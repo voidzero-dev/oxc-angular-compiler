@@ -2,7 +2,6 @@
 source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: result.code
 ---
-
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
 
@@ -14,9 +13,9 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:StyledComponent,select
     decls:2,vars:0,consts:[[1,"container"]],template:function StyledComponent_Template(rf,
         ctx) {
       if ((rf & 1)) {
-        i0.ɵɵdomElementStart(0,"div",0);
+        i0.ɵɵelementStart(0,"div",0);
         i0.ɵɵtext(1,"Hello");
-        i0.ɵɵdomElementEnd();
+        i0.ɵɵelementEnd();
       }
     },styles:[".container[_ngcontent-%COMP%] { color: red; }"]});
 }

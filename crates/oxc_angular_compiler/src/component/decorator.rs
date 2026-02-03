@@ -114,6 +114,7 @@ pub fn extract_component_metadata<'a>(
                     // Only override the implicit value if an explicit boolean is provided
                     if let Some(value) = extract_boolean_value(&prop.value) {
                         metadata.standalone = value;
+                        metadata.standalone_explicitly_set = true;
                     }
                 }
                 "encapsulation" => {

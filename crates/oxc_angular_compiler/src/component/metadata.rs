@@ -115,6 +115,17 @@ pub struct ComponentMetadata<'a> {
     /// Whether this is a standalone component.
     pub standalone: bool,
 
+    /// Whether `standalone` was explicitly set in the decorator.
+    ///
+    /// When `false`, `standalone` was inherited from the implicit default (Angular v19+
+    /// defaults to `true`). This distinction matters for DomOnly mode: only components
+    /// with an explicit `standalone: true` should use DomOnly mode, because implicit
+    /// standalone components may be declared in NgModules (which OXC can't detect in
+    /// single-file compilation).
+    ///
+    /// See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1326-1339
+    pub standalone_explicitly_set: bool,
+
     /// View encapsulation mode.
     pub encapsulation: ViewEncapsulation,
 
@@ -518,6 +529,7 @@ impl<'a> ComponentMetadata<'a> {
             styles: Vec::new_in(allocator),
             style_urls: Vec::new_in(allocator),
             standalone: implicit_standalone,
+            standalone_explicitly_set: false,
             encapsulation: ViewEncapsulation::default(),
             change_detection: ChangeDetectionStrategy::default(),
             host: None,

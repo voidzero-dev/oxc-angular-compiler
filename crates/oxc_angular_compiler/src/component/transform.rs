@@ -1364,7 +1364,20 @@ fn compile_component_full<'a>(
     // rather than relying solely on the external use_dom_only_mode flag.
     // The metadata has standalone (from decorator) and has_directive_dependencies
     // (from analyzing the imports array).
-    let mode = if metadata.standalone && !metadata.has_directive_dependencies {
+    //
+    // IMPORTANT: We only use DomOnly mode when `standalone: true` was EXPLICITLY
+    // set in the decorator. When standalone is implicitly defaulted (Angular v19+),
+    // we conservatively use Full mode because:
+    // 1. The component may be declared in an NgModule (OXC can't detect this)
+    // 2. Angular's ngtsc in local compilation mode always sets
+    //    hasDirectiveDependencies=true for safety
+    // 3. Angular's ngtsc in global mode sets hasDirectiveDependencies=!isStandalone||...
+    //    meaning non-standalone components ALWAYS use Full mode
+    // See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1326-1339
+    let mode = if metadata.standalone
+        && metadata.standalone_explicitly_set
+        && !metadata.has_directive_dependencies
+    {
         TemplateCompilationMode::DomOnly
     } else {
         TemplateCompilationMode::Full
