@@ -759,9 +759,6 @@ impl JsEmitter {
             OutputExpression::ArrowFunction(e) => {
                 ctx.print_with_span("(", source_span);
                 self.visit_params(&e.params, ctx);
-                // Angular's emitter prints ") =>" without trailing space
-                // For object literals: (params) =>({...})
-                // For other expressions: (params) =>expr
                 ctx.print(") =>");
                 match &e.body {
                     ArrowFunctionBody::Expression(body_expr) => {
@@ -887,8 +884,8 @@ impl JsEmitter {
                 ctx.print_with_span(if *b { "true" } else { "false" }, source_span);
             }
             LiteralValue::Number(n) => {
-                // f64::to_string() produces the same output as write!("{}", n)
-                ctx.print_with_span(&n.to_string(), source_span);
+                // Use JS-compatible formatting to match Angular's template literal coercion
+                ctx.print_with_span(&format_number_like_js(*n), source_span);
             }
             LiteralValue::String(s) => {
                 ctx.print_with_span(&escape_string(s, self.escape_dollar_in_strings), source_span);
@@ -896,6 +893,19 @@ impl JsEmitter {
         }
     }
 
+    /// Visit a literal array expression.
+    ///
+    /// When the array would exceed the line length limit, formats it as multi-line
+    /// with each element on its own line and a trailing comma after the last element.
+    /// This matches the TypeScript printer behavior used by Angular's ngtsc compiler.
+    ///
+    /// Single-line: `[a,b,c]`
+    /// Multi-line:
+    /// ```text
+    /// [element1,element2,element3,
+    ///     element4,
+    ///     element5]
+    /// ```
     fn visit_literal_array<'a>(&self, entries: &[OutputExpression<'a>], ctx: &mut EmitterContext) {
         ctx.print("[");
         self.visit_all_expressions(entries, ctx, ",");
@@ -1217,8 +1227,9 @@ fn is_nullish_coalesce(expr: &OutputExpression<'_>) -> bool {
 /// Escape a string for JavaScript output.
 ///
 /// Uses double quotes to match Angular's output style.
-/// Non-ASCII characters are escaped to Unicode escapes (`\uXXXX`) to match
-/// TypeScript's printer behavior, which Angular ngtsc uses.
+/// Only escapes control characters (`"`, `\`, `\n`, `\r`, and `$` when requested).
+/// Non-ASCII printable characters (e.g. `×`, `é`, `α`) are emitted as literal UTF-8,
+/// matching Angular's `escapeIdentifier` behavior.
 fn escape_string(input: &str, escape_dollar: bool) -> String {
     let mut result = String::with_capacity(input.len() + 2);
     result.push('"');
@@ -1229,21 +1240,12 @@ fn escape_string(input: &str, escape_dollar: bool) -> String {
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '$' if escape_dollar => result.push_str("\\$"),
-            // Non-ASCII characters are escaped to Unicode escapes to match TypeScript's behavior.
-            // This ensures HTML entities like `&times;` (decoded to U+00D7) are output as `\u00D7`.
-            c if !c.is_ascii() => {
-                // Handle characters in the BMP (Basic Multilingual Plane)
+            // Escape ASCII control characters (0x00-0x1F, 0x7F) other than \n and \r
+            c if c.is_ascii_control() => {
                 let code = c as u32;
-                if code <= 0xFFFF {
-                    // Single \uXXXX escape for BMP characters
-                    result.push_str(&format!("\\u{code:04X}"));
-                } else {
-                    // Surrogate pair for characters outside BMP
-                    let high = ((code - 0x10000) >> 10) + 0xD800;
-                    let low = ((code - 0x10000) & 0x3FF) + 0xDC00;
-                    result.push_str(&format!("\\u{high:04X}\\u{low:04X}"));
-                }
+                result.push_str(&format!("\\u{code:04X}"));
             }
+            // All other characters (including non-ASCII printable) are emitted literally
             _ => result.push(c),
         }
     }
@@ -1270,6 +1272,93 @@ fn escape_identifier(input: &Atom<'_>, escape_dollar: bool, always_quote: bool) 
         escape_string(input, escape_dollar)
     } else {
         input.to_string()
+    }
+}
+
+/// Format a number exactly like JavaScript's `Number.prototype.toString()`.
+///
+/// JavaScript and Rust differ in their formatting of `f64` values:
+/// - JS uses scientific notation for exponents >= 21 (e.g., `1e+21`), Rust uses decimal
+/// - JS uses scientific notation for very small numbers (e.g., `1e-7`), Rust uses decimal
+/// - JS outputs `Infinity`/`-Infinity`, Rust outputs `inf`/`-inf`
+/// - JS outputs `0` for negative zero, Rust outputs `-0`
+///
+/// This function matches the ECMAScript specification for `Number::toString()`
+/// (ECMA-262, 7.1.12.1) to ensure the emitted code matches Angular's TypeScript compiler
+/// which uses JavaScript's template literal coercion (`${value}`).
+fn format_number_like_js(value: f64) -> String {
+    // 1. NaN
+    if value.is_nan() {
+        return "NaN".to_string();
+    }
+    // 2. +0 or -0 => "0"
+    if value == 0.0 {
+        return "0".to_string();
+    }
+    // 3. Negative: prepend "-" and format the absolute value
+    if value < 0.0 {
+        return format!("-{}", format_number_like_js(-value));
+    }
+    // 4. Infinity
+    if value.is_infinite() {
+        return "Infinity".to_string();
+    }
+
+    // 5. For finite positive numbers, extract the significant digits and exponent.
+    //
+    // We use Rust's {:e} (scientific notation) formatting to get the shortest
+    // representation in a form we can parse: "d.dddde±N" or "deN".
+    let sci = format!("{value:e}");
+
+    // Parse the scientific notation string to extract digits and exponent.
+    // Format is like "3.14159265358979e0" or "1e-7" or "1.5e21"
+    let (mantissa_str, exp_str) = sci.split_once('e').unwrap_or((&sci, "0"));
+    let exp: i32 = exp_str.parse().unwrap_or(0);
+
+    // Extract all significant digits (removing the decimal point)
+    let digits: String = mantissa_str.chars().filter(|c| *c != '.').collect();
+    let k = digits.len() as i32; // number of significant digits
+
+    // n is the position of the decimal point relative to the first digit.
+    // In scientific notation a.bcd * 10^e, the integer is abcd (k=4 digits)
+    // and value = abcd * 10^(e - k + 1), so n = e + 1 (where n means:
+    // digits represent an integer s, and value = s * 10^(n-k))
+    let n = exp + 1;
+
+    // 6. Format according to ECMAScript spec rules:
+    if k <= n && n <= 21 {
+        // Case: k <= n <= 21
+        // Example: 1e8 -> digits="1", k=1, n=9 -> "1" + "00000000" = "100000000"
+        let mut result = digits;
+        for _ in 0..(n - k) {
+            result.push('0');
+        }
+        result
+    } else if 0 < n && n <= 21 {
+        // Case: 0 < n <= 21 (and n < k since we passed the first case)
+        // Example: 42.5 -> digits="425", k=3, n=2 -> "42.5"
+        let n = n as usize;
+        format!("{}.{}", &digits[..n], &digits[n..])
+    } else if -6 < n && n <= 0 {
+        // Case: -6 < n <= 0
+        // Example: 0.000001 (1e-6) -> digits="1", k=1, exp=-6, n=-5
+        // Format: "0." + "0"*(-n) + digits
+        let zeros = "0".repeat((-n) as usize);
+        format!("0.{zeros}{digits}")
+    } else if k == 1 {
+        // Single digit with scientific notation
+        // Example: 1e+21 -> digits="1", k=1, n=22
+        let exp_val = n - 1;
+        if exp_val > 0 { format!("{digits}e+{exp_val}") } else { format!("{digits}e{exp_val}") }
+    } else {
+        // Multiple digits with scientific notation
+        // Example: 1.5e+21 -> digits="15", k=2, n=22
+        let exp_val = n - 1;
+        if exp_val > 0 {
+            format!("{}e+{exp_val}", format!("{}.{}", &digits[..1], &digits[1..]))
+        } else {
+            format!("{}e{exp_val}", format!("{}.{}", &digits[..1], &digits[1..]))
+        }
     }
 }
 
@@ -1318,6 +1407,51 @@ mod tests {
     }
 
     #[test]
+    fn test_format_number_like_js() {
+        // Leading zero for decimals: "0.3" not ".3"
+        assert_eq!(format_number_like_js(0.3), "0.3");
+
+        // Integer: no decimal point
+        assert_eq!(format_number_like_js(42.0), "42");
+
+        // Decimal
+        assert_eq!(format_number_like_js(42.5), "42.5");
+
+        // Negative integer
+        assert_eq!(format_number_like_js(-1.0), "-1");
+
+        // Zero (including negative zero)
+        assert_eq!(format_number_like_js(0.0), "0");
+        assert_eq!(format_number_like_js(-0.0), "0");
+
+        // Large integer: decimal notation, not scientific
+        assert_eq!(format_number_like_js(1e8), "100000000");
+        assert_eq!(format_number_like_js(1e20), "100000000000000000000");
+
+        // Very large: scientific notation with e+
+        assert_eq!(format_number_like_js(1e21), "1e+21");
+        assert_eq!(format_number_like_js(1.5e21), "1.5e+21");
+
+        // Small numbers: JS uses scientific notation for exponent < -6
+        assert_eq!(format_number_like_js(1e-7), "1e-7");
+        assert_eq!(format_number_like_js(5e-7), "5e-7");
+        assert_eq!(format_number_like_js(1.5e-7), "1.5e-7");
+
+        // Small numbers: decimal notation for exponent >= -6
+        assert_eq!(format_number_like_js(1e-6), "0.000001");
+        assert_eq!(format_number_like_js(0.1), "0.1");
+        assert_eq!(format_number_like_js(0.01), "0.01");
+
+        // Special values
+        assert_eq!(format_number_like_js(f64::NAN), "NaN");
+        assert_eq!(format_number_like_js(f64::INFINITY), "Infinity");
+        assert_eq!(format_number_like_js(f64::NEG_INFINITY), "-Infinity");
+
+        // Negative decimal
+        assert_eq!(format_number_like_js(-0.3), "-0.3");
+    }
+
+    #[test]
     fn test_emit_literal_string() {
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -1352,30 +1486,51 @@ mod tests {
     }
 
     #[test]
-    fn test_escape_string_unicode() {
-        // Non-ASCII characters should be escaped to Unicode escapes
-        // This matches TypeScript's behavior used by Angular ngtsc
+    fn test_escape_string_unicode_literals() {
+        // Non-ASCII printable characters should be emitted as literal UTF-8,
+        // matching Angular's escapeIdentifier behavior.
 
-        // &times; (multiplication sign) -> \u00D7
-        assert_eq!(escape_string("\u{00D7}", false), "\"\\u00D7\"");
+        // &times; (multiplication sign U+00D7) -> literal ×
+        assert_eq!(escape_string("\u{00D7}", false), "\"\u{00D7}\"");
 
-        // &nbsp; (non-breaking space) -> \u00A0
-        assert_eq!(escape_string("\u{00A0}", false), "\"\\u00A0\"");
+        // &nbsp; (non-breaking space U+00A0) -> literal
+        assert_eq!(escape_string("\u{00A0}", false), "\"\u{00A0}\"");
 
         // Mixed ASCII and non-ASCII
-        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\\u00D7b\"");
+        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\u{00D7}b\"");
 
         // Multiple non-ASCII characters
-        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\\u00D7\\u00A0\"");
+        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\u{00D7}\u{00A0}\"");
 
-        // Characters outside BMP (emoji) - uses surrogate pairs
-        assert_eq!(escape_string("\u{1F600}", false), "\"\\uD83D\\uDE00\"");
+        // Characters outside BMP (emoji) -> emitted literally
+        assert_eq!(escape_string("\u{1F600}", false), "\"\u{1F600}\"");
 
-        // Common HTML entities
-        assert_eq!(escape_string("\u{00A9}", false), "\"\\u00A9\""); // &copy;
-        assert_eq!(escape_string("\u{00AE}", false), "\"\\u00AE\""); // &reg;
-        assert_eq!(escape_string("\u{2014}", false), "\"\\u2014\""); // &mdash;
-        assert_eq!(escape_string("\u{2013}", false), "\"\\u2013\""); // &ndash;
+        // Common HTML entities -> all emitted literally
+        assert_eq!(escape_string("\u{00A9}", false), "\"\u{00A9}\""); // &copy; ©
+        assert_eq!(escape_string("\u{00AE}", false), "\"\u{00AE}\""); // &reg; ®
+        assert_eq!(escape_string("\u{2014}", false), "\"\u{2014}\""); // &mdash; —
+        assert_eq!(escape_string("\u{2013}", false), "\"\u{2013}\""); // &ndash; –
+
+        // Greek letter alpha
+        assert_eq!(escape_string("\u{03B1}", false), "\"\u{03B1}\""); // α
+
+        // Accented Latin letter
+        assert_eq!(escape_string("\u{00E9}", false), "\"\u{00E9}\""); // é
+    }
+
+    #[test]
+    fn test_escape_string_control_characters() {
+        // ASCII control characters (other than \n and \r) should be escaped
+        assert_eq!(escape_string("\u{0000}", false), "\"\\u0000\""); // NUL
+        assert_eq!(escape_string("\u{0001}", false), "\"\\u0001\""); // SOH
+        assert_eq!(escape_string("\u{0008}", false), "\"\\u0008\""); // BS
+        assert_eq!(escape_string("\u{000B}", false), "\"\\u000B\""); // VT
+        assert_eq!(escape_string("\u{001F}", false), "\"\\u001F\""); // US
+        assert_eq!(escape_string("\u{007F}", false), "\"\\u007F\""); // DEL
+
+        // \n and \r have their own named escapes
+        assert_eq!(escape_string("\n", false), "\"\\n\"");
+        assert_eq!(escape_string("\r", false), "\"\\r\"");
     }
 
     // ========================================================================
@@ -2109,5 +2264,299 @@ mod tests {
         let output = emitter.emit_expression(&expr);
         // The conditional on left of ?? needs extra parentheses
         assert_eq!(output, "(((a? b: c)) ?? d)");
+    }
+
+    // ========================================================================
+    // Arrow Function Paren Tests
+    // ========================================================================
+
+    #[test]
+    fn test_emit_arrow_function_single_param_with_parens() {
+        use super::super::ast::{
+            ArrowFunctionBody, ArrowFunctionExpr, BinaryOperatorExpr, FnParam,
+        };
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Build: (x) =>(x + 1)
+        let x_var = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("x"), source_span: None },
+            &alloc,
+        ));
+        let one = OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Number(1.0), source_span: None },
+            &alloc,
+        ));
+        let body = OutputExpression::BinaryOperator(Box::new_in(
+            BinaryOperatorExpr {
+                operator: super::super::ast::BinaryOperator::Plus,
+                lhs: Box::new_in(x_var, &alloc),
+                rhs: Box::new_in(one, &alloc),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let mut params = oxc_allocator::Vec::new_in(&alloc);
+        params.push(FnParam { name: Atom::from("x") });
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params,
+                body: ArrowFunctionBody::Expression(Box::new_in(body, &alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Single param: always wrap in parens, matches Angular's abstract_js_emitter behavior
+        assert_eq!(output, "(x) =>(x + 1)");
+    }
+
+    #[test]
+    fn test_emit_arrow_function_multiple_params_with_parens() {
+        use super::super::ast::{
+            ArrowFunctionBody, ArrowFunctionExpr, BinaryOperatorExpr, FnParam,
+        };
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Build: (x, y) =>(x + y)
+        let x_var = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("x"), source_span: None },
+            &alloc,
+        ));
+        let y_var = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("y"), source_span: None },
+            &alloc,
+        ));
+        let body = OutputExpression::BinaryOperator(Box::new_in(
+            BinaryOperatorExpr {
+                operator: super::super::ast::BinaryOperator::Plus,
+                lhs: Box::new_in(x_var, &alloc),
+                rhs: Box::new_in(y_var, &alloc),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let mut params = oxc_allocator::Vec::new_in(&alloc);
+        params.push(FnParam { name: Atom::from("x") });
+        params.push(FnParam { name: Atom::from("y") });
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params,
+                body: ArrowFunctionBody::Expression(Box::new_in(body, &alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Multiple params: with parens
+        assert_eq!(output, "(x,y) =>(x + y)");
+    }
+
+    #[test]
+    fn test_emit_arrow_function_zero_params_with_parens() {
+        use super::super::ast::{ArrowFunctionBody, ArrowFunctionExpr};
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Build: () =>42
+        let body = OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Number(42.0), source_span: None },
+            &alloc,
+        ));
+
+        let params = oxc_allocator::Vec::new_in(&alloc);
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params,
+                body: ArrowFunctionBody::Expression(Box::new_in(body, &alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Zero params: with parens
+        assert_eq!(output, "() =>42");
+    }
+
+    #[test]
+    fn test_emit_localized_string_has_space_before_paren() {
+        use crate::output::ast::LocalizedStringExpr;
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Simple $localize with a single message part and no expressions
+        let mut message_parts = oxc_allocator::Vec::new_in(&alloc);
+        message_parts.push(Atom::from("Hello"));
+
+        let placeholder_names = oxc_allocator::Vec::new_in(&alloc);
+        let expressions = oxc_allocator::Vec::new_in(&alloc);
+
+        let expr = OutputExpression::LocalizedString(Box::new_in(
+            LocalizedStringExpr {
+                description: None,
+                meaning: None,
+                custom_id: None,
+                message_parts,
+                placeholder_names,
+                expressions,
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Must emit "$localize(" without a space before the opening paren
+        assert!(output.starts_with("$localize("), "Expected '$localize(' but got: {output}");
+    }
+
+    #[test]
+    fn test_emit_localized_string_with_expressions() {
+        use crate::output::ast::LocalizedStringExpr;
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // $localize with interpolation: "Hello {$name}!"
+        let mut message_parts = oxc_allocator::Vec::new_in(&alloc);
+        message_parts.push(Atom::from("Hello "));
+        message_parts.push(Atom::from("!"));
+
+        let mut placeholder_names = oxc_allocator::Vec::new_in(&alloc);
+        placeholder_names.push(Atom::from("name"));
+
+        let mut expressions = oxc_allocator::Vec::new_in(&alloc);
+        expressions.push(OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("name"), source_span: None },
+            &alloc,
+        )));
+
+        let expr = OutputExpression::LocalizedString(Box::new_in(
+            LocalizedStringExpr {
+                description: None,
+                meaning: None,
+                custom_id: None,
+                message_parts,
+                placeholder_names,
+                expressions,
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Must not have space before paren and include the expression
+        assert!(output.starts_with("$localize("), "Expected '$localize(' but got: {output}");
+        assert!(output.contains(", name)"), "Expected expression argument but got: {output}");
+    }
+
+    // ========================================================================
+    // Empty Body Tests
+    // ========================================================================
+
+    #[test]
+    fn test_emit_empty_function_expression_body() {
+        use super::super::ast::FunctionExpr;
+        use oxc_allocator::{Allocator, Box};
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        let expr = OutputExpression::Function(Box::new_in(
+            FunctionExpr {
+                name: None,
+                params: oxc_allocator::Vec::new_in(&alloc),
+                statements: oxc_allocator::Vec::new_in(&alloc),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        assert_eq!(output, "function() {\n}");
+    }
+
+    #[test]
+    fn test_emit_empty_arrow_function_statement_body() {
+        use super::super::ast::ArrowFunctionExpr;
+        use oxc_allocator::{Allocator, Box};
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params: oxc_allocator::Vec::new_in(&alloc),
+                body: ArrowFunctionBody::Statements(oxc_allocator::Vec::new_in(&alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        assert_eq!(output, "() =>{\n}");
+    }
+
+    #[test]
+    fn test_emit_empty_if_body() {
+        use super::super::ast::{IfStmt, LiteralExpr, LiteralValue};
+        use oxc_allocator::{Allocator, Box};
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        let condition = OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
+            &alloc,
+        ));
+
+        let stmt = OutputStatement::If(Box::new_in(
+            IfStmt {
+                condition,
+                true_case: oxc_allocator::Vec::new_in(&alloc),
+                false_case: oxc_allocator::Vec::new_in(&alloc),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_statement(&stmt);
+        assert_eq!(output, "if (true) {  }");
+    }
+
+    #[test]
+    fn test_emit_empty_declare_function_body() {
+        use super::super::ast::{DeclareFunctionStmt, StmtModifier};
+        use oxc_allocator::{Allocator, Box};
+        use oxc_span::Atom;
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        let stmt = OutputStatement::DeclareFunction(Box::new_in(
+            DeclareFunctionStmt {
+                name: Atom::from("foo"),
+                params: oxc_allocator::Vec::new_in(&alloc),
+                statements: oxc_allocator::Vec::new_in(&alloc),
+                modifiers: StmtModifier::NONE,
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_statement(&stmt);
+        assert_eq!(output, "function foo() {\n}");
     }
 }

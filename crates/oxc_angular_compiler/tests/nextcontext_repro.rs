@@ -674,3 +674,78 @@ fn test_listener_in_if_accessing_component_property() {
         &template_fn_body[..template_fn_body.len().min(800)]
     );
 }
+
+/// Test: Cascading unused variable removal via uncountVariableUsages in handler ops.
+///
+/// When a listener is inside a deeply nested @for loop but only accesses the
+/// component context (not loop variables), the generated handler should NOT
+/// have extra nextContext() calls for intermediate scopes.
+///
+/// Scenario:
+/// - @for (outer) -> @for (inner) -> listener that only calls component method
+/// - The listener handler generates variables for both @for contexts (item, innerItem)
+/// - Since the listener doesn't use innerItem, that variable is removed
+/// - Without uncountVariableUsages: the intermediate context variable (ctx_for_inner)
+///   still appears used (count=1 from the removed innerItem variable), causing
+///   its ViewContextWrite fence to keep it as a statement op -> extra nextContext()
+/// - With uncountVariableUsages: removing innerItem decrements ctx_for_inner's count
+///   to 0, so ctx_for_inner is also removed, and then ctx_for_outer is also removed,
+///   resulting in clean code with only one nextContext() to the component.
+#[test]
+fn test_cascading_unused_variable_removal_in_handler() {
+    let template = r#"
+@for (group of groups; track group.id) {
+  @for (item of group.items; track item.id) {
+    <button (click)="doSomething()">Click</button>
+  }
+}
+"#;
+
+    let js = compile_template_to_js(template, "TestComponent");
+    println!("Generated JS:\n{js}");
+
+    // Find the click listener
+    let listener_match = js.find("listener(\"click\"").or_else(|| js.find("listener('click'"));
+    assert!(listener_match.is_some(), "Should have a click listener. Got:\n{js}");
+
+    let listener_pos = listener_match.unwrap();
+    let listener_end = js[listener_pos..].find("});").unwrap_or(500);
+    let listener_body = &js[listener_pos..listener_pos + listener_end + 3];
+
+    println!("Listener body:\n{listener_body}");
+
+    // The listener should have exactly ONE nextContext() call (to reach the component).
+    // Without uncountVariableUsages, there would be extra nextContext() calls
+    // for the intermediate @for scopes whose variables weren't actually used.
+    let next_context_count = listener_body.matches("nextContext(").count();
+
+    // We expect exactly 1 nextContext call that reaches the component context.
+    // If uncountVariableUsages is not implemented, we'd see additional
+    // nextContext() calls as standalone statements (not assigned to variables).
+    assert!(
+        next_context_count == 1,
+        "Expected exactly 1 nextContext() call in listener, but found {next_context_count}.\n\
+         Without uncountVariableUsages, intermediate scope variables aren't decremented\n\
+         when unused variables referencing them are removed, causing extra nextContext() calls.\n\
+         Listener body:\n{listener_body}"
+    );
+
+    // Also verify there are no standalone nextContext() statements
+    // (nextContext calls that aren't part of variable assignments)
+    for line in listener_body.lines() {
+        let trimmed = line.trim();
+        if trimmed.contains("nextContext(")
+            && trimmed.ends_with(';')
+            && !trimmed.contains("const ")
+            && !trimmed.contains("let ")
+            && !trimmed.contains("= ")
+        {
+            panic!(
+                "Found standalone nextContext() statement (should have been removed):\n\
+                 '{trimmed}'\n\
+                 This indicates uncountVariableUsages is not working correctly.\n\
+                 Listener body:\n{listener_body}"
+            );
+        }
+    }
+}

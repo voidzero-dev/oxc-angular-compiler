@@ -1051,7 +1051,7 @@ mod tests {
             "Signal query should have ctx.refQuery as target.\nGot:\n{}",
             output
         );
-        // Note: The emitter may include trailing comma in arrays: ["myRef",]
+        // Note: The emitter formats arrays without trailing commas: ["myRef"]
         assert!(
             output.contains(r#"["myRef""#),
             "Signal query should have string selector array as predicate.\nGot:\n{}",

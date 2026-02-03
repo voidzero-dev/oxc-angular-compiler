@@ -1440,6 +1440,14 @@ export class NgtscFileEmitter {
   get emittedFilePaths(): string[] {
     return Array.from(this.emittedFiles.keys())
   }
+
+  /**
+   * Get a copy of all emitted files as a Map.
+   * Used by the ng-baseline system to snapshot Angular compilation output.
+   */
+  getAllEmittedFiles(): Map<string, string> {
+    return new Map(this.emittedFiles)
+  }
 }
 
 // =============================================================================

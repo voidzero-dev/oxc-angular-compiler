@@ -394,7 +394,7 @@ fn process_view_ops_depth_first<'a>(
     // Phase 0: Process function ops FIRST (matches TypeScript ops() generator order)
     // Arrow functions have their own ops lists that contain Variable ops prepended
     // by the generate_variables phase. These must be named before create/update ops.
-    process_function_ops_in_view(job, view_xref, allocator, state, var_names, semantic_var_names);
+    process_function_ops_in_view(job, view_xref, allocator, state, var_names);
 
     // Phase 1: Collect info about child views with their create op indices
     // We need to collect upfront to avoid borrow issues during iteration
@@ -927,13 +927,22 @@ fn process_single_create_op_ref<'a>(
 ///   // ... then create, then update
 /// }
 /// ```
+///
+/// IMPORTANT: Arrow function variables must NOT be deduplicated with listener/update variables.
+/// In Angular's TypeScript, `getScopeForView` is called fresh for each arrow function (line 80
+/// of generate_variables.ts), creating brand new `SemanticVariable` objects with `name: null`.
+/// These are different JavaScript objects from the listener/update scope variables. During naming,
+/// each object gets its own name, consuming counter values independently.
+///
+/// In OXC, we simulate this by NOT using the shared `semantic_var_names` map when naming arrow
+/// function variables. Each arrow function gets its own temporary semantic map, ensuring its
+/// variables always get fresh names and advance the counter.
 fn process_function_ops_in_view<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: Option<XrefId>,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
     var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
 ) {
     let functions = match view_xref {
         None => &job.root.functions,
@@ -946,16 +955,31 @@ fn process_function_ops_in_view<'a>(
         }
     };
 
-    // Process each arrow function's ops
+    // Process each arrow function's ops with its OWN semantic var names map.
+    // This matches Angular's behavior where each arrow function gets a fresh scope
+    // (getScopeForView creates new SemanticVariable objects per arrow function).
+    // Variables from different arrow functions (and from listener/update scopes)
+    // are distinct objects in Angular, so they never share names via object identity.
     for func_ptr in functions.iter() {
         // SAFETY: These pointers are valid as they point to ArrowFunctionExpr
         // allocated in the allocator and stored in the view's functions vec.
         let func = unsafe { &mut **func_ptr };
 
+        // Each arrow function gets its own semantic variable map to prevent
+        // deduplication with other scopes (listeners, update, other arrow functions).
+        let mut arrow_fn_semantic_var_names: FxHashMap<SemanticVariableKey<'a>, Atom<'a>> =
+            FxHashMap::default();
+
         // Process Variable ops in this arrow function
         for op in func.ops.iter_mut() {
             if let UpdateOp::Variable(var_op) = op {
-                name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                name_variable_op(
+                    var_op,
+                    allocator,
+                    state,
+                    var_names,
+                    &mut arrow_fn_semantic_var_names,
+                );
             }
         }
     }
@@ -1153,5 +1177,248 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::enums::{SemanticVariableKind, VariableFlags};
+    use crate::ir::expression::{IrExpression, NextContextExpr};
+    use crate::ir::ops::{UpdateVariableOp, XrefId};
+    use oxc_allocator::{Allocator, Box as AllocBox};
+    use oxc_span::Atom;
+
+    /// Helper: create an `UpdateVariableOp` representing a NextContext-based
+    /// context variable for the given `view_xref`.  The variable starts with
+    /// an empty name (needs naming) and `SemanticVariableKind::Context`.
+    fn make_context_var_op<'a>(
+        allocator: &'a Allocator,
+        xref: XrefId,
+        view_xref: XrefId,
+    ) -> UpdateVariableOp<'a> {
+        UpdateVariableOp {
+            base: Default::default(),
+            xref,
+            kind: SemanticVariableKind::Context,
+            name: Atom::from(""),
+            initializer: AllocBox::new_in(
+                IrExpression::NextContext(AllocBox::new_in(
+                    NextContextExpr { steps: 1, source_span: None },
+                    allocator,
+                )),
+                allocator,
+            ),
+            flags: VariableFlags::NONE,
+            view: Some(view_xref),
+            local: false,
+        }
+    }
+
+    /// Verify that `name_variable_op` deduplicates context variables for the
+    /// same view when they share the same `semantic_var_names` map.
+    ///
+    /// This is the CORRECT behaviour for variables within a single scope
+    /// (e.g., two update ops in the same view that both access the parent
+    /// context).
+    #[test]
+    fn test_shared_semantic_map_deduplicates_context_variables() {
+        let allocator = Allocator::default();
+        let mut state = NamingState { index: 0 };
+        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+        let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+
+        let parent_view = XrefId(100);
+
+        // First variable: Context for parent_view -- should get ctx_r0.
+        let mut var1 = make_context_var_op(&allocator, XrefId(1), parent_view);
+        name_variable_op(
+            &mut var1,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut semantic_var_names,
+        );
+        assert_eq!(var1.name.as_str(), "ctx_r0", "First context variable gets ctx_r0");
+        assert_eq!(state.index, 1, "Counter advances to 1 after first naming");
+
+        // Second variable: also Context for parent_view in the SAME semantic map.
+        // With deduplication, it should reuse ctx_r0 and NOT advance the counter.
+        let mut var2 = make_context_var_op(&allocator, XrefId(2), parent_view);
+        name_variable_op(
+            &mut var2,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut semantic_var_names,
+        );
+        assert_eq!(
+            var2.name.as_str(),
+            "ctx_r0",
+            "Second context variable in same scope is deduplicated to ctx_r0"
+        );
+        assert_eq!(state.index, 1, "Counter stays at 1 (no advancement due to dedup)");
+    }
+
+    /// Verify that arrow function context variables get independent names when
+    /// they use a separate `semantic_var_names` map (the fix).
+    ///
+    /// This test reproduces the exact scenario the fix addresses:
+    /// - An update scope names a Context variable for a parent view
+    /// - An arrow function also needs a Context variable for the SAME parent view
+    /// - With independent maps, the arrow function gets its own name and the
+    ///   counter advances, matching Angular's TypeScript behaviour where
+    ///   `getScopeForView` creates fresh SemanticVariable objects per arrow
+    ///   function.
+    ///
+    /// If the fix is reverted (arrow functions share the update scope's
+    /// semantic map), this test FAILS because the arrow function's context
+    /// variable would be deduplicated with the update scope's, producing
+    /// `ctx_r0` instead of `ctx_r1`.
+    #[test]
+    fn test_arrow_function_gets_independent_context_variable_name() {
+        let allocator = Allocator::default();
+        let mut state = NamingState { index: 0 };
+        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+
+        let parent_view = XrefId(100);
+
+        // --- Simulate the update scope naming a Context variable ---
+        let mut update_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+        let mut update_ctx_var = make_context_var_op(&allocator, XrefId(1), parent_view);
+        name_variable_op(
+            &mut update_ctx_var,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut update_semantic,
+        );
+        assert_eq!(
+            update_ctx_var.name.as_str(),
+            "ctx_r0",
+            "Update scope context variable gets ctx_r0"
+        );
+        assert_eq!(state.index, 1);
+
+        // --- Simulate an arrow function with its OWN semantic map (the fix) ---
+        let mut arrow_fn_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+        let mut arrow_ctx_var = make_context_var_op(&allocator, XrefId(2), parent_view);
+        name_variable_op(
+            &mut arrow_ctx_var,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut arrow_fn_semantic,
+        );
+
+        // With the fix: arrow function gets its own name, counter advances.
+        assert_eq!(
+            arrow_ctx_var.name.as_str(),
+            "ctx_r1",
+            "Arrow function context variable must get ctx_r1 (not deduplicated with update scope). \
+             If this fails with ctx_r0, the fix was reverted: arrow functions are sharing the \
+             update scope's semantic_var_names map instead of getting their own."
+        );
+        assert_eq!(state.index, 2, "Counter must advance to 2");
+    }
+
+    /// Verify that two separate arrow functions each get independent names,
+    /// even when they both reference the same parent view.
+    ///
+    /// In Angular's TypeScript, each arrow function gets its own scope via
+    /// `getScopeForView`, so their SemanticVariable objects are distinct and
+    /// naming produces independent counter values.
+    #[test]
+    fn test_multiple_arrow_functions_get_independent_names() {
+        let allocator = Allocator::default();
+        let mut state = NamingState { index: 0 };
+        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+
+        let parent_view = XrefId(100);
+
+        // Arrow function 1: own semantic map.
+        let mut arrow1_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+        let mut arrow1_ctx = make_context_var_op(&allocator, XrefId(1), parent_view);
+        name_variable_op(
+            &mut arrow1_ctx,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut arrow1_semantic,
+        );
+        assert_eq!(arrow1_ctx.name.as_str(), "ctx_r0");
+
+        // Arrow function 2: own semantic map.
+        let mut arrow2_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+        let mut arrow2_ctx = make_context_var_op(&allocator, XrefId(2), parent_view);
+        name_variable_op(
+            &mut arrow2_ctx,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut arrow2_semantic,
+        );
+        assert_eq!(
+            arrow2_ctx.name.as_str(),
+            "ctx_r1",
+            "Second arrow function must get ctx_r1, not ctx_r0"
+        );
+
+        // Both arrows independently advance the counter.
+        assert_eq!(state.index, 2);
+    }
+
+    /// Verify that the BUG scenario (shared semantic map) would cause incorrect
+    /// deduplication between an arrow function and the update scope.
+    ///
+    /// This test demonstrates what happens WITHOUT the fix: if an arrow function
+    /// shares the update scope's semantic_var_names map, its context variable
+    /// gets deduplicated and the counter does not advance.
+    #[test]
+    fn test_shared_map_causes_incorrect_deduplication_for_arrow_functions() {
+        let allocator = Allocator::default();
+        let mut state = NamingState { index: 0 };
+        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+
+        // Use a SINGLE shared semantic map (simulating the buggy behavior).
+        let mut shared_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+            FxHashMap::default();
+
+        let parent_view = XrefId(100);
+
+        // Update scope names its context variable.
+        let mut update_ctx = make_context_var_op(&allocator, XrefId(1), parent_view);
+        name_variable_op(
+            &mut update_ctx,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut shared_semantic,
+        );
+        assert_eq!(update_ctx.name.as_str(), "ctx_r0");
+        assert_eq!(state.index, 1);
+
+        // Arrow function uses the SAME shared map (the bug).
+        let mut arrow_ctx = make_context_var_op(&allocator, XrefId(2), parent_view);
+        name_variable_op(
+            &mut arrow_ctx,
+            &allocator,
+            &mut state,
+            &mut var_names,
+            &mut shared_semantic,
+        );
+
+        // BUG: deduplication causes the arrow function to get the same name.
+        assert_eq!(
+            arrow_ctx.name.as_str(),
+            "ctx_r0",
+            "With shared map, arrow function is incorrectly deduplicated to ctx_r0"
+        );
+        assert_eq!(state.index, 1, "Counter does not advance because of incorrect deduplication");
     }
 }

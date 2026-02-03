@@ -186,7 +186,8 @@ fn collect_arrow_functions_from_view(
     }
 
     // Move collected pointers into the allocator Vec
-    for ptr in collected.into_inner() {
+    let ptrs = collected.into_inner();
+    for ptr in ptrs {
         view.functions.push(ptr);
     }
 }

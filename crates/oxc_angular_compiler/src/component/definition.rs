@@ -2167,9 +2167,8 @@ mod tests {
 
     #[test]
     fn test_dependencies_runtime_resolved_with_array_imports() {
-        // Test that array literals inside function call args get trailing commas
-        // Angular outputs: ɵɵgetComponentDepsFactory(Comp,[A,B,C,])
-        // NOT: ɵɵgetComponentDepsFactory(Comp,[A,B,C])
+        // Test that array literals inside function call args are emitted correctly
+        // Angular outputs: ɵɵgetComponentDepsFactory(Comp,[A,B,C])
         let allocator = Allocator::default();
         let mut metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);

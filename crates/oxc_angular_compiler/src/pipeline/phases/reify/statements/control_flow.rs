@@ -421,12 +421,12 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
 }
 
 /// Creates a variable declaration statement with a value.
+/// All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts.
 pub fn create_variable_decl_stmt_with_value<'a>(
     allocator: &'a oxc_allocator::Allocator,
     name: &Atom<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    // Emit: const name = value;
     OutputStatement::DeclareVar(Box::new_in(
         DeclareVarStmt {
             name: name.clone(),

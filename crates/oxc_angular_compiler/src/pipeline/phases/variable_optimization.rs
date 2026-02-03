@@ -1811,7 +1811,13 @@ fn optimize_handler_ops_once<'a>(
                     // Convert to statement - keep the side effect but remove the variable
                     actions[idx] = Action::ConvertToStatement;
                 } else {
-                    // Safe to remove entirely
+                    // Safe to remove entirely.
+                    // Per TypeScript's variable_optimization.ts (line 240):
+                    // uncountVariableUsages(op, varUsages) is called before removing.
+                    // This decrements usage counts for variables referenced in the
+                    // removed variable's initializer, allowing cascading unused
+                    // detection in this single backwards pass.
+                    uncount_variable_usages_in_expr(&var.initializer, &mut var_usages);
                     actions[idx] = Action::Remove;
                 }
                 // Per TypeScript's variable_optimization.ts (line 223): after handling an unused

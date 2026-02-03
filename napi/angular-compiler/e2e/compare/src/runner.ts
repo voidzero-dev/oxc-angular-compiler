@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { dirname, join, normalize } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
@@ -8,6 +8,7 @@ import { compareFullFileSemantically } from './compare.js'
 import { NgtscFileEmitter } from './compilers/angular-ngtsc.js'
 import { compileProjectWithOxc, type PlainResolvedResources } from './compilers/oxc.js'
 import { findComponents } from './discovery/finder.js'
+import { createNgBaselineData, loadNgBaseline, saveNgBaseline } from './ng-baseline.js'
 import type {
   ComparisonReport,
   CompilerConfig,
@@ -63,6 +64,17 @@ export async function runComparison(config: CompilerConfig): Promise<ComparisonR
 
   if (components.length === 0) {
     console.log('No components found!')
+    return {
+      summary: createEmptySummary(),
+      metadata: await createMetadata(config, startTime),
+      results: [],
+    }
+  }
+
+  // Generate-ng-baseline-only mode: compile with Angular, save, and return early
+  if (config.generateNgBaselineOnly) {
+    console.log(`\nGenerating Angular baseline for ${components.length} components...`)
+    await generateAndSaveNgBaseline(components, config)
     return {
       summary: createEmptySummary(),
       metadata: await createMetadata(config, startTime),
@@ -200,19 +212,81 @@ async function compareFilesProjectWide(
     `Oxc batch compilation: ${oxcDuration.toFixed(0)}ms (${oxcResult.successCount} succeeded, ${oxcResult.errorCount} errors)`,
   )
 
-  // 3. Create NgtscFileEmitter and initialize ONCE
-  const ngStartTime = performance.now()
-  const emitter = new NgtscFileEmitter(filePaths, config.tsconfigPath!, fileContents)
-  await emitter.initialize()
-  const ngInitDuration = performance.now() - ngStartTime
-  console.log(
-    `Angular NgtscProgram init: ${ngInitDuration.toFixed(0)}ms (${emitter.fileCount} files)`,
-  )
+  // 3. Get Angular outputs: either from baseline file or by running NgtscFileEmitter
+  let ngOutputMap: Map<string, string>
+  let ngInitDuration: number
 
-  // Clear fileContents - no longer needed after both compilers have processed the files
-  // This frees ~500MB-2GB of duplicated source code strings
-  fileContents.clear()
-  resolvedResourcesByFile.clear()
+  if (config.ngBaselinePath) {
+    // Load from baseline - skip Angular compilation entirely
+    const ngStartTime = performance.now()
+    console.log(`Loading Angular baseline from: ${config.ngBaselinePath}`)
+    const baseline = await loadNgBaseline(config.ngBaselinePath)
+    ngOutputMap = new Map<string, string>()
+    for (const [filePath, output] of Object.entries(baseline.files)) {
+      if (output !== null) {
+        ngOutputMap.set(filePath, output)
+      }
+    }
+    ngInitDuration = performance.now() - ngStartTime
+    console.log(
+      `Angular baseline loaded: ${ngInitDuration.toFixed(0)}ms (${ngOutputMap.size} files, generated ${baseline.metadata.generatedAt}, Angular ${baseline.metadata.angularVersion})`,
+    )
+
+    // Warn about stale baseline: files in current discovery but missing from baseline
+    const missingFromBaseline = filePaths.filter(
+      (fp) => !ngOutputMap.has(fp) && !ngOutputMap.has(normalize(fp)),
+    )
+    if (missingFromBaseline.length > 0) {
+      console.warn(
+        `\nWarning: ${missingFromBaseline.length} file(s) not found in baseline (baseline may be stale):`,
+      )
+      for (const fp of missingFromBaseline.slice(0, 5)) {
+        console.warn(`  - ${fp}`)
+      }
+      if (missingFromBaseline.length > 5) {
+        console.warn(`  ... and ${missingFromBaseline.length - 5} more`)
+      }
+      console.warn(
+        `Regenerate with: --generate-ng-baseline --save-ng-baseline ${config.ngBaselinePath}\n`,
+      )
+    }
+
+    // Clear fileContents - no longer needed
+    fileContents.clear()
+    resolvedResourcesByFile.clear()
+  } else {
+    // Run NgtscFileEmitter (slow path)
+    const ngStartTime = performance.now()
+    const emitter = new NgtscFileEmitter(filePaths, config.tsconfigPath!, fileContents)
+    await emitter.initialize()
+    ngInitDuration = performance.now() - ngStartTime
+    console.log(
+      `Angular NgtscProgram init: ${ngInitDuration.toFixed(0)}ms (${emitter.fileCount} files)`,
+    )
+
+    // Clear fileContents - no longer needed after both compilers have processed the files
+    // This frees ~500MB-2GB of duplicated source code strings
+    fileContents.clear()
+    resolvedResourcesByFile.clear()
+
+    // Get all emitted files for comparison (and optionally saving baseline)
+    ngOutputMap = emitter.getAllEmittedFiles()
+
+    // Save baseline if requested
+    if (config.saveNgBaselinePath) {
+      const baselineData = createNgBaselineData(
+        ngOutputMap,
+        config.tsconfigPath!,
+        config.projectRoot,
+        filePaths.length,
+        ngInitDuration,
+      )
+      await saveNgBaseline(baselineData, config.saveNgBaselinePath)
+      console.log(
+        `Angular baseline saved to: ${config.saveNgBaselinePath} (${ngOutputMap.size} files)`,
+      )
+    }
+  }
 
   // Group components by file path
   const componentsByFile = new Map<string, ComponentInfo[]>()
@@ -234,10 +308,10 @@ async function compareFilesProjectWide(
     const fileComponents = componentsByFile.get(filePath) || []
     const classNames = fileComponents.map((c) => c.className)
 
-    // Emit with Angular (NgtscFileEmitter)
-    const ngResult = emitter.emit(filePath)
-    const ngOutput = ngResult.content
-    const ngError = ngResult.error
+    // Get Angular output (from baseline or emitter)
+    // Try both original and normalized paths for safety (matches emit() fallback behavior)
+    const ngOutput = ngOutputMap.get(filePath) ?? ngOutputMap.get(normalize(filePath))
+    const ngError = ngOutput === undefined ? `No emit result for ${filePath}` : undefined
 
     // Get Oxc output from batch result
     const oxcOutput = oxcResult.emittedFiles.get(filePath)
@@ -310,6 +384,73 @@ async function compareFilesProjectWide(
   printFileLevelSummary(results, components.length)
 
   return results
+}
+
+/**
+ * Generate Angular baseline only (no Oxc compilation, no comparison).
+ * Discovers components, collects file contents, runs NgtscFileEmitter, and saves the output.
+ */
+async function generateAndSaveNgBaseline(
+  components: ComponentInfo[],
+  config: CompilerConfig,
+): Promise<void> {
+  // Collect file contents (same logic as compareFilesProjectWide)
+  const fileContents = new Map<string, string>()
+  const needsToReadFromDisk = !components[0]?.sourceCode
+
+  for (const component of components) {
+    if (!fileContents.has(component.filePath)) {
+      if (component.sourceCode) {
+        fileContents.set(component.filePath, component.sourceCode)
+      } else if (needsToReadFromDisk) {
+        try {
+          fileContents.set(component.filePath, await readFile(component.filePath, 'utf-8'))
+        } catch (e) {
+          console.warn(`Warning: Could not read ${component.filePath}: ${e as Error}`)
+        }
+      }
+    }
+
+    if (component.templatePath && component.templateContent) {
+      if (!fileContents.has(component.templatePath)) {
+        fileContents.set(component.templatePath, component.templateContent)
+      }
+    }
+
+    if (component.styleUrls && component.styles) {
+      for (let i = 0; i < component.styleUrls.length && i < component.styles.length; i++) {
+        const styleUrl = component.styleUrls[i]
+        const styleContent = component.styles[i]
+        if (styleContent && !fileContents.has(styleUrl)) {
+          fileContents.set(styleUrl, styleContent)
+        }
+      }
+    }
+  }
+
+  const filePaths = Array.from(fileContents.keys()).filter((p) => p.endsWith('.ts'))
+  console.log(`Compiling ${filePaths.length} TypeScript files with Angular NgtscProgram...`)
+
+  const ngStartTime = performance.now()
+  const emitter = new NgtscFileEmitter(filePaths, config.tsconfigPath!, fileContents)
+  await emitter.initialize()
+  const ngDuration = performance.now() - ngStartTime
+
+  console.log(
+    `Angular NgtscProgram completed: ${ngDuration.toFixed(0)}ms (${emitter.emittedFileCount} files emitted)`,
+  )
+
+  const ngOutputMap = emitter.getAllEmittedFiles()
+  const outputPath = config.saveNgBaselinePath || 'ng-baseline.json'
+  const baselineData = createNgBaselineData(
+    ngOutputMap,
+    config.tsconfigPath!,
+    config.projectRoot,
+    filePaths.length,
+    ngDuration,
+  )
+  await saveNgBaseline(baselineData, outputPath)
+  console.log(`Angular baseline saved to: ${outputPath} (${ngOutputMap.size} files)`)
 }
 
 /**

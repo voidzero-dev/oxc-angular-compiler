@@ -661,6 +661,7 @@ fn reify_create_op<'a>(
         }
         CreateOp::Variable(var) => {
             // Emit variable declaration with initializer
+            // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts
             let value = convert_ir_expression(allocator, &var.initializer, expressions, root_xref);
             Some(create_variable_decl_stmt_with_value(allocator, &var.name, value))
         }
@@ -871,6 +872,7 @@ fn reify_update_op<'a>(
         }
         UpdateOp::Variable(var) => {
             // Emit variable declaration with initializer for update phase
+            // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts
             let value = convert_ir_expression(allocator, &var.initializer, expressions, root_xref);
             Some(create_variable_decl_stmt_with_value(allocator, &var.name, value))
         }

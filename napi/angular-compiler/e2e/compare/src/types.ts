@@ -40,6 +40,12 @@ export interface CompilerConfig {
   fullFileMode?: boolean
   /** Path to tsconfig.json for full-file compilation with real project context */
   tsconfigPath?: string
+  /** Path to load Angular baseline from (skips Angular compilation) */
+  ngBaselinePath?: string
+  /** Path to save Angular baseline to after compilation */
+  saveNgBaselinePath?: string
+  /** Run Angular compilation only and save baseline (no Oxc, no comparison) */
+  generateNgBaselineOnly?: boolean
 }
 
 /**

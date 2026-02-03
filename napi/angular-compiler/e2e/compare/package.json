@@ -8,6 +8,8 @@
     "compare": "oxnode src/index.ts",
     "compare:full-file": "NODE_OPTIONS='--max-old-space-size=16384' oxnode src/index.ts --full-file",
     "compare:clickup": "NODE_OPTIONS='--max-old-space-size=32768' oxnode src/index.ts --preset clickup --full-file",
+    "compare:clickup:fast": "NODE_OPTIONS='--max-old-space-size=16384' oxnode src/index.ts --preset clickup --full-file --ng-baseline ./ng-baseline-clickup.json",
+    "compare:clickup:save-baseline": "NODE_OPTIONS='--max-old-space-size=32768' oxnode src/index.ts --preset clickup --full-file --generate-ng-baseline --save-ng-baseline ./ng-baseline-clickup.json",
     "compare:clickup-core": "NODE_OPTIONS='--max-old-space-size=16384' oxnode src/index.ts --preset clickup-core --full-file",
     "compare:clickup-client": "NODE_OPTIONS='--max-old-space-size=16384' oxnode src/index.ts --preset clickup-client --full-file",
     "show-diff": "oxnode src/show-diff.ts",

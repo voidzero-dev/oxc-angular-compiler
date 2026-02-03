@@ -1025,7 +1025,7 @@ mod tests {
         let emitter = JsEmitter::new();
         let output = result.map(|e| emitter.emit_expression(&e)).unwrap_or_default();
 
-        // Expected: {value:"value",} - simple string format (emitter uses trailing comma)
+        // Expected: {value:"value"} - simple string format
         assert!(output.contains(r#"value:"value""#), "Simple input should be string: {}", output);
         // Should NOT contain array brackets for simple case
         assert!(!output.contains("["), "Simple input should not be array: {}", output);
@@ -1219,7 +1219,8 @@ mod tests {
         );
 
         // Transform input: [2, "boolInput", "boolInput", booleanAttribute]
-        // Note: The emitter may add newlines in the output, so we check for key parts
+        // Note: The emitter may add newlines in the output for multi-line arrays,
+        // so we check for key parts
         assert!(
             output.contains(r#"boolInput:[2,"boolInput","boolInput","#)
                 && output.contains("booleanAttribute]"),

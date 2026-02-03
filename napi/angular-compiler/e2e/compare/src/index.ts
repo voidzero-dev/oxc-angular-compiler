@@ -95,6 +95,19 @@ const { values, positionals } = parseArgs({
       type: 'boolean',
       description: 'Use full-file compilation mode instead of template-only',
     },
+    // Angular baseline options
+    'ng-baseline': {
+      type: 'string',
+      description: 'Path to Angular baseline file (skip Angular compilation)',
+    },
+    'save-ng-baseline': {
+      type: 'string',
+      description: 'Save Angular compilation output to baseline file',
+    },
+    'generate-ng-baseline': {
+      type: 'boolean',
+      description: 'Run Angular compilation only and save baseline (no Oxc, no comparison)',
+    },
     // Output options
     'json-reporter': {
       type: 'boolean',
@@ -198,6 +211,12 @@ try {
       fullFileMode: values['full-file'],
       // Pass tsconfigPath for full-file compilation with real project context
       tsconfigPath: values['full-file'] ? presetTsconfigPath : undefined,
+      // Angular baseline options
+      ngBaselinePath: values['ng-baseline'] ? resolve(values['ng-baseline']) : undefined,
+      saveNgBaselinePath: values['save-ng-baseline']
+        ? resolve(values['save-ng-baseline'])
+        : undefined,
+      generateNgBaselineOnly: values['generate-ng-baseline'],
     }
 
     if (runBoth) {
@@ -207,22 +226,26 @@ try {
 
     const report = await runComparison(config)
 
-    // Handle --json-reporter: output JSON to stdout
-    if (values['json-reporter']) {
-      console.log(JSON.stringify(report, null, 2))
-    } else {
-      // Write JSON report to file (normal behavior)
-      const outputPath = resolve(values.output!)
-      await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf-8')
-      console.log(`\nReport written to: ${outputPath}`)
-    }
+    // In generate-ng-baseline mode, the baseline is already saved by the runner.
+    // Skip writing the comparison report since there's no comparison data.
+    if (!values['generate-ng-baseline']) {
+      // Handle --json-reporter: output JSON to stdout
+      if (values['json-reporter']) {
+        console.log(JSON.stringify(report, null, 2))
+      } else {
+        // Write JSON report to file (normal behavior)
+        const outputPath = resolve(values.output!)
+        await writeFile(outputPath, JSON.stringify(report, null, 2), 'utf-8')
+        console.log(`\nReport written to: ${outputPath}`)
+      }
 
-    // Handle --detailed-diff: show detailed function body diffs for mismatches
-    if (values['detailed-diff']) {
-      showDetailedDiffs(report)
-    }
+      // Handle --detailed-diff: show detailed function body diffs for mismatches
+      if (values['detailed-diff']) {
+        showDetailedDiffs(report)
+      }
 
-    hasFailures = hasFailures || report.summary.mismatched > 0 || report.summary.oxcErrors > 0
+      hasFailures = hasFailures || report.summary.mismatched > 0 || report.summary.oxcErrors > 0
+    }
   }
 
   process.exit(hasFailures ? 1 : 0)
@@ -377,6 +400,16 @@ COMPILATION MODE OPTIONS:
                             Requires a preset with tsconfigPath for real project
                             context. Results are at file-level, not component-level.
 
+ANGULAR BASELINE OPTIONS:
+  --generate-ng-baseline    Run Angular compilation only and save baseline to file.
+                            Skips Oxc compilation and comparison. Use with
+                            --save-ng-baseline to specify output path.
+  --save-ng-baseline <path> Save Angular output as a baseline file after compilation.
+                            Can be used with or without --generate-ng-baseline.
+  --ng-baseline <path>      Load Angular output from a baseline file instead of
+                            running the Angular compiler. Dramatically speeds up
+                            comparison runs.
+
 OUTPUT OPTIONS:
   --json-reporter           Output results as JSON to stdout (instead of file)
   --detailed-diff           Show detailed function body diffs for mismatches
@@ -415,6 +448,15 @@ EXAMPLES:
 
   # Use file-to-file strict comparison mode with a preset
   pnpm compare --preset bitwarden --full-file
+
+  # Generate Angular baseline (slow, run once)
+  pnpm compare --preset clickup --full-file --generate-ng-baseline --save-ng-baseline ./ng-baseline-clickup.json
+
+  # Use saved Angular baseline (fast, run many times)
+  pnpm compare --preset clickup --full-file --ng-baseline ./ng-baseline-clickup.json
+
+  # Run comparison and save baseline at the same time
+  pnpm compare --preset clickup --full-file --save-ng-baseline ./ng-baseline-clickup.json
 
 REPORT FORMAT:
   The JSON report includes:

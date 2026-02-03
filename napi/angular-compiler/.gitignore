@@ -5,6 +5,7 @@
 /e2e/compare/compare-report.json
 /e2e/compare/i18n-report.json
 /e2e/compare/material-report.json
+/e2e/compare/ng-baseline-*.json
 /e2e/compare/dist
 /benchmarks/typedb-web/dist
 /e2e/app/dist
