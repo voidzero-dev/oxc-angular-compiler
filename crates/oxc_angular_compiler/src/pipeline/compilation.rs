@@ -139,16 +139,12 @@ pub struct ComponentCompilationJob<'a> {
     pub mode: TemplateCompilationMode,
     /// Whether this is for an i18n template.
     pub is_i18n_template: bool,
-    /// Metadata for i18n messages keyed by xref.
-    pub i18n_message_metadata: FxHashMap<XrefId, I18nMessageMetadata<'a>>,
-    /// Cache of i18n xrefs keyed by message identity (custom_id or computed id).
+    /// Metadata for i18n messages keyed by instance_id.
     ///
-    /// This ensures that when the same i18n message is encountered multiple times
-    /// (e.g., when copying attributes from an element to its conditional), they
-    /// share the same xref. This is crucial for correct const deduplication because
-    /// the i18n_const_collection phase assigns i18n variable names (I18N_0, I18N_1)
-    /// based on the context xref, which in turn depends on the message xref.
-    pub i18n_xref_by_message_key: FxHashMap<String, XrefId>,
+    /// The instance_id is a unique u32 assigned to each i18n message during parsing.
+    /// This avoids allocating xrefs during ingest for i18n messages on attribute bindings,
+    /// matching Angular TS which stores direct object references on BindingOp.i18nMessage.
+    pub i18n_message_metadata: FxHashMap<u32, I18nMessageMetadata<'a>>,
     /// Whether to use external message IDs in Closure Compiler variable names.
     ///
     /// When true, generates variable names like `MSG_EXTERNAL_abc123$$SUFFIX`.
@@ -227,7 +223,6 @@ impl<'a> ComponentCompilationJob<'a> {
             mode: TemplateCompilationMode::default(),
             is_i18n_template: false,
             i18n_message_metadata: FxHashMap::default(),
-            i18n_xref_by_message_key: FxHashMap::default(),
             i18n_use_external_ids: true, // Default matches Angular's JIT behavior
             relative_context_file_path: None,
             relocation_entries: Vec::new_in(allocator),
@@ -255,23 +250,6 @@ impl<'a> ComponentCompilationJob<'a> {
         let id = XrefId::new(self.next_xref_id);
         self.next_xref_id += 1;
         id
-    }
-
-    /// Gets or creates an i18n xref for a message with the given key.
-    ///
-    /// This ensures that when the same i18n message is encountered multiple times
-    /// (e.g., when copying attributes from an element to its conditional wrapper),
-    /// they share the same xref. This is crucial for correct const deduplication.
-    ///
-    /// The key should be derived from the message's identity (custom_id or computed id).
-    pub fn get_or_create_i18n_xref(&mut self, message_key: String) -> XrefId {
-        if let Some(&xref) = self.i18n_xref_by_message_key.get(&message_key) {
-            xref
-        } else {
-            let xref = self.allocate_xref_id();
-            self.i18n_xref_by_message_key.insert(message_key, xref);
-            xref
-        }
     }
 
     /// Stores an expression and returns its ID.

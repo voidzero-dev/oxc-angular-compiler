@@ -118,9 +118,9 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
                             let i18n_block =
                                 i18n_contexts.get(&ctx_op.xref).and_then(|(_, block)| *block);
 
-                            let metadata = ctx_op
-                                .message
-                                .and_then(|msg_xref| job.i18n_message_metadata.get(&msg_xref));
+                            let metadata = ctx_op.message.and_then(|instance_id| {
+                                job.i18n_message_metadata.get(&instance_id)
+                            });
 
                             messages_to_add.push(I18nMessageOp {
                                 base: CreateOpBase::default(),

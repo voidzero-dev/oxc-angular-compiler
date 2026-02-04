@@ -24,7 +24,7 @@ pub fn wrap_i18n_icus(job: &mut ComponentCompilationJob<'_>) {
 
 fn wrap_icus_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: XrefId) {
     // First pass: collect information about ICUs that need wrapping
-    let mut icus_to_wrap: Vec<(NonNull<CreateOp<'_>>, Option<XrefId>)> = Vec::new();
+    let mut icus_to_wrap: Vec<(NonNull<CreateOp<'_>>, Option<u32>)> = Vec::new();
 
     {
         let view = match job.view(view_xref) {

@@ -3914,3 +3914,31 @@ fn test_nested_if_alias_listener_ctx_reference() {
     );
     insta::assert_snapshot!("nested_if_alias_listener_ctx_reference", js);
 }
+
+/// Tests that i18n attribute bindings before a @for block do not inflate the xref IDs
+/// used for @for loop index variables.
+///
+/// In Angular's TypeScript compiler, BindingOp.i18nMessage stores a direct reference to
+/// the i18n.Message object -- no xref is allocated during ingest. The xref for the i18n
+/// context is only allocated later during the create_i18n_contexts phase.
+///
+/// If Oxc allocates extra xrefs for i18n messages during ingest, the @for body view's
+/// xref will be higher than Angular's, causing the generated variable name ɵ$index_N to
+/// use the wrong N value.
+///
+/// For the template `<div i18n-title title="Hello">text</div> @for (item of items; track $index) { {{$index}} }`:
+///   - Angular TS: div=xref1, i18nAttrs=xref2, forBody=xref3 => ɵ$index_3
+///   - Oxc (buggy): div=xref1, i18nMsg=xref2, i18nAttrs=xref3, forBody=xref4 => ɵ$index_4
+#[test]
+fn test_for_index_xref_with_i18n_attribute_binding() {
+    let js = compile_template_to_js(
+        r#"<div i18n-title title="Hello">text</div>
+@for (item of items; track $index) { {{$index}} }"#,
+        "TestComponent",
+    );
+
+    // Verify the output matches expected Angular behavior via snapshot.
+    // The fix ensures Oxc doesn't allocate extra xrefs for i18n messages during ingest,
+    // matching Angular TS which stores direct i18n.Message object references on BindingOp.
+    insta::assert_snapshot!("for_index_xref_with_i18n_attribute_binding", js);
+}

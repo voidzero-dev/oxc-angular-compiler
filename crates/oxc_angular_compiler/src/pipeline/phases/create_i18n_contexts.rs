@@ -24,7 +24,10 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
 
     // Phase 1: Create i18n context ops for i18n attrs.
     // For attributes with i18n messages, we create an I18nContext op.
-    let mut attr_context_by_message: FxHashMap<XrefId, XrefId> = FxHashMap::default();
+    //
+    // The dedup key is the i18n message's instance_id (u32), matching Angular TS where
+    // the Map key is the i18n.Message object reference (object identity).
+    let mut attr_context_by_message: FxHashMap<u32, XrefId> = FxHashMap::default();
     let view_xrefs_for_attrs: Vec<XrefId> =
         std::iter::once(job.root.xref).chain(job.views.keys().copied()).collect();
 
@@ -32,7 +35,7 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
     #[derive(Clone)]
     struct AttrI18nInfo<'a> {
         view_xref: XrefId,
-        message_xref: XrefId,
+        message_instance_id: u32,
         is_create_op: bool, // true for ExtractedAttribute, false for update ops
         // Additional fields to uniquely identify the attribute
         target: XrefId, // Element xref this attribute belongs to
@@ -47,10 +50,10 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
             // Check CreateOps (ExtractedAttribute)
             for op in view.create.iter() {
                 if let CreateOp::ExtractedAttribute(attr_op) = op {
-                    if let Some(msg_xref) = attr_op.i18n_message {
+                    if let Some(instance_id) = attr_op.i18n_message {
                         attr_ops_needing_context.push(AttrI18nInfo {
                             view_xref: *view_xref,
-                            message_xref: msg_xref,
+                            message_instance_id: instance_id,
                             is_create_op: true,
                             target: attr_op.target,
                             name: attr_op.name.clone(),
@@ -63,10 +66,10 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
             for op in view.update.iter() {
                 match op {
                     UpdateOp::Property(prop_op) => {
-                        if let Some(msg_xref) = prop_op.i18n_message {
+                        if let Some(instance_id) = prop_op.i18n_message {
                             attr_ops_needing_context.push(AttrI18nInfo {
                                 view_xref: *view_xref,
-                                message_xref: msg_xref,
+                                message_instance_id: instance_id,
                                 is_create_op: false,
                                 target: prop_op.target,
                                 name: prop_op.name.clone(),
@@ -74,10 +77,10 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
                         }
                     }
                     UpdateOp::Attribute(attr_op) => {
-                        if let Some(msg_xref) = attr_op.i18n_message {
+                        if let Some(instance_id) = attr_op.i18n_message {
                             attr_ops_needing_context.push(AttrI18nInfo {
                                 view_xref: *view_xref,
-                                message_xref: msg_xref,
+                                message_instance_id: instance_id,
                                 is_create_op: false,
                                 target: attr_op.target,
                                 name: attr_op.name.clone(),
@@ -90,19 +93,19 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
         }
     }
 
-    // Create I18nContext ops keyed by i18n_message xref.
+    // Create I18nContext ops keyed by i18n message instance_id.
     //
     // This matches TypeScript's behavior where `attrContextByMessage` uses the i18n.Message
     // object as the key. In TypeScript, when an attribute is copied (e.g., from element to
     // conditional via ingestControlFlowInsertionPoint), both uses share the same i18n.Message
     // object reference, so they get the same context.
     //
-    // In Rust, we use the i18n_message xref as the key. Since our ingestion code uses
-    // pointer-based caching for i18n xrefs, attributes from the same source share the same
-    // i18n_message xref, which means they'll also share the same context here.
+    // We use the instance_id as the key. Since the instance_id is assigned during parsing
+    // and survives Rust moves/copies, attributes from the same source share the same
+    // instance_id and get the same context here.
     for info in &attr_ops_needing_context {
-        // Skip if we've already created a context for this message xref
-        if attr_context_by_message.contains_key(&info.message_xref) {
+        // Skip if we've already created a context for this message instance_id
+        if attr_context_by_message.contains_key(&info.message_instance_id) {
             continue;
         }
 
@@ -115,7 +118,7 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
             params: oxc_allocator::HashMap::new_in(allocator),
             postprocessing_params: oxc_allocator::HashMap::new_in(allocator),
             icu_placeholder_literals: oxc_allocator::HashMap::new_in(allocator),
-            message: Some(info.message_xref),
+            message: Some(info.message_instance_id),
         });
 
         // Add context op to the view
@@ -125,12 +128,12 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
             view.create.push(context_op);
         }
 
-        attr_context_by_message.insert(info.message_xref, context_xref);
+        attr_context_by_message.insert(info.message_instance_id, context_xref);
     }
 
     // Assign contexts to the attribute ops using the message-based map
     for info in attr_ops_needing_context {
-        if let Some(&context_xref) = attr_context_by_message.get(&info.message_xref) {
+        if let Some(&context_xref) = attr_context_by_message.get(&info.message_instance_id) {
             let view = if info.view_xref.0 == 0 {
                 Some(&mut job.root)
             } else {
@@ -174,7 +177,7 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
     let mut block_context_by_i18n_block: FxHashMap<XrefId, XrefId> = FxHashMap::default();
 
     // First pass: collect root i18n blocks and create contexts for them
-    let mut root_i18n_blocks: Vec<(XrefId, XrefId, Option<XrefId>)> = Vec::new(); // (view_xref, i18n_xref, message)
+    let mut root_i18n_blocks: Vec<(XrefId, XrefId, Option<u32>)> = Vec::new(); // (view_xref, i18n_xref, message_instance_id)
 
     // Collect from root view
     {
@@ -326,15 +329,14 @@ fn create_icu_contexts_for_view(
 ) {
     let allocator = job.allocator;
 
-    // Collect ICU info: (icu_xref, icu_message, current_i18n_xref, current_i18n_message, current_i18n_context)
-    let mut icu_info: Vec<(XrefId, Option<XrefId>, XrefId, Option<XrefId>, Option<XrefId>)> =
-        Vec::new();
+    // Collect ICU info: (icu_xref, icu_message_id, current_i18n_xref, current_i18n_message_id, current_i18n_context)
+    let mut icu_info: Vec<(XrefId, Option<u32>, XrefId, Option<u32>, Option<XrefId>)> = Vec::new();
 
     {
         let view = if view_xref.0 == 0 { Some(&job.root) } else { job.view(view_xref) };
 
         if let Some(view) = view {
-            let mut current_i18n: Option<(XrefId, Option<XrefId>, Option<XrefId>)> = None; // (xref, message, context)
+            let mut current_i18n: Option<(XrefId, Option<u32>, Option<XrefId>)> = None; // (xref, message_instance_id, context)
 
             for op in view.create.iter() {
                 match op {

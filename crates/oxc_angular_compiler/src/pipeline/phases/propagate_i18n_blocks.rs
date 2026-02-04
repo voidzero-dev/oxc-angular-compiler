@@ -79,7 +79,7 @@ fn propagate_i18n_blocks_to_templates(
 
     // Track the current i18n block: (root_xref, message, sub_template_index)
     // root_xref is always the root of the i18n block tree (same for nested blocks)
-    let mut i18n_block: Option<(XrefId, Option<XrefId>, Option<u32>)> = None;
+    let mut i18n_block: Option<(XrefId, Option<u32>, Option<u32>)> = None;
 
     for (kind, xref, has_placeholder, extra_view, extra_has_placeholder) in ops_info {
         match kind {
@@ -174,7 +174,7 @@ fn wrap_template_with_i18n(
     job: &mut ComponentCompilationJob<'_>,
     view_xref: XrefId,
     root_i18n_xref: XrefId,
-    message: Option<XrefId>,
+    message: Option<u32>,
 ) {
     let view = match job.view(view_xref) {
         Some(v) => v,

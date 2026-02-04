@@ -1264,8 +1264,8 @@ pub struct I18nStartOp<'a> {
     pub slot: Option<SlotId>,
     /// I18n context.
     pub context: Option<XrefId>,
-    /// Message.
-    pub message: Option<XrefId>,
+    /// Message instance ID for metadata lookup.
+    pub message: Option<u32>,
     /// I18n placeholder data (start_name and close_name for i18n blocks).
     pub i18n_placeholder: Option<I18nPlaceholder<'a>>,
     /// Sub-template index for nested templates inside i18n blocks.
@@ -1289,8 +1289,8 @@ pub struct I18nOp<'a> {
     pub slot: Option<SlotId>,
     /// I18n context.
     pub context: Option<XrefId>,
-    /// Message.
-    pub message: Option<XrefId>,
+    /// Message instance ID for metadata lookup.
+    pub message: Option<u32>,
     /// I18n placeholder data (start_name and close_name for i18n blocks).
     pub i18n_placeholder: Option<I18nPlaceholder<'a>>,
     /// Sub-template index for nested templates inside i18n blocks.
@@ -1321,8 +1321,8 @@ pub struct IcuStartOp<'a> {
     pub xref: XrefId,
     /// I18n context.
     pub context: Option<XrefId>,
-    /// Message.
-    pub message: Option<XrefId>,
+    /// Message instance ID for metadata lookup.
+    pub message: Option<u32>,
     /// ICU placeholder.
     pub icu_placeholder: Option<Atom<'a>>,
 }
@@ -1365,8 +1365,11 @@ pub struct I18nContextOp<'a> {
     /// Maps ICU placeholder names to their formatted string values.
     /// These are string literals like "Hello ${�0�}!" generated from IcuPlaceholderOp.
     pub icu_placeholder_literals: oxc_allocator::HashMap<'a, Atom<'a>, Atom<'a>>,
-    /// Message reference.
-    pub message: Option<XrefId>,
+    /// Message instance ID reference (for metadata lookup).
+    ///
+    /// Stores the i18n message's instance_id (not an XrefId) to look up metadata
+    /// in the job's i18n_message_metadata map.
+    pub message: Option<u32>,
 }
 
 /// I18n attributes on an element.
@@ -1439,8 +1442,13 @@ pub struct ExtractedAttributeOp<'a> {
     pub security_context: SecurityContext,
     /// Whether expression is truthy.
     pub truthy_expression: bool,
-    /// i18n message (for i18n attributes).
-    pub i18n_message: Option<XrefId>,
+    /// i18n message instance ID (for i18n attributes).
+    ///
+    /// This stores the i18n message's instance_id rather than an XrefId to avoid
+    /// allocating xrefs during ingest. Angular TS stores a direct object reference
+    /// to the i18n.Message; we use the instance_id as a dedup key instead.
+    /// The actual xref for the i18n context is allocated later in create_i18n_contexts.
+    pub i18n_message: Option<u32>,
     /// i18n context.
     pub i18n_context: Option<XrefId>,
     /// Trusted value function for security-sensitive constant attributes.
@@ -1522,8 +1530,10 @@ pub struct PropertyOp<'a> {
     pub is_structural: bool,
     /// I18n context.
     pub i18n_context: Option<XrefId>,
-    /// I18n message.
-    pub i18n_message: Option<XrefId>,
+    /// I18n message instance ID.
+    ///
+    /// Stores the i18n message's instance_id for dedup, not an XrefId.
+    pub i18n_message: Option<u32>,
     /// Binding kind (for DomOnly mode and animation handling).
     pub binding_kind: BindingKind,
 }
@@ -1608,8 +1618,10 @@ pub struct AttributeOp<'a> {
     pub sanitizer: Option<Atom<'a>>,
     /// I18n context.
     pub i18n_context: Option<XrefId>,
-    /// I18n message.
-    pub i18n_message: Option<XrefId>,
+    /// I18n message instance ID.
+    ///
+    /// Stores the i18n message's instance_id for dedup, not an XrefId.
+    pub i18n_message: Option<u32>,
     /// Whether this is a text attribute (static attribute from template).
     ///
     /// Text attributes are extractable to the consts array and don't need
@@ -1811,8 +1823,10 @@ pub struct BindingOp<'a> {
     pub unit: Option<Atom<'a>>,
     /// Security context.
     pub security_context: SecurityContext,
-    /// I18n message.
-    pub i18n_message: Option<XrefId>,
+    /// I18n message instance ID.
+    ///
+    /// Stores the i18n message's instance_id for dedup, not an XrefId.
+    pub i18n_message: Option<u32>,
     /// Whether this binding came from a text attribute (e.g., `class="cls"` vs `[class]="expr"`).
     ///
     /// This is used for compatibility with TemplateDefinitionBuilder which treats
@@ -1843,8 +1857,10 @@ pub struct AnimationOp<'a> {
     pub handler_ops: Vec<'a, UpdateOp<'a>>,
     /// Function name for the handler.
     pub handler_fn_name: Option<Atom<'a>>,
-    /// I18n message.
-    pub i18n_message: Option<XrefId>,
+    /// I18n message instance ID.
+    ///
+    /// Stores the i18n message's instance_id for dedup, not an XrefId.
+    pub i18n_message: Option<u32>,
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.

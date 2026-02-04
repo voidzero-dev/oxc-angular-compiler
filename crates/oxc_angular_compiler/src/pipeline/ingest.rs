@@ -1137,9 +1137,9 @@ fn ingest_element<'a>(
             None
         } else {
             let i18n_xref = job.allocate_xref_id();
+            let instance_id = message.instance_id;
 
-            // Store i18n message metadata for later phases
-            // Clone legacy_ids using the allocator
+            // Store i18n message metadata keyed by instance_id
             let mut legacy_ids = Vec::new_in(allocator);
             for id in message.legacy_ids.iter() {
                 legacy_ids.push(id.clone());
@@ -1169,7 +1169,7 @@ fn ingest_element<'a>(
                     Some(message.message_string.clone())
                 },
             };
-            job.i18n_message_metadata.insert(i18n_xref, metadata);
+            job.i18n_message_metadata.insert(instance_id, metadata);
 
             // Create I18nStartOp
             let i18n_start = CreateOp::I18nStart(I18nStartOp {
@@ -1179,12 +1179,12 @@ fn ingest_element<'a>(
                 },
                 xref: i18n_xref,
                 slot: None,
-                context: None,            // Will be set by create_i18n_contexts phase
-                message: Some(i18n_xref), // Message xref for metadata lookup
-                i18n_placeholder: None,   // Root i18n block has no placeholder
-                sub_template_index: None, // Will be set by propagate_i18n_blocks phase
-                root: None,               // Root i18n block has no root
-                message_index: None,      // Will be set by i18n_const_collection phase
+                context: None,              // Will be set by create_i18n_contexts phase
+                message: Some(instance_id), // Instance ID for metadata lookup
+                i18n_placeholder: None,     // Root i18n block has no placeholder
+                sub_template_index: None,   // Will be set by propagate_i18n_blocks phase
+                root: None,                 // Root i18n block has no root
+                message_index: None,        // Will be set by i18n_const_collection phase
             });
 
             if let Some(view) = job.view_mut(view_xref) {
@@ -1384,28 +1384,19 @@ fn ingest_static_attributes_with_i18n<'a>(
         // Handle i18n message if present (for i18n-* attribute markers)
         // This matches Angular's asMessage(attr.i18n) in ingest.ts line 1329
         //
-        // IMPORTANT: Use a cached xref based on the message's instance_id to ensure
-        // that when the SAME attribute is encountered twice (once for the conditional via
-        // ingestControlFlowInsertionPoint, once for the element via this function), both
-        // uses share the same xref. This matches TypeScript's behavior where Map keys use
-        // object identity.
+        // Angular TS stores the i18n.Message object reference directly. We store the
+        // instance_id as a dedup key. When the SAME attribute is encountered twice
+        // (once for the conditional via ingestControlFlowInsertionPoint, once for the
+        // element via this function), they share the same instance_id since it's assigned
+        // during parsing and survives moves/copies.
         //
-        // Different attributes (even with the same content) should get DIFFERENT xrefs,
-        // which is crucial for correct const deduplication - each element with an i18n
-        // attribute should get its own const entry.
-        //
-        // We use instance_id rather than pointer address because Rust moves data around
-        // during iteration (e.g., `for child in branch.children` moves the children),
-        // which changes memory addresses. The instance_id is assigned during parsing
-        // and survives moves.
+        // Different attributes (even with the same content) get DIFFERENT instance_ids,
+        // which is crucial for correct const deduplication.
         let i18n_message = if let Some(I18nMeta::Message(ref message)) = attr.i18n {
-            // Use the instance ID as the cache key (survives Rust moves unlike pointer)
-            let message_key = format!("i18n_instance_{}", message.instance_id);
-
-            let i18n_xref = job.get_or_create_i18n_xref(message_key);
+            let instance_id = message.instance_id;
 
             // Store i18n message metadata for later phases (only if not already stored)
-            if !job.i18n_message_metadata.contains_key(&i18n_xref) {
+            if !job.i18n_message_metadata.contains_key(&instance_id) {
                 let mut legacy_ids = Vec::new_in(allocator);
                 for id in message.legacy_ids.iter() {
                     legacy_ids.push(id.clone());
@@ -1435,10 +1426,10 @@ fn ingest_static_attributes_with_i18n<'a>(
                         Some(message.message_string.clone())
                     },
                 };
-                job.i18n_message_metadata.insert(i18n_xref, metadata);
+                job.i18n_message_metadata.insert(instance_id, metadata);
             }
 
-            Some(i18n_xref)
+            Some(instance_id)
         } else {
             None
         };
@@ -1620,38 +1611,48 @@ fn ingest_binding_owned<'a>(
 
     // Handle i18n message if present (for i18n-* attribute bindings)
     // Ported from Angular's ingestElementBindings in ingest.ts
+    //
+    // Angular TS stores the i18n.Message object reference directly on the BindingOp
+    // without allocating an xref. We store the instance_id as a dedup key instead.
+    // The xref for the i18n context is allocated later in create_i18n_contexts.
     let i18n_message = if let Some(I18nMeta::Message(ref message)) = input.i18n {
-        let i18n_xref = job.allocate_xref_id();
+        let instance_id = message.instance_id;
 
-        // Store i18n message metadata for later phases
-        let mut legacy_ids = Vec::new_in(allocator);
-        for id in message.legacy_ids.iter() {
-            legacy_ids.push(id.clone());
+        // Store i18n message metadata for later phases (keyed by instance_id)
+        if !job.i18n_message_metadata.contains_key(&instance_id) {
+            let mut legacy_ids = Vec::new_in(allocator);
+            for id in message.legacy_ids.iter() {
+                legacy_ids.push(id.clone());
+            }
+
+            let metadata = I18nMessageMetadata {
+                message_id: if message.id.is_empty() { None } else { Some(message.id.clone()) },
+                custom_id: if message.custom_id.is_empty() {
+                    None
+                } else {
+                    Some(message.custom_id.clone())
+                },
+                meaning: if message.meaning.is_empty() {
+                    None
+                } else {
+                    Some(message.meaning.clone())
+                },
+                description: if message.description.is_empty() {
+                    None
+                } else {
+                    Some(message.description.clone())
+                },
+                legacy_ids,
+                message_string: if message.message_string.is_empty() {
+                    None
+                } else {
+                    Some(message.message_string.clone())
+                },
+            };
+            job.i18n_message_metadata.insert(instance_id, metadata);
         }
 
-        let metadata = I18nMessageMetadata {
-            message_id: if message.id.is_empty() { None } else { Some(message.id.clone()) },
-            custom_id: if message.custom_id.is_empty() {
-                None
-            } else {
-                Some(message.custom_id.clone())
-            },
-            meaning: if message.meaning.is_empty() { None } else { Some(message.meaning.clone()) },
-            description: if message.description.is_empty() {
-                None
-            } else {
-                Some(message.description.clone())
-            },
-            legacy_ids,
-            message_string: if message.message_string.is_empty() {
-                None
-            } else {
-                Some(message.message_string.clone())
-            },
-        };
-        job.i18n_message_metadata.insert(i18n_xref, metadata);
-
-        Some(i18n_xref)
+        Some(instance_id)
     } else {
         None
     };
@@ -1925,36 +1926,40 @@ fn ingest_template<'a>(
     // Ported from Angular's ingest.ts lines 384-397
     let i18n_message = if template_kind == TemplateKind::NgTemplate {
         if let Some(I18nMeta::Message(ref message)) = template.i18n {
+            let instance_id = message.instance_id;
             // Clone legacy_ids using the allocator
             let mut legacy_ids = Vec::new_in(allocator);
             for id in message.legacy_ids.iter() {
                 legacy_ids.push(id.clone());
             }
 
-            Some(I18nMessageMetadata {
-                message_id: if message.id.is_empty() { None } else { Some(message.id.clone()) },
-                custom_id: if message.custom_id.is_empty() {
-                    None
-                } else {
-                    Some(message.custom_id.clone())
+            Some((
+                instance_id,
+                I18nMessageMetadata {
+                    message_id: if message.id.is_empty() { None } else { Some(message.id.clone()) },
+                    custom_id: if message.custom_id.is_empty() {
+                        None
+                    } else {
+                        Some(message.custom_id.clone())
+                    },
+                    meaning: if message.meaning.is_empty() {
+                        None
+                    } else {
+                        Some(message.meaning.clone())
+                    },
+                    description: if message.description.is_empty() {
+                        None
+                    } else {
+                        Some(message.description.clone())
+                    },
+                    legacy_ids,
+                    message_string: if message.message_string.is_empty() {
+                        None
+                    } else {
+                        Some(message.message_string.clone())
+                    },
                 },
-                meaning: if message.meaning.is_empty() {
-                    None
-                } else {
-                    Some(message.meaning.clone())
-                },
-                description: if message.description.is_empty() {
-                    None
-                } else {
-                    Some(message.description.clone())
-                },
-                legacy_ids,
-                message_string: if message.message_string.is_empty() {
-                    None
-                } else {
-                    Some(message.message_string.clone())
-                },
-            })
+            ))
         } else {
             None
         }
@@ -2261,23 +2266,23 @@ fn ingest_template<'a>(
     // and end ops. For structural directive templates, the i18n ops will be added when ingesting the
     // element/template the directive is placed on.
     // Ported from Angular's ingest.ts lines 384-397
-    if let Some(metadata) = i18n_message {
+    if let Some((instance_id, metadata)) = i18n_message {
         let i18n_xref = job.allocate_xref_id();
 
-        // Store i18n message metadata for later phases
-        job.i18n_message_metadata.insert(i18n_xref, metadata);
+        // Store i18n message metadata keyed by instance_id
+        job.i18n_message_metadata.insert(instance_id, metadata);
 
         // Create I18nStartOp and insert after the head of the child view's create list
         let i18n_start = I18nStartOp {
             base: CreateOpBase { source_span: Some(template_start_span), ..Default::default() },
             xref: i18n_xref,
             slot: None,
-            context: None,            // Will be set by create_i18n_contexts phase
-            message: Some(i18n_xref), // Message xref for metadata lookup
-            i18n_placeholder: None,   // Root i18n block has no placeholder
-            sub_template_index: None, // Will be set by propagate_i18n_blocks phase
-            root: None,               // Root i18n block has no root
-            message_index: None,      // Will be set by i18n_const_collection phase
+            context: None,              // Will be set by create_i18n_contexts phase
+            message: Some(instance_id), // Instance ID for metadata lookup
+            i18n_placeholder: None,     // Root i18n block has no placeholder
+            sub_template_index: None,   // Will be set by propagate_i18n_blocks phase
+            root: None,                 // Root i18n block has no root
+            message_index: None,        // Will be set by i18n_const_collection phase
         };
 
         // Create I18nEndOp and insert before the tail of the child view's create list
@@ -4339,27 +4344,19 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
         // Handle i18n message if present (for i18n-* attribute markers)
         // This matches Angular's asMessage(attr.i18n) in ingest.ts line 1879
         //
-        // IMPORTANT: Use a cached xref based on MESSAGE INSTANCE ID to ensure that when
-        // the SAME attribute is encountered twice (once for the conditional via
-        // ingestControlFlowInsertionPoint, once for the element via ingestStaticAttributes),
-        // both uses share the same xref. This matches TypeScript's behavior where Map keys
-        // use object identity.
+        // Angular TS stores the i18n.Message object reference directly. We store the
+        // instance_id as a dedup key. When the SAME attribute is encountered twice
+        // (once for the conditional via ingestControlFlowInsertionPoint, once for the
+        // element via ingestStaticAttributes), they share the same instance_id since
+        // it's assigned during parsing and survives moves/copies.
         //
-        // Each i18n message has a unique instance_id assigned during parsing. This survives
-        // moves/copies and ensures correct identity tracking even after Rust's move semantics
-        // relocate the data.
-        //
-        // Different attributes (even with the same content) should get DIFFERENT xrefs,
-        // which is crucial for correct const deduplication - each element with an i18n
-        // attribute should get its own const entry.
+        // Different attributes (even with the same content) get DIFFERENT instance_ids,
+        // which is crucial for correct const deduplication.
         let i18n_message = if let Some(I18nMeta::Message(ref message)) = attr.i18n {
-            // Use the instance ID as the cache key
-            let message_key = format!("i18n_instance_{}", message.instance_id);
-
-            let i18n_xref = job.get_or_create_i18n_xref(message_key);
+            let instance_id = message.instance_id;
 
             // Store i18n message metadata for later phases (only if not already stored)
-            if !job.i18n_message_metadata.contains_key(&i18n_xref) {
+            if !job.i18n_message_metadata.contains_key(&instance_id) {
                 let mut legacy_ids = Vec::new_in(allocator);
                 for id in message.legacy_ids.iter() {
                     legacy_ids.push(id.clone());
@@ -4389,10 +4386,10 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
                         Some(message.message_string.clone())
                     },
                 };
-                job.i18n_message_metadata.insert(i18n_xref, metadata);
+                job.i18n_message_metadata.insert(instance_id, metadata);
             }
 
-            Some(i18n_xref)
+            Some(instance_id)
         } else {
             None
         };
