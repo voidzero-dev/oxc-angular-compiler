@@ -3650,3 +3650,36 @@ export class TestComponent {
         result.code
     );
 }
+
+#[test]
+fn test_nested_if_listener_ctx_reference() {
+    // Test: nested @if where a listener in the inner @if accesses component properties.
+    // The listener should use nextContext() to get the component context,
+    // not bare `ctx` which would be the inner embedded view's context.
+    let js = compile_template_to_js(
+        r#"@if (show) {
+  @if (active) {
+    <button (click)="handleClick()">Click</button>
+  }
+}"#,
+        "TestComponent",
+    );
+    insta::assert_snapshot!("nested_if_listener_ctx_reference", js);
+}
+
+#[test]
+fn test_nested_if_alias_listener_ctx_reference() {
+    // Test: @if with alias, nested @if where listener accesses both
+    // the alias from the outer @if and a method from the component.
+    // All context references inside the listener should use named variables (ctx_rN),
+    // not bare `ctx`.
+    let js = compile_template_to_js(
+        r#"@if (getItem(); as item) {
+  @if (item.active) {
+    <button (click)="makePrivate(!(item.private && !item.shareWithTeam))">Toggle</button>
+  }
+}"#,
+        "TestComponent",
+    );
+    insta::assert_snapshot!("nested_if_alias_listener_ctx_reference", js);
+}

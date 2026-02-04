@@ -1,0 +1,38 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Conditional_0_Conditional_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    const _r1 = i0.ɵɵgetCurrentView();
+    i0.ɵɵtext(0,"\n    ");
+    i0.ɵɵelementStart(1,"button",0);
+    i0.ɵɵlistener("click",function TestComponent_Conditional_0_Conditional_1_Template_button_click_1_listener() {
+      i0.ɵɵrestoreView(_r1);
+      const item_r2 = i0.ɵɵnextContext();
+      const ctx_r2 = i0.ɵɵnextContext();
+      return i0.ɵɵresetView(ctx_r2.makePrivate(!(item_r2.private && !item_r2.shareWithTeam)));
+    });
+    i0.ɵɵtext(2,"Toggle");
+    i0.ɵɵelementEnd();
+    i0.ɵɵtext(3,"\n  ");
+  }
+}
+function TestComponent_Conditional_0_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0,"\n  ");
+    i0.ɵɵconditionalCreate(1,TestComponent_Conditional_0_Conditional_1_Template,4,
+        0);
+  }
+  if ((rf & 2)) {
+    i0.ɵɵadvance();
+    i0.ɵɵconditional((ctx.active? 1: -1));
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵconditionalCreate(0,TestComponent_Conditional_0_Template,2,1); }
+  if ((rf & 2)) {
+    let tmp_0_0;
+    i0.ɵɵconditional(((tmp_0_0 = ctx.getItem())? 0: -1),tmp_0_0);
+  }
+}
