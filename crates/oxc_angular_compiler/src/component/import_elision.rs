@@ -203,6 +203,14 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         if prop_sig.computed {
                             Self::collect_idents_from_expr(&prop_sig.key, result);
                         }
+                        // Recurse into the property's type annotation to find
+                        // computed keys in nested type literals
+                        if let Some(type_ann) = &prop_sig.type_annotation {
+                            Self::collect_computed_keys_from_ts_type(
+                                &type_ann.type_annotation,
+                                result,
+                            );
+                        }
                     }
                 }
             }
@@ -1687,6 +1695,78 @@ class MyComponent {
         assert!(
             !type_only.contains("RecipientType"),
             "RecipientType used as computed property key in type annotation should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_nested_type_literal_computed_key_preserved() {
+        // Computed key inside a nested type literal: { nested: { [fromEmail]: string } }
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { fromEmail } from './email.interface';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() config: {
+        nested: {
+            [fromEmail]: string;
+        };
+    };
+}
+"#;
+        let type_only = analyze_source(source);
+
+        assert!(
+            !type_only.contains("fromEmail"),
+            "fromEmail in nested type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_deeply_nested_type_literal_computed_key_preserved() {
+        // Computed key three levels deep
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() data: {
+        level1: {
+            level2: {
+                [myKey]: number;
+            };
+        };
+    };
+}
+"#;
+        let type_only = analyze_source(source);
+
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in deeply nested type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_nested_union_type_literal_preserved() {
+        // Computed key inside a type literal nested within a union
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() data: {
+        field: { [myKey]: string } | null;
+    };
+}
+"#;
+        let type_only = analyze_source(source);
+
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in type literal nested within union should be preserved"
         );
     }
 }
