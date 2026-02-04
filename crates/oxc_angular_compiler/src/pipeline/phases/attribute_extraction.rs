@@ -187,22 +187,14 @@ fn process_view_attributes<'a>(
                         continue;
                     }
 
-                    // Determine the extracted binding kind.
-                    // Ported from Angular's attribute_extraction.ts lines 32-39:
-                    //   if (op.i18nMessage !== null && op.templateKind === null) {
-                    //     bindingKind = ir.BindingKind.I18n;
-                    //   } else if (op.isStructuralTemplateAttribute) {
-                    //     bindingKind = ir.BindingKind.Template;
-                    //   } else {
-                    //     bindingKind = ir.BindingKind.Property;
-                    //   }
-                    let binding_kind = if prop_op.i18n_message.is_some()
-                        && prop_op.binding_kind != BindingKind::Template
-                    {
-                        BindingKind::I18n
-                    } else {
-                        prop_op.binding_kind
-                    };
+                    // Use the binding kind from the property op directly.
+                    // Angular's attribute_extraction.ts has a condition:
+                    //   if (op.i18nMessage !== null && op.templateKind === null)
+                    // that sets bindingKind to I18n, but empirically the Angular
+                    // compiler never produces I18n AttributeMarker (6) in consts
+                    // arrays. The templateKind guard (which OXC's PropertyOp lacks)
+                    // prevents it from triggering in practice.
+                    let binding_kind = prop_op.binding_kind;
 
                     // Properties also generate extracted attributes for directive matching
                     // Note: Property ops are NOT removed - they still need runtime updates
