@@ -38,7 +38,7 @@ use std::path::Path;
 
 use oxc_ast::ast::{
     BindingIdentifier, ClassElement, Expression, ImportDeclarationSpecifier, MethodDefinitionKind,
-    Program, Statement,
+    Program, Statement, TSType,
 };
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
 use oxc_span::Atom;
@@ -90,8 +90,9 @@ impl<'a> ImportElisionAnalyzer<'a> {
             for specifier in specifiers {
                 match specifier {
                     ImportDeclarationSpecifier::ImportSpecifier(spec) => {
-                        // Skip explicit type-only specifiers (import { type X })
+                        // Explicit type-only specifiers (import { type X }) are always elided
                         if spec.import_kind.is_type() {
+                            type_only_specifiers.insert(spec.local.name.clone());
                             continue;
                         }
 
@@ -120,19 +121,146 @@ impl<'a> ImportElisionAnalyzer<'a> {
             }
         }
 
+        // Post-pass: remove identifiers used as computed property keys in type annotations.
+        // These are value references (they compute runtime property names) even though they
+        // appear inside type contexts. TypeScript preserves these imports.
+        // Example: `[fromEmail]: Emailer[]` in a type literal uses `fromEmail` as a value.
+        let computed_key_idents = Self::collect_computed_property_key_idents(program);
+        for name in &computed_key_idents {
+            type_only_specifiers.remove(name);
+        }
+
         Self { type_only_specifiers }
     }
 
-    /// Collect import names that are used ONLY in constructor parameter decorators.
+    /// Collect identifiers used as computed property keys in type annotations.
     ///
-    /// Constructor parameter decorators like `@Inject`, `@Optional`, `@Self`, `@SkipSelf`,
-    /// `@Host`, and `@Attribute` are removed by Angular's compiler and converted to
-    /// factory metadata. The imports for these decorators and their arguments (like
-    /// `@Inject(TOKEN)`) should be elided.
+    /// Computed property keys like `[fromEmail]` in type literals reference runtime values,
+    /// even when they appear in type contexts. TypeScript considers these as value references
+    /// and preserves their imports.
+    fn collect_computed_property_key_idents(program: &'a Program<'a>) -> FxHashSet<Atom<'a>> {
+        let mut result = FxHashSet::default();
+
+        for stmt in &program.body {
+            Self::collect_computed_keys_from_statement(stmt, &mut result);
+        }
+
+        result
+    }
+
+    /// Walk a statement collecting computed property key identifiers from type annotations.
+    fn collect_computed_keys_from_statement(
+        stmt: &'a Statement<'a>,
+        result: &mut FxHashSet<Atom<'a>>,
+    ) {
+        match stmt {
+            Statement::ClassDeclaration(class) => {
+                Self::collect_computed_keys_from_class(class, result);
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
+                    &export.declaration
+                {
+                    Self::collect_computed_keys_from_class(class, result);
+                }
+            }
+            Statement::ExportNamedDeclaration(export) => {
+                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
+                    &export.declaration
+                {
+                    Self::collect_computed_keys_from_class(class, result);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Walk class members collecting computed property key identifiers from type annotations.
+    fn collect_computed_keys_from_class(
+        class: &'a oxc_ast::ast::Class<'a>,
+        result: &mut FxHashSet<Atom<'a>>,
+    ) {
+        for element in &class.body.body {
+            if let ClassElement::PropertyDefinition(prop) = element {
+                // Check the type annotation for computed property keys in type literals
+                if let Some(ts_type) = &prop.type_annotation {
+                    Self::collect_computed_keys_from_ts_type(&ts_type.type_annotation, result);
+                }
+            }
+        }
+    }
+
+    /// Recursively walk a TypeScript type collecting computed property key identifiers.
+    fn collect_computed_keys_from_ts_type(
+        ts_type: &'a TSType<'a>,
+        result: &mut FxHashSet<Atom<'a>>,
+    ) {
+        match ts_type {
+            TSType::TSTypeLiteral(type_lit) => {
+                for member in &type_lit.members {
+                    if let oxc_ast::ast::TSSignature::TSPropertySignature(prop_sig) = member {
+                        // Check if the property key is computed
+                        if prop_sig.computed {
+                            Self::collect_idents_from_expr(&prop_sig.key, result);
+                        }
+                    }
+                }
+            }
+            TSType::TSUnionType(union_type) => {
+                for ty in &union_type.types {
+                    Self::collect_computed_keys_from_ts_type(ty, result);
+                }
+            }
+            TSType::TSIntersectionType(intersection_type) => {
+                for ty in &intersection_type.types {
+                    Self::collect_computed_keys_from_ts_type(ty, result);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Collect identifier names from an expression (for computed property keys).
+    fn collect_idents_from_expr(
+        expr: &'a oxc_ast::ast::PropertyKey<'a>,
+        result: &mut FxHashSet<Atom<'a>>,
+    ) {
+        match expr {
+            oxc_ast::ast::PropertyKey::StaticIdentifier(_) => {
+                // Static identifiers are NOT computed property keys
+            }
+            oxc_ast::ast::PropertyKey::PrivateIdentifier(_) => {}
+            _ => {
+                if let Some(expr) = expr.as_expression() {
+                    Self::collect_idents_from_expression(expr, result);
+                }
+            }
+        }
+    }
+
+    /// Collect identifier names from an expression.
+    fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Atom<'a>>) {
+        match expr {
+            Expression::Identifier(id) => {
+                result.insert(id.name.clone());
+            }
+            Expression::StaticMemberExpression(member) => {
+                // For `RecipientType.To`, collect `RecipientType`
+                if let Expression::Identifier(id) = &member.object {
+                    result.insert(id.name.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Collect import names that are used ONLY in compiler-handled positions.
     ///
-    /// This function returns a set of local import names that should be elided because:
-    /// 1. The import is a known parameter decorator (Inject, Optional, etc.)
-    /// 2. The import is ONLY used as an argument to @Inject()
+    /// This includes:
+    /// 1. Constructor parameter decorators (`@Inject`, `@Optional`, etc.) - removed by Angular
+    /// 2. `@Inject(TOKEN)` arguments - only used in ctor param decorators
+    /// 3. `declare` property decorator arguments - `declare` properties are not emitted by
+    ///    TypeScript, so their decorator arguments have no runtime value references
     ///
     /// Reference: packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
     fn collect_ctor_param_decorator_only_imports(program: &'a Program<'a>) -> FxHashSet<&'a str> {
@@ -141,8 +269,10 @@ impl<'a> ImportElisionAnalyzer<'a> {
         // Track:
         // 1. Symbols used ONLY in ctor param decorator position (the decorator itself)
         // 2. Symbols used ONLY as @Inject() arguments
+        // 3. Symbols used ONLY in `declare` property decorator arguments
         let mut ctor_param_decorator_uses: FxHashSet<&'a str> = FxHashSet::default();
         let mut inject_arg_uses: FxHashSet<&'a str> = FxHashSet::default();
+        let mut declare_prop_decorator_uses: FxHashSet<&'a str> = FxHashSet::default();
         let mut other_value_uses: FxHashSet<&'a str> = FxHashSet::default();
 
         // Walk the AST to find constructor parameters and their decorators
@@ -151,19 +281,24 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 stmt,
                 &mut ctor_param_decorator_uses,
                 &mut inject_arg_uses,
+                &mut declare_prop_decorator_uses,
                 &mut other_value_uses,
             );
         }
 
-        // A symbol can be elided if:
-        // 1. It's used in ctor param decorators AND NOT used elsewhere, OR
-        // 2. It's used in @Inject() args AND NOT used elsewhere
+        // A symbol can be elided if it appears ONLY in compiler-handled positions
+        // and NOT in other value positions
         for name in ctor_param_decorator_uses {
             if !other_value_uses.contains(name) {
                 result.insert(name);
             }
         }
         for name in inject_arg_uses {
+            if !other_value_uses.contains(name) {
+                result.insert(name);
+            }
+        }
+        for name in declare_prop_decorator_uses {
             if !other_value_uses.contains(name) {
                 result.insert(name);
             }
@@ -177,6 +312,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
         stmt: &'a Statement<'a>,
         ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
         inject_arg_uses: &mut FxHashSet<&'a str>,
+        declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
         other_value_uses: &mut FxHashSet<&'a str>,
     ) {
         match stmt {
@@ -185,6 +321,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     class,
                     ctor_param_decorator_uses,
                     inject_arg_uses,
+                    declare_prop_decorator_uses,
                     other_value_uses,
                 );
             }
@@ -196,6 +333,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         class,
                         ctor_param_decorator_uses,
                         inject_arg_uses,
+                        declare_prop_decorator_uses,
                         other_value_uses,
                     );
                 }
@@ -208,6 +346,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         class,
                         ctor_param_decorator_uses,
                         inject_arg_uses,
+                        declare_prop_decorator_uses,
                         other_value_uses,
                     );
                 }
@@ -233,6 +372,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
         class: &'a oxc_ast::ast::Class<'a>,
         ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
         inject_arg_uses: &mut FxHashSet<&'a str>,
+        declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
         other_value_uses: &mut FxHashSet<&'a str>,
     ) {
         // Process class decorators - these are NOT elided (they run at runtime)
@@ -259,9 +399,24 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     }
                 }
                 ClassElement::PropertyDefinition(prop) => {
-                    // Process property decorators (e.g., @Input, @ViewChild) - NOT elided
-                    for decorator in &prop.decorators {
-                        Self::collect_value_uses_from_expr(&decorator.expression, other_value_uses);
+                    if prop.declare {
+                        // `declare` properties are not emitted by TypeScript, so their
+                        // decorators and arguments have no runtime value references.
+                        // Track them separately for elision.
+                        for decorator in &prop.decorators {
+                            Self::collect_value_uses_from_expr(
+                                &decorator.expression,
+                                declare_prop_decorator_uses,
+                            );
+                        }
+                    } else {
+                        // Process property decorators (e.g., @Input, @ViewChild) - NOT elided
+                        for decorator in &prop.decorators {
+                            Self::collect_value_uses_from_expr(
+                                &decorator.expression,
+                                other_value_uses,
+                            );
+                        }
                     }
                     // Process property initializers (e.g., doc = DOCUMENT)
                     if let Some(init) = &prop.value {
@@ -1431,5 +1586,107 @@ export class BitLabelComponent {
 
         // Should NOT contain ElementRef (type annotation)
         assert!(!import_line.contains("ElementRef"), "ElementRef should be removed from imports");
+    }
+
+    // =========================================================================
+    // Regression tests for specific import specifier mismatches (1d category)
+    // =========================================================================
+
+    #[test]
+    fn test_inline_type_specifier_elided() {
+        // Case 1: `import { type FormGroup, FormControl } from '@angular/forms'`
+        // The `type` keyword on a specifier means it should be elided.
+        // Angular strips type-only specifiers regardless of other specifiers in the same import.
+        let source = r#"
+import { type FormGroup, FormControl, FormsModule, ReactiveFormsModule, UntypedFormGroup, Validators } from '@angular/forms';
+import { Component } from '@angular/core';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    form = new FormControl('');
+    addEditFieldForm = new UntypedFormGroup({});
+}
+
+type AddEditFieldForm = FormGroup<{ name: FormControl<string> }>;
+"#;
+        let type_only = analyze_source(source);
+
+        // FormGroup has `type` keyword — must be elided
+        assert!(
+            type_only.contains("FormGroup"),
+            "type FormGroup (inline type specifier) should be elided"
+        );
+
+        // FormControl, UntypedFormGroup are used as values — must NOT be elided
+        assert!(
+            !type_only.contains("FormControl"),
+            "FormControl should be preserved (value usage)"
+        );
+        assert!(
+            !type_only.contains("UntypedFormGroup"),
+            "UntypedFormGroup should be preserved (value usage)"
+        );
+    }
+
+    #[test]
+    fn test_declare_property_viewchild_arg_elided() {
+        // Case 2: `@ViewChild(GridstackComponent) declare gridstack: GridstackComponent;`
+        // When a property is `declare`, TypeScript does not emit it, so the decorator
+        // and its arguments have no runtime value references. Angular strips it.
+        let source = r#"
+import { Component, ViewChild } from '@angular/core';
+import { GridstackComponent, GridstackModule } from 'gridstack/dist/angular';
+
+@Component({ selector: 'test', imports: [GridstackModule] })
+class MyComponent {
+    @ViewChild(GridstackComponent, { static: true })
+    declare gridstack: GridstackComponent;
+}
+"#;
+        let type_only = analyze_source(source);
+
+        // GridstackComponent is only used on a `declare` property — must be elided
+        assert!(
+            type_only.contains("GridstackComponent"),
+            "GridstackComponent on declare property should be elided"
+        );
+
+        // GridstackModule is used in Component imports array — must NOT be elided
+        assert!(
+            !type_only.contains("GridstackModule"),
+            "GridstackModule should be preserved (value usage in imports array)"
+        );
+    }
+
+    #[test]
+    fn test_computed_property_key_in_type_annotation_preserved() {
+        // Case 3: `[fromEmail]: Emailer[]` as computed property key in a type annotation.
+        // Even though `[fromEmail]` appears in a type context, the computed property key
+        // references the runtime value of `fromEmail`. Angular preserves it.
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { fromEmail, RecipientType } from './email.interface';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() collapseEmailInfo: {
+        [fromEmail]: string[];
+        [RecipientType.To]: string[];
+    };
+}
+"#;
+        let type_only = analyze_source(source);
+
+        // fromEmail should NOT be elided — it's a computed property key that references a value
+        assert!(
+            !type_only.contains("fromEmail"),
+            "fromEmail used as computed property key in type annotation should be preserved"
+        );
+
+        // RecipientType is used via member access — should NOT be elided
+        assert!(
+            !type_only.contains("RecipientType"),
+            "RecipientType used as computed property key in type annotation should be preserved"
+        );
     }
 }
