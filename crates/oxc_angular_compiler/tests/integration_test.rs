@@ -577,6 +577,88 @@ fn test_let_inside_for_if_with_component_method_call() {
 }
 
 // ============================================================================
+// @let with pipe in child view Tests
+// ============================================================================
+
+#[test]
+fn test_let_with_pipe_used_in_child_view() {
+    // @let with pipe used in a child view (@if block) should keep BOTH declareLet and storeLet.
+    //
+    // When a @let wraps a pipe and is referenced from a child view:
+    // - declareLet is needed because pipes use DI which requires the TNode
+    // - storeLet is needed because the @let is accessed from another view via readContextLet
+    //
+    // Without storeLet, the pipe's varOffset would be wrong because storeLet contributes
+    // 1 var to the var counting, and removing it shifts all subsequent varOffsets.
+    //
+    // Expected Angular output:
+    //   i0.ɵɵstoreLet(i0.ɵɵpipeBind1(1, varOffset, ctx.name));
+    //
+    // Bug output (missing storeLet):
+    //   i0.ɵɵpipeBind1(1, varOffset, ctx.name);
+    let js = compile_template_to_js(
+        r"@let value = name | uppercase; @if (true) { {{value}} }",
+        "TestComponent",
+    );
+    // storeLet must wrap pipeBind because @let is used externally (in child @if view)
+    assert!(
+        js.contains("ɵɵstoreLet(i0.ɵɵpipeBind1("),
+        "storeLet should wrap pipeBind1 when @let with pipe is used in child view. Output:\n{js}"
+    );
+    // declareLet must be present (pipes need TNode for DI)
+    assert!(
+        js.contains("ɵɵdeclareLet("),
+        "declareLet should be present when @let contains a pipe. Output:\n{js}"
+    );
+    // readContextLet must be present in the child view
+    assert!(
+        js.contains("ɵɵreadContextLet("),
+        "readContextLet should be present in child view. Output:\n{js}"
+    );
+    insta::assert_snapshot!("let_with_pipe_used_in_child_view", js);
+}
+
+#[test]
+fn test_let_with_pipe_used_in_listener() {
+    // @let with pipe used in an event listener in the same view should keep storeLet.
+    //
+    // Event listeners are callbacks (isCallback=true), so @let declarations
+    // in the same view generate ContextLetReferenceExpr in the listener's handler ops.
+    // This means the @let is "used externally" and storeLet must be preserved.
+    let js = compile_template_to_js(
+        r#"@let value = name | uppercase; <button (click)="onClick(value)">Click</button>"#,
+        "TestComponent",
+    );
+    // storeLet must wrap pipeBind because @let is used externally (in listener callback)
+    assert!(
+        js.contains("ɵɵstoreLet(i0.ɵɵpipeBind1("),
+        "storeLet should wrap pipeBind1 when @let with pipe is used in listener. Output:\n{js}"
+    );
+    insta::assert_snapshot!("let_with_pipe_used_in_listener", js);
+}
+
+#[test]
+fn test_let_with_pipe_multiple_in_child_view_varoffset() {
+    // Multiple @let declarations with pipes used in a child view.
+    // Each storeLet contributes 1 var, so removing them would cause cumulative varOffset drift.
+    //
+    // This reproduces the ClickUp AdvancedTabComponent pattern where multiple @let
+    // declarations with pipes have their storeLet wrappers incorrectly removed,
+    // causing the second pipe's varOffset to drift by +1 for each missing storeLet.
+    let js = compile_template_to_js(
+        r"@let a = x | uppercase; @let b = y | lowercase; @if (true) { {{a}} {{b}} }",
+        "TestComponent",
+    );
+    // Both @let values should have storeLet wrappers
+    let store_let_count = js.matches("ɵɵstoreLet(").count();
+    assert!(
+        store_let_count >= 2,
+        "Expected at least 2 storeLet calls for 2 @let declarations with pipes used in child view, got {store_let_count}. Output:\n{js}"
+    );
+    insta::assert_snapshot!("let_with_pipe_multiple_in_child_view_varoffset", js);
+}
+
+// ============================================================================
 // ng-content Tests
 // ============================================================================
 

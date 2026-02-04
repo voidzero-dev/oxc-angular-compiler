@@ -1,0 +1,31 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Conditional_6_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtext(0); }
+  if ((rf & 2)) {
+    i0.ɵɵnextContext();
+    const a_r1 = i0.ɵɵreadContextLet(0);
+    const b_r2 = i0.ɵɵreadContextLet(3);
+    i0.ɵɵtextInterpolate2(" ",a_r1," ",b_r2," ");
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵdeclareLet(0);
+    i0.ɵɵpipe(1,"uppercase");
+    i0.ɵɵtext(2," ");
+    i0.ɵɵdeclareLet(3);
+    i0.ɵɵpipe(4,"lowercase");
+    i0.ɵɵtext(5," ");
+    i0.ɵɵconditionalCreate(6,TestComponent_Conditional_6_Template,1,2);
+  }
+  if ((rf & 2)) {
+    i0.ɵɵstoreLet(i0.ɵɵpipeBind1(1,1,ctx.x));
+    i0.ɵɵadvance(3);
+    i0.ɵɵstoreLet(i0.ɵɵpipeBind1(4,4,ctx.y));
+    i0.ɵɵadvance(3);
+    i0.ɵɵconditional((true? 6: -1));
+  }
+}

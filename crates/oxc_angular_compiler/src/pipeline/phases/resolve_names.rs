@@ -98,6 +98,47 @@ impl<'a> ScopeMaps<'a> {
     }
 }
 
+/// Build scope maps from listener handler_ops.
+///
+/// Per Angular's resolve_names.ts (line 86), handler ops are processed as a
+/// completely separate lexical scope via recursive `processLexicalScope(unit, op.handlerOps, savedView)`.
+/// The generateVariables phase already prepends all necessary variables to handler_ops,
+/// so no merging from the parent view's scope is needed. This matches Angular's
+/// behavior where each `processLexicalScope` call starts with fresh scope/localDefinitions maps.
+fn build_scope_from_handler_ops<'a, 'b>(
+    ops: impl Iterator<Item = &'b UpdateOp<'a>>,
+) -> ScopeMaps<'a>
+where
+    'a: 'b,
+{
+    let mut maps = ScopeMaps::default();
+    for op in ops {
+        if let UpdateOp::Variable(var_op) = op {
+            match var_op.kind {
+                SemanticVariableKind::Identifier => {
+                    if var_op.local {
+                        if !maps.local_definitions.contains_key(&var_op.name) {
+                            maps.local_definitions.insert(var_op.name.clone(), var_op.xref);
+                        }
+                    } else if !maps.scope.contains_key(&var_op.name) {
+                        maps.scope.insert(var_op.name.clone(), var_op.xref);
+                    }
+                    if !maps.scope.contains_key(&var_op.name) {
+                        maps.scope.insert(var_op.name.clone(), var_op.xref);
+                    }
+                }
+                SemanticVariableKind::Alias => {
+                    if !maps.scope.contains_key(&var_op.name) {
+                        maps.scope.insert(var_op.name.clone(), var_op.xref);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    maps
+}
+
 /// Build scope maps from update operations (for variables like context reads).
 fn build_scope_from_update_ops<'a>(ops: &crate::ir::list::UpdateOpList<'a>) -> ScopeMaps<'a> {
     let mut maps = ScopeMaps::default();
@@ -193,58 +234,13 @@ fn process_lexical_scope_create<'a>(
     for op in ops.iter_mut() {
         match op {
             CreateOp::Listener(listener) => {
-                // Build handler-specific scope that includes Variables from handler_ops.
-                // This is critical for @for loops where listeners need access to loop variables
-                // that were prepended to handler_ops by generate_variables phase.
-                //
-                // We use "first wins" semantics: the first Variable with a given name takes
-                // precedence. This matches Angular TypeScript compiler behavior in
-                // resolve_names.ts (lines 55-58).
-                //
-                // handler_ops Variables override update_scope Variables, but among handler_ops
-                // Variables themselves, the first one wins. This is achieved by:
-                // 1. First building a scope from handler_ops only (first wins)
-                // 2. Then merging in update_scope for names not in handler_ops
-                let mut handler_scope = ScopeMaps::default();
-                // First pass: add handler_ops Variables (first wins)
-                for handler_op in listener.handler_ops.iter() {
-                    if let UpdateOp::Variable(var_op) = handler_op {
-                        match var_op.kind {
-                            SemanticVariableKind::Identifier => {
-                                // Handler-local variables take precedence
-                                if var_op.local
-                                    && !handler_scope.local_definitions.contains_key(&var_op.name)
-                                {
-                                    handler_scope
-                                        .local_definitions
-                                        .insert(var_op.name.clone(), var_op.xref);
-                                }
-                                // Only add if not already present (first wins)
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            SemanticVariableKind::Alias => {
-                                // Only add if not already present (first wins)
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                // Second pass: merge in update_scope for names not in handler_ops
-                for (name, xref) in &scope.scope {
-                    if !handler_scope.scope.contains_key(name) {
-                        handler_scope.scope.insert(name.clone(), *xref);
-                    }
-                }
-                for (name, xref) in &scope.local_definitions {
-                    if !handler_scope.local_definitions.contains_key(name) {
-                        handler_scope.local_definitions.insert(name.clone(), *xref);
-                    }
-                }
+                // Per Angular's resolve_names.ts (line 86):
+                //   processLexicalScope(unit, op.handlerOps, savedView);
+                // Handler ops are processed as a SEPARATE lexical scope — a fresh
+                // scope/localDefinitions is built from handler_ops variables only,
+                // with NO merging from the parent view's scope. The generateVariables
+                // phase already prepends all necessary variables to handler_ops.
+                let handler_scope = build_scope_from_handler_ops(listener.handler_ops.iter());
 
                 // Process listener handler_ops with the handler scope
                 for handler_op in listener.handler_ops.iter_mut() {
@@ -276,43 +272,8 @@ fn process_lexical_scope_create<'a>(
                 }
             }
             CreateOp::TwoWayListener(listener) => {
-                // Build handler-specific scope for TwoWayListener
-                // Uses same "first wins" semantics as Listener (see above)
-                let mut handler_scope = ScopeMaps::default();
-                for handler_op in listener.handler_ops.iter() {
-                    if let UpdateOp::Variable(var_op) = handler_op {
-                        match var_op.kind {
-                            SemanticVariableKind::Identifier => {
-                                if var_op.local
-                                    && !handler_scope.local_definitions.contains_key(&var_op.name)
-                                {
-                                    handler_scope
-                                        .local_definitions
-                                        .insert(var_op.name.clone(), var_op.xref);
-                                }
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            SemanticVariableKind::Alias => {
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                for (name, xref) in &scope.scope {
-                    if !handler_scope.scope.contains_key(name) {
-                        handler_scope.scope.insert(name.clone(), *xref);
-                    }
-                }
-                for (name, xref) in &scope.local_definitions {
-                    if !handler_scope.local_definitions.contains_key(name) {
-                        handler_scope.local_definitions.insert(name.clone(), *xref);
-                    }
-                }
+                // Per Angular's resolve_names.ts: handler ops get their own scope
+                let handler_scope = build_scope_from_handler_ops(listener.handler_ops.iter());
 
                 for handler_op in listener.handler_ops.iter_mut() {
                     transform_expressions_in_update_op(
@@ -330,46 +291,10 @@ fn process_lexical_scope_create<'a>(
                         VisitorContextFlag::NONE,
                     );
                 }
-                // Note: TwoWayListenerOp has no handler_expression field
             }
             CreateOp::AnimationListener(listener) => {
-                // Build handler-specific scope for AnimationListener
-                // Uses same "first wins" semantics as Listener (see above)
-                let mut handler_scope = ScopeMaps::default();
-                for handler_op in listener.handler_ops.iter() {
-                    if let UpdateOp::Variable(var_op) = handler_op {
-                        match var_op.kind {
-                            SemanticVariableKind::Identifier => {
-                                if var_op.local
-                                    && !handler_scope.local_definitions.contains_key(&var_op.name)
-                                {
-                                    handler_scope
-                                        .local_definitions
-                                        .insert(var_op.name.clone(), var_op.xref);
-                                }
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            SemanticVariableKind::Alias => {
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                for (name, xref) in &scope.scope {
-                    if !handler_scope.scope.contains_key(name) {
-                        handler_scope.scope.insert(name.clone(), *xref);
-                    }
-                }
-                for (name, xref) in &scope.local_definitions {
-                    if !handler_scope.local_definitions.contains_key(name) {
-                        handler_scope.local_definitions.insert(name.clone(), *xref);
-                    }
-                }
+                // Per Angular's resolve_names.ts: handler ops get their own scope
+                let handler_scope = build_scope_from_handler_ops(listener.handler_ops.iter());
 
                 for handler_op in listener.handler_ops.iter_mut() {
                     transform_expressions_in_update_op(
@@ -387,46 +312,10 @@ fn process_lexical_scope_create<'a>(
                         VisitorContextFlag::NONE,
                     );
                 }
-                // Note: AnimationListenerOp has no handler_expression field
             }
             CreateOp::Animation(animation) => {
-                // Build handler-specific scope for Animation
-                // Uses same "first wins" semantics as Listener (see above)
-                let mut handler_scope = ScopeMaps::default();
-                for handler_op in animation.handler_ops.iter() {
-                    if let UpdateOp::Variable(var_op) = handler_op {
-                        match var_op.kind {
-                            SemanticVariableKind::Identifier => {
-                                if var_op.local
-                                    && !handler_scope.local_definitions.contains_key(&var_op.name)
-                                {
-                                    handler_scope
-                                        .local_definitions
-                                        .insert(var_op.name.clone(), var_op.xref);
-                                }
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            SemanticVariableKind::Alias => {
-                                if !handler_scope.scope.contains_key(&var_op.name) {
-                                    handler_scope.scope.insert(var_op.name.clone(), var_op.xref);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                for (name, xref) in &scope.scope {
-                    if !handler_scope.scope.contains_key(name) {
-                        handler_scope.scope.insert(name.clone(), *xref);
-                    }
-                }
-                for (name, xref) in &scope.local_definitions {
-                    if !handler_scope.local_definitions.contains_key(name) {
-                        handler_scope.local_definitions.insert(name.clone(), *xref);
-                    }
-                }
+                // Per Angular's resolve_names.ts: handler ops get their own scope
+                let handler_scope = build_scope_from_handler_ops(animation.handler_ops.iter());
 
                 for handler_op in animation.handler_ops.iter_mut() {
                     transform_expressions_in_update_op(
@@ -444,7 +333,6 @@ fn process_lexical_scope_create<'a>(
                         VisitorContextFlag::NONE,
                     );
                 }
-                // Note: AnimationOp has no handler_expression field
             }
             _ => {
                 transform_expressions_in_create_op(
