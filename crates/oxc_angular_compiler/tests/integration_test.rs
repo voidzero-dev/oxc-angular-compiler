@@ -19,8 +19,8 @@ use oxc_span::Atom;
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let allocator = Allocator::default();
 
-    // Stage 1: Parse HTML
-    let parser = HtmlParser::new(&allocator, template, "test.html");
+    // Stage 1: Parse HTML (with expansion forms enabled for ICU/plural support)
+    let parser = HtmlParser::with_expansion_forms(&allocator, template, "test.html");
     let html_result = parser.parse();
 
     // Check for parse errors
@@ -3814,6 +3814,58 @@ export class TestComponent {
         result.code.contains(r#"6,"heading""#),
         "Interpolated attribute with i18n marker should produce I18n AttributeMarker (6), not Bindings (3). Output:\n{}",
         result.code
+    );
+}
+
+/// Tests that i18n expressions with pipes maintain the correct template order.
+/// When a text node inside an i18n span contains both plain expressions and pipe expressions,
+/// the expressions must be emitted in their original template order.
+/// Ported from Angular compliance test: r3_view_compiler_i18n/multiple_pipes.ts
+#[test]
+fn test_i18n_expression_ordering_with_pipes() {
+    let js = compile_template_to_js(
+        r#"<span i18n>{{ a }} and {{ b }} and {{ c }} and {{ b | uppercase }}</span>"#,
+        "TestComponent",
+    );
+
+    // Debug: print full output
+    // The i18nExp calls should follow template order:
+    // ctx.a, ctx.b, ctx.c, pipeBind1(..., ctx.b)
+    assert!(
+        js.contains("i18nExp(ctx.a)(ctx.b)(ctx.c)"),
+        "Expressions should be in template order. Full output:\n{js}"
+    );
+}
+
+/// Tests i18n expression ordering with ICU plural containing both plain and pipe expressions.
+/// The credits-tooltip pattern: an i18n block with text interpolation + ICU plural where
+/// the "other" case has a pipe expression that must come AFTER the plain expression.
+///
+/// Expected expression order (matching Angular ngtsc):
+///   i18nExp(ctx.name)(ctx.count)(ctx.amount)(pipeBind1(..., ctx.count))
+///
+/// Bug: OXC was emitting pipeBind1 before ctx.amount (swapping expressions 2 and 3).
+#[test]
+fn test_i18n_expression_ordering_icu_plural_with_pipe() {
+    let js = compile_template_to_js(
+        r#"<div i18n>{{ name }} {count, plural, =1 {({{ amount }} credits x 1 user)} other {({{ amount }} credits x {{ count | number }} users)}}</div>"#,
+        "TestComponent",
+    );
+
+    // Extract the update block to check i18nExp ordering
+    let update_start = js.find("if ((rf & 2))").expect("should have update block");
+    let update_block = &js[update_start..];
+
+    // The plain expression (ctx.amount) must come BEFORE the pipe expression (pipeBind1)
+    // in the i18nExp chain. This matches Angular ngtsc behavior.
+    let amount_pos = update_block.find("ctx.amount").expect("should have ctx.amount in i18nExp");
+    let pipe_pos = update_block.find("pipeBind1").expect("should have pipeBind1 in i18nExp");
+
+    assert!(
+        amount_pos < pipe_pos,
+        "ctx.amount (plain expression) must come before pipeBind1 (pipe expression) in i18nExp chain.\n\
+         amount_pos={amount_pos}, pipe_pos={pipe_pos}\n\
+         Update block:\n{update_block}"
     );
 }
 

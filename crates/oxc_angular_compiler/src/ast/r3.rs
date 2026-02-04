@@ -1361,10 +1361,10 @@ pub struct R3HostElement<'a> {
 /// An ICU message for internationalization.
 #[derive(Debug)]
 pub struct R3Icu<'a> {
-    /// Variable expressions.
-    pub vars: HashMap<'a, Atom<'a>, R3BoundText<'a>>,
-    /// Placeholder expressions.
-    pub placeholders: HashMap<'a, Atom<'a>, R3IcuPlaceholder<'a>>,
+    /// Variable expressions (ordered: must preserve insertion order like JS objects).
+    pub vars: Vec<'a, (Atom<'a>, R3BoundText<'a>)>,
+    /// Placeholder expressions (ordered: must preserve insertion order like JS objects).
+    pub placeholders: Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
     /// Source span.
     pub source_span: Span,
     /// i18n metadata.

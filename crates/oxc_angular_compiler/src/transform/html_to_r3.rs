@@ -99,6 +99,34 @@ pub struct TransformOptions {
     pub collect_comment_nodes: bool,
 }
 
+/// Inserts or updates a var entry in an ordered Vec, preserving first-insertion order.
+/// This matches JS object semantics where reassigning an existing key keeps its position.
+fn ordered_insert_var<'a>(
+    vec: &mut Vec<'a, (Atom<'a>, R3BoundText<'a>)>,
+    key: Atom<'a>,
+    value: R3BoundText<'a>,
+) {
+    if let Some(existing) = vec.iter_mut().find(|(k, _)| *k == key) {
+        existing.1 = value;
+    } else {
+        vec.push((key, value));
+    }
+}
+
+/// Inserts or updates a placeholder entry in an ordered Vec, preserving first-insertion order.
+/// This matches JS object semantics where reassigning an existing key keeps its position.
+fn ordered_insert_placeholder<'a>(
+    vec: &mut Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
+    key: Atom<'a>,
+    value: R3IcuPlaceholder<'a>,
+) {
+    if let Some(existing) = vec.iter_mut().find(|(k, _)| *k == key) {
+        existing.1 = value;
+    } else {
+        vec.push((key, value));
+    }
+}
+
 /// Transforms HTML AST to R3 AST.
 pub struct HtmlToR3Transform<'a> {
     allocator: &'a Allocator,
@@ -1250,7 +1278,7 @@ impl<'a> HtmlToR3Transform<'a> {
         };
 
         // Create variable for the switch value (using VAR_* placeholder name)
-        let mut vars = HashMap::new_in(self.allocator);
+        let mut vars = Vec::new_in(self.allocator);
         let switch_value_str = expansion.switch_value.as_str();
         let switch_value_span = expansion.switch_value_span;
 
@@ -1262,7 +1290,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // This matches Angular's visitExpansion behavior where nested ICUs are visited first,
         // and their VAR_* placeholders are added before the outer ICU's VAR_*.
         // Ported from Angular's i18n_parser.ts:137-159
-        let mut placeholders = HashMap::new_in(self.allocator);
+        let mut placeholders = Vec::new_in(self.allocator);
         for case in expansion.cases.iter() {
             self.extract_placeholders_from_nodes(&case.expansion, &mut placeholders, &mut vars);
         }
@@ -1271,7 +1299,8 @@ impl<'a> HtmlToR3Transform<'a> {
         // This ensures the correct order: nested ICU vars first, then outer ICU var.
         // Use the unique VAR_* placeholder name as the key, matching Angular's behavior.
         // The expression_placeholder was already generated above with getUniquePlaceholder.
-        vars.insert(
+        ordered_insert_var(
+            &mut vars,
             expression_placeholder.clone(),
             R3BoundText { value: parse_result.ast, source_span: switch_value_span, i18n: None },
         );
@@ -1290,8 +1319,8 @@ impl<'a> HtmlToR3Transform<'a> {
     fn extract_placeholders_from_nodes(
         &mut self,
         nodes: &[HtmlNode<'a>],
-        placeholders: &mut HashMap<'a, Atom<'a>, R3IcuPlaceholder<'a>>,
-        vars: &mut HashMap<'a, Atom<'a>, R3BoundText<'a>>,
+        placeholders: &mut Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
+        vars: &mut Vec<'a, (Atom<'a>, R3BoundText<'a>)>,
     ) {
         for node in nodes {
             match node {
@@ -1335,10 +1364,11 @@ impl<'a> HtmlToR3Transform<'a> {
                     // Use the unique VAR_* placeholder name as the key, not the raw switch value.
                     // This is critical: when multiple nested ICUs have the same switch value
                     // (e.g., same pipe expression), they MUST have separate entries in the vars
-                    // HashMap. Angular uses unique placeholder names (VAR_SELECT, VAR_SELECT_1,
+                    // collection. Angular uses unique placeholder names (VAR_SELECT, VAR_SELECT_1,
                     // VAR_SELECT_2) to ensure each nested ICU creates its own TextOp with its
                     // own pipe slot allocation.
-                    vars.insert(
+                    ordered_insert_var(
+                        vars,
                         var_placeholder_name,
                         R3BoundText {
                             value: parse_result.ast,
@@ -1357,7 +1387,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &mut self,
         text: &str,
         base_span: Span,
-        placeholders: &mut HashMap<'a, Atom<'a>, R3IcuPlaceholder<'a>>,
+        placeholders: &mut Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
     ) {
         // Use default Angular interpolation markers
         let start_marker = "{{";
@@ -1395,7 +1425,11 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: interp_span,
                         i18n: None,
                     };
-                    placeholders.insert(placeholder_key, R3IcuPlaceholder::BoundText(bound_text));
+                    ordered_insert_placeholder(
+                        placeholders,
+                        placeholder_key,
+                        R3IcuPlaceholder::BoundText(bound_text),
+                    );
 
                     pos = abs_end;
                 } else {
