@@ -1677,6 +1677,13 @@ class MyComponent {
             "GridstackComponent on declare property should be elided"
         );
 
+        // ViewChild is only used as decorator on a `declare` property — must also be elided.
+        // TypeScript does not emit `declare` properties, so the decorator has no runtime effect.
+        assert!(
+            type_only.contains("ViewChild"),
+            "ViewChild decorator on declare property should be elided"
+        );
+
         // GridstackModule is used in Component imports array — must NOT be elided
         assert!(
             !type_only.contains("GridstackModule"),
