@@ -2092,12 +2092,13 @@ pub fn transform_expressions_in_create_op<'a, F>(
             transform_expressions_in_expression(&mut op.initializer, transform, flags);
         }
         CreateOp::Listener(op) => {
-            // Process handler expression if present
-            if let Some(handler_expr) = &mut op.handler_expression {
-                transform_expressions_in_expression(handler_expr, transform, flags);
-            }
-            // Process handler ops in the listener
+            // Process handler ops and handler_expression as child operations.
+            // handler_expression is the return expression of the listener function and
+            // must be treated as part of the handler scope (not the parent scope).
             let child_flags = flags.union(VisitorContextFlag::IN_CHILD_OPERATION);
+            if let Some(handler_expr) = &mut op.handler_expression {
+                transform_expressions_in_expression(handler_expr, transform, child_flags);
+            }
             for handler_op in op.handler_ops.iter_mut() {
                 transform_expressions_in_update_op(handler_op, transform, child_flags);
             }
@@ -2279,10 +2280,10 @@ pub fn visit_expressions_in_create_op<'a, F>(
             visit_expressions_in_expression(&op.initializer, visitor, flags);
         }
         CreateOp::Listener(op) => {
-            if let Some(handler_expr) = &op.handler_expression {
-                visit_expressions_in_expression(handler_expr, visitor, flags);
-            }
             let child_flags = flags.union(VisitorContextFlag::IN_CHILD_OPERATION);
+            if let Some(handler_expr) = &op.handler_expression {
+                visit_expressions_in_expression(handler_expr, visitor, child_flags);
+            }
             for handler_op in op.handler_ops.iter() {
                 visit_expressions_in_update_op(handler_op, visitor, child_flags);
             }

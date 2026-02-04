@@ -1,0 +1,15 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵelementStart(0,"button",0);
+    i0.ɵɵlistener("click",function TestComponent_Template_button_click_0_listener() {
+      let tmp_0_0;
+      return (((tmp_0_0 = ctx.getDialog()) == null)? null: tmp_0_0.visible);
+    });
+    i0.ɵɵtext(1,"Toggle");
+    i0.ɵɵelementEnd();
+  }
+}
