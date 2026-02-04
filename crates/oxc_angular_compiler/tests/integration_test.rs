@@ -3325,6 +3325,90 @@ fn test_animation_in_for_with_listener_variable_naming() {
     insta::assert_snapshot!("animation_in_for_with_listener", js);
 }
 
+#[test]
+fn test_animation_enter_string_literal_in_embedded_view() {
+    // Reproduces the edit-long-text-custom-field-value.component.ts issue:
+    // An animation handler that returns a string literal in an embedded view (@if)
+    // should still have getCurrentView/restoreView/resetView generated.
+    //
+    // Angular always adds restoreView/resetView to animation handlers in embedded views,
+    // even when the handler expression is a simple string literal.
+    // The variable_optimization phase may later optimize away the restoreView if the
+    // handler doesn't actually access outer context, but the getCurrentView at the
+    // view level must survive if there are other listeners that reference it.
+    //
+    // NG output pattern for animation returning string literal in embedded view:
+    //   const _r1 = i0.ɵɵgetCurrentView();
+    //   i0.ɵɵelementStart(0, "div", 0);
+    //   i0.ɵɵanimateEnter(function ..._cb() {
+    //     i0.ɵɵrestoreView(_r1);
+    //     const ctx_r1 = i0.ɵɵnextContext();
+    //     return i0.ɵɵresetView(ctx_r1.onClick());
+    //   });
+    //   i0.ɵɵlistener("click", function ..._listener() { ... });
+    //
+    // OXC bug: missing getCurrentView because the animation handler's restoreView
+    // gets optimized away (string literal doesn't reference outer context), and if
+    // the SavedView variable optimization also removes the getCurrentView, other
+    // listeners in the same view lose their restoreView target.
+    let js = compile_template_to_js(
+        r#"@if (show) {
+            <div [animate.enter]="'animate-in'" (click)="onClick()">
+                {{label}}
+            </div>
+        }"#,
+        "TestComponent",
+    );
+    assert!(
+        !js.contains("_unnamed_"),
+        "Generated JS contains _unnamed_ references.\nGenerated JS:\n{js}"
+    );
+    assert!(
+        js.contains("getCurrentView"),
+        "Embedded view with animation and listener should have getCurrentView.\nGenerated JS:\n{js}"
+    );
+    assert!(
+        js.contains("restoreView"),
+        "Listener in embedded view should have restoreView.\nGenerated JS:\n{js}"
+    );
+    insta::assert_snapshot!("animation_enter_string_literal_embedded_view", js);
+}
+
+#[test]
+fn test_animation_enter_string_literal_only_in_embedded_view() {
+    // Tests the case where an animation handler returning a string literal is the ONLY
+    // listener-like op in an embedded view. Angular's ngtsc always keeps restoreView/resetView
+    // in animation handler callbacks in embedded views, even when the return value is a simple
+    // string literal that doesn't reference the view context.
+    //
+    // Expected NG output pattern:
+    //   i0.ɵɵanimateEnter(function ...() {
+    //     i0.ɵɵrestoreView(_r1);
+    //     return i0.ɵɵresetView("animate-in");
+    //   });
+    let js = compile_template_to_js(
+        r#"@if (show) {
+            <div [animate.enter]="'animate-in'">
+                {{label}}
+            </div>
+        }"#,
+        "TestComponent",
+    );
+    assert!(
+        !js.contains("_unnamed_"),
+        "Generated JS contains _unnamed_ references.\nGenerated JS:\n{js}"
+    );
+    assert!(
+        js.contains("restoreView"),
+        "Animation handler in embedded view should keep restoreView.\nGenerated JS:\n{js}"
+    );
+    assert!(
+        js.contains("resetView"),
+        "Animation handler in embedded view should keep resetView.\nGenerated JS:\n{js}"
+    );
+    insta::assert_snapshot!("animation_enter_string_literal_only_embedded_view", js);
+}
+
 /// Test that implicit standalone components (no `standalone` in decorator) use Full mode.
 ///
 /// Angular 19+ defaults `standalone` to `true` when not specified. However, OXC performs

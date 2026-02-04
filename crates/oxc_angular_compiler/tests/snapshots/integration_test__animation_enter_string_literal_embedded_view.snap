@@ -1,0 +1,32 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Conditional_0_Template(rf,ctx) {
+  if ((rf & 1)) {
+    const _r1 = i0.ɵɵgetCurrentView();
+    i0.ɵɵtext(0,"\n            ");
+    i0.ɵɵelementStart(1,"div",0);
+    i0.ɵɵanimateEnter(function TestComponent_Conditional_0_Template_animateenter_cb() {
+      i0.ɵɵrestoreView(_r1);
+      return i0.ɵɵresetView("animate-in");
+    });
+    i0.ɵɵlistener("click",function TestComponent_Conditional_0_Template_div_click_1_listener() {
+      i0.ɵɵrestoreView(_r1);
+      const ctx_r1 = i0.ɵɵnextContext();
+      return i0.ɵɵresetView(ctx_r1.onClick());
+    });
+    i0.ɵɵtext(2);
+    i0.ɵɵelementEnd();
+    i0.ɵɵtext(3,"\n        ");
+  }
+  if ((rf & 2)) {
+    const ctx_r1 = i0.ɵɵnextContext();
+    i0.ɵɵadvance(2);
+    i0.ɵɵtextInterpolate1("\n                ",ctx_r1.label,"\n            ");
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵconditionalCreate(0,TestComponent_Conditional_0_Template,4,1); }
+  if ((rf & 2)) { i0.ɵɵconditional((ctx.show? 0: -1)); }
+}

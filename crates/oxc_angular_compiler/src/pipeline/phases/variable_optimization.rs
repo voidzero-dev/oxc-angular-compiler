@@ -1749,7 +1749,11 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                 }
                 CreateOp::Animation(animation) => {
                     optimize_handler_ops(&mut animation.handler_ops, None, allocator);
-                    optimize_save_restore_view(&mut animation.handler_ops, allocator);
+                    // Note: We intentionally do NOT call optimize_save_restore_view on
+                    // Animation handler_ops. Angular's ngtsc output keeps restoreView/resetView
+                    // in animation callbacks even when the return value doesn't reference the
+                    // view context (e.g., `return "animate-in"`). Skipping this optimization
+                    // for Animation handlers matches the observed Angular output.
                 }
                 _ => {}
             }
