@@ -235,21 +235,28 @@ fn generate_temporaries_for_handler_ops<'a>(
 /// temporary variable processing so that `let tmp_N_0;` declarations are generated inside
 /// the listener function scope rather than the parent create scope.
 ///
-/// The algorithm mirrors `generate_temporaries_for_handler_ops` but additionally visits/transforms
-/// the handler_expression alongside the ops.
+/// The handler_ops are processed first (same as `generate_temporaries_for_handler_ops`),
+/// then handler_expression is processed once AFTER the loop with op_count equal to
+/// handler_ops.len(). This matches Angular TS where the return expression is the last
+/// entry in handlerOps at index N.
 fn generate_temporaries_for_handler_ops_with_expression<'a>(
     ops: &mut [UpdateOp<'a>],
     handler_expression: &mut Option<oxc_allocator::Box<'a, IrExpression<'a>>>,
     allocator: &'a Allocator,
 ) -> Vec<UpdateOp<'a>> {
-    let mut op_count = 0;
-    let mut generated_statements = Vec::new();
+    // First, process handler_ops exactly like generate_temporaries_for_handler_ops
+    let mut generated_statements = generate_temporaries_for_handler_ops(ops, allocator);
 
-    for op in ops.iter_mut() {
+    // Then process handler_expression once, with op_count = ops.len().
+    // In Angular TS, the return expression is the last entry in handlerOps,
+    // so its op index equals the number of preceding ops.
+    if let Some(handler_expr) = handler_expression.as_mut() {
+        let op_count = ops.len();
+
         // Pass 1: Count reads per xref to determine final reads
         let read_counts = RefCell::new(FxHashMap::<XrefId, usize>::default());
-        visit_expressions_in_update_op(
-            op,
+        visit_expressions_in_expression(
+            handler_expr,
             &|expr, flags| {
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
@@ -260,28 +267,12 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
             },
             VisitorContextFlag::NONE,
         );
-        // Also count reads in handler_expression
-        if let Some(handler_expr) = handler_expression.as_ref() {
-            visit_expressions_in_expression(
-                handler_expr,
-                &|expr, flags| {
-                    if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
-                        return;
-                    }
-                    if let IrExpression::ReadTemporary(read) = expr {
-                        *read_counts.borrow_mut().entry(read.xref).or_insert(0) += 1;
-                    }
-                },
-                VisitorContextFlag::NONE,
-            );
-        }
         let total_reads = read_counts.into_inner();
 
         // Pass 2: Assign names with reuse when final read is encountered
         let tracker = RefCell::new(TempVarTracker::new(op_count, total_reads));
-
-        transform_expressions_in_update_op(
-            op,
+        transform_expressions_in_expression(
+            handler_expr,
             &|expr, flags| {
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
@@ -290,19 +281,6 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
             },
             VisitorContextFlag::NONE,
         );
-        // Also assign names in handler_expression
-        if let Some(handler_expr) = handler_expression.as_mut() {
-            transform_expressions_in_expression(
-                handler_expr,
-                &|expr, flags| {
-                    if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
-                        return;
-                    }
-                    assign_temp_names(expr, &tracker, allocator);
-                },
-                VisitorContextFlag::NONE,
-            );
-        }
 
         // Collect unique names and create declarations
         let defs = tracker.into_inner().defs;
@@ -312,49 +290,6 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
                 base: UpdateOpBase::default(),
                 statement: stmt,
             }));
-        }
-
-        op_count += 1;
-    }
-
-    // If there are no ops but handler_expression has temporaries, process it standalone
-    if ops.is_empty() {
-        if let Some(handler_expr) = handler_expression.as_mut() {
-            let read_counts = RefCell::new(FxHashMap::<XrefId, usize>::default());
-            visit_expressions_in_expression(
-                handler_expr,
-                &|expr, flags| {
-                    if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
-                        return;
-                    }
-                    if let IrExpression::ReadTemporary(read) = expr {
-                        *read_counts.borrow_mut().entry(read.xref).or_insert(0) += 1;
-                    }
-                },
-                VisitorContextFlag::NONE,
-            );
-            let total_reads = read_counts.into_inner();
-
-            let tracker = RefCell::new(TempVarTracker::new(op_count, total_reads));
-            transform_expressions_in_expression(
-                handler_expr,
-                &|expr, flags| {
-                    if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
-                        return;
-                    }
-                    assign_temp_names(expr, &tracker, allocator);
-                },
-                VisitorContextFlag::NONE,
-            );
-
-            let defs = tracker.into_inner().defs;
-            for name in collect_unique_names(&defs) {
-                let stmt = create_declare_var_statement(allocator, &name);
-                generated_statements.push(UpdateOp::Statement(StatementOp {
-                    base: UpdateOpBase::default(),
-                    statement: stmt,
-                }));
-            }
         }
     }
 
