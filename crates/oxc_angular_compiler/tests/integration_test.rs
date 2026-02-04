@@ -3977,3 +3977,166 @@ fn test_for_index_xref_with_i18n_attribute_binding() {
     // matching Angular TS which stores direct i18n.Message object references on BindingOp.
     insta::assert_snapshot!("for_index_xref_with_i18n_attribute_binding", js);
 }
+
+/// Tests that setClassMetadata uses namespace-prefixed type references for imported
+/// constructor parameter types.
+///
+/// Angular's TypeScript compiler distinguishes between local and imported types in
+/// the ɵsetClassMetadata constructor parameter metadata:
+/// - Local types use bare names: `{ type: LocalService }`
+/// - Imported types use namespace-prefixed names: `{ type: i1.ImportedService }`
+///
+/// This is because TypeScript type annotations are erased at runtime, so imported
+/// types need namespace imports (i0, i1, i2...) to be available as runtime values.
+/// The factory function (ɵfac) already handles this correctly via R3DependencyMetadata
+/// and create_token_expression, but setClassMetadata was using bare names for all types.
+#[test]
+fn test_set_class_metadata_uses_namespace_for_imported_ctor_params() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { SomeService } from './some.service';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div>hello</div>',
+    standalone: true,
+})
+export class TestComponent {
+    constructor(private svc: SomeService) {}
+}
+"#;
+
+    let options = ComponentTransformOptions {
+        emit_class_metadata: true,
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Extract the setClassMetadata section specifically (not the factory function)
+    let metadata_section = result
+        .code
+        .split("ɵsetClassMetadata")
+        .nth(1)
+        .expect("setClassMetadata should be present in output");
+
+    // The ctor_parameters callback should use namespace-prefixed type for
+    // the imported SomeService: `{type:i1.SomeService}` not `{type:SomeService}`
+    assert!(
+        metadata_section.contains("i1.SomeService"),
+        "setClassMetadata ctor_parameters should use namespace-prefixed type (i1.SomeService) for imported constructor parameter. Metadata section:\n{}",
+        metadata_section
+    );
+    assert!(
+        !metadata_section.contains("type:SomeService}"),
+        "setClassMetadata should NOT use bare type name for imported types. Metadata section:\n{}",
+        metadata_section
+    );
+}
+
+/// Tests that setClassMetadata uses namespace-prefixed type even when @Inject is present.
+///
+/// When a constructor parameter has both a type annotation and @Inject decorator pointing
+/// to the same imported class, the metadata `type` field should still use namespace prefix.
+/// The factory correctly uses bare names for @Inject tokens with named imports, but the
+/// metadata type always represents the TypeScript type annotation which is erased at runtime.
+///
+/// Example:
+/// - Factory: `ɵɵdirectiveInject(TagPickerComponent, 12)` (bare - ok, @Inject value import)
+/// - Metadata: `{ type: i1.TagPickerComponent, decorators: [{type: Inject, ...}] }` (namespace)
+#[test]
+fn test_set_class_metadata_namespace_with_inject_decorator() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Inject, Optional, SkipSelf } from '@angular/core';
+import { SomeService } from './some.service';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div>hello</div>',
+    standalone: true,
+})
+export class TestComponent {
+    constructor(
+        @Optional() @SkipSelf() @Inject(SomeService) private svc: SomeService
+    ) {}
+}
+"#;
+
+    let options = ComponentTransformOptions {
+        emit_class_metadata: true,
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Extract the setClassMetadata section
+    let metadata_section = result
+        .code
+        .split("ɵsetClassMetadata")
+        .nth(1)
+        .expect("setClassMetadata should be present in output");
+
+    // Even with @Inject(SomeService), the type field should use namespace prefix
+    // because the type annotation is erased by TypeScript
+    assert!(
+        metadata_section.contains("i1.SomeService"),
+        "setClassMetadata should use namespace-prefixed type even with @Inject. Metadata section:\n{}",
+        metadata_section
+    );
+}
+
+/// Tests that when @Inject token differs from the type annotation (e.g., @Inject(DOCUMENT)
+/// on a parameter typed as Document), the metadata type uses bare name since the type
+/// annotation may reference a global or different module than the injection token.
+#[test]
+fn test_set_class_metadata_inject_differs_from_type() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Inject } from '@angular/core';
+import { DOCUMENT } from '@angular/common';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div>hello</div>',
+    standalone: true,
+})
+export class TestComponent {
+    constructor(@Inject(DOCUMENT) private doc: Document) {}
+}
+"#;
+
+    let options = ComponentTransformOptions {
+        emit_class_metadata: true,
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let metadata_section = result
+        .code
+        .split("ɵsetClassMetadata")
+        .nth(1)
+        .expect("setClassMetadata should be present in output");
+
+    // The type should be bare "Document" (global type), not namespace-prefixed
+    // even though the @Inject token (DOCUMENT) is from @angular/common
+    assert!(
+        metadata_section.contains("type:Document"),
+        "setClassMetadata should use bare type for globals when @Inject token differs. Metadata section:\n{}",
+        metadata_section
+    );
+    // Should NOT add namespace prefix for Document
+    assert!(
+        !metadata_section.contains("i1.Document"),
+        "setClassMetadata should NOT namespace-prefix global types. Metadata section:\n{}",
+        metadata_section
+    );
+}

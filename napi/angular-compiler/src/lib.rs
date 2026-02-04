@@ -1928,7 +1928,12 @@ pub fn compile_class_metadata_sync(
     let decorators_expr = core_build_decorator_metadata_array(&allocator, &[decorator_ref]);
 
     // Build constructor parameters metadata
-    let ctor_params_expr = core_build_ctor_params_metadata(&allocator, class);
+    // This standalone API doesn't have full transform pipeline context (constructor deps
+    // and namespace registry), so imported types won't get namespace prefixes.
+    // The full transform_angular_file pipeline handles namespace prefixes correctly.
+    let mut namespace_registry = oxc_angular_compiler::NamespaceRegistry::new(&allocator);
+    let ctor_params_expr =
+        core_build_ctor_params_metadata(&allocator, class, None, &mut namespace_registry);
 
     // Build property decorators metadata
     let prop_decorators_expr = core_build_prop_decorators_metadata(&allocator, class);

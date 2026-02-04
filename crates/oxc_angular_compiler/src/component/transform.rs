@@ -779,6 +779,11 @@ pub fn transform_angular_file(
                                     );
 
                                     // Build metadata from the class AST
+                                    // Pass constructor deps and namespace registry so that
+                                    // imported types get namespace-prefixed references
+                                    // (e.g., i1.SomeService instead of bare SomeService)
+                                    let ctor_deps_slice =
+                                        metadata.constructor_deps.as_ref().map(|v| v.as_slice());
                                     let class_metadata = R3ClassMetadata {
                                         r#type: type_expr,
                                         decorators: build_decorator_metadata_array(
@@ -786,7 +791,10 @@ pub fn transform_angular_file(
                                             &[decorator],
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
-                                            allocator, class,
+                                            allocator,
+                                            class,
+                                            ctor_deps_slice,
+                                            &mut file_namespace_registry,
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
                                             allocator, class,

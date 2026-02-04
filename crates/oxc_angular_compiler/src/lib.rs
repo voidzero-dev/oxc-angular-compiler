@@ -57,10 +57,10 @@ pub use transform::{HtmlToR3Transform, html_to_r3::html_ast_to_r3_ast};
 pub use component::{
     AngularVersion, ChangeDetectionStrategy, CompiledComponent, ComponentMetadata,
     HmrTemplateCompileOutput, HostMetadata, HostMetadataInput, ImportInfo, ImportMap,
-    ResolvedResources, TemplateCompileOutput, TransformOptions, TransformResult, ViewEncapsulation,
-    build_import_map, compile_component_template, compile_for_hmr, compile_template_for_hmr,
-    compile_template_to_js, compile_template_to_js_with_options, extract_component_metadata,
-    transform_angular_file,
+    NamespaceRegistry, ResolvedResources, TemplateCompileOutput, TransformOptions, TransformResult,
+    ViewEncapsulation, build_import_map, compile_component_template, compile_for_hmr,
+    compile_template_for_hmr, compile_template_to_js, compile_template_to_js_with_options,
+    extract_component_metadata, transform_angular_file,
 };
 
 // Re-export cross-file elision types when feature is enabled
