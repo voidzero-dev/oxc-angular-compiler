@@ -145,13 +145,13 @@ fn test_multiple_interpolations() {
 
 #[test]
 fn test_html_entity_between_interpolations() {
-    // HTML entity &times; between two interpolations should produce literal UTF-8 in the output
+    // HTML entity &times; between two interpolations should produce \u00D7 in the output
     let js = compile_template_to_js("<div>{{ a }}&times;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "\u{00D7}", ctx.b)
-    // Note: × (multiplication sign) = U+00D7, emitted as literal UTF-8
+    // Should produce: textInterpolate2("", ctx.a, "\u00D7", ctx.b)
+    // Note: × (multiplication sign) = U+00D7, escaped as \u00D7
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00D7}\",ctx.b)"),
-        "Expected textInterpolate2 with literal times character. Got:\n{js}"
+        js.contains(r#"textInterpolate2("",ctx.a,"\u00D7",ctx.b)"#),
+        "Expected textInterpolate2 with escaped times character. Got:\n{js}"
     );
 }
 
@@ -159,12 +159,12 @@ fn test_html_entity_between_interpolations() {
 fn test_html_entity_at_start_of_interpolation() {
     // Entity at start: &times;{{ a }}
     let js = compile_template_to_js("<div>&times;{{ a }}</div>", "TestComponent");
-    // Should produce: textInterpolate1("\u{00D7}", ctx.a)
-    // Note: × (multiplication sign) = U+00D7, emitted as literal UTF-8
+    // Should produce: textInterpolate1("\u00D7", ctx.a)
+    // Note: × (multiplication sign) = U+00D7, escaped as \u00D7
     assert!(
-        js.contains("textInterpolate1(\"\u{00D7}\",ctx.a)")
-            || js.contains("textInterpolate(\"\u{00D7}\",ctx.a)"),
-        "Expected textInterpolate with literal times character at start. Got:\n{js}"
+        js.contains(r#"textInterpolate1("\u00D7",ctx.a)"#)
+            || js.contains(r#"textInterpolate("\u00D7",ctx.a)"#),
+        "Expected textInterpolate with escaped times character at start. Got:\n{js}"
     );
 }
 
@@ -173,11 +173,11 @@ fn test_multiple_html_entities_between_interpolations() {
     // Multiple entities: {{ a }}&nbsp;&times;&nbsp;{{ b }}
     let js =
         compile_template_to_js("<div>{{ a }}&nbsp;&times;&nbsp;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "\u{00A0}\u{00D7}\u{00A0}", ctx.b)
-    // Note: &nbsp; = U+00A0, &times; = U+00D7, both emitted as literal UTF-8
+    // Should produce: textInterpolate2("", ctx.a, "\u00A0\u00D7\u00A0", ctx.b)
+    // Note: &nbsp; = U+00A0, &times; = U+00D7, both escaped as \uNNNN
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00A0}\u{00D7}\u{00A0}\",ctx.b)"),
-        "Expected textInterpolate2 with literal Unicode entities. Got:\n{js}"
+        js.contains(r#"textInterpolate2("",ctx.a,"\u00A0\u00D7\u00A0",ctx.b)"#),
+        "Expected textInterpolate2 with escaped Unicode entities. Got:\n{js}"
     );
 }
 

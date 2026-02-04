@@ -1227,9 +1227,11 @@ fn is_nullish_coalesce(expr: &OutputExpression<'_>) -> bool {
 /// Escape a string for JavaScript output.
 ///
 /// Uses double quotes to match Angular's output style.
-/// Only escapes control characters (`"`, `\`, `\n`, `\r`, and `$` when requested).
-/// Non-ASCII printable characters (e.g. `×`, `é`, `α`) are emitted as literal UTF-8,
-/// matching Angular's `escapeIdentifier` behavior.
+/// Escapes `"`, `\`, `\n`, `\r`, `$` (when requested), ASCII control characters,
+/// and all non-ASCII characters (code point > 0x7E) as `\uNNNN` sequences.
+/// Characters above the BMP (U+10000+) are encoded as UTF-16 surrogate pairs
+/// (`\uXXXX\uXXXX`). This matches TypeScript's emitter behavior, which escapes
+/// non-ASCII characters in string literals.
 fn escape_string(input: &str, escape_dollar: bool) -> String {
     let mut result = String::with_capacity(input.len() + 2);
     result.push('"');
@@ -1240,17 +1242,35 @@ fn escape_string(input: &str, escape_dollar: bool) -> String {
             '\n' => result.push_str("\\n"),
             '\r' => result.push_str("\\r"),
             '$' if escape_dollar => result.push_str("\\$"),
-            // Escape ASCII control characters (0x00-0x1F, 0x7F) other than \n and \r
-            c if c.is_ascii_control() => {
+            // ASCII printable characters (0x20-0x7E) are emitted literally
+            c if (' '..='\x7E').contains(&c) => result.push(c),
+            // Everything else (ASCII control chars, non-ASCII) is escaped as \uNNNN.
+            // Characters above the BMP are encoded as UTF-16 surrogate pairs.
+            c => {
                 let code = c as u32;
-                result.push_str(&format!("\\u{code:04X}"));
+                if code <= 0xFFFF {
+                    push_unicode_escape(&mut result, code);
+                } else {
+                    let hi = 0xD800 + ((code - 0x10000) >> 10);
+                    let lo = 0xDC00 + ((code - 0x10000) & 0x3FF);
+                    push_unicode_escape(&mut result, hi);
+                    push_unicode_escape(&mut result, lo);
+                }
             }
-            // All other characters (including non-ASCII printable) are emitted literally
-            _ => result.push(c),
         }
     }
     result.push('"');
     result
+}
+
+/// Push a `\uXXXX` escape sequence for a 16-bit code unit.
+fn push_unicode_escape(buf: &mut String, code: u32) {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    buf.push_str("\\u");
+    buf.push(HEX[((code >> 12) & 0xF) as usize] as char);
+    buf.push(HEX[((code >> 8) & 0xF) as usize] as char);
+    buf.push(HEX[((code >> 4) & 0xF) as usize] as char);
+    buf.push(HEX[(code & 0xF) as usize] as char);
 }
 
 /// Escape an identifier for use as a property key.
@@ -1487,35 +1507,35 @@ mod tests {
 
     #[test]
     fn test_escape_string_unicode_literals() {
-        // Non-ASCII printable characters should be emitted as literal UTF-8,
-        // matching Angular's escapeIdentifier behavior.
+        // Non-ASCII characters should be escaped as \uNNNN to match
+        // TypeScript's emitter behavior.
 
-        // &times; (multiplication sign U+00D7) -> literal ×
-        assert_eq!(escape_string("\u{00D7}", false), "\"\u{00D7}\"");
+        // &times; (multiplication sign U+00D7) -> \u00D7
+        assert_eq!(escape_string("\u{00D7}", false), "\"\\u00D7\"");
 
-        // &nbsp; (non-breaking space U+00A0) -> literal
-        assert_eq!(escape_string("\u{00A0}", false), "\"\u{00A0}\"");
+        // &nbsp; (non-breaking space U+00A0) -> \u00A0
+        assert_eq!(escape_string("\u{00A0}", false), "\"\\u00A0\"");
 
         // Mixed ASCII and non-ASCII
-        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\u{00D7}b\"");
+        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\\u00D7b\"");
 
         // Multiple non-ASCII characters
-        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\u{00D7}\u{00A0}\"");
+        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\\u00D7\\u00A0\"");
 
-        // Characters outside BMP (emoji) -> emitted literally
-        assert_eq!(escape_string("\u{1F600}", false), "\"\u{1F600}\"");
+        // Characters outside BMP (emoji) -> surrogate pair
+        assert_eq!(escape_string("\u{1F600}", false), "\"\\uD83D\\uDE00\"");
 
-        // Common HTML entities -> all emitted literally
-        assert_eq!(escape_string("\u{00A9}", false), "\"\u{00A9}\""); // &copy; ©
-        assert_eq!(escape_string("\u{00AE}", false), "\"\u{00AE}\""); // &reg; ®
-        assert_eq!(escape_string("\u{2014}", false), "\"\u{2014}\""); // &mdash; —
-        assert_eq!(escape_string("\u{2013}", false), "\"\u{2013}\""); // &ndash; –
+        // Common HTML entities -> all escaped as \uNNNN
+        assert_eq!(escape_string("\u{00A9}", false), "\"\\u00A9\""); // &copy; ©
+        assert_eq!(escape_string("\u{00AE}", false), "\"\\u00AE\""); // &reg; ®
+        assert_eq!(escape_string("\u{2014}", false), "\"\\u2014\""); // &mdash; —
+        assert_eq!(escape_string("\u{2013}", false), "\"\\u2013\""); // &ndash; –
 
         // Greek letter alpha
-        assert_eq!(escape_string("\u{03B1}", false), "\"\u{03B1}\""); // α
+        assert_eq!(escape_string("\u{03B1}", false), "\"\\u03B1\""); // α
 
         // Accented Latin letter
-        assert_eq!(escape_string("\u{00E9}", false), "\"\u{00E9}\""); // é
+        assert_eq!(escape_string("\u{00E9}", false), "\"\\u00E9\""); // é
     }
 
     #[test]
@@ -1531,6 +1551,41 @@ mod tests {
         // \n and \r have their own named escapes
         assert_eq!(escape_string("\n", false), "\"\\n\"");
         assert_eq!(escape_string("\r", false), "\"\\r\"");
+    }
+
+    #[test]
+    fn test_escape_string_non_ascii_as_unicode_escapes() {
+        // Non-ASCII characters should be escaped as \uNNNN to match
+        // TypeScript's emitter behavior (which escapes non-ASCII in string literals).
+
+        // Non-breaking space U+00A0
+        assert_eq!(escape_string("\u{00A0}", false), "\"\\u00A0\"");
+
+        // En dash U+2013
+        assert_eq!(escape_string("\u{2013}", false), "\"\\u2013\"");
+
+        // Trademark U+2122
+        assert_eq!(escape_string("\u{2122}", false), "\"\\u2122\"");
+
+        // Infinity U+221E
+        assert_eq!(escape_string("\u{221E}", false), "\"\\u221E\"");
+
+        // Mixed ASCII and non-ASCII
+        assert_eq!(escape_string("a\u{00D7}b", false), "\"a\\u00D7b\"");
+
+        // Multiple non-ASCII characters
+        assert_eq!(escape_string("\u{00D7}\u{00A0}", false), "\"\\u00D7\\u00A0\"");
+
+        // Characters above BMP should use surrogate pairs
+        // U+1F600 (grinning face) = surrogate pair D83D DE00
+        assert_eq!(escape_string("\u{1F600}", false), "\"\\uD83D\\uDE00\"");
+
+        // U+10000 (first supplementary char) = surrogate pair D800 DC00
+        assert_eq!(escape_string("\u{10000}", false), "\"\\uD800\\uDC00\"");
+
+        // ASCII printable chars (0x20-0x7E) should remain literal
+        assert_eq!(escape_string(" ~", false), "\" ~\"");
+        assert_eq!(escape_string("abc123!@#", false), "\"abc123!@#\"");
     }
 
     // ========================================================================
