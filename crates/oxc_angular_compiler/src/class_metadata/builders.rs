@@ -10,6 +10,7 @@ use oxc_ast::ast::{
 };
 use oxc_span::Atom;
 
+use crate::component::{NamespaceRegistry, R3DependencyMetadata};
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
     LiteralMapExpr, LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
@@ -110,9 +111,16 @@ pub fn build_decorator_metadata_array<'a>(
 ///
 /// Creates: `() => [{ type: SomeService, decorators: [...] }, ...]`
 /// Returns `None` if the class has no constructor.
+///
+/// For imported types, generates namespace-prefixed references (e.g., `i1.SomeService`)
+/// using the constructor dependency metadata and namespace registry. This matches
+/// Angular's behavior where type-only imports need namespace imports because
+/// TypeScript types are erased at runtime.
 pub fn build_ctor_params_metadata<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
+    constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
@@ -126,11 +134,18 @@ pub fn build_ctor_params_metadata<'a>(
 
     let mut param_entries = AllocVec::new_in(allocator);
 
-    for param in constructor {
+    for (i, param) in constructor.iter().enumerate() {
         let mut map_entries = AllocVec::new_in(allocator);
 
-        // Extract type from TypeScript type annotation
-        let type_expr = extract_param_type_expression(allocator, param).unwrap_or_else(|| {
+        // Extract type from TypeScript type annotation, using namespace-prefixed
+        // references for imported types when constructor dependency info is available.
+        let type_expr = build_param_type_expression(
+            allocator,
+            param,
+            constructor_deps.and_then(|deps| deps.get(i)),
+            namespace_registry,
+        )
+        .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Undefined, source_span: None },
                 allocator,
@@ -257,7 +272,80 @@ pub fn build_prop_decorators_metadata<'a>(
 // Internal helper functions
 // ============================================================================
 
-/// Extract the type expression from a constructor parameter.
+/// Build the type expression for a constructor parameter, using namespace-prefixed
+/// references for imported types.
+///
+/// TypeScript type annotations are erased at runtime, so imported types need namespace
+/// imports (e.g., `i1.SomeService`) to be available as runtime values.
+///
+/// The `dep.token_source_module` tracks where the injection token comes from. We only
+/// use it for namespace prefix when the type annotation name matches the dep token name,
+/// confirming that the dep's source module applies to the type. When they differ
+/// (e.g., `@Inject(DOCUMENT) doc: Document`), we fall back to bare name since the type
+/// may be a global or from a different module.
+fn build_param_type_expression<'a>(
+    allocator: &'a Allocator,
+    param: &FormalParameter<'a>,
+    dep: Option<&R3DependencyMetadata<'a>>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+) -> Option<OutputExpression<'a>> {
+    // Extract the type name from the type annotation
+    let type_name = extract_param_type_name(param);
+
+    // Use namespace prefix when the type annotation matches the dep token name
+    // and the dep has a source module (imported type).
+    if let Some(dep) = dep {
+        if let Some(ref source_module) = dep.token_source_module {
+            if let Some(ref token) = dep.token {
+                let type_matches_token =
+                    type_name.as_ref().is_some_and(|tn| tn.as_str() == token.as_str());
+
+                if type_matches_token {
+                    let name = type_name.unwrap_or_else(|| token.clone());
+                    let namespace = namespace_registry.get_or_assign(source_module);
+                    return Some(OutputExpression::ReadProp(Box::new_in(
+                        ReadPropExpr {
+                            receiver: Box::new_in(
+                                OutputExpression::ReadVar(Box::new_in(
+                                    ReadVarExpr { name: namespace, source_span: None },
+                                    allocator,
+                                )),
+                                allocator,
+                            ),
+                            name,
+                            optional: false,
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                }
+            }
+        }
+    }
+
+    // Fall back to extracting the bare type name from the type annotation
+    extract_param_type_expression(allocator, param)
+}
+
+/// Extract the type name (as an Atom) from a constructor parameter's type annotation.
+///
+/// Returns the simple type name from the annotation, if present.
+/// Used to get the type name for namespace-prefixed references in metadata.
+fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Atom<'a>> {
+    let type_annotation = param.type_annotation.as_ref()?;
+    match &type_annotation.type_annotation {
+        TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
+            TSTypeName::IdentifierReference(id) => Some(id.name),
+            TSTypeName::QualifiedName(qualified) => Some(qualified.right.name),
+            TSTypeName::ThisExpression(_) => None,
+        },
+        _ => None,
+    }
+}
+
+/// Extract the type expression from a constructor parameter's type annotation.
+///
+/// This is the fallback path for local types that don't need namespace prefixes.
 fn extract_param_type_expression<'a>(
     allocator: &'a Allocator,
     param: &FormalParameter<'a>,
