@@ -187,13 +187,29 @@ fn process_view_attributes<'a>(
                         continue;
                     }
 
+                    // Determine the extracted binding kind.
+                    // Ported from Angular's attribute_extraction.ts lines 32-39:
+                    //   if (op.i18nMessage !== null && op.templateKind === null) {
+                    //     bindingKind = ir.BindingKind.I18n;
+                    //   } else if (op.isStructuralTemplateAttribute) {
+                    //     bindingKind = ir.BindingKind.Template;
+                    //   } else {
+                    //     bindingKind = ir.BindingKind.Property;
+                    //   }
+                    let binding_kind = if prop_op.i18n_message.is_some()
+                        && prop_op.binding_kind != BindingKind::Template
+                    {
+                        BindingKind::I18n
+                    } else {
+                        prop_op.binding_kind
+                    };
+
                     // Properties also generate extracted attributes for directive matching
                     // Note: Property ops are NOT removed - they still need runtime updates
-                    // Use the actual binding_kind from the op (may be Template for structural directives)
                     let extracted = ExtractedAttributeOp {
                         base: CreateOpBase::default(),
                         target: prop_op.target,
-                        binding_kind: prop_op.binding_kind,
+                        binding_kind,
                         namespace: None,
                         name: prop_op.name.clone(),
                         value: None, // Property bindings don't copy the expression

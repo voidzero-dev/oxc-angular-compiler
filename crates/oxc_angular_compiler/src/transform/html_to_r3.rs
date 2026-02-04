@@ -2605,13 +2605,16 @@ impl<'a> HtmlToR3Transform<'a> {
                                 None,
                             ));
                         } else {
-                            inputs.push(self.create_bound_attribute(
+                            let i18n = i18n_attrs_meta.remove(rest);
+                            let mut bound_attr = self.create_bound_attribute(
                                 element_name,
                                 rest,
                                 attr,
                                 BindingType::Property,
                                 None,
-                            ));
+                            );
+                            bound_attr.i18n = i18n;
+                            inputs.push(bound_attr);
                         }
                     }
                     BindingPrefix::Let => {
@@ -2717,13 +2720,13 @@ impl<'a> HtmlToR3Transform<'a> {
                     } else {
                         (BindingType::Property, prop_name, None)
                     };
-                inputs.push(self.create_bound_attribute(
-                    element_name,
-                    final_name,
-                    attr,
-                    binding_type,
-                    unit,
-                ));
+                // Look up i18n metadata for this property binding (e.g., i18n-heading for [heading])
+                // Ported from Angular's categorizePropertyAttributes in r3_template_transform.ts
+                let i18n = i18n_attrs_meta.remove(final_name);
+                let mut bound_attr =
+                    self.create_bound_attribute(element_name, final_name, attr, binding_type, unit);
+                bound_attr.i18n = i18n;
+                inputs.push(bound_attr);
                 continue;
             }
 
