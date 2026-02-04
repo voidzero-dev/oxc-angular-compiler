@@ -224,6 +224,24 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     Self::collect_computed_keys_from_ts_type(ty, result);
                 }
             }
+            TSType::TSArrayType(array_type) => {
+                Self::collect_computed_keys_from_ts_type(&array_type.element_type, result);
+            }
+            TSType::TSTupleType(tuple_type) => {
+                for element in &tuple_type.element_types {
+                    Self::collect_computed_keys_from_ts_type(element.to_ts_type(), result);
+                }
+            }
+            TSType::TSTypeReference(type_ref) => {
+                if let Some(type_args) = &type_ref.type_arguments {
+                    for ty in &type_args.params {
+                        Self::collect_computed_keys_from_ts_type(ty, result);
+                    }
+                }
+            }
+            TSType::TSParenthesizedType(paren_type) => {
+                Self::collect_computed_keys_from_ts_type(&paren_type.type_annotation, result);
+            }
             _ => {}
         }
     }
@@ -1767,6 +1785,82 @@ class MyComponent {
         assert!(
             !type_only.contains("myKey"),
             "myKey in type literal nested within union should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_array_type_preserved() {
+        // Review claim: TSArrayType `{ [key]: string }[]` is not handled
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() items: { [myKey]: string }[];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in array element type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_generic_type_arg_preserved() {
+        // Review claim: TSTypeReference `Array<{ [key]: string }>` is not handled
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() items: Array<{ [myKey]: string }>;
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in generic type argument type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_tuple_type_preserved() {
+        // Review claim: TSTupleType is not handled
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() pair: [string, { [myKey]: number }];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in tuple element type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_parenthesized_type_preserved() {
+        // Review claim: TSParenthesizedType is not handled
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() data: ({ [myKey]: string });
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in parenthesized type literal should be preserved"
         );
     }
 }
