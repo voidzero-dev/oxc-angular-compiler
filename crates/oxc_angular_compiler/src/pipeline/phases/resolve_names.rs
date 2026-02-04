@@ -980,6 +980,18 @@ fn resolve_expression<'a>(
             );
         }
 
+        // Parenthesized expression - resolve the inner expression
+        IrExpression::Parenthesized(paren) => {
+            resolve_expression(
+                paren.expr.as_mut(),
+                scope,
+                root_xref,
+                saved_view,
+                allocator,
+                expressions,
+            );
+        }
+
         // Other expression types don't need resolution
         _ => {}
     }
