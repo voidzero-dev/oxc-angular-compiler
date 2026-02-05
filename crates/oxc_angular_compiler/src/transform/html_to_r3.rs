@@ -2461,6 +2461,15 @@ impl<'a> HtmlToR3Transform<'a> {
                         connected.parameters.iter().map(|p| p.expression.as_str()).collect();
                     let minimum_time = parse_placeholder_parameters(&params);
 
+                    // Create i18n placeholder if inside an i18n context
+                    let i18n = self.create_block_placeholder(
+                        "placeholder",
+                        &[],
+                        connected.span,
+                        connected.start_span,
+                        connected.end_span,
+                    );
+
                     placeholder = Some(R3DeferredBlockPlaceholder {
                         children: connected_children,
                         minimum_time,
@@ -2468,7 +2477,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         name_span: connected.name_span,
                         start_source_span: connected.start_span,
                         end_source_span: connected.end_span,
-                        i18n: None,
+                        i18n,
                     });
                 }
                 BlockType::Loading => {
@@ -2476,6 +2485,15 @@ impl<'a> HtmlToR3Transform<'a> {
                     let params: std::vec::Vec<&str> =
                         connected.parameters.iter().map(|p| p.expression.as_str()).collect();
                     let (after_time, minimum_time) = parse_loading_parameters(&params);
+
+                    // Create i18n placeholder if inside an i18n context
+                    let i18n = self.create_block_placeholder(
+                        "loading",
+                        &[],
+                        connected.span,
+                        connected.start_span,
+                        connected.end_span,
+                    );
 
                     loading = Some(R3DeferredBlockLoading {
                         children: connected_children,
@@ -2485,17 +2503,26 @@ impl<'a> HtmlToR3Transform<'a> {
                         name_span: connected.name_span,
                         start_source_span: connected.start_span,
                         end_source_span: connected.end_span,
-                        i18n: None,
+                        i18n,
                     });
                 }
                 BlockType::Error => {
+                    // Create i18n placeholder if inside an i18n context
+                    let i18n = self.create_block_placeholder(
+                        "error",
+                        &[],
+                        connected.span,
+                        connected.start_span,
+                        connected.end_span,
+                    );
+
                     error = Some(R3DeferredBlockError {
                         children: connected_children,
                         source_span: connected.span,
                         name_span: connected.name_span,
                         start_source_span: connected.start_span,
                         end_source_span: connected.end_span,
-                        i18n: None,
+                        i18n,
                     });
                 }
                 _ => {}
@@ -2512,6 +2539,15 @@ impl<'a> HtmlToR3Transform<'a> {
             block.span
         };
 
+        // Create i18n placeholder for @defer block if inside i18n context
+        let i18n = self.create_block_placeholder(
+            "defer",
+            &[],
+            source_span,
+            block.start_span,
+            end_source_span,
+        );
+
         let defer_block = R3DeferredBlock {
             children,
             triggers: trigger_result.triggers,
@@ -2525,7 +2561,7 @@ impl<'a> HtmlToR3Transform<'a> {
             name_span: block.name_span,
             start_source_span: block.start_span,
             end_source_span,
-            i18n: None,
+            i18n,
         };
         Some(R3Node::DeferredBlock(Box::new_in(defer_block, self.allocator)))
     }

@@ -1,0 +1,35 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function MyApp_span_2_Defer_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,2);
+    i0.ɵɵelement(1,"span");
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_span_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,1);
+    i0.ɵɵelementStart(1,"span");
+    i0.ɵɵdomTemplate(2,MyApp_span_2_Defer_2_Template,2,0);
+    i0.ɵɵdefer(3,2);
+    i0.ɵɵdeferOnIdle();
+    i0.ɵɵelementEnd();
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵelementStart(0,"div");
+    i0.ɵɵi18nStart(1,0);
+    i0.ɵɵtemplate(2,MyApp_span_2_Template,5,0,"span",1);
+    i0.ɵɵi18nEnd();
+    i0.ɵɵelementEnd();
+  }
+  if ((rf & 2)) {
+    i0.ɵɵadvance(2);
+    i0.ɵɵproperty("ngIf",ctx.show);
+  }
+}
