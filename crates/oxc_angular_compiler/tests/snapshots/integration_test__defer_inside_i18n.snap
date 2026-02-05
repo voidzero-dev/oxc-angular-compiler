@@ -1,0 +1,48 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function MyApp_Defer_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,1);
+    i0.ɵɵelement(1,"span");
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_DeferLoading_3_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,2);
+    i0.ɵɵelement(1,"button");
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_DeferPlaceholder_4_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,3);
+    i0.ɵɵelement(1,"div");
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_DeferError_5_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵi18nStart(0,0,4);
+    i0.ɵɵelement(1,"h1");
+    i0.ɵɵi18nEnd();
+  }
+}
+function MyApp_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵelementStart(0,"div");
+    i0.ɵɵi18nStart(1,0);
+    i0.ɵɵdomTemplate(2,MyApp_Defer_2_Template,2,0)(3,MyApp_DeferLoading_3_Template,2,
+        0)(4,MyApp_DeferPlaceholder_4_Template,2,0)(5,MyApp_DeferError_5_Template,2,
+        0);
+    i0.ɵɵdefer(6,2,null,3,4,5);
+    i0.ɵɵi18nEnd();
+    i0.ɵɵelementEnd();
+  }
+  if ((rf & 2)) {
+    i0.ɵɵadvance(6);
+    i0.ɵɵdeferWhen(ctx.isLoaded);
+  }
+}

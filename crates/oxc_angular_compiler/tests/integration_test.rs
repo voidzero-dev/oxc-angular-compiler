@@ -471,6 +471,87 @@ fn test_defer_block() {
     insta::assert_snapshot!("defer_block", js);
 }
 
+/// Tests that @defer blocks inside i18n contexts get wrapped with i18nStart/i18nEnd.
+/// Angular propagates i18n context into defer view templates so that the deferred
+/// content is part of the i18n message. Each defer sub-block (main, loading,
+/// placeholder, error) gets its own sub-template index.
+///
+/// Ported from Angular compliance test:
+/// `r3_view_compiler_i18n/blocks/defer.ts`
+#[test]
+fn test_defer_inside_i18n() {
+    let js = compile_template_to_js(
+        r#"<div i18n>
+  Content:
+  @defer (when isLoaded) {
+    before<span>middle</span>after
+  } @placeholder {
+    before<div>placeholder</div>after
+  } @loading {
+    before<button>loading</button>after
+  } @error {
+    before<h1>error</h1>after
+  }
+</div>"#,
+        "MyApp",
+    );
+
+    // Each deferred template function should be wrapped with i18nStart/i18nEnd
+    // with increasing sub-template indices (1, 2, 3, 4)
+    assert!(
+        js.contains("i18nStart(0,0,1)"),
+        "Main defer template should have i18nStart with sub-template index 1. Output:\n{js}"
+    );
+    assert!(
+        js.contains("i18nStart(0,0,2)"),
+        "Loading defer template should have i18nStart with sub-template index 2. Output:\n{js}"
+    );
+    assert!(
+        js.contains("i18nStart(0,0,3)"),
+        "Placeholder defer template should have i18nStart with sub-template index 3. Output:\n{js}"
+    );
+    assert!(
+        js.contains("i18nStart(0,0,4)"),
+        "Error defer template should have i18nStart with sub-template index 4. Output:\n{js}"
+    );
+
+    // The deferred templates should have 2 decls (i18nStart + element), not 1
+    // domTemplate(N, fn, 2, 0) - 2 declarations for each deferred view
+    assert!(
+        js.contains("MyApp_Defer_2_Template,2,0)"),
+        "Main defer domTemplate should have 2 decls. Output:\n{js}"
+    );
+
+    insta::assert_snapshot!("defer_inside_i18n", js);
+}
+
+/// When @defer is nested inside a structural directive (*ngIf template) that's inside
+/// an i18n context, the i18n wrapping must propagate through the template boundary
+/// to the defer view. This matches the unlock-view-confirm ClickUp pattern.
+#[test]
+fn test_defer_inside_structural_directive_in_i18n() {
+    let js = compile_template_to_js(
+        r#"<div i18n>
+  text
+  <span *ngIf="show">
+    @defer (on idle) {
+      <span>deferred</span>
+    }
+  </span>
+</div>"#,
+        "MyApp",
+    );
+
+    // The defer template should have i18nStart wrapping since it's
+    // transitively inside an i18n context (through the *ngIf template)
+    assert!(
+        js.contains("i18nStart(0,"),
+        "Defer template inside structural directive in i18n should have i18nStart. Output:\n{js}"
+    );
+
+    insta::assert_snapshot!("defer_inside_structural_directive_in_i18n", js);
+}
+
 #[test]
 fn test_defer_with_loading() {
     let js = compile_template_to_js(

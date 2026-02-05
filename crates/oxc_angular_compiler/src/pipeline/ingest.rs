@@ -3132,6 +3132,7 @@ fn ingest_defer_view<'a>(
     job: &mut ComponentCompilationJob<'a>,
     parent_xref: XrefId,
     suffix: &str,
+    i18n: Option<I18nMeta<'a>>,
     children: Option<Vec<'a, R3Node<'a>>>,
     source_span: Option<oxc_span::Span>,
 ) -> Option<XrefId> {
@@ -3151,6 +3152,11 @@ fn ingest_defer_view<'a>(
     // We use the same pattern here so that defer_resolve_targets can find elements by view xref.
     let fn_name_suffix = Some(Atom::from(job.allocator.alloc_str(&format!("Defer{suffix}"))));
 
+    // Convert i18n metadata to placeholder, matching Angular's ingestDeferView which passes
+    // i18nMeta through to createTemplateOp. This enables propagate_i18n_blocks to wrap the
+    // deferred template with i18nStart/i18nEnd when inside an i18n context.
+    let i18n_placeholder = convert_i18n_meta_to_placeholder(i18n);
+
     let template_op = CreateOp::Template(TemplateOp {
         base: CreateOpBase { source_span, ..Default::default() },
         xref: secondary_view, // Use view xref as TemplateOp xref, matching Angular
@@ -3166,7 +3172,7 @@ fn ingest_defer_view<'a>(
         attributes: None,
         local_refs: Vec::new_in(job.allocator),
         local_refs_index: None,
-        i18n_placeholder: None,
+        i18n_placeholder,
     });
 
     // Push the TemplateOp to the parent view's create ops
@@ -3185,7 +3191,7 @@ fn ingest_defer_block<'a>(
 ) {
     let xref = job.allocate_xref_id();
 
-    // Extract timing values and source spans before consuming the blocks
+    // Extract timing values, source spans, and i18n metadata before consuming the blocks
     let placeholder_minimum_time = defer_block.placeholder.as_ref().and_then(|p| p.minimum_time);
     let loading_minimum_time = defer_block.loading.as_ref().and_then(|l| l.minimum_time);
     let loading_after_time = defer_block.loading.as_ref().and_then(|l| l.after_time);
@@ -3199,33 +3205,44 @@ fn ingest_defer_block<'a>(
         job,
         view_xref,
         "", // Empty suffix for main content - becomes "Defer"
+        defer_block.i18n,
         Some(defer_block.children),
         Some(defer_block.source_span),
     );
 
+    // Destructure sub-blocks to extract both children and i18n before consuming
+    let (loading_children, loading_i18n) = match defer_block.loading {
+        Some(l) => (Some(l.children), l.i18n),
+        None => (None, None),
+    };
     let loading_template_xref = ingest_defer_view(
         job,
         view_xref,
         "Loading",
-        defer_block.loading.map(|l| l.children),
+        loading_i18n,
+        loading_children,
         loading_source_span,
     );
 
+    let (placeholder_children, placeholder_i18n) = match defer_block.placeholder {
+        Some(p) => (Some(p.children), p.i18n),
+        None => (None, None),
+    };
     let placeholder_template_xref = ingest_defer_view(
         job,
         view_xref,
         "Placeholder",
-        defer_block.placeholder.map(|p| p.children),
+        placeholder_i18n,
+        placeholder_children,
         placeholder_source_span,
     );
 
-    let error_template_xref = ingest_defer_view(
-        job,
-        view_xref,
-        "Error",
-        defer_block.error.map(|e| e.children),
-        error_source_span,
-    );
+    let (error_children, error_i18n) = match defer_block.error {
+        Some(e) => (Some(e.children), e.i18n),
+        None => (None, None),
+    };
+    let error_template_xref =
+        ingest_defer_view(job, view_xref, "Error", error_i18n, error_children, error_source_span);
 
     // Set own_resolver_fn based on emit mode
     // This matches Angular's ingestDeferBlock behavior (ingest.ts lines 663-672)
