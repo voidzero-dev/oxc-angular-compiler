@@ -4221,3 +4221,156 @@ export class TestComponent {
         metadata_section
     );
 }
+
+// ============================================================================
+// Namespace Attribute Const Collection Tests
+// ============================================================================
+
+/// Test that SVG elements with namespace attributes (xmlns:xlink) produce correct consts.
+///
+/// When a static attribute like `xmlns:xlink="..."` is ingested, the name should be
+/// split into namespace="xmlns" and name="xlink" so that the consts array serializes it
+/// as [AttributeMarker.NamespaceUri, "xmlns", "xlink", "..."] instead of
+/// [":xmlns:xlink", "..."].
+///
+/// Without the fix, namespace attributes create duplicate consts entries because
+/// the unsplit `:xmlns:xlink` format doesn't match the properly-split format,
+/// preventing deduplication and shifting all subsequent consts indices.
+#[test]
+fn test_svg_namespace_attribute_consts() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-icon',
+    standalone: true,
+    template: '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-testid="icon"><use></use></svg>',
+})
+export class IconComponent {}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "icon.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    eprintln!("OUTPUT:\n{code}");
+
+    // The consts array should NOT contain ":xmlns:xlink" as a raw string.
+    // Instead, namespace attributes should be serialized with the NamespaceUri marker (0).
+    assert!(
+        !code.contains(r#"":xmlns:xlink""#),
+        "Consts should NOT contain raw ':xmlns:xlink' string. Namespace should be split. Output:\n{code}"
+    );
+
+    // The consts array SHOULD contain the proper namespace marker format:
+    // 0 (NamespaceUri marker), "xmlns", "xlink"
+    assert!(
+        code.contains(r#"0,"xmlns","xlink""#),
+        "Consts should contain namespace marker format: 0,\"xmlns\",\"xlink\". Output:\n{code}"
+    );
+}
+
+/// Test that SVG with both namespace attributes and property bindings has correct consts indices.
+///
+/// This reproduces the real-world icon.component pattern where:
+/// - An @if conditional wraps the SVG (creating a template function)
+/// - The SVG has namespace attrs (xmlns:xlink) AND a property binding ([name])
+/// - Both the conditional template and the SVG element need consts entries
+///
+/// Without the fix, a duplicate consts entry is created for the SVG element,
+/// causing the template to reference the wrong consts index.
+#[test]
+fn test_svg_namespace_attrs_with_conditional_and_binding() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Input } from '@angular/core';
+
+@Component({
+    selector: 'app-icon',
+    standalone: true,
+    template: `@if (showIcon) {<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-testid="icon" class="svg"><use></use></svg>}`,
+})
+export class IconComponent {
+    showIcon = true;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "icon.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    eprintln!("OUTPUT:\n{code}");
+
+    // Should NOT have duplicate consts entries. Count occurrences of "xmlns" in consts.
+    // With the bug, there would be two entries - one with proper namespace format,
+    // one with raw ":xmlns:xlink".
+    assert!(
+        !code.contains(r#"":xmlns:xlink""#),
+        "Consts should NOT contain raw ':xmlns:xlink' string. Output:\n{code}"
+    );
+}
+
+/// When an element has a structural directive (*ngIf) AND an i18n-translated attribute,
+/// the hoisted static attributes must preserve the i18n info. Without this, the literal
+/// text value is used in the consts array instead of the i18n variable reference, causing
+/// incorrect deduplication when multiple similar elements exist.
+///
+/// Ported to match Angular TS behavior: ingestTemplateBindings passes attr.i18n to
+/// createTemplateBinding for hoisted attributes (ingest.ts line 1497).
+#[test]
+fn test_i18n_attribute_on_structural_directive_element() {
+    let allocator = Allocator::default();
+    // Two buttons with *ngIf, both with i18n-cuTooltip but different custom IDs.
+    // Each should get its own i18n variable (i18n_0, i18n_1) in the consts array.
+    // Without the fix, both get literal "Clear date" and are deduplicated into one entry.
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    standalone: true,
+    template: `
+        <button *ngIf="showA" cuTooltip="Clear date" i18n-cuTooltip="@@clear-date-a" (click)="clearA()">Clear A</button>
+        <button *ngIf="showB" cuTooltip="Clear date" i18n-cuTooltip="@@clear-date-b" (click)="clearB()">Clear B</button>
+    `,
+})
+export class TestComponent {
+    showA = true;
+    showB = true;
+    clearA() {}
+    clearB() {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    eprintln!("OUTPUT:\n{code}");
+
+    // Both buttons should use i18n variable references, not the literal "Clear date".
+    // The consts array should contain i18n_0 and i18n_1 (or similar), NOT literal "Clear date".
+    assert!(
+        !code.contains(r#""cuTooltip","Clear date""#),
+        "Consts should NOT contain literal 'Clear date' - should use i18n variable reference. Output:\n{code}"
+    );
+    // There should be two distinct i18n entries (i18n_0, i18n_1) for the two different @@ IDs
+    assert!(code.contains("i18n_0"), "Should have i18n_0 variable. Output:\n{code}");
+    assert!(code.contains("i18n_1"), "Should have i18n_1 variable. Output:\n{code}");
+}
