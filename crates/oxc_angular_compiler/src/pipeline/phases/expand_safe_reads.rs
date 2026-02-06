@@ -127,10 +127,10 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
 
 /// Checks if an IR expression requires a temporary variable to avoid re-evaluation.
 ///
-/// Returns true for expressions with side effects:
-/// - Function calls/invocations
-/// - Pipe bindings
-/// - Safe function invocations
+/// Returns true for expressions with side effects (function calls, pipe bindings),
+/// or for compound expressions that may contain such sub-expressions.
+///
+/// Ported from Angular's `needsTemporaryInSafeAccess` in `expand_safe_reads.ts` lines 43-73.
 fn needs_temporary_in_safe_access(expr: &IrExpression<'_>) -> bool {
     match expr {
         // Function calls always need temporaries (they may have side effects)
@@ -140,6 +140,26 @@ fn needs_temporary_in_safe_access(expr: &IrExpression<'_>) -> bool {
         // Pipe bindings need temporaries (they may have side effects)
         IrExpression::PipeBinding(_) => true,
         IrExpression::PipeBindingVariadic(_) => true,
+        // Array and object literals need temporaries
+        IrExpression::LiteralArray(_) | IrExpression::DerivedLiteralArray(_) => true,
+        IrExpression::LiteralMap(_) | IrExpression::DerivedLiteralMap(_) => true,
+        // Unary operators need to check their operand
+        IrExpression::Unary(u) => needs_temporary_in_safe_access(&u.expr),
+        IrExpression::Not(n) => needs_temporary_in_safe_access(&n.expr),
+        // Binary operators need to check both operands
+        IrExpression::Binary(binary) => {
+            needs_temporary_in_safe_access(&binary.lhs)
+                || needs_temporary_in_safe_access(&binary.rhs)
+        }
+        IrExpression::ResolvedBinary(rb) => {
+            needs_temporary_in_safe_access(&rb.left) || needs_temporary_in_safe_access(&rb.right)
+        }
+        // Conditional expressions need to check all branches
+        IrExpression::Ternary(t) => {
+            needs_temporary_in_safe_access(&t.condition)
+                || needs_temporary_in_safe_access(&t.true_expr)
+                || needs_temporary_in_safe_access(&t.false_expr)
+        }
         // AssignTemporary expressions need to check their inner expression
         IrExpression::AssignTemporary(assign) => needs_temporary_in_safe_access(&assign.expr),
         // Safe property reads need to check their receiver

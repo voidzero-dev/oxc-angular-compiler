@@ -4374,3 +4374,67 @@ export class TestComponent {
     assert!(code.contains("i18n_0"), "Should have i18n_0 variable. Output:\n{code}");
     assert!(code.contains("i18n_1"), "Should have i18n_1 variable. Output:\n{code}");
 }
+
+/// Test that pipe inside binary expression with safe navigation generates a temporary variable.
+///
+/// When a pipe result is wrapped in a binary expression (e.g., `(data$ | async) || fallback`)
+/// and then used with safe navigation (`?.`), the compiler should generate a temporary variable
+/// to avoid calling the pipe twice.
+///
+/// This is a port of the Angular TS behavior where `needsTemporaryInSafeAccess` checks through
+/// `BinaryOperatorExpr` to find nested pipe expressions that need temporaries.
+///
+/// Without the fix, the compiler generates:
+///   `(pipeBind1(...) || fallback) == null ? null : (pipeBind1(...) || fallback).prop`
+///   (pipe called twice, slot indices doubled)
+///
+/// With the fix:
+///   `(tmp_0_0 = pipeBind1(...) || fallback) == null ? null : tmp_0_0.prop`
+///   (pipe called once, stored in temp variable)
+#[test]
+fn test_pipe_in_binary_with_safe_nav_uses_temp_variable() {
+    let js = compile_template_to_js(
+        r#"<div [title]="((data$ | async) || defaultVal)?.name"></div>"#,
+        "TestComponent",
+    );
+    eprintln!("OUTPUT:\n{js}");
+
+    // Should use a temporary variable to avoid double pipe evaluation
+    assert!(
+        js.contains("tmp_0_0"),
+        "Should generate tmp_0_0 for pipe inside binary with safe nav. Output:\n{js}"
+    );
+
+    // The pipe should only appear ONCE in the expression (stored in tmp)
+    let pipe_count = js.matches("pipeBind1(").count();
+    assert_eq!(
+        pipe_count, 1,
+        "pipeBind1 should appear exactly once (not duplicated). Found {pipe_count} occurrences. Output:\n{js}"
+    );
+}
+
+/// Test pipe in binary with safe navigation and chained property access.
+///
+/// More complex case: `((data$ | async) || fallback)?.nested?.value`
+/// The entire safe navigation chain should use the temp variable.
+#[test]
+fn test_pipe_in_binary_with_safe_nav_chain() {
+    let js = compile_template_to_js(
+        r#"<div [title]="((data$ | async) || defaultVal)?.nested?.value"></div>"#,
+        "TestComponent",
+    );
+    eprintln!("OUTPUT:\n{js}");
+
+    // Should use a temporary variable
+    assert!(
+        js.contains("tmp_0_0"),
+        "Should generate tmp_0_0 for pipe inside binary with safe nav chain. Output:\n{js}"
+    );
+
+    // The pipe should only appear ONCE
+    let pipe_count = js.matches("pipeBind1(").count();
+    assert_eq!(
+        pipe_count, 1,
+        "pipeBind1 should appear exactly once. Found {pipe_count}. Output:\n{js}"
+    );
+}
