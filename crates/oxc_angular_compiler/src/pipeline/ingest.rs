@@ -1244,94 +1244,6 @@ fn ingest_element<'a>(
     }
 }
 
-/// Ingests static attributes from an element into BindingOp operations.
-///
-/// Static attributes (e.g., `<div class="foo" ngNonBindable>`) are ingested as
-/// BindingOp with `is_text_attribute: true` into the UPDATE list, just like
-/// Angular's TypeScript implementation. This allows binding_specialization
-/// to detect special attributes like `ngNonBindable` and handle them appropriately.
-///
-/// Ported from Angular's ingestElementBindings in template/pipeline/src/ingest.ts
-///
-/// `is_structural_template_attribute` - If true, use BindingKind::Template for the extracted
-/// attributes. This is needed for structural directive attributes like `*cdkPortal` where
-/// the attribute (cdkPortal) should be extracted with the Template marker, not as a regular
-/// Attribute.
-fn ingest_static_attributes<'a>(
-    job: &mut ComponentCompilationJob<'a>,
-    view_xref: XrefId,
-    element_xref: XrefId,
-    attributes: std::vec::Vec<(Atom<'a>, Atom<'a>)>,
-    is_structural_template_attribute: bool,
-) {
-    use crate::output::ast::{LiteralExpr, LiteralValue, OutputExpression};
-
-    let allocator = job.allocator;
-
-    for (name, value) in attributes {
-        // ngNonBindable and animate.* require special handling: they must be added to the
-        // update list as BindingOp so binding_specialization can detect and process them.
-        // - ngNonBindable: marks element as non-bindable
-        // - animate.*: converts to AnimationBindingOp for animation instructions
-        if name.as_str() == "ngNonBindable" || name.as_str().starts_with("animate.") {
-            let literal_expr = OutputExpression::Literal(Box::new_in(
-                LiteralExpr { value: LiteralValue::String(value), source_span: None },
-                allocator,
-            ));
-            let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
-
-            let binding = BindingOp {
-                base: UpdateOpBase::default(),
-                target: element_xref,
-                kind: BindingKind::Attribute,
-                name,
-                expression: Box::new_in(value_expr, allocator),
-                unit: None,
-                security_context: SecurityContext::None,
-                i18n_message: None,
-                is_text_attribute: true,
-            };
-
-            if let Some(view) = job.view_mut(view_xref) {
-                view.update.push(UpdateOp::Binding(binding));
-            }
-            continue;
-        }
-
-        // All other static attributes go to the create list as ExtractedAttributeOp
-        let literal_expr = OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(value), source_span: None },
-            allocator,
-        ));
-        let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
-
-        // Use Template kind for structural template attributes, Attribute otherwise
-        let binding_kind = if is_structural_template_attribute {
-            BindingKind::Template
-        } else {
-            BindingKind::Attribute
-        };
-
-        let extracted = ExtractedAttributeOp {
-            base: CreateOpBase::default(),
-            target: element_xref,
-            binding_kind,
-            namespace: None,
-            name,
-            value: Some(Box::new_in(value_expr, allocator)),
-            security_context: SecurityContext::None,
-            truthy_expression: false,
-            i18n_context: None,
-            i18n_message: None,
-            trusted_value_fn: None,
-        };
-
-        if let Some(view) = job.view_mut(view_xref) {
-            view.create.push(CreateOp::ExtractedAttribute(extracted));
-        }
-    }
-}
-
 /// Ingests static attributes from R3TextAttribute, preserving i18n metadata.
 ///
 /// This version takes R3TextAttribute directly so it can access the i18n field.
@@ -1448,12 +1360,17 @@ fn ingest_static_attributes_with_i18n<'a>(
             BindingKind::Attribute
         };
 
+        // Split namespace from attribute name (e.g., `:xmlns:xlink` → namespace="xmlns", name="xlink")
+        let (ns, local_name) = split_ns_name(name.as_str());
+        let namespace = ns.map(|n| Atom::from(n));
+        let local_name = Atom::from(local_name);
+
         let extracted = ExtractedAttributeOp {
             base: CreateOpBase::default(),
             target: element_xref,
             binding_kind,
-            namespace: None,
-            name,
+            namespace,
+            name: local_name,
             value: Some(Box::new_in(value_expr, allocator)),
             security_context: SecurityContext::None,
             truthy_expression: false,
@@ -1523,12 +1440,17 @@ fn ingest_single_static_attribute<'a>(
         }
     } else {
         // For regular (non-structural) attributes, create ExtractedAttributeOp directly
+        // Split namespace from attribute name (e.g., `:xmlns:xlink` → namespace="xmlns", name="xlink")
+        let (ns, local_name) = split_ns_name(name.as_str());
+        let namespace = ns.map(|n| Atom::from(n));
+        let local_name = Atom::from(local_name);
+
         let extracted = ExtractedAttributeOp {
             base: CreateOpBase::default(),
             target: element_xref,
             binding_kind: BindingKind::Attribute,
-            namespace: None,
-            name,
+            namespace,
+            name: local_name,
             value: Some(Box::new_in(value_expr, allocator)),
             security_context: SecurityContext::None,
             truthy_expression: false,
@@ -2088,12 +2010,12 @@ fn ingest_template<'a>(
     }
 
     // Process hoisted static attributes from the wrapped element.
-    // Ported from Angular's `ingestTemplateBindings` - attributes processing (lines 1471-1489).
-    let static_attrs: std::vec::Vec<_> =
-        attributes.into_iter().map(|attr| (attr.name, attr.value)).collect();
-    if !static_attrs.is_empty() {
+    // Ported from Angular's `ingestTemplateBindings` - attributes processing (lines 1471-1501).
+    // IMPORTANT: Use ingest_static_attributes_with_i18n to preserve i18n metadata (attr.i18n).
+    // Angular's TS passes asMessage(attr.i18n) to createTemplateBinding (ingest.ts line 1497).
+    if !attributes.is_empty() {
         // Hoisted attributes from wrapped element are regular attributes, not Template
-        ingest_static_attributes(job, view_xref, xref, static_attrs, false);
+        ingest_static_attributes_with_i18n(job, view_xref, xref, &attributes, false);
     }
 
     // Process hoisted inputs from the wrapped element (e.g., [class]="..." on <div *ngIf>).

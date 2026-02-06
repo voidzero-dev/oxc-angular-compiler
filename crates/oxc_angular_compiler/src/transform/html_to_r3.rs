@@ -3710,7 +3710,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     source_span: attr.source_span,
                     key_span: attr.key_span,
                     value_span: attr.value_span,
-                    i18n: None,
+                    i18n: attr.i18n.as_ref().map(|meta| meta.clone_in(self.allocator)),
                 });
             }
         }
@@ -3735,7 +3735,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     source_span: input.source_span,
                     key_span: input.key_span,
                     value_span: input.value_span,
-                    i18n: None,
+                    i18n: input.i18n.as_ref().map(|meta| meta.clone_in(self.allocator)),
                 });
             }
         }
