@@ -25,81 +25,6 @@ export type PlainResolvedResources = {
 }
 
 /**
- * Known Angular built-in pipes that are NOT directive dependencies.
- * These pipes don't affect whether DomOnly mode should be used.
- */
-const KNOWN_PIPES = new Set([
-  // @angular/common pipes
-  'AsyncPipe',
-  'CurrencyPipe',
-  'DatePipe',
-  'DecimalPipe',
-  'I18nPluralPipe',
-  'I18nSelectPipe',
-  'JsonPipe',
-  'KeyValuePipe',
-  'LowerCasePipe',
-  'PercentPipe',
-  'SlicePipe',
-  'TitleCasePipe',
-  'UpperCasePipe',
-])
-
-/**
- * Detect if a component should use DomOnly mode using regex.
- *
- * DomOnly mode is used by Angular's NgtscProgram for standalone components
- * without directive dependencies. This produces optimized instructions like
- * `ɵɵdomElementStart` instead of `ɵɵelementStart`.
- *
- * A component should use DomOnly mode when:
- * 1. It is standalone (explicit or implicit via imports)
- * 2. It has no directive dependencies in its imports array (pipes don't count)
- *
- * @param source - The TypeScript source code
- * @returns true if the component should use DomOnly mode
- */
-function shouldUseDomOnlyMode(source: string): boolean {
-  // Check if component is standalone
-  const standaloneMatch = source.match(/standalone\s*:\s*(true|false)/)
-  const isStandalone = standaloneMatch ? standaloneMatch[1] === 'true' : false
-
-  if (!isStandalone) {
-    // Non-standalone components use Full mode
-    return false
-  }
-
-  // Check if component has imports property (directive dependencies)
-  const importsMatch = source.match(/imports\s*:\s*\[([^\]]*)\]/)
-  if (!importsMatch) {
-    // Standalone without imports = DomOnly mode
-    return true
-  }
-
-  const importsContent = importsMatch[1].trim()
-  if (importsContent === '') {
-    // Empty imports array = DomOnly mode
-    return true
-  }
-
-  // Parse imports to check if any are directive dependencies (not pipes)
-  // Extract identifiers from the imports array
-  const identifierPattern = /\b([A-Z][a-zA-Z0-9]*)\b/g
-  let match
-  while ((match = identifierPattern.exec(importsContent)) !== null) {
-    const identifier = match[1]
-    // Skip known pipes - they don't affect DomOnly mode
-    if (!KNOWN_PIPES.has(identifier)) {
-      // Found a non-pipe import (likely a directive/component)
-      return false
-    }
-  }
-
-  // All imports are pipes, use DomOnly mode
-  return true
-}
-
-/**
  * Output from raw full-file compilation.
  */
 export interface OxcFullFileRawOutput {
@@ -133,15 +58,11 @@ export function compileWithOxcFullFileRaw(
 ): OxcFullFileRawOutput {
   const startTime = performance.now()
 
-  // Detect if component should use DomOnly mode
-  const useDomOnlyMode = shouldUseDomOnlyMode(source)
-
   const transformOptions: TransformOptions = {
     sourcemap: false,
     jit: false,
     hmr: false,
     advancedOptimizations: false,
-    useDomOnlyMode,
     // Enable cross-file analysis for barrel export tracing
     crossFileElision: true,
     baseDir: path.dirname(filePath),

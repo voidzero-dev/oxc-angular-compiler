@@ -2,15 +2,14 @@
 source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: result.code
 ---
-
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
 
 function TestComponent_li_0_Template(rf,ctx) {
   if ((rf & 1)) {
-    i0.ɵɵdomElementStart(0,"li");
+    i0.ɵɵelementStart(0,"li");
     i0.ɵɵtext(1);
-    i0.ɵɵdomElementEnd();
+    i0.ɵɵelementEnd();
   }
   if ((rf & 2)) {
     const item_r1 = ctx.$implicit;
@@ -28,8 +27,8 @@ static ɵfac = function TestComponent_Factory(__ngFactoryType__) {
 static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selectors:[["test-comp"]],decls:1,
     vars:1,consts:[[4,"ngFor","ngForOf"]],template:function TestComponent_Template(rf,
         ctx) {
-      if ((rf & 1)) { i0.ɵɵdomTemplate(0,TestComponent_li_0_Template,2,1,"li",0); }
-      if ((rf & 2)) { i0.ɵɵdomProperty("ngForOf",ctx.items); }
+      if ((rf & 1)) { i0.ɵɵtemplate(0,TestComponent_li_0_Template,2,1,"li",0); }
+      if ((rf & 2)) { i0.ɵɵproperty("ngForOf",ctx.items); }
     },encapsulation:2});
 }
 (() =>{

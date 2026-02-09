@@ -445,7 +445,9 @@ function getOrCreateCachedConfig(tsconfigPath: string): CachedProgramEntry {
   const tsconfigHash = hashString(rawConfig)
 
   // Merge with Angular options first (needed for host creation)
-  const angularOptions = createAngularOptions()
+  // Use skipTypeChecking=true to get experimental-local compilation mode,
+  // which matches OXC's single-file compilation behavior (always Full template mode).
+  const angularOptions = createAngularOptions(true)
   const mergedOptions = {
     ...compilerOptions,
     ...angularOptions,
@@ -693,7 +695,9 @@ export async function compileWithNgtsc(
     if (!virtualModeConfig) {
       // Create compiler options (only once)
       const compilerOptions = createCompilerOptions(rootDir)
-      const angularOptions = createAngularOptions()
+      // Use skipTypeChecking=true to get experimental-local compilation mode,
+      // which matches OXC's single-file compilation behavior (always Full template mode).
+      const angularOptions = createAngularOptions(true)
       const mergedCompilerOptions = {
         ...compilerOptions,
         ...angularOptions,
@@ -1613,30 +1617,4 @@ ${decorator}
 export class ${className} {
 ${classBody.length > 0 ? classBody.join('\n') + '\n' : ''}}
 `
-}
-
-/**
- * Compile a template using NgtscProgram by generating a full component source.
- *
- * This function provides the same interface as compileWithAngular but uses
- * NgtscProgram internally for compilation, ensuring consistent behavior
- * with real Angular CLI builds.
- *
- * @param template - The template HTML to compile
- * @param className - The component class name
- * @param filePath - The file path for error reporting
- * @param metadata - Optional component metadata
- * @returns The compiled JavaScript output
- */
-export async function compileTemplateWithNgtsc(
-  template: string,
-  className: string,
-  filePath: string,
-  metadata?: ComponentMetadata,
-): Promise<CompilerOutput> {
-  // Generate the full component source
-  const source = generateComponentSource(template, className, metadata)
-
-  // Compile with NgtscProgram
-  return compileWithNgtsc(source, filePath)
 }

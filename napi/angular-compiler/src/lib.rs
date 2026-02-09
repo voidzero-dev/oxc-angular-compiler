@@ -124,12 +124,6 @@ pub struct TransformOptions {
     /// Enable advanced optimizations.
     pub advanced_optimizations: Option<bool>,
 
-    /// Enable DomOnly compilation mode for standalone components.
-    ///
-    /// When true, uses optimized DOM-only instructions that skip directive matching.
-    /// Only safe when the component has no directive dependencies.
-    pub use_dom_only_mode: Option<bool>,
-
     /// i18n message ID strategy.
     ///
     /// When true (default), uses external message IDs (MSG_EXTERNAL_abc123$$SUFFIX).
@@ -215,7 +209,6 @@ impl From<TransformOptions> for RustTransformOptions {
             jit: options.jit.unwrap_or(false),
             hmr: options.hmr.unwrap_or(false),
             advanced_optimizations: options.advanced_optimizations.unwrap_or(false),
-            use_dom_only_mode: options.use_dom_only_mode.unwrap_or(false),
             i18n_use_external_ids: options.i18n_use_external_ids.unwrap_or(true),
             angular_version: options.angular_version.map(Into::into),
             // Component metadata overrides

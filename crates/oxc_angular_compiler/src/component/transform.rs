@@ -82,15 +82,6 @@ pub struct TransformOptions {
     /// When true, applies additional optimizations like constant folding.
     pub advanced_optimizations: bool,
 
-    /// Enable DomOnly compilation mode for standalone components.
-    ///
-    /// When true, uses optimized DOM-only instructions (ɵɵdomElementStart, etc.)
-    /// that skip directive matching. Only safe when the component has no
-    /// directive dependencies.
-    ///
-    /// This is a hint from the build tool's metadata resolver.
-    pub use_dom_only_mode: bool,
-
     /// i18n message ID strategy.
     ///
     /// When true (default), uses external message IDs for Closure Compiler
@@ -208,7 +199,6 @@ impl Default for TransformOptions {
             jit: false,
             hmr: false,
             advanced_optimizations: false,
-            use_dom_only_mode: false,
             i18n_use_external_ids: true, // Angular's JIT default
             angular_version: None,       // None means assume latest (v19+ behavior)
             // Metadata overrides default to None (use extracted/default values)
@@ -1398,33 +1388,13 @@ fn compile_component_full<'a>(
     // Build ingest options from metadata and transform options
     let component_name_atom = Atom::from_in(metadata.class_name.as_str(), allocator);
 
-    // Determine compilation mode matching Angular's logic:
-    //   meta.isStandalone && !meta.hasDirectiveDependencies → DomOnly
-    //   otherwise → Full
-    // See: angular/packages/compiler/src/render3/view/compiler.ts:229-232
+    // OXC is a single-file compiler, equivalent to Angular's local compilation mode.
+    // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
+    // so DomOnly mode is never used for component templates.
+    // See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1257
     //
-    // For full component compilation, we determine this from the parsed metadata
-    // rather than relying solely on the external use_dom_only_mode flag.
-    // The metadata has standalone (from decorator) and has_directive_dependencies
-    // (from analyzing the imports array).
-    //
-    // IMPORTANT: We only use DomOnly mode when `standalone: true` was EXPLICITLY
-    // set in the decorator. When standalone is implicitly defaulted (Angular v19+),
-    // we conservatively use Full mode because:
-    // 1. The component may be declared in an NgModule (OXC can't detect this)
-    // 2. Angular's ngtsc in local compilation mode always sets
-    //    hasDirectiveDependencies=true for safety
-    // 3. Angular's ngtsc in global mode sets hasDirectiveDependencies=!isStandalone||...
-    //    meaning non-standalone components ALWAYS use Full mode
-    // See: angular/packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts:1326-1339
-    let mode = if metadata.standalone
-        && metadata.standalone_explicitly_set
-        && !metadata.has_directive_dependencies
-    {
-        TemplateCompilationMode::DomOnly
-    } else {
-        TemplateCompilationMode::Full
-    };
+    // Note: DomOnly mode is still used for host bindings (separate code path).
+    let mode = TemplateCompilationMode::Full;
 
     // Determine defer block emit mode based on JIT setting
     // In JIT mode, use PerComponent mode since the compiler doesn't have full dependency info
@@ -1842,11 +1812,8 @@ pub fn compile_template_to_js_with_options<'a>(
     }
 
     // Build IngestOptions from TransformOptions
-    let mode = if options.use_dom_only_mode {
-        TemplateCompilationMode::DomOnly
-    } else {
-        TemplateCompilationMode::Full
-    };
+    // OXC is a single-file compiler (local compilation mode): always use Full mode.
+    let mode = TemplateCompilationMode::Full;
 
     let defer_block_deps_emit_mode = if options.jit {
         DeferBlockDepsEmitMode::PerComponent
@@ -2009,11 +1976,8 @@ pub fn compile_template_for_hmr<'a>(
     }
 
     // Build IngestOptions from TransformOptions
-    let mode = if options.use_dom_only_mode {
-        TemplateCompilationMode::DomOnly
-    } else {
-        TemplateCompilationMode::Full
-    };
+    // OXC is a single-file compiler (local compilation mode): always use Full mode.
+    let mode = TemplateCompilationMode::Full;
 
     let defer_block_deps_emit_mode = if options.jit {
         DeferBlockDepsEmitMode::PerComponent

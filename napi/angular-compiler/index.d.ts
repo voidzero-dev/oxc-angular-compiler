@@ -697,13 +697,6 @@ export interface TransformOptions {
   /** Enable advanced optimizations. */
   advancedOptimizations?: boolean
   /**
-   * Enable DomOnly compilation mode for standalone components.
-   *
-   * When true, uses optimized DOM-only instructions that skip directive matching.
-   * Only safe when the component has no directive dependencies.
-   */
-  useDomOnlyMode?: boolean
-  /**
    * i18n message ID strategy.
    *
    * When true (default), uses external message IDs (MSG_EXTERNAL_abc123$$SUFFIX).
