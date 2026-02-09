@@ -3873,12 +3873,10 @@ fn test_let_declaration_with_multiple_context_refs_variable_naming() {
 // Const reference index: i18n property binding extraction
 // ============================================================================
 
-/// Tests that property bindings with i18n markers are extracted as BindingKind::Property
-/// in the consts array. Angular's attribute_extraction.ts has a condition
-/// `op.i18nMessage !== null && op.templateKind === null` that would produce I18n kind,
-/// but empirically Angular never produces I18n marker (6) in consts arrays across all
-/// tested components. The i18n metadata is handled by the i18n pipeline separately.
-/// The property binding should use Bindings marker (3) for directive matching.
+/// Tests that pure property bindings with i18n markers are extracted as BindingKind::Property.
+/// Pure property bindings like [heading]="title" i18n-heading keep Bindings marker (3) because
+/// the runtime uses domProperty to set the value, not i18nAttributes. The I18n marker (6) is
+/// only used for interpolated attributes that go through the i18n pipeline.
 #[test]
 fn test_i18n_property_binding_extracted_as_property_kind() {
     let allocator = Allocator::default();
@@ -3903,26 +3901,22 @@ export class TestComponent {
         None,
     );
 
-    // The consts array should contain [3,"heading"] (AttributeMarker.Bindings = 3)
-    // Angular never produces [6,"heading"] (AttributeMarker.I18n = 6) in consts arrays.
+    // Pure property bindings keep Bindings marker (3), NOT I18n marker (6).
+    // The i18n marker on a property binding is a no-op for directive matching.
     assert!(
         result.code.contains(r#"3,"heading""#),
-        "Property binding with i18n marker should produce Bindings AttributeMarker (3), not I18n (6). Output:\n{}",
-        result.code
-    );
-    assert!(
-        !result.code.contains(r#"6,"heading""#),
-        "Property binding with i18n marker should NOT produce I18n AttributeMarker (6). Output:\n{}",
+        "Pure property binding with i18n marker should produce Bindings AttributeMarker (3). Output:\n{}",
         result.code
     );
 }
 
 /// Tests that interpolated attributes with i18n markers (e.g., heading="{{ name }}" i18n-heading)
-/// are extracted as BindingKind::Property (Bindings marker 3), not I18n marker 6.
-/// Angular's compiler never produces I18n AttributeMarker (6) in consts arrays.
+/// are extracted as BindingKind::I18n (marker 6).
+/// Angular's attribute_extraction.ts checks `op.i18nMessage !== null && op.templateKind === null`
+/// and overrides the binding kind to I18n.
 /// This matches the real-world pattern in ClickUp's old-join-team component.
 #[test]
-fn test_i18n_interpolated_attribute_extracted_as_property_kind() {
+fn test_i18n_interpolated_attribute_extracted_as_i18n_kind() {
     let allocator = Allocator::default();
     let source = r#"
 import { Component } from '@angular/core';
@@ -3945,17 +3939,70 @@ export class TestComponent {
         None,
     );
 
-    // The consts array should contain [3,"heading"] (AttributeMarker.Bindings = 3)
-    // not [6,"heading"] (AttributeMarker.I18n = 6)
-    // Angular's compiler never produces I18n marker in consts arrays.
+    // The consts array should contain [6,"heading"] (AttributeMarker.I18n = 6)
+    // because the interpolated attribute has an i18n message (i18n-heading).
     assert!(
-        result.code.contains(r#"3,"heading""#),
-        "Interpolated attribute with i18n marker should produce Bindings AttributeMarker (3), not I18n (6). Output:\n{}",
+        result.code.contains(r#"6,"heading""#),
+        "Interpolated attribute with i18n marker should produce I18n AttributeMarker (6). Output:\n{}",
         result.code
     );
     assert!(
-        !result.code.contains(r#"6,"heading""#),
-        "Interpolated attribute with i18n marker should NOT produce I18n AttributeMarker (6). Output:\n{}",
+        !result.code.contains(r#"3,"heading""#),
+        "Interpolated attribute with i18n marker should NOT produce Bindings AttributeMarker (3). Output:\n{}",
+        result.code
+    );
+}
+
+/// Tests that i18n property bindings in control flow don't produce extra consts entries.
+/// When a property binding has i18n-attr (e.g., [cuTooltip]="expr" i18n-cuTooltip),
+/// the consts entry should use Bindings marker (3), matching the conditional insertion point.
+/// This ensures the entries deduplicate and don't shift downstream consts indices.
+#[test]
+fn test_i18n_property_binding_in_control_flow_no_extra_consts() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: `
+      <div data-test="body" class="body">
+        @if (showTooltip) {
+          <div data-test="inner"
+            [cuTooltip]="someExpr"
+            i18n-cuTooltip="@@copy-id">
+            Content
+          </div>
+        }
+      </div>
+    `,
+    standalone: true,
+})
+export class TestComponent {
+    someExpr = 'hello';
+    showTooltip = true;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    // The consts array should NOT contain [6,"cuTooltip"] because [cuTooltip]="expr"
+    // is a pure property binding, not an interpolated attribute.
+    assert!(
+        !result.code.contains(r#"6,"cuTooltip""#),
+        "Pure property binding in control flow should NOT produce I18n AttributeMarker (6). Output:\n{}",
+        result.code
+    );
+    // Should use Bindings marker (3) instead
+    assert!(
+        result.code.contains(r#"3,"cuTooltip""#),
+        "Pure property binding in control flow should produce Bindings AttributeMarker (3). Output:\n{}",
         result.code
     );
 }
