@@ -1932,8 +1932,14 @@ pub fn compile_class_metadata_sync(
     // and namespace registry), so imported types won't get namespace prefixes.
     // The full transform_angular_file pipeline handles namespace prefixes correctly.
     let mut namespace_registry = oxc_angular_compiler::NamespaceRegistry::new(&allocator);
-    let ctor_params_expr =
-        core_build_ctor_params_metadata(&allocator, class, None, &mut namespace_registry);
+    let empty_import_map = oxc_angular_compiler::ImportMap::default();
+    let ctor_params_expr = core_build_ctor_params_metadata(
+        &allocator,
+        class,
+        None,
+        &mut namespace_registry,
+        &empty_import_map,
+    );
 
     // Build property decorators metadata
     let prop_decorators_expr = core_build_prop_decorators_metadata(&allocator, class);

@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
-    Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier, Statement,
+    Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier, ImportOrExportKind,
+    Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -391,6 +392,10 @@ pub struct ImportInfo<'a> {
     /// True for: `import { AuthService } from "module"`
     /// False for: `import * as core from "module"` (namespace imports)
     pub is_named_import: bool,
+    /// Whether this is a type-only import (`import type { X }` or `import { type X }`).
+    /// Type-only imports are erased at runtime and should not generate namespace
+    /// imports for `setClassMetadata()` type references.
+    pub is_type_only: bool,
 }
 
 /// Map from local identifier name to its import information.
@@ -438,6 +443,9 @@ pub fn build_import_map<'a>(
 
         let default_source_module = import_decl.source.value.clone();
 
+        // `import type { ... }` makes all specifiers type-only
+        let decl_is_type_only = import_decl.import_kind == ImportOrExportKind::Type;
+
         // Process all specifiers
         let Some(specifiers) = &import_decl.specifiers else {
             // Side-effect import: `import 'foo'` - no identifiers to map
@@ -453,14 +461,21 @@ pub fn build_import_map<'a>(
                     // Named imports CAN be reused with bare name
                     let local_name = spec.local.name.clone();
 
+                    // Type-only if the declaration is `import type { ... }` or the specifier
+                    // is `import { type X }` (inline type specifier)
+                    let is_type_only =
+                        decl_is_type_only || spec.import_kind == ImportOrExportKind::Type;
+
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone());
 
-                    import_map
-                        .insert(local_name, ImportInfo { source_module, is_named_import: true });
+                    import_map.insert(
+                        local_name,
+                        ImportInfo { source_module, is_named_import: true, is_type_only },
+                    );
                 }
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                     // Default import: `import DefaultService from "module"`
@@ -473,8 +488,14 @@ pub fn build_import_map<'a>(
                         .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone());
 
-                    import_map
-                        .insert(local_name, ImportInfo { source_module, is_named_import: true });
+                    import_map.insert(
+                        local_name,
+                        ImportInfo {
+                            source_module,
+                            is_named_import: true,
+                            is_type_only: decl_is_type_only,
+                        },
+                    );
                 }
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
                     // Namespace import: `import * as core from "module"`
@@ -487,8 +508,14 @@ pub fn build_import_map<'a>(
                         .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone());
 
-                    import_map
-                        .insert(local_name, ImportInfo { source_module, is_named_import: false });
+                    import_map.insert(
+                        local_name,
+                        ImportInfo {
+                            source_module,
+                            is_named_import: false,
+                            is_type_only: decl_is_type_only,
+                        },
+                    );
                 }
             }
         }
@@ -590,19 +617,17 @@ pub fn transform_angular_file(
     // by tracking the next index and passing it to each component.
     let mut shared_pool_index: u32 = 0;
 
-    // When cross_file_elision is enabled, resolve import paths through barrel exports
-    // to get the actual source file paths. This is merged with any externally-provided
-    // resolved_imports from the options.
+    // When cross_file_elision is enabled, collect type-only information for each import
+    // by checking if the exported symbol is an interface or type alias. This is separate
+    // from barrel resolution to avoid changing namespace import paths.
     #[cfg(feature = "cross_file_elision")]
-    let resolved_imports_for_build = if options.cross_file_elision {
+    let cross_file_type_only: FxHashMap<String, bool> = if options.cross_file_elision {
         let file_path = std::path::Path::new(path);
         let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
 
         if let Some(base) = base_dir {
             let mut analyzer = CrossFileAnalyzer::new(base, options.tsconfig_path.as_deref());
-
-            // Build resolved imports map by tracing each named import through barrel exports
-            let mut resolved = options.resolved_imports.clone().unwrap_or_default();
+            let mut type_only: FxHashMap<String, bool> = FxHashMap::default();
 
             for stmt in &parser_ret.program.body {
                 let Statement::ImportDeclaration(import_decl) = stmt else {
@@ -619,40 +644,49 @@ pub fn transform_angular_file(
                         let local_name = spec.local.name.as_str();
                         let imported_name = spec.imported.name().as_str();
 
-                        // Skip if already resolved externally
-                        if resolved.contains_key(local_name) {
-                            continue;
-                        }
-
-                        // Try to resolve the import path through barrel exports
-                        if let Some(resolved_path) =
-                            analyzer.resolve_import_source_path(source, imported_name, file_path)
-                        {
-                            // Only add if the resolved path is different from the original
-                            if resolved_path != source {
-                                resolved.insert(local_name.to_string(), resolved_path);
-                            }
+                        // Check if this import is type-only using the original import path.
+                        // Resolves the file and checks if the exported symbol is an interface
+                        // or type alias. Unresolvable imports return false (conservative).
+                        if analyzer.is_type_only_import(source, imported_name, file_path) {
+                            type_only.insert(local_name.to_string(), true);
                         }
                     }
                 }
             }
 
-            Some(resolved)
+            type_only
         } else {
-            options.resolved_imports.clone()
+            FxHashMap::default()
         }
     } else {
-        options.resolved_imports.clone()
+        FxHashMap::default()
     };
 
+    // Build import map from import declarations using ORIGINAL import paths.
+    // Only externally-provided resolved_imports (e.g., for host directives) override paths.
+    // Barrel-resolved paths are NOT used here to avoid changing namespace import paths
+    // from what Angular's compiler would produce.
     #[cfg(not(feature = "cross_file_elision"))]
-    let resolved_imports_for_build = options.resolved_imports.clone();
-
-    // Build import map from import declarations
-    // This maps imported identifiers to their source modules
-    // When resolved_imports is provided, it overrides barrel export paths with actual file paths
     let import_map =
-        build_import_map(allocator, &parser_ret.program.body, resolved_imports_for_build.as_ref());
+        build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
+
+    #[cfg(feature = "cross_file_elision")]
+    let mut import_map =
+        build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
+
+    // Apply cross-file type-only information to the import_map.
+    // This marks imports that resolve to interfaces or type aliases as type-only,
+    // even when they don't use `import type` syntax. This is needed because many
+    // codebases import interfaces with regular `import { X }` syntax, and without
+    // a TypeScript type checker we cannot otherwise distinguish interfaces from classes.
+    #[cfg(feature = "cross_file_elision")]
+    for (name, is_type_only) in &cross_file_type_only {
+        if let Some(info) = import_map.get_mut(name.as_str()) {
+            if *is_type_only {
+                info.is_type_only = true;
+            }
+        }
+    }
 
     // 2. Walk AST to find @Component decorated classes and extract metadata
     for stmt in &parser_ret.program.body {
@@ -795,6 +829,7 @@ pub fn transform_angular_file(
                                             class,
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
+                                            &import_map,
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
                                             allocator, class,
@@ -4013,18 +4048,184 @@ export class ButtonComponent {}
             result.code
         );
 
-        // The output should contain the RESOLVED path, not the barrel path
-        // i.e., `../a11y/aria-disable.directive` not `../a11y`
+        // The output should use the ORIGINAL import path (barrel path), matching Angular's behavior.
+        // Angular's compiler uses original import paths, not barrel-resolved paths.
         assert!(
-            result.code.contains("'../a11y/aria-disable.directive'"),
-            "Code should import from resolved path '../a11y/aria-disable.directive', but got:\n{}",
+            result.code.contains("'../a11y'"),
+            "Code should import from original barrel path '../a11y', but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_inject_decorator_with_different_type_module_generates_namespace_import() {
+        // When @Inject(TOKEN) is used and the type annotation comes from a different module
+        // than the token, setClassMetadata should emit a namespace-prefixed type reference
+        // and generate the namespace import for the type's module.
+        //
+        // Example: @Inject(DARK_THEME) darkTheme$: Observable<boolean>
+        //   - Token: DARK_THEME from '@app/theme'
+        //   - Type: Observable from 'rxjs'
+        //   - Expected: { type: i2.Observable, decorators: [{ type: Inject, args: [DARK_THEME] }] }
+        //   - Expected import: import * as i2 from "rxjs"
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component, Inject } from '@angular/core';
+import { Observable } from 'rxjs';
+import { DARK_THEME } from '@app/theme';
+
+@Component({
+    selector: 'app-test',
+    template: '<div></div>'
+})
+export class TestComponent {
+    constructor(
+        @Inject(DARK_THEME) protected readonly darkTheme$: Observable<boolean>,
+    ) {}
+}
+"#;
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+
+        let result =
+            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+        // Should generate namespace import for rxjs (i1 because i0=@angular/core;
+        // DARK_THEME uses bare name via @Inject so @app/theme doesn't get a namespace)
+        assert!(
+            result.code.contains("import * as i1 from 'rxjs'"),
+            "Should generate namespace import for rxjs, but got:\n{}",
             result.code
         );
 
-        // The output should NOT contain a namespace import for just the barrel path
+        // The setClassMetadata ctor params should reference i1.Observable
         assert!(
-            !result.code.contains("import * as i1 from '../a11y';"),
-            "Code should NOT have namespace import from barrel path '../a11y', but got:\n{}",
+            result.code.contains("i1.Observable"),
+            "setClassMetadata should use namespace-prefixed Observable, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_inject_decorator_with_service_type_from_different_module() {
+        // Similar to the Observable case but with a service type:
+        // @Inject(TOKEN) service: AbstractService
+        // where TOKEN is from one module and AbstractService is from another.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component, Inject } from '@angular/core';
+import { AbstractService, SERVICE_TOKEN } from './service';
+import { Store } from '@ngrx/store';
+
+@Component({
+    selector: 'app-test',
+    template: '<div></div>'
+})
+export class TestComponent {
+    constructor(
+        @Inject(SERVICE_TOKEN) private readonly service: AbstractService,
+        private readonly store: Store,
+    ) {}
+}
+"#;
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+
+        let result =
+            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+        // The type 'AbstractService' is imported from './service' and should get a namespace import
+        // even though the @Inject token 'SERVICE_TOKEN' is also from './service'.
+        // The factory generates i1 for @ngrx/store (Store), so ./service should get i2
+        // for the metadata type reference.
+        assert!(
+            result.code.contains("i1.Store") || result.code.contains("i2.Store"),
+            "Should generate namespace-prefixed Store reference, but got:\n{}",
+            result.code
+        );
+
+        // AbstractService should get a namespace-prefixed reference in metadata
+        // (the exact index depends on registration order, but it must be namespace-prefixed)
+        assert!(
+            result.code.contains("i1.AbstractService")
+                || result.code.contains("i2.AbstractService"),
+            "setClassMetadata should use namespace-prefixed AbstractService, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_inject_decorator_with_type_only_import_skips_namespace() {
+        // When the type annotation is from a type-only import (`import type { X }`),
+        // setClassMetadata should NOT generate a namespace import for it because
+        // type-only imports are erased at runtime and don't resolve to values.
+        // Angular's compiler uses typeToValue() which returns null for interfaces/types.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component, Inject, InjectionToken } from '@angular/core';
+import type { SomeInterface } from './some.interface';
+
+const MY_TOKEN = new InjectionToken<SomeInterface>('my-token');
+
+@Component({
+    selector: 'app-test',
+    template: '<div></div>'
+})
+export class TestComponent {
+    constructor(
+        @Inject(MY_TOKEN) private readonly data: SomeInterface,
+    ) {}
+}
+"#;
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+
+        let result =
+            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+        // Should NOT generate a namespace import for ./some.interface
+        // (the original `import type` statement may still appear, but no `import * as iN`)
+        assert!(
+            !result.code.contains("import * as i1 from './some.interface'"),
+            "Should NOT generate namespace import for type-only import, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_inject_decorator_with_inline_type_specifier_skips_namespace() {
+        // Same as above but with inline type specifier: `import { type X } from '...'`
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component, Inject, InjectionToken } from '@angular/core';
+import { type SomeInterface } from './some.interface';
+
+const MY_TOKEN = new InjectionToken<SomeInterface>('my-token');
+
+@Component({
+    selector: 'app-test',
+    template: '<div></div>'
+})
+export class TestComponent {
+    constructor(
+        @Inject(MY_TOKEN) private readonly data: SomeInterface,
+    ) {}
+}
+"#;
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+
+        let result =
+            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+        // Should NOT generate a namespace import for ./some.interface
+        assert!(
+            !result.code.contains("import * as i1 from './some.interface'"),
+            "Should NOT generate namespace import for inline type-only import, but got:\n{}",
             result.code
         );
     }

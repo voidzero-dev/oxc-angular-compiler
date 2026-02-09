@@ -10,7 +10,7 @@ use oxc_ast::ast::{
 };
 use oxc_span::Atom;
 
-use crate::component::{NamespaceRegistry, R3DependencyMetadata};
+use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
     LiteralMapExpr, LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
@@ -121,6 +121,7 @@ pub fn build_ctor_params_metadata<'a>(
     class: &Class<'a>,
     constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    import_map: &ImportMap<'a>,
 ) -> Option<OutputExpression<'a>> {
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
@@ -144,6 +145,7 @@ pub fn build_ctor_params_metadata<'a>(
             param,
             constructor_deps.and_then(|deps| deps.get(i)),
             namespace_registry,
+            import_map,
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -278,16 +280,17 @@ pub fn build_prop_decorators_metadata<'a>(
 /// TypeScript type annotations are erased at runtime, so imported types need namespace
 /// imports (e.g., `i1.SomeService`) to be available as runtime values.
 ///
-/// The `dep.token_source_module` tracks where the injection token comes from. We only
-/// use it for namespace prefix when the type annotation name matches the dep token name,
-/// confirming that the dep's source module applies to the type. When they differ
-/// (e.g., `@Inject(DOCUMENT) doc: Document`), we fall back to bare name since the type
-/// may be a global or from a different module.
+/// When the type annotation name matches the dep token name, the dep's `token_source_module`
+/// is used directly. When they differ (e.g., `@Inject(DARK_THEME) theme$: Observable<boolean>`),
+/// we look up the type annotation name in the `import_map` to find its source module
+/// independently. This matches Angular's behavior where type references in `setClassMetadata`
+/// always use namespace-prefixed imports regardless of whether `@Inject` is used.
 fn build_param_type_expression<'a>(
     allocator: &'a Allocator,
     param: &FormalParameter<'a>,
     dep: Option<&R3DependencyMetadata<'a>>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    import_map: &ImportMap<'a>,
 ) -> Option<OutputExpression<'a>> {
     // Extract the type name from the type annotation
     let type_name = extract_param_type_name(param);
@@ -323,7 +326,39 @@ fn build_param_type_expression<'a>(
         }
     }
 
+    // When the type annotation differs from the dep token (e.g., @Inject(TOKEN) param: SomeType),
+    // look up the type annotation name in the import_map to find its source module independently.
+    // Only generate namespace-prefixed references for non-type-only imports, since type-only
+    // imports (`import type { X }` / `import { type X }`) are erased at runtime and don't
+    // resolve to values. Angular's compiler uses typeToValue() which skips interfaces and
+    // type aliases; checking is_type_only is the closest heuristic without a full type checker.
+    if let Some(ref tn) = type_name {
+        if let Some(import_info) = import_map.get(tn) {
+            if import_info.is_type_only {
+                // Type-only imports are erased at runtime — emit undefined.
+                return None;
+            }
+            let namespace = namespace_registry.get_or_assign(&import_info.source_module);
+            return Some(OutputExpression::ReadProp(Box::new_in(
+                ReadPropExpr {
+                    receiver: Box::new_in(
+                        OutputExpression::ReadVar(Box::new_in(
+                            ReadVarExpr { name: namespace, source_span: None },
+                            allocator,
+                        )),
+                        allocator,
+                    ),
+                    name: tn.clone(),
+                    optional: false,
+                    source_span: None,
+                },
+                allocator,
+            )));
+        }
+    }
+
     // Fall back to extracting the bare type name from the type annotation
+    // (for local/global types not in the import_map)
     extract_param_type_expression(allocator, param)
 }
 

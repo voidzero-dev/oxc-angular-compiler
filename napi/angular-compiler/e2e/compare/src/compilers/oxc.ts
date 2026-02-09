@@ -114,6 +114,8 @@ export interface OxcFullFileRawOutput {
 export interface OxcFullFileRawOptions {
   /** Pre-resolved external resources (templates/styles) */
   resolvedResources?: ResolvedResources | null
+  /** Path to tsconfig.json for resolving path aliases in cross-file analysis */
+  tsconfigPath?: string
 }
 
 /**
@@ -143,6 +145,8 @@ export function compileWithOxcFullFileRaw(
     // Enable cross-file analysis for barrel export tracing
     crossFileElision: true,
     baseDir: path.dirname(filePath),
+    // Pass tsconfig for resolving monorepo path aliases (e.g., @cu/*)
+    tsconfigPath: options?.tsconfigPath,
     // Enable class metadata for TestBed support (matches Angular's output)
     emitClassMetadata: true,
   }
@@ -300,6 +304,8 @@ export async function compileClassMetadataWithOxc(
 export interface OxcProjectOptions {
   /** Pre-resolved resources (templates/styles) by file path */
   resolvedResourcesByFile?: Map<string, PlainResolvedResources>
+  /** Path to tsconfig.json for resolving path aliases in cross-file analysis */
+  tsconfigPath?: string
 }
 
 /**
@@ -337,6 +343,7 @@ export function compileProjectWithOxc(
         const plainResources = options?.resolvedResourcesByFile?.get(filePath)
         const compiled = compileWithOxcFullFileRaw(source, filePath, {
           resolvedResources: plainResources,
+          tsconfigPath: options?.tsconfigPath,
         })
 
         if (compiled.error) {

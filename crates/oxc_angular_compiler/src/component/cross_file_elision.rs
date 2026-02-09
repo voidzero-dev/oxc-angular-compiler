@@ -93,18 +93,18 @@ impl CrossFileAnalyzer {
         import_name: &str,
         from_file: &Path,
     ) -> bool {
-        // Skip node_modules - assume they export values (conservative)
-        if import_source.starts_with('@') || !import_source.starts_with('.') {
-            // Package imports - check cache first
-            // For @angular/core, @bitwarden/common, etc., we cannot easily analyze
-            // Return false (conservative - assume value) unless we've already cached it
-            return false;
-        }
-
         // Resolve the import path to a file
         let resolved = match from_file.parent() {
             Some(parent) => match self.resolver.resolve(parent, import_source) {
-                Ok(resolution) => resolution.full_path().to_string_lossy().to_string(),
+                Ok(resolution) => {
+                    let full_path = resolution.full_path();
+                    // Skip node_modules - pre-compiled packages don't have interface
+                    // declarations visible in their source. Assume value (conservative).
+                    if full_path.components().any(|c| c.as_os_str() == "node_modules") {
+                        return false;
+                    }
+                    full_path.to_string_lossy().to_string()
+                }
                 Err(_) => return false, // Cannot resolve - assume value (conservative)
             },
             None => return false,

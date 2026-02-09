@@ -206,6 +206,7 @@ async function compareFilesProjectWide(
   const oxcStartTime = performance.now()
   const oxcResult = compileProjectWithOxc(filePaths, fileContents, {
     resolvedResourcesByFile,
+    tsconfigPath: config.tsconfigPath,
   })
   const oxcDuration = performance.now() - oxcStartTime
   console.log(
