@@ -174,20 +174,6 @@ fn needs_temporary_in_safe_access(expr: &IrExpression<'_>) -> bool {
             needs_temporary_in_safe_access(&keyed.receiver)
                 || needs_temporary_in_safe_access(&keyed.key)
         }
-        // Binary operators need to check both operands
-        IrExpression::Binary(bin) => {
-            needs_temporary_in_safe_access(&bin.lhs) || needs_temporary_in_safe_access(&bin.rhs)
-        }
-        // Ternary needs to check all branches
-        IrExpression::Ternary(ternary) => {
-            needs_temporary_in_safe_access(&ternary.condition)
-                || needs_temporary_in_safe_access(&ternary.true_expr)
-                || needs_temporary_in_safe_access(&ternary.false_expr)
-        }
-        // Not expression needs to check operand
-        IrExpression::Not(not) => needs_temporary_in_safe_access(&not.expr),
-        // Unary operator needs to check operand
-        IrExpression::Unary(unary) => needs_temporary_in_safe_access(&unary.expr),
         // Check AST expressions for function calls
         IrExpression::Ast(ast_expr) => needs_temporary_in_ast_expression(ast_expr),
         // Parenthesized expressions need to check their inner expression

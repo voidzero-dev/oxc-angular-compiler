@@ -114,8 +114,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
                             type_only_specifiers.insert(name.clone());
                         }
                     }
-                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(_) => {
-                        // Namespace imports are generally kept (hard to determine type-only usage)
+                    ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
+                        // Check if the namespace import is type-only using semantic analysis.
+                        // e.g., `import * as moment from 'moment'` where `moment` is only
+                        // used in type annotations like `moment.Moment`.
+                        if Self::is_type_only_import(&spec.local, semantic) {
+                            type_only_specifiers.insert(spec.local.name.clone());
+                        }
                     }
                 }
             }
@@ -587,9 +592,25 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     }
                 }
             }
-            Expression::ArrowFunctionExpression(_) => {
-                // For arrow functions, we don't need to deeply analyze the body
-                // since we're only checking decorator positions
+            Expression::ArrowFunctionExpression(arrow) => {
+                // Arrow function bodies may contain value references, e.g.,
+                // `forwardRef(() => TagPickerComponent)` in Component imports.
+                for stmt in &arrow.body.statements {
+                    match stmt {
+                        Statement::ExpressionStatement(expr_stmt) => {
+                            Self::collect_value_uses_from_expr(
+                                &expr_stmt.expression,
+                                other_value_uses,
+                            );
+                        }
+                        Statement::ReturnStatement(ret) => {
+                            if let Some(arg) = &ret.argument {
+                                Self::collect_value_uses_from_expr(arg, other_value_uses);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
             _ => {}
         }
@@ -701,13 +722,24 @@ impl<'a> ImportElisionAnalyzer<'a> {
 /// Filter import declarations to remove type-only specifiers.
 ///
 /// Returns a new source string with type-only import specifiers removed.
-/// Entire import declarations are removed if all their specifiers are type-only.
+/// Entire import declarations are removed if all their specifiers are type-only,
+/// or if the import has no specifiers at all (`import {} from 'module'`).
 pub fn filter_imports<'a>(
     source: &str,
     program: &Program<'a>,
     analyzer: &ImportElisionAnalyzer<'a>,
 ) -> String {
-    if !analyzer.has_type_only_imports() {
+    // Check if there are empty imports that need removal (import {} from '...')
+    let has_empty_imports = program.body.iter().any(|stmt| {
+        if let Statement::ImportDeclaration(import_decl) = stmt {
+            if let Some(specifiers) = &import_decl.specifiers {
+                return specifiers.is_empty();
+            }
+        }
+        false
+    });
+
+    if !analyzer.has_type_only_imports() && !has_empty_imports {
         return source.to_string();
     }
 
@@ -740,8 +772,8 @@ pub fn filter_imports<'a>(
             !analyzer.should_elide(name)
         });
 
-        if removed.is_empty() {
-            // All specifiers kept, no changes needed
+        if removed.is_empty() && !kept.is_empty() {
+            // All specifiers kept and at least one exists, no changes needed
             continue;
         }
 
@@ -1868,6 +1900,106 @@ class MyComponent {
         assert!(
             !type_only.contains("myKey"),
             "myKey in parenthesized type literal should be preserved"
+        );
+    }
+
+    // =========================================================================
+    // Regression tests for ClickUp import elision mismatches
+    // =========================================================================
+
+    #[test]
+    fn test_namespace_import_type_only_should_be_elided() {
+        // Reproduces: bookmark.component.ts
+        // `import * as moment from 'moment'` where `moment` is only used as
+        // `moment.Moment` in type annotations should be elided.
+        let source = r#"
+import * as moment from 'moment';
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-bookmark' })
+class BookmarkComponent {
+    dueDate: moment.Moment = null;
+}
+"#;
+        let type_only = analyze_source(source);
+        // `moment` is only referenced in type position (moment.Moment)
+        // so it should be marked for elision
+        assert!(
+            type_only.contains("moment"),
+            "Namespace import `moment` used only in type annotation `moment.Moment` should be elided"
+        );
+    }
+
+    #[test]
+    fn test_namespace_import_with_value_usage_preserved() {
+        // Namespace import that IS used at runtime should be preserved
+        let source = r#"
+import * as moment from 'moment';
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-test' })
+class TestComponent {
+    now = moment();
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("moment"),
+            "Namespace import `moment` used in value expression `moment()` should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_forward_ref_arrow_function_preserves_value_use() {
+        // Reproduces: tags.component.ts
+        // `forwardRef(() => TagPickerComponent)` in @Component imports array
+        // uses TagPickerComponent as a value inside an arrow function.
+        // The arrow function body MUST be traversed to find value uses.
+        let source = r#"
+import { Component, forwardRef, Inject, Optional, SkipSelf } from '@angular/core';
+import { TagPickerComponent } from './tag-picker/tag-picker.component';
+
+@Component({
+    selector: 'app-tags',
+    imports: [forwardRef(() => TagPickerComponent)]
+})
+class TagsComponent {
+    constructor(
+        @Optional()
+        @SkipSelf()
+        @Inject(TagPickerComponent)
+        readonly tagPickerComponent: TagPickerComponent,
+    ) {}
+}
+"#;
+        let type_only = analyze_source(source);
+        // TagPickerComponent is used as a value in forwardRef(() => TagPickerComponent)
+        // and as @Inject(TagPickerComponent) argument. It must NOT be elided.
+        assert!(
+            !type_only.contains("TagPickerComponent"),
+            "TagPickerComponent used in forwardRef arrow function and @Inject should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_empty_import_should_be_elided() {
+        // Reproduces: users-table.component.ts
+        // `import {} from '@cu/teams-pulse/types'` is an empty import that
+        // should be completely removed (no specifiers to keep).
+        let source = r#"
+import { Component } from '@angular/core';
+import {} from '@cu/teams-pulse/types';
+
+@Component({ selector: 'app-users-table' })
+class UsersTableComponent {}
+"#;
+        let filtered = filter_source(source);
+
+        // The empty import should be removed entirely
+        assert!(
+            !filtered.contains("@cu/teams-pulse/types"),
+            "Empty import `import {{}} from '@cu/teams-pulse/types'` should be removed.\nFiltered:\n{}",
+            filtered
         );
     }
 }

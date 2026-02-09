@@ -312,6 +312,9 @@ impl CrossFileAnalyzer {
             exports.get(export_name).cloned()
         };
 
+        // If not found directly, check star exports (export * from './other')
+        let export_info = export_info.or_else(|| self.find_in_star_exports(file_path, export_name));
+
         let Some(export_info) = export_info else {
             return false;
         };
@@ -919,5 +922,56 @@ export { doSomething } from './utils';
         let mut analyzer = CrossFileAnalyzer::new(dir.path(), None);
         let resolved = analyzer.resolve_import_source_path("./index", "RenamedExport", &main_file);
         assert_eq!(resolved, Some("./original".to_string()));
+    }
+
+    /// Regression test for quick-access.component.ts:
+    /// `import { WIDGET_CONTROL, WidgetControlService } from '../../widget-control'`
+    /// where `widget-control/index.ts` has `export * from './widget-control.service'`
+    /// and `widget-control.service.ts` has `export interface WidgetControlService { ... }`
+    ///
+    /// The interface should be detected as type-only through the barrel star export chain.
+    #[test]
+    fn test_interface_through_star_export_barrel_is_type_only() {
+        let dir = TempDir::new().unwrap();
+        // widget-control/widget-control.service.ts — interface (type-only)
+        create_test_file(
+            dir.path(),
+            "widget-control/widget-control.service.ts",
+            "export interface WidgetControlService { hideWidget(widgetId: string): void; }",
+        );
+        // widget-control/widget-control.token.ts — const (runtime value)
+        create_test_file(
+            dir.path(),
+            "widget-control/widget-control.token.ts",
+            "import { InjectionToken } from '@angular/core';\nexport const WIDGET_CONTROL = new InjectionToken('WidgetControlService');",
+        );
+        // widget-control/index.ts — barrel re-export via star
+        create_test_file(
+            dir.path(),
+            "widget-control/index.ts",
+            "export * from './widget-control.service';\nexport * from './widget-control.token';",
+        );
+
+        let main_file = dir.path().join("quick-access/quick-access/main.ts");
+        // Create parent dir so the path is valid
+        std::fs::create_dir_all(main_file.parent().unwrap()).unwrap();
+
+        let mut analyzer = CrossFileAnalyzer::new(dir.path(), None);
+
+        // WidgetControlService is an interface — should be type-only
+        assert!(
+            analyzer.is_type_only_import(
+                "../../widget-control",
+                "WidgetControlService",
+                &main_file
+            ),
+            "WidgetControlService interface should be detected as type-only through star export barrel"
+        );
+
+        // WIDGET_CONTROL is a const — should NOT be type-only
+        assert!(
+            !analyzer.is_type_only_import("../../widget-control", "WIDGET_CONTROL", &main_file),
+            "WIDGET_CONTROL const should NOT be type-only"
+        );
     }
 }
