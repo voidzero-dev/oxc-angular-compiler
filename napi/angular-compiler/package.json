@@ -51,7 +51,7 @@
   "scripts": {
     "artifacts": "napi artifacts",
     "build-dev": "oxnode build.ts --esm --platform --features allocator",
-    "build-test": "pnpm run build-dev --features cross_file_elision",
+    "build-test": "oxnode build.ts --esm --platform --features allocator,cross_file_elision && pnpm run build:ts",
     "build": "pnpm run build:native && pnpm run build:ts",
     "build:native": "pnpm run build-dev --release",
     "build:ts": "tsdown",
