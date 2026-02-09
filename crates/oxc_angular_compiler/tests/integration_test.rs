@@ -1156,6 +1156,20 @@ fn test_safe_call_in_listener_inside_conditional() {
     insta::assert_snapshot!("safe_call_in_listener_inside_conditional", js);
 }
 
+#[test]
+fn test_pipe_in_binary_with_safe_property_read() {
+    // Pattern from EmailCommentComponent: (comment$ | async || comment)?.new_mentioned_thread_count
+    // When a pipe binding is inside a binary expression that is the receiver of a safe property read,
+    // the compiler must generate a temporary variable to avoid evaluating the pipe twice.
+    // TypeScript Angular compiler produces: (tmp = pipeBind(...) || fallback) == null ? null : tmp.prop
+    // Without the fix, OXC duplicates the pipe call in both the guard and the access expression.
+    let js = compile_template_to_js(
+        r#"<div>{{ ((data$ | async) || fallback)?.name }}</div>"#,
+        "TestComponent",
+    );
+    insta::assert_snapshot!("pipe_in_binary_with_safe_property_read", js);
+}
+
 // ============================================================================
 // Event Modifier Tests
 // ============================================================================
