@@ -507,8 +507,23 @@ fn reify_create_op<'a>(
         CreateOp::Defer(defer) => {
             // Emit defer instruction for @defer
             let slot = defer.slot.map(|s| s.0).unwrap_or(0);
-            // Take ownership of resolver_fn since OutputExpression doesn't implement Clone
-            // Use config indices (const pool slots) instead of raw timing values
+            // Extract const indices from resolved ConstReference expressions.
+            // By this point, Phase 53 (collectConstExpressions) has replaced
+            // ConstCollectedExpr with ConstReference(index).
+            let loading_config = defer.loading_config.as_ref().and_then(|expr| {
+                if let crate::ir::expression::IrExpression::ConstReference(cr) = expr.as_ref() {
+                    Some(cr.index)
+                } else {
+                    None
+                }
+            });
+            let placeholder_config = defer.placeholder_config.as_ref().and_then(|expr| {
+                if let crate::ir::expression::IrExpression::ConstReference(cr) = expr.as_ref() {
+                    Some(cr.index)
+                } else {
+                    None
+                }
+            });
             Some(create_defer_stmt(
                 allocator,
                 slot,
@@ -517,8 +532,8 @@ fn reify_create_op<'a>(
                 defer.loading_slot.map(|s| s.0),
                 defer.placeholder_slot.map(|s| s.0),
                 defer.error_slot.map(|s| s.0),
-                defer.loading_config,
-                defer.placeholder_config,
+                loading_config,
+                placeholder_config,
                 defer.flags,
             ))
         }

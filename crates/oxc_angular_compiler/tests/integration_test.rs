@@ -4619,3 +4619,49 @@ fn test_i18n_nested_icu_with_interpolations_inside_elements() {
 
     insta::assert_snapshot!("i18n_nested_icu_with_interpolations_inside_elements", js);
 }
+
+/// Tests that @defer loading timer consts are ordered AFTER i18n consts in the consts array.
+///
+/// Angular's TS compiler wraps defer timer configs in ConstCollectedExpr (phase 19), which are
+/// resolved later in collectConstExpressions (phase 53) — AFTER i18n consts are added (phase 52).
+/// This means i18n consts always appear before defer timer consts in the consts array.
+///
+/// Previously, OXC directly called job.add_const() in the defer_configs phase, placing the timer
+/// const [100, null] at the front of the array and shifting all i18n indices by +1.
+///
+/// The template pattern: an i18n message + @defer with @loading(minimum 100ms).
+/// Expected consts ordering: [i18n_0, [100, null], ...]
+/// Bug consts ordering:      [[100, 0], i18n_0, ...]
+#[test]
+fn test_defer_loading_timer_consts_after_i18n_consts() {
+    let js = compile_template_to_js(
+        r#"<span i18n="@@my-label">Hello</span>
+@defer (on viewport; prefetch on idle) {
+  <div>Deferred content</div>
+} @loading (minimum 100ms) {
+  <div>Loading...</div>
+}"#,
+        "TestComponent",
+    );
+
+    // The i18n message should reference const index 0 (i18n_0 is first in consts array)
+    // The @defer instruction should reference the timer config at a later index
+    //
+    // NG expected output has:
+    //   consts: [...] => return [i18n_0, [100, null], ...]
+    //   i18n(N, 0)       — i18n at const index 0
+    //   defer(M, ..., 1, ..., timerScheduling)  — timer config at const index 1
+    //
+    // The bug would produce:
+    //   consts: [...] => return [[100, 0], i18n_0, ...]
+    //   i18n(N, 1)       — i18n at const index 1 (wrong!)
+    //   defer(M, ..., 0, ..., timerScheduling)  — timer config at const index 0 (wrong!)
+
+    // Check that i18n references const index 0 (not 1)
+    assert!(
+        js.contains("i18n(1,0)") || js.contains("i18n(1, 0)"),
+        "i18n should reference const index 0 (before defer timer const). Output:\n{js}"
+    );
+
+    insta::assert_snapshot!("defer_loading_timer_consts_after_i18n_consts", js);
+}

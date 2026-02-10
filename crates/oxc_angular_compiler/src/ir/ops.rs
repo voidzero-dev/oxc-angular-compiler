@@ -1017,12 +1017,12 @@ pub struct DeferOp<'a> {
     pub loading_minimum_time: Option<u32>,
     /// Loading after time.
     pub loading_after_time: Option<u32>,
-    /// Placeholder config const index (points to [minimumTime] in consts array).
-    /// Set by defer_configs phase after adding to constant pool.
-    pub placeholder_config: Option<u32>,
-    /// Loading config const index (points to [minimumTime, afterTime] in consts array).
-    /// Set by defer_configs phase after adding to constant pool.
-    pub loading_config: Option<u32>,
+    /// Placeholder config expression (wraps [minimumTime] as ConstCollectedExpr).
+    /// Set by defer_configs phase; resolved to ConstReference by const collection phase.
+    pub placeholder_config: Option<Box<'a, IrExpression<'a>>>,
+    /// Loading config expression (wraps [minimumTime, afterTime] as ConstCollectedExpr).
+    /// Set by defer_configs phase; resolved to ConstReference by const collection phase.
+    pub loading_config: Option<Box<'a, IrExpression<'a>>>,
     /// Resolver function expression (after constant pool processing).
     /// This is the shared function reference created by resolve_defer_deps_fns.
     /// Corresponds to `resolverFn` in Angular TS.

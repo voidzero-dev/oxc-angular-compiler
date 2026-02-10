@@ -2147,6 +2147,20 @@ pub fn transform_expressions_in_create_op<'a, F>(
                 }
             }
         }
+        // Defer: transform loadingConfig and placeholderConfig expressions.
+        // Matches Angular TS expression.ts lines 1241-1251:
+        //   case OpKind.Defer:
+        //     if (op.loadingConfig !== null) { op.loadingConfig = transform(op.loadingConfig); }
+        //     if (op.placeholderConfig !== null) { op.placeholderConfig = transform(op.placeholderConfig); }
+        //     if (op.resolverFn !== null) { op.resolverFn = transform(op.resolverFn); }
+        CreateOp::Defer(op) => {
+            if let Some(ref mut config) = op.loading_config {
+                transform_expressions_in_expression(config.as_mut(), transform, flags);
+            }
+            if let Some(ref mut config) = op.placeholder_config {
+                transform_expressions_in_expression(config.as_mut(), transform, flags);
+            }
+        }
         // Operations without expressions (expressions are in the UPDATE op now)
         CreateOp::Conditional(_) => {}
         // Operations without expressions
@@ -2162,7 +2176,6 @@ pub fn transform_expressions_in_create_op<'a, F>(
         | CreateOp::EnableBindings(_)
         | CreateOp::Text(_)
         | CreateOp::Pipe(_)
-        | CreateOp::Defer(_)
         | CreateOp::I18nMessage(_)
         | CreateOp::Namespace(_)
         | CreateOp::ProjectionDef(_)
@@ -2329,6 +2342,15 @@ pub fn visit_expressions_in_create_op<'a, F>(
                 }
             }
         }
+        // Defer: visit loadingConfig and placeholderConfig expressions.
+        CreateOp::Defer(op) => {
+            if let Some(ref config) = op.loading_config {
+                visit_expressions_in_expression(config.as_ref(), visitor, flags);
+            }
+            if let Some(ref config) = op.placeholder_config {
+                visit_expressions_in_expression(config.as_ref(), visitor, flags);
+            }
+        }
         // Operations without expressions
         CreateOp::Conditional(_)
         | CreateOp::ListEnd(_)
@@ -2343,7 +2365,6 @@ pub fn visit_expressions_in_create_op<'a, F>(
         | CreateOp::EnableBindings(_)
         | CreateOp::Text(_)
         | CreateOp::Pipe(_)
-        | CreateOp::Defer(_)
         | CreateOp::I18nMessage(_)
         | CreateOp::Namespace(_)
         | CreateOp::ProjectionDef(_)
