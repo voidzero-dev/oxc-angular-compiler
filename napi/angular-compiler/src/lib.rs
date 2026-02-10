@@ -2535,7 +2535,7 @@ pub struct OptimizeResult {
 /// # Example
 ///
 /// ```typescript
-/// import { optimizeAngularPackageSync } from '@aspect/angular-compiler';
+/// import { optimizeAngularPackageSync } from '@voidzero-dev/angular-compiler';
 ///
 /// const result = optimizeAngularPackageSync(
 ///   `let MyComponent = class MyComponent {};

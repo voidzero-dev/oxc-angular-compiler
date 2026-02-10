@@ -98,7 +98,7 @@ The `vite.config.ts` includes:
 
 | Aspect           | Vite/OXC            | Webpack/@ngtools              |
 | ---------------- | ------------------- | ----------------------------- |
-| Bundler          | Vite (esbuild)      | Webpack                       |
+| Bundler          | Vite (Rolldown)     | Webpack                       |
 | Angular Compiler | OXC (Rust)          | @ngtools/webpack (TypeScript) |
 | CSS Processing   | Vite's CSS pipeline | MiniCssExtractPlugin          |
 | Source Maps      | Vite native         | Webpack devtool               |

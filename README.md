@@ -190,7 +190,7 @@ Pre-built binaries are available for:
 
 ```bash
 # Clone the repository
-git clone https://github.com/aspect-dev/oxc-angular-compiler.git
+git clone https://github.com/voidzero-dev/oxc-angular-compiler.git
 cd oxc-angular-compiler
 
 # Install dependencies
