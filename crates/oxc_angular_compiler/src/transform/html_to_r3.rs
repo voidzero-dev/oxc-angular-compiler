@@ -1377,6 +1377,14 @@ impl<'a> HtmlToR3Transform<'a> {
                         },
                     );
                 }
+                HtmlNode::Element(element) => {
+                    // Recurse into element children to extract interpolations inside HTML
+                    // elements like `<strong>{{ expr }}</strong>` within ICU branches.
+                    // Angular's i18n_parser.ts visitElement recursively visits children,
+                    // so interpolations inside elements are correctly registered as
+                    // placeholders. Without this recursion, these interpolations are lost.
+                    self.extract_placeholders_from_nodes(&element.children, placeholders, vars);
+                }
                 _ => {}
             }
         }
