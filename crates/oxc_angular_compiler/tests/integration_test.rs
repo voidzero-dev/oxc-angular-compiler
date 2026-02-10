@@ -757,6 +757,36 @@ fn test_ng_content_select() {
 }
 
 #[test]
+fn test_ng_content_i18n_attr_not_in_projection() {
+    // Verify i18n/i18n-* attrs are NOT included in ng-content projection attributes.
+    // Angular's I18nMetaVisitor strips these before r3_template_transform runs.
+    let js = compile_template_to_js(
+        r#"<ng-content i18n select=".header"></ng-content>"#,
+        "TestComponent",
+    );
+    assert!(
+        !js.contains(r#""i18n""#),
+        "i18n attribute should not appear in projection output. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_ng_content_with_bound_select() {
+    // Tests that [select] binding on ng-content passes the binding name and value
+    // as attributes to the projection instruction.
+    // Angular treats ALL raw attrs on ng-content as TextAttributes, including bindings.
+    // [select] with brackets is NOT the same as the static `select` attribute for the
+    // CSS selector — the selector stays as "*" (wildcard).
+    // Expected: ɵɵprojectionDef() with no args (single wildcard),
+    //           ɵɵprojection(0, 0, ["[select]", "'[slot=expanded-content]'"])
+    let js = compile_template_to_js(
+        r#"<ng-content [select]="'[slot=expanded-content]'" />"#,
+        "TestComponent",
+    );
+    insta::assert_snapshot!("ng_content_with_bound_select", js);
+}
+
+#[test]
 fn test_ng_content_with_ng_project_as() {
     // Tests that ngProjectAs attribute generates the correct ProjectAs marker (5)
     // and parsed CSS selector in the attributes array.
