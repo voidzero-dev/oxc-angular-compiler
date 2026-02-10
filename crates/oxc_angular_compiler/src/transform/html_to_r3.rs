@@ -468,18 +468,27 @@ impl<'a> HtmlToR3Transform<'a> {
             let selector = self.get_ng_content_selector(element);
             self.ng_content_selectors.push(selector.clone());
 
-            // For ng-content, include the structural directive attribute (*ngIf, etc.)
-            // as a text attribute. This is needed because the projection instruction
-            // includes these attributes in its output (e.g., ["*ngIf", "!subtitle()"]).
-            // Reference: r3_template_transform.ts line 193 - all attrs are included
-            let mut content_attributes = attributes;
-            if let Some(ref tpl_attr) = template_attr {
+            // For ng-content, Angular converts ALL raw HTML attributes to TextAttributes.
+            // Reference: r3_template_transform.ts line 193:
+            //   const attrs: t.TextAttribute[] = element.attrs.map((attr) => this.visitAttribute(attr));
+            // This includes bound attributes like [select]="..." which get serialized with
+            // their raw names (e.g., "[select]") and values into the projection instruction.
+            //
+            // However, i18n/i18n-* attributes are excluded because Angular's I18nMetaVisitor
+            // strips them from element.attrs before r3_template_transform runs.
+            let mut content_attributes: Vec<'a, R3TextAttribute<'a>> =
+                Vec::with_capacity_in(element.attrs.len(), self.allocator);
+            for attr in &element.attrs {
+                let name = attr.name.as_str();
+                if name == "i18n" || name.starts_with("i18n-") {
+                    continue;
+                }
                 content_attributes.push(R3TextAttribute {
-                    name: tpl_attr.name.clone(),
-                    value: tpl_attr.value.clone(),
-                    source_span: tpl_attr.span,
-                    key_span: Some(tpl_attr.name_span),
-                    value_span: tpl_attr.value_span,
+                    name: attr.name.clone(),
+                    value: attr.value.clone(),
+                    source_span: attr.span,
+                    key_span: Some(attr.name_span),
+                    value_span: attr.value_span,
                     i18n: None,
                 });
             }
