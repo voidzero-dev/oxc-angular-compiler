@@ -4565,3 +4565,57 @@ fn test_pipe_in_binary_with_safe_nav_chain() {
         "pipeBind1 should appear exactly once. Found {pipe_count}. Output:\n{js}"
     );
 }
+
+/// Tests that interpolations inside HTML elements within nested ICU plural branches
+/// are correctly extracted as i18n expression placeholders.
+///
+/// When ICU case text contains `<strong>{{ expr }}</strong>`, the interpolation is
+/// inside an HTML element node. `extract_placeholders_from_nodes` must recurse into
+/// element children to find these interpolations. Without this, they are silently
+/// dropped, leading to fewer i18nExp calls than expected.
+///
+/// This reproduces the undo-toast-items.component.ts mismatch where Angular emits 8
+/// i18nExp args but OXC only emitted 5 due to missing interpolations inside `<strong>`.
+#[test]
+fn test_i18n_nested_icu_with_interpolations_inside_elements() {
+    let js = compile_template_to_js(
+        r#"<span i18n>{count, plural, =1 {<strong>{{ name }}</strong> was deleted from {nestedCount, plural, =1 {<strong>{{ category }}</strong>} other {<strong>{{ category }}</strong> and {{ extra }} more}}} other {{{ count }} items deleted}}</span>"#,
+        "TestComponent",
+    );
+
+    eprintln!("OUTPUT:\n{js}");
+
+    // All interpolation expressions must appear in the i18nExp chain.
+    // The expressions inside <strong> elements MUST be extracted:
+    //   - name (inside <strong> in outer =1 branch)
+    //   - category (inside <strong> in nested =1 branch)
+    //   - category (inside <strong> in nested other branch)
+    //   - extra (plain text in nested other branch)
+    //   - count (plain text in outer other branch)
+    // Plus the ICU switch variables:
+    //   - count (outer plural VAR)
+    //   - nestedCount (inner plural VAR)
+
+    // Check that the expressions inside <strong> elements are present
+    assert!(
+        js.contains("ctx.name"),
+        "ctx.name (inside <strong> in ICU) must be in i18nExp chain. Output:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.category"),
+        "ctx.category (inside <strong> in nested ICU) must be in i18nExp chain. Output:\n{js}"
+    );
+
+    // Count the total number of i18nExp arguments.
+    // There should be 7 expressions total:
+    //   VAR: extra (innermost ICU), nestedCount (middle), count (outer) = 3 ICU vars
+    //   INTERPOLATION: name, category, category, extra, count = varies
+    // The exact count depends on deduplication, but name and category must be present.
+    let i18n_exp_count = js.matches("i18nExp(").count();
+    assert!(
+        i18n_exp_count >= 1,
+        "Should have at least one i18nExp call. Found {i18n_exp_count}. Output:\n{js}"
+    );
+
+    insta::assert_snapshot!("i18n_nested_icu_with_interpolations_inside_elements", js);
+}
