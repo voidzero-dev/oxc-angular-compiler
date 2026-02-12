@@ -53,7 +53,8 @@ export class LoginFormComponent {
     type: 'full-transform',
     name: 'query-chaining-multiple-contentchild',
     category: 'regressions',
-    description: 'Multiple @ContentChild/@ContentChildren should emit separate ɵɵcontentQuery statements',
+    description:
+      'Multiple @ContentChild/@ContentChildren should emit separate ɵɵcontentQuery statements',
     className: 'TabsComponent',
     sourceCode: `
 import { Component, ContentChild, ContentChildren, QueryList, TemplateRef } from '@angular/core';

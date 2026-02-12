@@ -1,8 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
-import type { Plugin } from 'vite'
-
 import { linkAngularPackageSync } from '#binding'
+import type { Plugin } from 'vite'
 
 /**
  * Angular Linker plugin for Vite.

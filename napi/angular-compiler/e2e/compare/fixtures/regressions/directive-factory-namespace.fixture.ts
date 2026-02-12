@@ -56,7 +56,8 @@ export class ToastPositionHelperDirective {
     type: 'full-transform',
     name: 'directive-factory-namespace-multi-module',
     category: 'regressions',
-    description: 'Directive injecting from multiple external modules gets correct namespace indices',
+    description:
+      'Directive injecting from multiple external modules gets correct namespace indices',
     className: 'MultiDepDirective',
     sourceCode: `
 import { Directive, ElementRef } from '@angular/core';

@@ -660,7 +660,11 @@ fn link_declaration(name: &str, call: &CallExpression<'_>, source: &str) -> Opti
         DECLARE_CLASS_METADATA => link_class_metadata(meta, source, ns, type_name),
         DECLARE_CLASS_METADATA_ASYNC => link_class_metadata_async(meta, source, ns, type_name),
         DECLARE_DIRECTIVE => link_directive(meta, source, ns, type_name),
-        DECLARE_COMPONENT => link_component(meta, source, ns, type_name),
+        // Skip component linking: template compilation is not yet implemented.
+        // Replacing ɵɵngDeclareComponent with an empty template would silently break
+        // all library component rendering. Leave the partial declaration intact so
+        // Angular's runtime can JIT-compile it via @angular/compiler.
+        DECLARE_COMPONENT => return None,
         _ => return None,
     };
 
@@ -926,76 +930,12 @@ fn link_directive(
     Some(format!("{ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", ")))
 }
 
-/// Link ɵɵngDeclareComponent → ɵɵdefineComponent.
-///
-/// This is the most complex case as it requires template compilation.
-/// For now, we generate a minimal component definition that Angular can use.
-fn link_component(
-    meta: &ObjectExpression<'_>,
-    source: &str,
-    ns: &str,
-    type_name: &str,
-) -> Option<String> {
-    let mut parts = vec![format!("type: {type_name}")];
-
-    if let Some(selector) = get_string_property(meta, "selector") {
-        parts.push(format!("selectors: {}", parse_selector(selector)));
-    }
-
-    // Template - for components in node_modules, we generate a minimal template function.
-    // Full template compilation for linked components will be integrated later.
-    if has_property(meta, "template") {
-        parts.push(format!(
-            "template: function {type_name}_Template(rf, ctx) {{}}, decls: 0, vars: 0"
-        ));
-    }
-
-    if let Some(inputs) = get_property_source(meta, "inputs", source) {
-        parts.push(format!("inputs: {inputs}"));
-    }
-    if let Some(outputs) = get_property_source(meta, "outputs", source) {
-        parts.push(format!("outputs: {outputs}"));
-    }
-    if let Some(export_as) = get_property_source(meta, "exportAs", source) {
-        parts.push(format!("exportAs: {export_as}"));
-    }
-
-    let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
-    parts.push(format!("standalone: {standalone}"));
-
-    if let Some(styles) = get_property_source(meta, "styles", source) {
-        parts.push(format!("styles: {styles}"));
-    }
-
-    let encapsulation = get_property_source(meta, "encapsulation", source);
-    if let Some(enc) = encapsulation {
-        parts.push(format!("encapsulation: {enc}"));
-    } else {
-        parts.push(format!("encapsulation: 2")); // ViewEncapsulation.Emulated
-    }
-
-    if let Some(change_detection) = get_property_source(meta, "changeDetection", source) {
-        parts.push(format!("changeDetection: {change_detection}"));
-    }
-
-    if let Some(dependencies) = get_property_source(meta, "dependencies", source) {
-        parts.push(format!("dependencies: {dependencies}"));
-    }
-
-    if let Some(features) = get_property_source(meta, "features", source) {
-        parts.push(format!("features: {features}"));
-    }
-
-    // Host bindings - convert host object to hostAttrs array
-    if let Some(host_obj) = get_object_property(meta, "host") {
-        let host_attrs = build_host_attrs(host_obj, source);
-        if !host_attrs.is_empty() {
-            parts.push(format!("hostAttrs: [{}]", host_attrs));
-        }
-    }
-
-    Some(format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", ")))
-}
+// NOTE: link_component is intentionally not implemented.
+// Component linking requires full template compilation (parsing HTML templates
+// into Angular instruction sequences like ɵɵelementStart, ɵɵtext, etc.).
+// This is a major feature that needs a template compiler.
+// Until implemented, ɵɵngDeclareComponent is left intact for Angular's
+// runtime JIT compiler to handle.
 
 #[cfg(test)]
 mod tests {
@@ -1097,5 +1037,41 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.0.0", ngImpor
         let result = link(&allocator, code, "test.mjs");
         assert!(!result.linked);
         assert_eq!(result.code, code);
+    }
+
+    #[test]
+    fn test_component_declarations_are_preserved() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        // Component declarations should NOT be linked (template compilation not implemented).
+        // The original ɵɵngDeclareComponent call must be preserved intact so Angular's
+        // runtime can JIT-compile the template.
+        assert!(!result.linked);
+        assert!(result.code.contains("\u{0275}\u{0275}ngDeclareComponent"));
+        assert!(!result.code.contains("defineComponent"));
+    }
+
+    #[test]
+    fn test_component_preserved_while_other_declarations_linked() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, deps: [], target: i0.ɵɵFactoryTarget.Component });
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        // Factory should be linked but component declaration should be preserved
+        assert!(result.linked);
+        assert!(result.code.contains("MyComponent_Factory"));
+        assert!(!result.code.contains("\u{0275}\u{0275}ngDeclareFactory"));
+        assert!(result.code.contains("\u{0275}\u{0275}ngDeclareComponent"));
     }
 }
