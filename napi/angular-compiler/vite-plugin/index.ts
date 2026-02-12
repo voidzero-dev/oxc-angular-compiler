@@ -111,6 +111,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // Cache for resolved resources
   const resourceCache = new Map<string, string>()
 
+  // Track component files with pending HMR updates (set by fs.watch, checked by HMR endpoint)
+  const pendingHmrUpdates = new Set<string>()
+
   /**
    * Resolve external template/style URLs and read their contents.
    */
@@ -227,10 +230,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 if (componentFile && componentIds.has(componentFile)) {
                   debugHmr('resource change triggers HMR: %s -> %s', normalizedFile, componentFile)
 
-                  // NOTE: We intentionally do NOT invalidate the component module here.
-                  // The HMR URL includes a timestamp for cache-busting, so the dynamic import
-                  // will fetch fresh content. Invalidating would trigger Vite's module
-                  // propagation logic and cause an unwanted full page reload.
+                  // Mark this component as having a pending HMR update so the
+                  // HMR endpoint serves the update module instead of an empty response.
+                  pendingHmrUpdates.add(componentFile)
 
                   // Send HMR update event
                   const componentId = `${componentFile}@${componentIds.get(componentFile)}`
@@ -301,18 +303,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const fileId = decodedComponentId.slice(0, atIndex)
             const resolvedId = resolve(process.cwd(), fileId)
 
-            // Only return HMR update module if the file has been invalidated (changed).
-            // On initial page load, modules haven't been invalidated yet, so we return
-            // an empty response. This prevents ɵɵreplaceMetadata from being called
-            // unnecessarily during initial load, which would re-create views and cause
-            // errors with @Required() decorators and directive matching.
-            const mod = server.moduleGraph.getModuleById(resolvedId)
-            if (!mod?.lastInvalidationTimestamp) {
+            // Only return HMR update module if there's a pending update from our
+            // custom fs.watch handler. On initial page load, there are no pending
+            // updates, so we return an empty response. This prevents ɵɵreplaceMetadata
+            // from being called unnecessarily during initial load, which would
+            // re-create views and cause errors with @Required() decorators.
+            if (!pendingHmrUpdates.has(fileId)) {
               res.setHeader('Content-Type', 'text/javascript')
               res.setHeader('Cache-Control', 'no-cache')
               res.end('')
               return
             }
+            pendingHmrUpdates.delete(fileId)
 
             try {
               const source = await readFile(resolvedId, 'utf-8')

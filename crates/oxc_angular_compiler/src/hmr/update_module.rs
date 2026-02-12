@@ -152,9 +152,14 @@ fn generate_hmr_update_module_internal(
     // `parseAndConvertInputsForDefinition`). If we don't override, ɵɵdefineComponent
     // will process them again, producing corrupted input mappings.
     // `inputConfig` stores the original unprocessed inputs format.
+    // Only override when inputConfig exists (components with inputs); otherwise
+    // setting `inputs: undefined` would corrupt the component definition.
     output.push_str(&format!("  {}.ɵcmp = i0.ɵɵdefineComponent({{\n", class_name));
     output.push_str(&format!("    ...{}.ɵcmp,\n", class_name));
-    output.push_str(&format!("    inputs: {}.ɵcmp.inputConfig,\n", class_name));
+    output.push_str(&format!(
+        "    ...({cn}.ɵcmp.inputConfig ? {{ inputs: {cn}.ɵcmp.inputConfig }} : {{}}),\n",
+        cn = class_name
+    ));
 
     // Add template function if present
     if let Some(template_js) = template_js {
@@ -271,13 +276,15 @@ mod tests {
             None,
         );
 
-        // The HMR module must override `inputs` with `inputConfig` to avoid
-        // double-processing by `parseAndConvertInputsForDefinition`.
-        assert!(result.contains("inputs: AppComponent.ɵcmp.inputConfig"));
+        // The HMR module must conditionally override `inputs` with `inputConfig`
+        // to avoid double-processing by `parseAndConvertInputsForDefinition`.
+        // It must only do so when inputConfig exists to avoid setting inputs to undefined.
+        assert!(result.contains("AppComponent.ɵcmp.inputConfig"));
+        assert!(result.contains("inputs:"));
 
         // `inputs` override must come AFTER the spread to take precedence
         let spread_pos = result.find("...AppComponent.ɵcmp").unwrap();
-        let inputs_pos = result.find("inputs: AppComponent.ɵcmp.inputConfig").unwrap();
+        let inputs_pos = result.find("inputConfig").unwrap();
         assert!(inputs_pos > spread_pos);
     }
 
