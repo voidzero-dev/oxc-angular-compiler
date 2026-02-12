@@ -2556,6 +2556,239 @@ fn compile_host_bindings_from_input<'a>(
     Some(result)
 }
 
+/// Compile host bindings for the linker, returning the emitted JS function + hostVars count.
+///
+/// This takes host property/listener data extracted from a partial declaration and compiles
+/// it through the full Angular expression parser and host binding pipeline, producing
+/// correctly compiled output (unlike raw string interpolation which would fail for complex
+/// Angular template expressions).
+pub fn compile_host_bindings_for_linker(
+    host_input: &HostMetadataInput,
+    component_name: &str,
+    selector: Option<&str>,
+) -> Option<(String, u32)> {
+    let allocator = Allocator::default();
+    let result =
+        compile_host_bindings_from_input(&allocator, host_input, component_name, selector)?;
+
+    let emitter = JsEmitter::new();
+
+    let host_vars = result.host_vars.unwrap_or(0);
+
+    let fn_js = result.host_binding_fn.map(|f| {
+        let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &allocator));
+        emitter.emit_expression(&expr)
+    })?;
+
+    Some((fn_js, host_vars))
+}
+
+/// Output from compiling a template for the linker.
+///
+/// Used by the partial declaration linker to generate `ɵɵdefineComponent` calls
+/// from `ɵɵngDeclareComponent` partial declarations.
+#[derive(Debug)]
+pub struct LinkerTemplateOutput {
+    /// All declarations (child view functions, pooled constants, main template function)
+    /// as JavaScript code. These need to be emitted before the `defineComponent` call.
+    pub declarations_js: String,
+
+    /// The name of the main template function (e.g., "ComponentName_Template").
+    pub template_fn_name: String,
+
+    /// Number of element/text/container declarations in the root view.
+    pub decls: u32,
+
+    /// Number of variable binding slots in the root view.
+    pub vars: u32,
+
+    /// The consts array as a JavaScript expression string, if any.
+    pub consts_js: Option<String>,
+
+    /// The ngContentSelectors array as a JavaScript expression string, if any.
+    pub ng_content_selectors_js: Option<String>,
+}
+
+/// Compile a template for the linker, returning all data needed to build a `defineComponent` call.
+///
+/// This is similar to `compile_template_to_js_with_options` but returns a richer result
+/// that includes numeric metadata (decls, vars) and the consts/ngContentSelectors as strings,
+/// which the linker needs to assemble the `defineComponent({...})` replacement.
+pub fn compile_template_for_linker<'a>(
+    allocator: &'a Allocator,
+    template: &'a str,
+    component_name: &str,
+    file_path: &str,
+    preserve_whitespaces: bool,
+) -> Result<LinkerTemplateOutput, std::vec::Vec<OxcDiagnostic>> {
+    use crate::pipeline::ingest::{IngestOptions, ingest_component_with_options};
+    use oxc_allocator::FromIn;
+
+    let mut diagnostics = std::vec::Vec::new();
+
+    // Stage 1: Parse HTML
+    let parse_options = ParseTemplateOptions {
+        preserve_whitespaces,
+        enable_block_syntax: true,
+        enable_let_syntax: true,
+        tokenize_expansion_forms: true,
+        ..Default::default()
+    };
+    let parser = HtmlParser::with_options(allocator, template, file_path, &parse_options);
+    let html_result = parser.parse();
+
+    if !html_result.errors.is_empty() {
+        for error in &html_result.errors {
+            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+        }
+        return Err(diagnostics);
+    }
+
+    // Stage 1.5: Remove whitespace if not preserving
+    let nodes = if parse_options.preserve_whitespaces {
+        &html_result.nodes
+    } else {
+        let processed = remove_whitespaces(allocator, &html_result.nodes, true);
+        allocator.alloc(processed) as &_
+    };
+
+    // Stage 2: Transform HTML to R3 AST
+    let r3_transform_options =
+        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
+    let r3_result = transformer.transform(nodes);
+
+    if !r3_result.errors.is_empty() {
+        for error in &r3_result.errors {
+            diagnostics.push(OxcDiagnostic::error(error.msg.clone()));
+        }
+        return Err(diagnostics);
+    }
+
+    // Stage 3-5: Ingest and compile
+    let ingest_options = IngestOptions {
+        mode: TemplateCompilationMode::Full,
+        relative_context_file_path: None,
+        i18n_use_external_ids: true,
+        defer_block_deps_emit_mode: DeferBlockDepsEmitMode::PerBlock,
+        relative_template_path: None,
+        enable_debug_locations: false,
+        template_source: Some(template),
+        all_deferrable_deps_fn: None,
+        pool_starting_index: 0,
+    };
+
+    let component_name_atom = Atom::from_in(component_name, allocator);
+    let mut job = ingest_component_with_options(
+        allocator,
+        component_name_atom,
+        r3_result.nodes,
+        ingest_options,
+    );
+
+    let compiled = compile_template(&mut job);
+
+    // Collect diagnostics
+    diagnostics.extend(job.diagnostics.into_iter());
+
+    // Extract numeric metadata from the compilation job
+    let decls = job.root.decl_count.unwrap_or(0);
+    let vars = job.root.vars.unwrap_or(0);
+
+    let emitter = JsEmitter::new();
+
+    // Emit consts array as JS expression
+    let consts_js = if !job.consts.is_empty() {
+        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+        for const_value in &job.consts {
+            const_entries.push(const_value_to_expression(allocator, const_value));
+        }
+
+        let consts_expr = if !job.consts_initializers.is_empty() {
+            // Wrap in function with initializers
+            let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
+                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, allocator);
+            for stmt in job.consts_initializers.drain(..) {
+                fn_stmts.push(stmt);
+            }
+            fn_stmts.push(OutputStatement::Return(oxc_allocator::Box::new_in(
+                crate::output::ast::ReturnStatement {
+                    value: OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+                        crate::output::ast::LiteralArrayExpr {
+                            entries: const_entries,
+                            source_span: None,
+                        },
+                        allocator,
+                    )),
+                    source_span: None,
+                },
+                allocator,
+            )));
+            OutputExpression::Function(oxc_allocator::Box::new_in(
+                FunctionExpr {
+                    name: None,
+                    params: OxcVec::new_in(allocator),
+                    statements: fn_stmts,
+                    source_span: None,
+                },
+                allocator,
+            ))
+        } else {
+            OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+                crate::output::ast::LiteralArrayExpr { entries: const_entries, source_span: None },
+                allocator,
+            ))
+        };
+        Some(emitter.emit_expression(&consts_expr))
+    } else {
+        None
+    };
+
+    // Emit ngContentSelectors as JS expression
+    let ng_content_selectors_js =
+        job.content_selectors.take().map(|expr| emitter.emit_expression(&expr));
+
+    // Get template function name
+    let template_fn_name = compiled
+        .template_fn
+        .name
+        .as_ref()
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| format!("{component_name}_Template"));
+
+    // Emit all declarations + main template function as JS code
+    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+
+    for decl in compiled.declarations {
+        all_statements.push(decl);
+    }
+
+    if let Some(fn_name) = compiled.template_fn.name.clone() {
+        let main_fn_stmt = OutputStatement::DeclareFunction(oxc_allocator::Box::new_in(
+            DeclareFunctionStmt {
+                name: fn_name,
+                params: compiled.template_fn.params,
+                statements: compiled.template_fn.statements,
+                modifiers: StmtModifier::NONE,
+                source_span: compiled.template_fn.source_span,
+            },
+            allocator,
+        ));
+        all_statements.push(main_fn_stmt);
+    }
+
+    let declarations_js = emitter.emit_statements(&all_statements);
+
+    Ok(LinkerTemplateOutput {
+        declarations_js,
+        template_fn_name,
+        decls,
+        vars,
+        consts_js,
+        ng_content_selectors_js,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

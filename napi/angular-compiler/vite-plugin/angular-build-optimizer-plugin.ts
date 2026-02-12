@@ -53,8 +53,8 @@ export function buildOptimizerPlugin({
     },
     transform: {
       filter: {
-        // Match Angular FESM packages (e.g., @angular/core/fesm2022/core.mjs)
-        id: /node_modules\/@angular\/.*fesm20.*\.[cm]?js$/,
+        // Match Angular FESM packages (e.g., @angular/core/fesm2022/core.mjs, @ngrx/store/fesm2022/ngrx-store.mjs)
+        id: /fesm20.*\.[cm]?js$/,
       },
       async handler(code, id) {
         // Only optimize in production builds

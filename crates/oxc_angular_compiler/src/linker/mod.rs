@@ -34,8 +34,8 @@
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, CallExpression, Expression, ObjectExpression, ObjectPropertyKind, Program,
-    PropertyKey, Statement,
+    Argument, ArrayExpressionElement, CallExpression, Expression, ObjectExpression,
+    ObjectPropertyKind, Program, PropertyKey, Statement,
 };
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
@@ -85,7 +85,7 @@ pub fn link(allocator: &Allocator, code: &str, filename: &str) -> LinkResult {
     let mut edits: Vec<Edit> = Vec::new();
 
     // Walk all statements looking for ɵɵngDeclare* calls
-    collect_declaration_edits(&program, code, &mut edits);
+    collect_declaration_edits(&program, code, filename, &mut edits);
 
     if edits.is_empty() {
         return LinkResult { code: code.to_string(), map: None, linked: false };
@@ -97,110 +97,115 @@ pub fn link(allocator: &Allocator, code: &str, filename: &str) -> LinkResult {
 }
 
 /// Recursively walk the AST to find all ɵɵngDeclare* calls and generate edits.
-fn collect_declaration_edits(program: &Program<'_>, source: &str, edits: &mut Vec<Edit>) {
+fn collect_declaration_edits(
+    program: &Program<'_>,
+    source: &str,
+    filename: &str,
+    edits: &mut Vec<Edit>,
+) {
     for stmt in &program.body {
-        walk_statement(stmt, source, edits);
+        walk_statement(stmt, source, filename, edits);
     }
 }
 
 /// Walk a statement looking for ɵɵngDeclare* calls.
-fn walk_statement(stmt: &Statement<'_>, source: &str, edits: &mut Vec<Edit>) {
+fn walk_statement(stmt: &Statement<'_>, source: &str, filename: &str, edits: &mut Vec<Edit>) {
     match stmt {
         Statement::ExpressionStatement(expr_stmt) => {
-            walk_expression(&expr_stmt.expression, source, edits);
+            walk_expression(&expr_stmt.expression, source, filename, edits);
         }
         Statement::ClassDeclaration(class_decl) => {
-            walk_class_body(&class_decl.body, source, edits);
+            walk_class_body(&class_decl.body, source, filename, edits);
         }
         Statement::VariableDeclaration(var_decl) => {
             for decl in &var_decl.declarations {
                 if let Some(init) = &decl.init {
-                    walk_expression(init, source, edits);
+                    walk_expression(init, source, filename, edits);
                 }
             }
         }
         Statement::ReturnStatement(ret) => {
             if let Some(ref arg) = ret.argument {
-                walk_expression(arg, source, edits);
+                walk_expression(arg, source, filename, edits);
             }
         }
         Statement::BlockStatement(block) => {
             for stmt in &block.body {
-                walk_statement(stmt, source, edits);
+                walk_statement(stmt, source, filename, edits);
             }
         }
         Statement::IfStatement(if_stmt) => {
-            walk_statement(&if_stmt.consequent, source, edits);
+            walk_statement(&if_stmt.consequent, source, filename, edits);
             if let Some(ref alt) = if_stmt.alternate {
-                walk_statement(alt, source, edits);
+                walk_statement(alt, source, filename, edits);
             }
         }
         Statement::ForStatement(for_stmt) => {
-            walk_statement(&for_stmt.body, source, edits);
+            walk_statement(&for_stmt.body, source, filename, edits);
         }
         Statement::ForInStatement(for_in) => {
-            walk_statement(&for_in.body, source, edits);
+            walk_statement(&for_in.body, source, filename, edits);
         }
         Statement::ForOfStatement(for_of) => {
-            walk_statement(&for_of.body, source, edits);
+            walk_statement(&for_of.body, source, filename, edits);
         }
         Statement::WhileStatement(while_stmt) => {
-            walk_statement(&while_stmt.body, source, edits);
+            walk_statement(&while_stmt.body, source, filename, edits);
         }
         Statement::DoWhileStatement(do_while) => {
-            walk_statement(&do_while.body, source, edits);
+            walk_statement(&do_while.body, source, filename, edits);
         }
         Statement::TryStatement(try_stmt) => {
             for stmt in &try_stmt.block.body {
-                walk_statement(stmt, source, edits);
+                walk_statement(stmt, source, filename, edits);
             }
             if let Some(ref handler) = try_stmt.handler {
                 for stmt in &handler.body.body {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
             if let Some(ref finalizer) = try_stmt.finalizer {
                 for stmt in &finalizer.body {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
         Statement::SwitchStatement(switch_stmt) => {
             for case in &switch_stmt.cases {
                 for stmt in &case.consequent {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
         Statement::LabeledStatement(labeled) => {
-            walk_statement(&labeled.body, source, edits);
+            walk_statement(&labeled.body, source, filename, edits);
         }
         Statement::FunctionDeclaration(func_decl) => {
             if let Some(ref body) = func_decl.body {
                 for stmt in &body.statements {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
         Statement::ExportNamedDeclaration(export_decl) => {
             if let Some(ref decl) = export_decl.declaration {
-                walk_declaration(decl, source, edits);
+                walk_declaration(decl, source, filename, edits);
             }
         }
         Statement::ExportDefaultDeclaration(export_default) => match &export_default.declaration {
             oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) => {
-                walk_class_body(&class_decl.body, source, edits);
+                walk_class_body(&class_decl.body, source, filename, edits);
             }
             oxc_ast::ast::ExportDefaultDeclarationKind::FunctionDeclaration(func_decl) => {
                 if let Some(ref body) = func_decl.body {
                     for stmt in &body.statements {
-                        walk_statement(stmt, source, edits);
+                        walk_statement(stmt, source, filename, edits);
                     }
                 }
             }
             _ => {
                 if let Some(expr) = export_default.declaration.as_expression() {
-                    walk_expression(expr, source, edits);
+                    walk_expression(expr, source, filename, edits);
                 }
             }
         },
@@ -209,22 +214,27 @@ fn walk_statement(stmt: &Statement<'_>, source: &str, edits: &mut Vec<Edit>) {
 }
 
 /// Walk a class body looking for ɵɵngDeclare* calls in property definitions and static blocks.
-fn walk_class_body(body: &oxc_ast::ast::ClassBody<'_>, source: &str, edits: &mut Vec<Edit>) {
+fn walk_class_body(
+    body: &oxc_ast::ast::ClassBody<'_>,
+    source: &str,
+    filename: &str,
+    edits: &mut Vec<Edit>,
+) {
     for element in &body.body {
         if let oxc_ast::ast::ClassElement::PropertyDefinition(prop) = element {
             if let Some(ref value) = prop.value {
-                walk_expression(value, source, edits);
+                walk_expression(value, source, filename, edits);
             }
         }
         if let oxc_ast::ast::ClassElement::StaticBlock(block) = element {
             for stmt in &block.body {
-                walk_statement(stmt, source, edits);
+                walk_statement(stmt, source, filename, edits);
             }
         }
         if let oxc_ast::ast::ClassElement::MethodDefinition(method) = element {
             if let Some(ref body) = method.value.body {
                 for stmt in &body.statements {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
@@ -232,35 +242,40 @@ fn walk_class_body(body: &oxc_ast::ast::ClassBody<'_>, source: &str, edits: &mut
 }
 
 /// Walk a declaration (from export statements) looking for ɵɵngDeclare* calls.
-fn walk_declaration(decl: &oxc_ast::ast::Declaration<'_>, source: &str, edits: &mut Vec<Edit>) {
+fn walk_declaration(
+    decl: &oxc_ast::ast::Declaration<'_>,
+    source: &str,
+    filename: &str,
+    edits: &mut Vec<Edit>,
+) {
     match decl {
         oxc_ast::ast::Declaration::VariableDeclaration(var_decl) => {
             for d in &var_decl.declarations {
                 if let Some(init) = &d.init {
-                    walk_expression(init, source, edits);
+                    walk_expression(init, source, filename, edits);
                 }
             }
         }
         oxc_ast::ast::Declaration::FunctionDeclaration(func_decl) => {
             if let Some(ref body) = func_decl.body {
                 for stmt in &body.statements {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
         oxc_ast::ast::Declaration::ClassDeclaration(class_decl) => {
-            walk_class_body(&class_decl.body, source, edits);
+            walk_class_body(&class_decl.body, source, filename, edits);
         }
         _ => {}
     }
 }
 
 /// Walk an expression looking for ɵɵngDeclare* calls.
-fn walk_expression(expr: &Expression<'_>, source: &str, edits: &mut Vec<Edit>) {
+fn walk_expression(expr: &Expression<'_>, source: &str, filename: &str, edits: &mut Vec<Edit>) {
     match expr {
         Expression::CallExpression(call) => {
             if let Some(name) = get_declare_name(call) {
-                if let Some(edit) = link_declaration(name, call, source) {
+                if let Some(edit) = link_declaration(name, call, source, filename) {
                     edits.push(edit);
                     return;
                 }
@@ -270,42 +285,42 @@ fn walk_expression(expr: &Expression<'_>, source: &str, edits: &mut Vec<Edit>) {
                 if let Argument::SpreadElement(_) = arg {
                     continue;
                 }
-                walk_expression(arg.to_expression(), source, edits);
+                walk_expression(arg.to_expression(), source, filename, edits);
             }
         }
         Expression::AssignmentExpression(assign) => {
-            walk_expression(&assign.right, source, edits);
+            walk_expression(&assign.right, source, filename, edits);
         }
         Expression::SequenceExpression(seq) => {
             for expr in &seq.expressions {
-                walk_expression(expr, source, edits);
+                walk_expression(expr, source, filename, edits);
             }
         }
         Expression::ConditionalExpression(cond) => {
-            walk_expression(&cond.consequent, source, edits);
-            walk_expression(&cond.alternate, source, edits);
+            walk_expression(&cond.consequent, source, filename, edits);
+            walk_expression(&cond.alternate, source, filename, edits);
         }
         Expression::LogicalExpression(logical) => {
-            walk_expression(&logical.left, source, edits);
-            walk_expression(&logical.right, source, edits);
+            walk_expression(&logical.left, source, filename, edits);
+            walk_expression(&logical.right, source, filename, edits);
         }
         Expression::ParenthesizedExpression(paren) => {
-            walk_expression(&paren.expression, source, edits);
+            walk_expression(&paren.expression, source, filename, edits);
         }
         Expression::ArrowFunctionExpression(arrow) => {
             for stmt in &arrow.body.statements {
-                walk_statement(stmt, source, edits);
+                walk_statement(stmt, source, filename, edits);
             }
         }
         Expression::FunctionExpression(func) => {
             if let Some(body) = &func.body {
                 for stmt in &body.statements {
-                    walk_statement(stmt, source, edits);
+                    walk_statement(stmt, source, filename, edits);
                 }
             }
         }
         Expression::ClassExpression(class_expr) => {
-            walk_class_body(&class_expr.body, source, edits);
+            walk_class_body(&class_expr.body, source, filename, edits);
         }
         _ => {}
     }
@@ -646,7 +661,12 @@ fn get_factory_target(obj: &ObjectExpression<'_>, source: &str) -> &'static str 
 }
 
 /// Link a single ɵɵngDeclare* call, generating the replacement code.
-fn link_declaration(name: &str, call: &CallExpression<'_>, source: &str) -> Option<Edit> {
+fn link_declaration(
+    name: &str,
+    call: &CallExpression<'_>,
+    source: &str,
+    filename: &str,
+) -> Option<Edit> {
     let meta = get_metadata_object(call)?;
     let ns = get_ng_import_namespace(call);
     let type_name = get_property_source(meta, "type", source)?;
@@ -660,11 +680,7 @@ fn link_declaration(name: &str, call: &CallExpression<'_>, source: &str) -> Opti
         DECLARE_CLASS_METADATA => link_class_metadata(meta, source, ns, type_name),
         DECLARE_CLASS_METADATA_ASYNC => link_class_metadata_async(meta, source, ns, type_name),
         DECLARE_DIRECTIVE => link_directive(meta, source, ns, type_name),
-        // Skip component linking: template compilation is not yet implemented.
-        // Replacing ɵɵngDeclareComponent with an empty template would silently break
-        // all library component rendering. Leave the partial declaration intact so
-        // Angular's runtime can JIT-compile it via @angular/compiler.
-        DECLARE_COMPONENT => return None,
+        DECLARE_COMPONENT => link_component(meta, source, filename, ns, type_name),
         _ => return None,
     };
 
@@ -888,6 +904,111 @@ fn link_class_metadata_async(
     ))
 }
 
+/// Convert inputs from declaration format to definition format.
+///
+/// Declaration format (`ɵɵngDeclareDirective`):
+///   - `propertyName: "publicName"` (simple)
+///   - `propertyName: ["publicName", "classPropertyName"]` (aliased)
+///   - `propertyName: { classPropertyName: "...", publicName: "...", isRequired: bool,
+///      isSignal: bool, transformFunction: expr }` (Angular 16+ object format)
+///
+/// Definition format (`ɵɵdefineDirective`):
+///   - `propertyName: "publicName"` (simple, same as declaration)
+///   - `propertyName: [InputFlags, "publicName", "declaredName", transform?]` (array format)
+///
+/// InputFlags: None=0, SignalBased=1, HasDecoratorInputTransform=2
+fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source: &str) -> String {
+    let mut entries: Vec<String> = Vec::new();
+
+    for prop in &inputs_obj.properties {
+        let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
+
+        let key = match &p.key {
+            PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
+            PropertyKey::StringLiteral(s) => s.value.to_string(),
+            _ => {
+                // Fallback: use source text
+                let span = p.span();
+                entries.push(source[span.start as usize..span.end as usize].to_string());
+                continue;
+            }
+        };
+
+        match &p.value {
+            // Simple string: propertyName: "publicName" → keep as is
+            Expression::StringLiteral(lit) => {
+                entries.push(format!("{key}: \"{}\"", lit.value));
+            }
+            // Array: check if it's declaration format [publicName, classPropertyName]
+            // and convert to definition format [InputFlags, publicName, classPropertyName]
+            Expression::ArrayExpression(arr) => {
+                if arr.elements.len() == 2 {
+                    // Check if first element is a string (declaration format)
+                    let first_is_string = matches!(
+                        arr.elements.first(),
+                        Some(ArrayExpressionElement::StringLiteral(_))
+                    );
+                    if first_is_string {
+                        // Declaration format: ["publicName", "classPropertyName"]
+                        // Convert to: [0, "publicName", "classPropertyName"]
+                        let arr_source =
+                            &source[arr.span.start as usize + 1..arr.span.end as usize - 1];
+                        entries.push(format!("{key}: [0, {arr_source}]"));
+                    } else {
+                        // Already in definition format or unknown, keep as is
+                        let val =
+                            &source[p.value.span().start as usize..p.value.span().end as usize];
+                        entries.push(format!("{key}: {val}"));
+                    }
+                } else {
+                    // 3+ elements likely already in definition format, keep as is
+                    let val = &source[p.value.span().start as usize..p.value.span().end as usize];
+                    entries.push(format!("{key}: {val}"));
+                }
+            }
+            // Object: Angular 16+ format with classPropertyName, publicName, isRequired, etc.
+            Expression::ObjectExpression(obj) => {
+                let public_name = get_string_property(obj, "publicName").unwrap_or(&key);
+                let declared_name =
+                    get_string_property(obj, "classPropertyName").unwrap_or(public_name);
+                let is_signal = get_bool_property(obj, "isSignal").unwrap_or(false);
+                let is_required = get_bool_property(obj, "isRequired").unwrap_or(false);
+                let transform = get_property_source(obj, "transformFunction", source);
+
+                let mut flags = 0u32;
+                if is_signal {
+                    flags |= 1; // InputFlags.SignalBased
+                }
+                if transform.is_some() {
+                    flags |= 2; // InputFlags.HasDecoratorInputTransform
+                }
+                // isRequired is expressed via InputFlags.SignalBased for signal inputs
+                // and is checked separately for non-signal inputs
+                let _ = is_required;
+
+                if flags == 0 && transform.is_none() && public_name == declared_name {
+                    // Simple case: no flags, no transform, names match
+                    entries.push(format!("{key}: \"{public_name}\""));
+                } else if let Some(transform_fn) = transform {
+                    entries.push(format!(
+                        "{key}: [{flags}, \"{public_name}\", \"{declared_name}\", {transform_fn}]"
+                    ));
+                } else {
+                    entries
+                        .push(format!("{key}: [{flags}, \"{public_name}\", \"{declared_name}\"]"));
+                }
+            }
+            // Unknown format, keep as is
+            _ => {
+                let val = &source[p.value.span().start as usize..p.value.span().end as usize];
+                entries.push(format!("{key}: {val}"));
+            }
+        }
+    }
+
+    format!("{{ {} }}", entries.join(", "))
+}
+
 /// Link ɵɵngDeclareDirective → ɵɵdefineDirective.
 fn link_directive(
     meta: &ObjectExpression<'_>,
@@ -900,8 +1021,9 @@ fn link_directive(
     if let Some(selector) = get_string_property(meta, "selector") {
         parts.push(format!("selectors: {}", parse_selector(selector)));
     }
-    if let Some(inputs) = get_property_source(meta, "inputs", source) {
-        parts.push(format!("inputs: {inputs}"));
+    if let Some(inputs_obj) = get_object_property(meta, "inputs") {
+        let converted = convert_inputs_to_definition_format(inputs_obj, source);
+        parts.push(format!("inputs: {converted}"));
     }
     if let Some(outputs) = get_property_source(meta, "outputs", source) {
         parts.push(format!("outputs: {outputs}"));
@@ -930,12 +1052,409 @@ fn link_directive(
     Some(format!("{ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", ")))
 }
 
-// NOTE: link_component is intentionally not implemented.
-// Component linking requires full template compilation (parsing HTML templates
-// into Angular instruction sequences like ɵɵelementStart, ɵɵtext, etc.).
-// This is a major feature that needs a template compiler.
-// Until implemented, ɵɵngDeclareComponent is left intact for Angular's
-// runtime JIT compiler to handle.
+/// Extract an array expression property value from an object expression.
+fn get_array_property<'a>(
+    obj: &'a ObjectExpression<'a>,
+    name: &str,
+) -> Option<&'a oxc_ast::ast::ArrayExpression<'a>> {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
+                if let Expression::ArrayExpression(arr) = &prop.value {
+                    return Some(arr.as_ref());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Extract dependency type references from the `dependencies` array in component metadata.
+///
+/// In partial declarations, dependencies look like:
+/// ```javascript
+/// dependencies: [{ kind: "directive", type: RouterOutlet, selector: "...", ... }]
+/// ```
+/// Extract host properties and listeners from the `host` metadata object into a
+/// `HostMetadataInput` for compilation through the full Angular expression parser.
+///
+/// The partial declaration format stores host bindings as:
+/// ```javascript
+/// host: {
+///   properties: { "id": "this.dirId", "attr.aria-disabled": "disabled" },
+///   listeners: { "click": "onClick($event)" }
+/// }
+/// ```
+///
+/// The values are Angular template expression strings that must be compiled through
+/// the Angular expression parser (not simple string interpolation).
+fn extract_host_metadata_input(
+    host_obj: &ObjectExpression<'_>,
+) -> crate::component::HostMetadataInput {
+    let mut input = crate::component::HostMetadataInput::default();
+
+    if let Some(properties) = get_object_property(host_obj, "properties") {
+        for prop in &properties.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
+            let key = match &p.key {
+                PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
+                PropertyKey::StringLiteral(s) => s.value.to_string(),
+                _ => continue,
+            };
+            let value = match &p.value {
+                Expression::StringLiteral(s) => s.value.to_string(),
+                _ => continue,
+            };
+            input.properties.push((key, value));
+        }
+    }
+
+    if let Some(listeners) = get_object_property(host_obj, "listeners") {
+        for prop in &listeners.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else { continue };
+            let key = match &p.key {
+                PropertyKey::StaticIdentifier(ident) => ident.name.to_string(),
+                PropertyKey::StringLiteral(s) => s.value.to_string(),
+                _ => continue,
+            };
+            let value = match &p.value {
+                Expression::StringLiteral(s) => s.value.to_string(),
+                _ => continue,
+            };
+            input.listeners.push((key, value));
+        }
+    }
+
+    input
+}
+
+/// In the defineComponent output, we just need the type references:
+/// ```javascript
+/// dependencies: [RouterOutlet]
+/// ```
+fn extract_dependency_types(
+    arr: &oxc_ast::ast::ArrayExpression<'_>,
+    source: &str,
+) -> Option<String> {
+    let mut types: Vec<String> = Vec::new();
+    for el in &arr.elements {
+        let expr = match el {
+            ArrayExpressionElement::SpreadElement(_) => continue,
+            _ => el.to_expression(),
+        };
+        if let Expression::ObjectExpression(obj) = expr {
+            if let Some(type_src) = get_property_source(obj.as_ref(), "type", source) {
+                types.push(type_src.to_string());
+            }
+        }
+    }
+    if types.is_empty() { None } else { Some(format!("[{}]", types.join(", "))) }
+}
+
+/// Build a query function (contentQueries or viewQuery) from query metadata.
+///
+/// Content query metadata format:
+/// ```javascript
+/// { propertyName: "items", first: true, predicate: SomeType, descendants: true }
+/// ```
+///
+/// View query metadata format:
+/// ```javascript
+/// { propertyName: "child", first: true, predicate: SomeType, static: true }
+/// ```
+fn build_queries(
+    queries: &oxc_ast::ast::ArrayExpression<'_>,
+    source: &str,
+    ns: &str,
+    type_name: &str,
+    is_content_query: bool,
+) -> Option<String> {
+    if queries.elements.is_empty() {
+        return None;
+    }
+
+    let mut create_stmts: Vec<String> = Vec::new();
+    let mut update_stmts: Vec<String> = Vec::new();
+    let mut t_declared = false;
+
+    for el in &queries.elements {
+        let expr = match el {
+            ArrayExpressionElement::SpreadElement(_) => continue,
+            _ => el.to_expression(),
+        };
+        let Expression::ObjectExpression(query_obj) = expr else { continue };
+
+        let prop_name =
+            get_string_property(query_obj.as_ref(), "propertyName").unwrap_or("unknown");
+        let first = get_bool_property(query_obj.as_ref(), "first").unwrap_or(false);
+        let is_static = get_bool_property(query_obj.as_ref(), "static").unwrap_or(false);
+        let descendants = get_bool_property(query_obj.as_ref(), "descendants").unwrap_or(false);
+        let is_signal = get_bool_property(query_obj.as_ref(), "isSignal").unwrap_or(false);
+        let read = get_property_source(query_obj.as_ref(), "read", source);
+
+        // Build predicate - can be a type reference or string array
+        let predicate =
+            get_property_source(query_obj.as_ref(), "predicate", source).unwrap_or("null");
+
+        // Calculate flags
+        let flags = if is_content_query {
+            if descendants { 5u32 } else { 4u32 }
+        } else if is_static {
+            7u32
+        } else {
+            4u32
+        };
+
+        // Signal queries use different flags
+        let flags = if is_signal { flags | 1 } else { flags };
+
+        // Create block
+        if is_content_query {
+            let mut args = format!("dirIndex, {predicate}, {flags}");
+            if let Some(read_expr) = read {
+                args = format!("{args}, {read_expr}");
+            }
+            create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuery({args})"));
+        } else {
+            let mut args = format!("{predicate}, {flags}");
+            if let Some(read_expr) = read {
+                args = format!("{args}, {read_expr}");
+            }
+            create_stmts.push(format!("{ns}.\u{0275}\u{0275}viewQuery({args})"));
+        }
+
+        // Update block — declare `_t` once before the first query refresh
+        let t_var = if !t_declared {
+            t_declared = true;
+            "let _t;\n"
+        } else {
+            ""
+        };
+        let access = if first { ".first" } else { "" };
+        update_stmts.push(format!(
+            "{t_var}{ns}.\u{0275}\u{0275}queryRefresh(_t = {ns}.\u{0275}\u{0275}loadQuery()) && (ctx.{prop_name} = _t{access})"
+        ));
+    }
+
+    let create_block = create_stmts.join(";\n");
+    let update_block = update_stmts.join(";\n");
+
+    if is_content_query {
+        Some(format!(
+            "function {type_name}_ContentQueries(rf, ctx, dirIndex) {{\nif (rf & 1) {{\n{create_block};\n}}\nif (rf & 2) {{\n{update_block};\n}}\n}}"
+        ))
+    } else {
+        Some(format!(
+            "function {type_name}_Query(rf, ctx) {{\nif (rf & 1) {{\n{create_block};\n}}\nif (rf & 2) {{\n{update_block};\n}}\n}}"
+        ))
+    }
+}
+
+/// Build the features array from component metadata.
+///
+/// Examines boolean flags and providers to build the features array:
+/// - `usesInheritance: true` → `ns.ɵɵInheritDefinitionFeature`
+/// - `usesOnChanges: true` → `ns.ɵɵNgOnChangesFeature`
+/// - `providers: [...]` → `ns.ɵɵProvidersFeature([...])`
+/// - `viewProviders: [...]` → `ns.ɵɵViewProvidersFeature([...])`
+fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
+    let mut features: Vec<String> = Vec::new();
+
+    if get_bool_property(meta, "usesInheritance") == Some(true) {
+        features.push(format!("{ns}.\u{0275}\u{0275}InheritDefinitionFeature"));
+    }
+    if get_bool_property(meta, "usesOnChanges") == Some(true) {
+        features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
+    }
+    if let Some(providers) = get_property_source(meta, "providers", source) {
+        features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature({providers})"));
+    }
+    if let Some(view_providers) = get_property_source(meta, "viewProviders", source) {
+        features.push(format!("{ns}.\u{0275}\u{0275}ViewProvidersFeature({view_providers})"));
+    }
+
+    if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
+}
+
+/// Link ɵɵngDeclareComponent → ɵɵdefineComponent.
+///
+/// A component extends a directive with template compilation and additional
+/// component-specific metadata (styles, encapsulation, change detection, etc.).
+///
+/// The replacement is wrapped in an IIFE to scope the template function declarations:
+/// ```javascript
+/// (() => {
+///   function Child_Template(rf, ctx) { ... }
+///   function Component_Template(rf, ctx) { ... }
+///   return i0.ɵɵdefineComponent({ ... template: Component_Template, ... });
+/// })()
+/// ```
+fn link_component(
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    filename: &str,
+    ns: &str,
+    type_name: &str,
+) -> Option<String> {
+    // Extract template string - required for component linking
+    let template = get_string_property(meta, "template")?;
+    let preserve_whitespaces = get_bool_property(meta, "preserveWhitespaces").unwrap_or(false);
+
+    // Compile the template using the full template compilation pipeline.
+    let template_allocator = Allocator::default();
+
+    // We need to leak the template string into the template allocator's lifetime
+    let template_owned: String = template.to_string();
+    let template_ref: &str = template_allocator.alloc_str(&template_owned);
+
+    let template_output = crate::component::compile_template_for_linker(
+        &template_allocator,
+        template_ref,
+        type_name,
+        filename,
+        preserve_whitespaces,
+    )
+    .ok()?;
+
+    // Build the defineComponent properties
+    let mut parts: Vec<String> = Vec::new();
+
+    // 1. type
+    parts.push(format!("type: {type_name}"));
+
+    // 2. selectors
+    if let Some(selector) = get_string_property(meta, "selector") {
+        parts.push(format!("selectors: {}", parse_selector(selector)));
+    }
+
+    // 3. contentQueries
+    if let Some(queries_arr) = get_array_property(meta, "queries") {
+        if let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true) {
+            parts.push(format!("contentQueries: {cq_fn}"));
+        }
+    }
+
+    // 4. viewQuery
+    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries") {
+        if let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false) {
+            parts.push(format!("viewQuery: {vq_fn}"));
+        }
+    }
+
+    // 5-7. Host bindings (hostAttrs, hostVars, hostBindings)
+    if let Some(host_obj) = get_object_property(meta, "host") {
+        // Static attributes → hostAttrs
+        let host_attrs = build_host_attrs(host_obj, source);
+        if !host_attrs.is_empty() {
+            parts.push(format!("hostAttrs: [{host_attrs}]"));
+        }
+
+        // Dynamic bindings → hostVars + hostBindings function
+        // Extract host properties and listeners as HostMetadataInput and compile
+        // through the full Angular expression parser for correct output.
+        let host_input = extract_host_metadata_input(host_obj);
+        let selector = get_string_property(meta, "selector");
+        if let Some((host_fn, host_vars)) =
+            crate::component::compile_host_bindings_for_linker(&host_input, type_name, selector)
+        {
+            if host_vars > 0 {
+                parts.push(format!("hostVars: {host_vars}"));
+            }
+            parts.push(format!("hostBindings: {host_fn}"));
+        }
+    }
+
+    // 8. inputs
+    if let Some(inputs_obj) = get_object_property(meta, "inputs") {
+        let converted = convert_inputs_to_definition_format(inputs_obj, source);
+        parts.push(format!("inputs: {converted}"));
+    }
+
+    // 9. outputs
+    if let Some(outputs) = get_property_source(meta, "outputs", source) {
+        parts.push(format!("outputs: {outputs}"));
+    }
+
+    // 10. exportAs
+    if let Some(export_as) = get_property_source(meta, "exportAs", source) {
+        parts.push(format!("exportAs: {export_as}"));
+    }
+
+    // 11. standalone
+    let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
+    parts.push(format!("standalone: {standalone}"));
+
+    // 12. features
+    if let Some(features) = build_features(meta, source, ns) {
+        parts.push(format!("features: {features}"));
+    }
+
+    // 13. ngContentSelectors (from template compilation)
+    if let Some(ref ng_content_selectors) = template_output.ng_content_selectors_js {
+        parts.push(format!("ngContentSelectors: {ng_content_selectors}"));
+    }
+
+    // 14. decls (from template compilation)
+    parts.push(format!("decls: {}", template_output.decls));
+
+    // 15. vars (from template compilation)
+    parts.push(format!("vars: {}", template_output.vars));
+
+    // 16. consts (from template compilation)
+    if let Some(ref consts) = template_output.consts_js {
+        parts.push(format!("consts: {consts}"));
+    }
+
+    // 17. template (reference to the compiled function)
+    parts.push(format!("template: {}", template_output.template_fn_name));
+
+    // 18. dependencies (extract type references from dependency objects)
+    if let Some(deps_arr) = get_array_property(meta, "dependencies") {
+        if let Some(deps_str) = extract_dependency_types(deps_arr, source) {
+            parts.push(format!("dependencies: {deps_str}"));
+        }
+    }
+
+    // 19. styles
+    if let Some(styles) = get_property_source(meta, "styles", source) {
+        parts.push(format!("styles: {styles}"));
+    }
+
+    // 20. encapsulation
+    if let Some(encap) = get_property_source(meta, "encapsulation", source) {
+        // Convert ViewEncapsulation enum to numeric value
+        if encap.contains("None") {
+            parts.push("encapsulation: 2".to_string());
+        } else if encap.contains("ShadowDom") {
+            parts.push("encapsulation: 3".to_string());
+        }
+        // Emulated (0) is the default, no need to emit
+    }
+
+    // 21. data (animations)
+    if let Some(animations) = get_property_source(meta, "animations", source) {
+        parts.push(format!("data: {{ animation: {animations} }}"));
+    }
+
+    // 22. changeDetection
+    if let Some(cd) = get_property_source(meta, "changeDetection", source) {
+        if cd.contains("OnPush") {
+            parts.push("changeDetection: 0".to_string());
+        }
+        // Default (1) is the default, no need to emit
+    }
+
+    let define_component =
+        format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
+
+    // Wrap in IIFE with template declarations
+    let declarations = &template_output.declarations_js;
+    if declarations.trim().is_empty() {
+        Some(define_component)
+    } else {
+        Some(format!("(() => {{\n{declarations}\nreturn {define_component};\n}})()"))
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -1040,7 +1559,36 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.0.0", ngImpor
     }
 
     #[test]
-    fn test_component_declarations_are_preserved() {
+    fn test_link_directive_with_aliased_inputs() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class RxFor {
+}
+RxFor.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "16.2.10", ngImport: i0, type: RxFor, isStandalone: true, selector: "[rxFor][rxForOf]", inputs: { rxForOf: "rxForOf", renderParent: ["rxForParent", "renderParent"], trackBy: ["rxForTrackBy", "trackBy"] } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(result.code.contains("defineDirective"));
+        assert!(!result.code.contains("ɵɵngDeclareDirective"));
+        // Simple inputs should stay as string: rxForOf: "rxForOf"
+        assert!(result.code.contains(r#"rxForOf: "rxForOf""#));
+        // Aliased inputs must be converted with InputFlags prepended:
+        // ["rxForTrackBy", "trackBy"] → [0, "rxForTrackBy", "trackBy"]
+        assert!(
+            result.code.contains(r#"trackBy: [0, "rxForTrackBy", "trackBy"]"#),
+            "Expected trackBy to have InputFlags prepended. Got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains(r#"renderParent: [0, "rxForParent", "renderParent"]"#),
+            "Expected renderParent to have InputFlags prepended. Got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_basic() {
         let allocator = Allocator::default();
         let code = r#"
 import * as i0 from "@angular/core";
@@ -1049,16 +1597,31 @@ class MyComponent {
 MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
 "#;
         let result = link(&allocator, code, "test.mjs");
-        // Component declarations should NOT be linked (template compilation not implemented).
-        // The original ɵɵngDeclareComponent call must be preserved intact so Angular's
-        // runtime can JIT-compile the template.
-        assert!(!result.linked);
-        assert!(result.code.contains("\u{0275}\u{0275}ngDeclareComponent"));
-        assert!(!result.code.contains("defineComponent"));
+        assert!(result.linked, "Component should be linked");
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("\u{0275}\u{0275}ngDeclareComponent"),
+            "Should not contain ngDeclareComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("MyComponent_Template"),
+            "Should contain compiled template function, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("selectors: [[\"my-comp\"]]"),
+            "Should contain parsed selectors, got:\n{}",
+            result.code
+        );
     }
 
     #[test]
-    fn test_component_preserved_while_other_declarations_linked() {
+    fn test_link_component_with_factory() {
         let allocator = Allocator::default();
         let code = r#"
 import * as i0 from "@angular/core";
@@ -1068,10 +1631,182 @@ MyComponent.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20
 MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
 "#;
         let result = link(&allocator, code, "test.mjs");
-        // Factory should be linked but component declaration should be preserved
         assert!(result.linked);
         assert!(result.code.contains("MyComponent_Factory"));
         assert!(!result.code.contains("\u{0275}\u{0275}ngDeclareFactory"));
-        assert!(result.code.contains("\u{0275}\u{0275}ngDeclareComponent"));
+        assert!(result.code.contains("defineComponent"));
+        assert!(!result.code.contains("\u{0275}\u{0275}ngDeclareComponent"));
+    }
+
+    #[test]
+    fn test_link_component_with_dependencies() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+import * as i1 from "@angular/router";
+class EmptyOutletComponent {
+}
+EmptyOutletComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: EmptyOutletComponent, selector: "ng-component", template: "<router-outlet/>", isStandalone: true, dependencies: [{ kind: "directive", type: i1.RouterOutlet, selector: "router-outlet" }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should be linked");
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: [i1.RouterOutlet]"),
+            "Should extract dependency types, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_features() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", usesInheritance: true, providers: [SomeService] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("InheritDefinitionFeature"),
+            "Should have InheritDefinitionFeature, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ProvidersFeature"),
+            "Should have ProvidersFeature, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_ng_content() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class CdkStep {
+}
+CdkStep.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: CdkStep, selector: "cdk-step", template: "<ng-template><ng-content></ng-content></ng-template>", isStandalone: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ngContentSelectors"),
+            "Should contain ngContentSelectors for ng-content, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_encapsulation() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", encapsulation: i0.ViewEncapsulation.None });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("encapsulation: 2"),
+            "ViewEncapsulation.None should be 2, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_change_detection() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", changeDetection: i0.ChangeDetectionStrategy.OnPush });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("changeDetection: 0"),
+            "ChangeDetectionStrategy.OnPush should be 0, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_host_attrs() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", host: { attributes: { "role": "tree" }, classAttribute: "cdk-tree" } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("hostAttrs:"),
+            "Should contain hostAttrs, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("\"role\""),
+            "Should contain role attribute, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_host_bindings() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", host: { properties: { "id": "this.dirId", "attr.aria-disabled": "disabled" }, listeners: { "click": "onClick($event)" } } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        // Should have hostVars for the 2 property bindings
+        assert!(
+            result.code.contains("hostVars:"),
+            "Should contain hostVars, got:\n{}",
+            result.code
+        );
+        // Should have hostBindings function
+        assert!(
+            result.code.contains("hostBindings:"),
+            "Should contain hostBindings, got:\n{}",
+            result.code
+        );
+        // The host binding function should properly compile expressions, not raw strings with quotes
+        assert!(
+            !result.code.contains(r#"ctx."this.dirId""#),
+            "Should NOT contain invalid ctx.\"this.dirId\" expression, got:\n{}",
+            result.code
+        );
+        // Should have proper context property access
+        assert!(
+            result.code.contains("ctx.dirId"),
+            "Should contain properly compiled ctx.dirId, got:\n{}",
+            result.code
+        );
+        // Listener should be properly compiled (not raw string with quotes)
+        assert!(
+            !result.code.contains(r#"ctx."onClick($event)""#),
+            "Should NOT contain invalid listener expression, got:\n{}",
+            result.code
+        );
     }
 }

@@ -301,6 +301,19 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const fileId = decodedComponentId.slice(0, atIndex)
             const resolvedId = resolve(process.cwd(), fileId)
 
+            // Only return HMR update module if the file has been invalidated (changed).
+            // On initial page load, modules haven't been invalidated yet, so we return
+            // an empty response. This prevents ɵɵreplaceMetadata from being called
+            // unnecessarily during initial load, which would re-create views and cause
+            // errors with @Required() decorators and directive matching.
+            const mod = server.moduleGraph.getModuleById(resolvedId)
+            if (!mod?.lastInvalidationTimestamp) {
+              res.setHeader('Content-Type', 'text/javascript')
+              res.setHeader('Cache-Control', 'no-cache')
+              res.end('')
+              return
+            }
+
             try {
               const source = await readFile(resolvedId, 'utf-8')
               const { templateUrls, styleUrls } = await extractComponentUrls(source, resolvedId)
@@ -385,14 +398,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           id: ANGULAR_TS_REGEX,
         },
         async handler(code, id) {
-          // DEBUG: Log all files being considered
-          if (id.includes('nav-base') || id.includes('nav-item')) {
-            console.log('[OXC DEBUG] Handler called for:', id)
-            console.log('  - In node_modules:', id.includes('node_modules'))
-            console.log('  - Has @Directive:', code.includes('@Directive'))
-            console.log('  - Has @Component:', code.includes('@Component'))
-          }
-
           // Skip node_modules
           if (id.includes('node_modules')) {
             return

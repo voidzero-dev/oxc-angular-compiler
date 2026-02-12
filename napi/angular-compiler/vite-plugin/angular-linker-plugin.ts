@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-import { linkAngularPackageSync } from '#binding'
+import { linkAngularPackage } from '#binding'
 import type { Plugin } from 'vite'
 
 /**
@@ -13,7 +13,8 @@ import type { Plugin } from 'vite'
  * Without this plugin, Angular falls back to JIT compilation which requires
  * @angular/compiler at runtime.
  *
- * Uses OXC's native Rust-based linker for fast, zero-dependency linking.
+ * Uses OXC's native Rust-based linker for fast, zero-dependency linking of all
+ * declaration types including ɵɵngDeclareComponent (with full template compilation).
  *
  * This plugin works in two phases:
  * 1. During dependency optimization (Rolldown pre-bundling) via a Rolldown load plugin
@@ -28,13 +29,35 @@ const SKIP_REGEX = /[\\/]@angular[\\/](?:compiler|core)[\\/]/
 // Match JS files in node_modules (Angular FESM bundles)
 const NODE_MODULES_JS_REGEX = /node_modules\/.*\.[cm]?js$/
 
+/**
+ * Run the OXC Rust linker on the given code.
+ */
+async function linkCode(
+  code: string,
+  id: string,
+): Promise<{ code: string; map: string | null; linked: boolean }> {
+  const result = await linkAngularPackage(code, id)
+  return {
+    code: result.linked ? result.code : code,
+    map: result.map ?? null,
+    linked: result.linked,
+  }
+}
+
 export function angularLinkerPlugin(): Plugin {
   return {
     name: '@voidzero-dev/vite-plugin-angular-linker',
-    config() {
+    config(_, { command }) {
       return {
         optimizeDeps: {
           rolldownOptions: {
+            transform: {
+              define: {
+                ngJitMode: 'false',
+                ngI18nClosureMode: 'false',
+                ...(command === 'serve' ? {} : { ngDevMode: 'false' }),
+              },
+            },
             plugins: [
               {
                 name: 'angular-linker',
@@ -55,7 +78,7 @@ export function angularLinkerPlugin(): Plugin {
                       return
                     }
 
-                    const result = linkAngularPackageSync(code, id)
+                    const result = await linkCode(code, id)
 
                     if (!result.linked) {
                       return
@@ -75,13 +98,13 @@ export function angularLinkerPlugin(): Plugin {
         id: NODE_MODULES_JS_REGEX,
         code: LINKER_DECLARATION_PREFIX,
       },
-      handler(code, id) {
+      async handler(code, id) {
         // Skip packages that don't need linking
         if (SKIP_REGEX.test(id)) {
           return
         }
 
-        const result = linkAngularPackageSync(code, id)
+        const result = await linkCode(code, id)
 
         if (!result.linked) {
           return
@@ -89,7 +112,7 @@ export function angularLinkerPlugin(): Plugin {
 
         return {
           code: result.code,
-          map: result.map ?? null,
+          map: result.map,
         }
       },
     },
