@@ -460,10 +460,6 @@ pub fn create_view_queries_function<'a>(
     let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
     let mut temp_allocator = TempAllocator::new();
 
-    // Track chained calls
-    let mut view_query_signal_call: Option<OutputExpression<'a>> = None;
-    let mut view_query_call: Option<OutputExpression<'a>> = None;
-
     for (idx, query) in view_queries.iter().enumerate() {
         // Creation: ɵɵviewQuery(predicate, flags, read) or ɵɵviewQuerySignal(ctx.prop, predicate, flags, read)
         // Use pre-pooled predicate instead of calling get_query_create_parameters
@@ -473,24 +469,15 @@ pub fn create_view_queries_function<'a>(
             pooled_predicates[idx].clone_in(allocator),
         );
 
+        // Emit each query as a separate statement.
+        // Angular 20's ɵɵviewQuery returns void, so chaining is not supported.
         if query.is_signal {
-            // Angular's pattern: viewQuerySignalCall ??= o.importExpr(R3.viewQuerySignal);
-            //                    viewQuerySignalCall = viewQuerySignalCall.callFn(params);
-            // This chains calls directly: prev(params), not prev.viewQuerySignal(params)
-            let fn_expr = match view_query_signal_call {
-                Some(prev) => prev,
-                None => import_expr(allocator, Identifiers::VIEW_QUERY_SIGNAL),
-            };
-            view_query_signal_call = Some(call_fn(allocator, fn_expr, params));
+            let call =
+                call_fn(allocator, import_expr(allocator, Identifiers::VIEW_QUERY_SIGNAL), params);
+            create_statements.push(expr_stmt(allocator, call));
         } else {
-            // Angular's pattern: viewQueryCall ??= o.importExpr(R3.viewQuery);
-            //                    viewQueryCall = viewQueryCall.callFn(params);
-            // This chains calls directly: prev(params), not prev.viewQuery(params)
-            let fn_expr = match view_query_call {
-                Some(prev) => prev,
-                None => import_expr(allocator, Identifiers::VIEW_QUERY),
-            };
-            view_query_call = Some(call_fn(allocator, fn_expr, params));
+            let call = call_fn(allocator, import_expr(allocator, Identifiers::VIEW_QUERY), params);
+            create_statements.push(expr_stmt(allocator, call));
         }
 
         // Update phase
@@ -566,14 +553,6 @@ pub fn create_view_queries_function<'a>(
             update_statements
                 .push(MaybeAdvanceStatement::Statement(expr_stmt(allocator, and_expr)));
         }
-    }
-
-    // Build create statements
-    if let Some(signal_call) = view_query_signal_call {
-        create_statements.push(expr_stmt(allocator, signal_call));
-    }
-    if let Some(query_call) = view_query_call {
-        create_statements.push(expr_stmt(allocator, query_call));
     }
 
     // Build update statements with temp variable declarations
@@ -665,10 +644,6 @@ pub fn create_content_queries_function<'a>(
     let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
     let mut temp_allocator = TempAllocator::new();
 
-    // Track chained calls
-    let mut content_query_signal_call: Option<OutputExpression<'a>> = None;
-    let mut content_query_call: Option<OutputExpression<'a>> = None;
-
     for (idx, query) in queries.iter().enumerate() {
         // Prepend dirIndex parameter for content queries
         let mut prepend = Vec::new_in(allocator);
@@ -681,24 +656,19 @@ pub fn create_content_queries_function<'a>(
             prepend,
         );
 
+        // Emit each query as a separate statement.
+        // Angular 20's ɵɵcontentQuery returns void, so chaining is not supported.
         if query.is_signal {
-            // Angular's pattern: contentQuerySignalCall ??= o.importExpr(R3.contentQuerySignal);
-            //                    contentQuerySignalCall = contentQuerySignalCall.callFn(params);
-            // This chains calls directly: prev(params), not prev.contentQuerySignal(params)
-            let fn_expr = match content_query_signal_call {
-                Some(prev) => prev,
-                None => import_expr(allocator, Identifiers::CONTENT_QUERY_SIGNAL),
-            };
-            content_query_signal_call = Some(call_fn(allocator, fn_expr, params));
+            let call = call_fn(
+                allocator,
+                import_expr(allocator, Identifiers::CONTENT_QUERY_SIGNAL),
+                params,
+            );
+            create_statements.push(expr_stmt(allocator, call));
         } else {
-            // Angular's pattern: contentQueryCall ??= o.importExpr(R3.contentQuery);
-            //                    contentQueryCall = contentQueryCall.callFn(params);
-            // This chains calls directly: prev(params), not prev.contentQuery(params)
-            let fn_expr = match content_query_call {
-                Some(prev) => prev,
-                None => import_expr(allocator, Identifiers::CONTENT_QUERY),
-            };
-            content_query_call = Some(call_fn(allocator, fn_expr, params));
+            let call =
+                call_fn(allocator, import_expr(allocator, Identifiers::CONTENT_QUERY), params);
+            create_statements.push(expr_stmt(allocator, call));
         }
 
         // Update phase (same as view queries)
@@ -767,14 +737,6 @@ pub fn create_content_queries_function<'a>(
             update_statements
                 .push(MaybeAdvanceStatement::Statement(expr_stmt(allocator, and_expr)));
         }
-    }
-
-    // Build create statements
-    if let Some(signal_call) = content_query_signal_call {
-        create_statements.push(expr_stmt(allocator, signal_call));
-    }
-    if let Some(query_call) = content_query_call {
-        create_statements.push(expr_stmt(allocator, query_call));
     }
 
     // Build update statements with temp variable declarations
@@ -1003,14 +965,148 @@ mod tests {
 
         println!("Chained signal queries output:\n{}", output);
 
-        // Angular chains signal queries: fn(params1)(params2)
-        // Each params should have: target, predicate, flags
-        // Remove whitespace for comparison since emitter may format differently
+        // Each signal query should be emitted as a separate statement.
+        // Angular 20's ɵɵviewQuerySignal returns void, so chaining is not supported.
         let normalized = output.replace(['\n', ' '], "");
         assert!(
-            normalized
-                .contains("viewQuerySignal(ctx.query1,Component1,1)(ctx.query2,Component2,1)"),
-            "Chained signal queries should each have: target, predicate, flags.\nGot:\n{}",
+            normalized.contains("viewQuerySignal(ctx.query1,Component1,1);")
+                && normalized.contains("viewQuerySignal(ctx.query2,Component2,1);"),
+            "Each signal query should be a separate statement.\nGot:\n{}",
+            output
+        );
+    }
+
+    /// Regression test: Multiple non-signal view queries must be separate statements.
+    ///
+    /// Previously, multiple view queries were chained as ɵɵviewQuery(p1)(p2), calling
+    /// the result of the first query as a function. Angular 20's ɵɵviewQuery returns void,
+    /// so chaining breaks with: TypeError: ɵɵviewQuery(...) is not a function.
+    ///
+    /// The fix: Emit each query as a separate statement.
+    #[test]
+    fn test_multiple_non_signal_view_queries_are_separate_statements() {
+        let allocator = Allocator::default();
+
+        let query1 = R3QueryMetadata {
+            property_name: Atom::from("myChild"),
+            first: true,
+            predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: Atom::from("ChildComponent"), source_span: None },
+                &allocator,
+            ))),
+            descendants: true,
+            emit_distinct_changes_only: true,
+            is_static: false,
+            is_signal: false,
+            read: None,
+        };
+
+        let query2 = R3QueryMetadata {
+            property_name: Atom::from("myOther"),
+            first: false,
+            predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: Atom::from("OtherComponent"), source_span: None },
+                &allocator,
+            ))),
+            descendants: true,
+            emit_distinct_changes_only: true,
+            is_static: false,
+            is_signal: false,
+            read: None,
+        };
+
+        let queries = [query1, query2];
+        let result =
+            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None);
+
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result);
+
+        let normalized = output.replace(['\n', ' '], "");
+
+        // Each non-signal view query should be a separate statement (ending with ;),
+        // NOT chained as ɵɵviewQuery(ChildComponent,5)(OtherComponent,5).
+        assert!(
+            normalized.contains("i0.ɵɵviewQuery(ChildComponent,5);"),
+            "First view query should be a separate statement.\nGot:\n{}",
+            output
+        );
+        assert!(
+            normalized.contains("i0.ɵɵviewQuery(OtherComponent,5);"),
+            "Second view query should be a separate statement.\nGot:\n{}",
+            output
+        );
+
+        // Make sure they're NOT chained (the old buggy pattern)
+        assert!(
+            !normalized.contains("viewQuery(ChildComponent,5)(OtherComponent"),
+            "View queries must NOT be chained (Angular 20 returns void).\nGot:\n{}",
+            output
+        );
+    }
+
+    /// Regression test: Multiple content queries must be separate statements.
+    ///
+    /// Same as the view query chaining bug, but for content queries.
+    /// Angular 20's ɵɵcontentQuery also returns void, so chaining breaks.
+    #[test]
+    fn test_multiple_content_queries_are_separate_statements() {
+        let allocator = Allocator::default();
+
+        let query1 = R3QueryMetadata {
+            property_name: Atom::from("items"),
+            first: false,
+            predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: Atom::from("ItemComponent"), source_span: None },
+                &allocator,
+            ))),
+            descendants: true,
+            emit_distinct_changes_only: true,
+            is_static: false,
+            is_signal: false,
+            read: None,
+        };
+
+        let query2 = R3QueryMetadata {
+            property_name: Atom::from("headers"),
+            first: true,
+            predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: Atom::from("HeaderComponent"), source_span: None },
+                &allocator,
+            ))),
+            descendants: false,
+            emit_distinct_changes_only: true,
+            is_static: false,
+            is_signal: false,
+            read: None,
+        };
+
+        let queries = [query1, query2];
+        let result =
+            create_content_queries_function(&allocator, &queries, Some("TestDirective"), None);
+
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result);
+
+        let normalized = output.replace(['\n', ' '], "");
+
+        // Each content query should be a separate statement (ending with ;),
+        // NOT chained as ɵɵcontentQuery(dirIndex,ItemComponent,5)(dirIndex,HeaderComponent,4).
+        assert!(
+            normalized.contains("i0.ɵɵcontentQuery(dirIndex,ItemComponent,5);"),
+            "First content query should be a separate statement.\nGot:\n{}",
+            output
+        );
+        assert!(
+            normalized.contains("i0.ɵɵcontentQuery(dirIndex,HeaderComponent,4);"),
+            "Second content query should be a separate statement.\nGot:\n{}",
+            output
+        );
+
+        // Make sure they're NOT chained
+        assert!(
+            !normalized.contains("contentQuery(dirIndex,ItemComponent,5)(dirIndex,HeaderComponent"),
+            "Content queries must NOT be chained (Angular 20 returns void).\nGot:\n{}",
             output
         );
     }

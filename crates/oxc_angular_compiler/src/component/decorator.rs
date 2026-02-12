@@ -931,11 +931,6 @@ fn extract_param_dependency<'a>(
     // Determine the token:
     // 1. If @Inject(TOKEN) is present, use TOKEN
     // 2. Otherwise, use the type annotation
-    //
-    // Track whether the token comes from @Inject decorator (value) or type annotation.
-    // This affects import reuse: @Inject tokens can reuse named imports, but type
-    // annotation tokens need namespace imports because TypeScript types are erased.
-    let token_from_inject = inject_token.is_some();
     let token = inject_token.or_else(|| extract_param_token(param));
 
     // Handle @Attribute decorator
@@ -950,12 +945,10 @@ fn extract_param_dependency<'a>(
             // Look up the token in the import map to find its source module and import type
             if let Some(import_info) = import_map.get(token_name) {
                 d.token_source_module = Some(import_info.source_module.clone());
-                // Only reuse named imports for tokens from @Inject decorator.
-                // Type annotation tokens need namespace imports because TypeScript
-                // types are erased at runtime and may not be available as values.
-                // This matches Angular's behavior: @Inject(TOKEN) uses bare TOKEN,
-                // but `param: ServiceType` uses `i1.ServiceType`.
-                d.has_named_import = token_from_inject && import_info.is_named_import;
+                // Always use namespace imports for DI tokens (has_named_import = false).
+                // Import elision removes @Inject(TOKEN) argument imports since they're
+                // only used in decorator positions that get compiled away.
+                // Using bare TOKEN would fail at runtime because the import is gone.
             }
             d
         }

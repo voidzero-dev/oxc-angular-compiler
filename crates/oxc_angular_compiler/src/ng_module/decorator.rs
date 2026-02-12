@@ -29,8 +29,13 @@ pub struct NgModuleMetadata<'a> {
     /// Declared components, directives, and pipes as class names.
     pub declarations: Vec<'a, Atom<'a>>,
 
-    /// Imported modules as class names.
+    /// Imported modules as class names (for ɵmod scope resolution).
     pub imports: Vec<'a, Atom<'a>>,
+
+    /// Raw imports array expression (for ɵinj provider resolution).
+    /// This preserves call expressions like `StoreModule.forRoot(...)` and spread elements
+    /// that are needed by the injector to resolve `ModuleWithProviders`.
+    pub raw_imports_expr: Option<OutputExpression<'a>>,
 
     /// Exported declarations and modules as class names.
     pub exports: Vec<'a, Atom<'a>>,
@@ -64,6 +69,7 @@ impl<'a> NgModuleMetadata<'a> {
             class_span,
             declarations: Vec::new_in(allocator),
             imports: Vec::new_in(allocator),
+            raw_imports_expr: None,
             exports: Vec::new_in(allocator),
             providers: None,
             bootstrap: Vec::new_in(allocator),
@@ -226,6 +232,10 @@ pub fn extract_ng_module_metadata<'a>(
                     if has_forward_refs {
                         metadata.contains_forward_decls = true;
                     }
+                    // Also store the raw imports expression for ɵinj generation.
+                    // This preserves call expressions like StoreModule.forRoot(...)
+                    // and spread elements that are dropped by extract_reference_array.
+                    metadata.raw_imports_expr = convert_oxc_expression(allocator, &prop.value);
                 }
                 "exports" => {
                     let (identifiers, has_forward_refs) =
@@ -334,6 +344,7 @@ fn extract_reference_array<'a>(
                 result.push(id.name.clone());
             }
             // Forward reference: forwardRef(() => SomeComponent)
+            // Or method call: StoreModule.forRoot(...), EffectsModule.forRoot([...])
             ArrayExpressionElement::CallExpression(call) => {
                 if let Expression::Identifier(id) = &call.callee {
                     if id.name == "forwardRef" {
@@ -345,6 +356,12 @@ fn extract_reference_array<'a>(
                                 result.push(inner_id.name.clone());
                             }
                         }
+                    }
+                } else if let Expression::StaticMemberExpression(member) = &call.callee {
+                    // Module.forRoot(...) or Module.forChild(...) pattern
+                    // Extract the base class identifier for ɵmod scope resolution
+                    if let Expression::Identifier(id) = &member.object {
+                        result.push(id.name.clone());
                     }
                 }
             }

@@ -200,7 +200,7 @@ impl Edit {
 ///
 /// Edits are sorted by position (descending) so that applying them
 /// from the end doesn't invalidate earlier positions.
-fn apply_edits(code: &str, mut edits: Vec<Edit>) -> String {
+pub fn apply_edits(code: &str, mut edits: Vec<Edit>) -> String {
     if edits.is_empty() {
         return code.to_string();
     }

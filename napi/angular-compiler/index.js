@@ -777,6 +777,8 @@ const {
   extractComponentUrls,
   generateHmrModule,
   generateStyleModule,
+  linkAngularPackage,
+  linkAngularPackageSync,
   optimizeAngularPackage,
   parseComponentId,
   transformAngularFile,
@@ -795,6 +797,8 @@ export { extractAngularComponentByAst }
 export { extractComponentUrls }
 export { generateHmrModule }
 export { generateStyleModule }
+export { linkAngularPackage }
+export { linkAngularPackageSync }
 export { optimizeAngularPackage }
 export { parseComponentId }
 export { transformAngularFile }

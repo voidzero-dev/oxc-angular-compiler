@@ -32,6 +32,7 @@ import {
 
 import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
 import { jitPlugin } from './angular-jit-plugin.js'
+import { angularLinkerPlugin } from './angular-linker-plugin.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -440,36 +441,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)
 
-          // Debug logging for nav-base specifically
-          if (actualId.includes('nav-base.component')) {
-            console.log('[OXC Angular] nav-base.component.ts OUTPUT:')
-            console.log('='.repeat(80))
-            console.log(result.code)
-            console.log('='.repeat(80))
-          }
-
-          // Debug logging for I18nPipe to see generated factory
-          if (actualId.includes('i18n.pipe')) {
-            console.log('[OXC Angular] i18n.pipe.ts OUTPUT:')
-            console.log('='.repeat(80))
-            console.log(result.code)
-            console.log('='.repeat(80))
-          }
-
-          // Debug logging for services in circular dependency chain
-          if (
-            actualId.includes('folder.service.ts') ||
-            actualId.includes('cipher.service.ts') ||
-            actualId.includes('api.service.ts') ||
-            actualId.includes('jslib-services.module.ts') ||
-            actualId.includes('core.module.ts')
-          ) {
-            console.log(`[OXC Angular] ${actualId.split('/').pop()} OUTPUT:`)
-            console.log('='.repeat(80))
-            console.log(result.code)
-            console.log('='.repeat(80))
-          }
-
           // Report errors and warnings
           for (const error of result.errors) {
             this.error(error.message)
@@ -601,6 +572,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   return [
     angularPlugin(),
     stylesPlugin(),
+    angularLinkerPlugin(),
     pluginOptions.jit &&
       jitPlugin({
         inlineStylesExtension: pluginOptions.inlineStylesExtension,

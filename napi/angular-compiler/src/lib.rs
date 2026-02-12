@@ -2604,3 +2604,78 @@ pub fn optimize_angular_package(
 ) -> AsyncTask<OptimizeAngularPackageTask> {
     AsyncTask::new(OptimizeAngularPackageTask { code, filename, options })
 }
+
+// =============================================================================
+// Angular Partial Declaration Linker
+// =============================================================================
+
+/// Result of linking Angular partial declarations.
+#[napi(object)]
+pub struct LinkResult {
+    /// The linked code.
+    pub code: String,
+    /// Source map (if enabled).
+    pub map: Option<String>,
+    /// Whether any declarations were linked.
+    pub linked: bool,
+}
+
+/// Link Angular partial declarations in a JavaScript file (sync).
+///
+/// Processes pre-compiled Angular library code containing `ɵɵngDeclare*` calls
+/// and converts them to their fully compiled equivalents (`ɵɵdefine*` calls).
+///
+/// This is necessary for Angular libraries published with partial compilation
+/// (Angular 12+). Without linking, Angular falls back to JIT compilation
+/// which requires `@angular/compiler` at runtime.
+///
+/// # Arguments
+///
+/// * `code` - The JavaScript source code to link
+/// * `filename` - The filename (for source maps and error messages)
+///
+/// # Returns
+///
+/// A `LinkResult` containing the linked code. If no partial declarations
+/// were found, the original code is returned with `linked: false`.
+#[napi]
+pub fn link_angular_package_sync(code: String, filename: String) -> LinkResult {
+    use oxc_angular_compiler::linker::link;
+
+    let allocator = Allocator::default();
+    let result = link(&allocator, &code, &filename);
+
+    LinkResult { code: result.code, map: result.map, linked: result.linked }
+}
+
+/// Async task for Angular linking.
+pub struct LinkAngularPackageTask {
+    code: String,
+    filename: String,
+}
+
+#[napi]
+impl Task for LinkAngularPackageTask {
+    type JsValue = LinkResult;
+    type Output = LinkResult;
+
+    fn compute(&mut self) -> napi::Result<Self::Output> {
+        Ok(link_angular_package_sync(
+            std::mem::take(&mut self.code),
+            std::mem::take(&mut self.filename),
+        ))
+    }
+
+    fn resolve(&mut self, _: napi::Env, result: Self::Output) -> napi::Result<Self::JsValue> {
+        Ok(result)
+    }
+}
+
+/// Link Angular partial declarations in a JavaScript file (async).
+///
+/// This is the async version of `linkAngularPackageSync`. Use this when
+/// linking packages in a non-blocking context.
+#[napi]
+pub fn link_angular_package(code: String, filename: String) -> AsyncTask<LinkAngularPackageTask> {
+    AsyncTask::new(LinkAngularPackageTask { code, filename })
+}

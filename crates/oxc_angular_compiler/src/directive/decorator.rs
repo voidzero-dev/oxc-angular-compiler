@@ -372,12 +372,10 @@ fn get_decorator_name_from_expr<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>
 
 /// Extract the injection token from a parameter's type annotation.
 ///
-/// Type annotations are erased at runtime by TypeScript, so we need to generate
-/// namespace-prefixed property access (e.g., `i0.TemplateRef`) to ensure the
-/// runtime value is available.
-///
-/// Note: Unlike @Inject tokens which use named imports, type annotations always
-/// need the namespace prefix because the type may not be available as a value.
+/// Returns a bare `ReadVar` expression with the type name. The caller
+/// (`resolve_factory_dep_namespaces` in `transform.rs`) is responsible for
+/// looking up the correct namespace based on the import map and converting
+/// it to a namespace-prefixed `ReadProp` (e.g., `i1.Store`).
 fn extract_param_token<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
@@ -398,27 +396,8 @@ fn extract_param_token<'a>(
             }
         };
 
-        // Type annotations need to be accessed through the namespace import (i0.TypeName)
-        // because TypeScript erases types at runtime. The namespace ensures the runtime
-        // value is available.
-        //
-        // For example: `constructor(template: TemplateRef<any>)` should generate
-        // `i0.ɵɵdirectiveInject(i0.TemplateRef)` not `i0.ɵɵdirectiveInject(TemplateRef)`
-        //
-        // This matches Angular's behavior for type-annotation-based injection.
-        return Some(OutputExpression::ReadProp(Box::new_in(
-            crate::output::ast::ReadPropExpr {
-                receiver: Box::new_in(
-                    OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
-                        allocator,
-                    )),
-                    allocator,
-                ),
-                name: type_name,
-                optional: false,
-                source_span: None,
-            },
+        return Some(OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: type_name, source_span: None },
             allocator,
         )));
     }
@@ -1397,6 +1376,56 @@ mod tests {
         "#;
         assert_directive_metadata(code, |meta| {
             assert!(meta.uses_inheritance, "Should have inheritance");
+        });
+    }
+
+    #[test]
+    fn test_extract_param_token_returns_read_var_not_read_prop() {
+        // Regression test for bug where extract_param_token() returned
+        // ReadProp(i0.TypeName) with hardcoded i0, instead of a bare
+        // ReadVar(TypeName). The ReadProp prevented resolve_factory_dep_namespaces()
+        // from processing the tokens (it only handles ReadVar tokens), causing
+        // all directive constructor deps to be assigned the wrong namespace.
+        //
+        // The fix: Changed extract_param_token to return ReadVar(TypeName)
+        // matching the pattern used by injectable, pipe, and ng_module extractors.
+        let code = r#"
+            @Directive({ selector: '[myDir]' })
+            class MyDirective {
+                constructor(private store: Store, private svc: SomeService) {}
+            }
+        "#;
+        assert_directive_metadata(code, |meta| {
+            // Should have 2 constructor deps
+            let deps = meta.deps.as_ref().expect("Directive should have deps");
+            assert_eq!(deps.len(), 2, "Should have 2 constructor deps");
+
+            // Each dep token should be a ReadVar (bare identifier), NOT a ReadProp
+            // ReadVar tokens can be resolved by resolve_factory_dep_namespaces()
+            // to the correct namespace prefix (e.g., i1.Store instead of i0.Store)
+            for (i, dep) in deps.iter().enumerate() {
+                let token = dep.token.as_ref().unwrap_or_else(|| {
+                    panic!("Dep {} should have a token", i);
+                });
+                assert!(
+                    matches!(token, crate::output::ast::OutputExpression::ReadVar(_)),
+                    "Dep {} token should be ReadVar (bare identifier), but got ReadProp or other. \
+                     This means resolve_factory_dep_namespaces() cannot process it.",
+                    i
+                );
+            }
+
+            // Verify the specific token names
+            if let crate::output::ast::OutputExpression::ReadVar(var) =
+                deps[0].token.as_ref().unwrap()
+            {
+                assert_eq!(var.name.as_str(), "Store", "First dep should be Store");
+            }
+            if let crate::output::ast::OutputExpression::ReadVar(var) =
+                deps[1].token.as_ref().unwrap()
+            {
+                assert_eq!(var.name.as_str(), "SomeService", "Second dep should be SomeService");
+            }
         });
     }
 }

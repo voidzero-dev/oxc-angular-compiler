@@ -535,6 +535,46 @@ export interface InjectorNapiCompileResult {
 }
 
 /**
+ * Link Angular partial declarations in a JavaScript file (async).
+ *
+ * This is the async version of `linkAngularPackageSync`. Use this when
+ * linking packages in a non-blocking context.
+ */
+export declare function linkAngularPackage(code: string, filename: string): Promise<LinkResult>
+
+/**
+ * Link Angular partial declarations in a JavaScript file (sync).
+ *
+ * Processes pre-compiled Angular library code containing `ɵɵngDeclare*` calls
+ * and converts them to their fully compiled equivalents (`ɵɵdefine*` calls).
+ *
+ * This is necessary for Angular libraries published with partial compilation
+ * (Angular 12+). Without linking, Angular falls back to JIT compilation
+ * which requires `@angular/compiler` at runtime.
+ *
+ * # Arguments
+ *
+ * * `code` - The JavaScript source code to link
+ * * `filename` - The filename (for source maps and error messages)
+ *
+ * # Returns
+ *
+ * A `LinkResult` containing the linked code. If no partial declarations
+ * were found, the original code is returned with `linked: false`.
+ */
+export declare function linkAngularPackageSync(code: string, filename: string): LinkResult
+
+/** Result of linking Angular partial declarations. */
+export interface LinkResult {
+  /** The linked code. */
+  code: string
+  /** Source map (if enabled). */
+  map?: string
+  /** Whether any declarations were linked. */
+  linked: boolean
+}
+
+/**
  * Optimize an Angular package file for better tree-shaking (async).
  *
  * This is the async version of `optimizeAngularPackageSync`. Use this when

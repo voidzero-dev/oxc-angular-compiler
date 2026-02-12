@@ -4695,3 +4695,432 @@ fn test_defer_loading_timer_consts_after_i18n_consts() {
 
     insta::assert_snapshot!("defer_loading_timer_consts_after_i18n_consts", js);
 }
+
+// =============================================================================
+// Regression tests for runtime bugs found during ClickUp integration
+// =============================================================================
+
+/// Regression: Directive constructor DI tokens must be namespace-prefixed.
+///
+/// Bug: `@Directive` classes that inject services from external modules (e.g., `Store` from
+/// `@ngrx/store`) emitted bare identifiers like `ɵɵdirectiveInject(Store)` instead of
+/// namespace-prefixed `ɵɵdirectiveInject(i1.Store)`. At runtime TypeScript elides the bare
+/// `Store` import (it's type-only), causing `ASSERTION ERROR: token must be defined`.
+///
+/// Root cause (two parts):
+/// 1. `extract_param_token()` in directive/decorator.rs returned `ReadProp(i0.TypeName)` with
+///    a hardcoded `i0` prefix, instead of `ReadVar(TypeName)` like injectable/pipe/ng_module.
+/// 2. `transform_angular_file()` did not call `resolve_factory_dep_namespaces()` for directive
+///    deps, so even corrected `ReadVar` tokens would not get namespace-resolved.
+///
+/// Fix: Return `ReadVar(TypeName)` from `extract_param_token()` AND call
+/// `resolve_factory_dep_namespaces()` for directive deps in transform.rs.
+#[test]
+fn test_directive_factory_deps_use_namespace_prefixed_tokens() {
+    let allocator = Allocator::default();
+
+    // Simulate the ClickUp pattern: a directive injecting services from multiple modules
+    let source = r#"
+import { Directive } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { ToastService } from './toast.service';
+
+@Directive({
+    selector: '[appToastPosition]',
+    standalone: true,
+})
+export class ToastPositionHelperDirective {
+    constructor(
+        private store: Store,
+        private toastService: ToastService,
+    ) {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "toast-position-helper.directive.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Factory function should use namespace-prefixed tokens for DI
+    // Store comes from @ngrx/store (i1), ToastService from ./toast.service (i2)
+    assert!(
+        code.contains("i1.Store"),
+        "Factory should use namespace-prefixed i1.Store for @ngrx/store import. Output:\n{code}"
+    );
+    assert!(
+        code.contains("i2.ToastService"),
+        "Factory should use namespace-prefixed i2.ToastService for ./toast.service import. Output:\n{code}"
+    );
+
+    // Must NOT have bare (un-prefixed) tokens in directiveInject calls
+    // A bare `directiveInject(Store)` would fail at runtime because TypeScript elides the import
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    assert!(
+        !factory_section.contains("directiveInject(Store)"),
+        "Factory must NOT use bare 'Store' - TypeScript would elide this import. Factory:\n{factory_section}"
+    );
+    assert!(
+        !factory_section.contains("directiveInject(ToastService)"),
+        "Factory must NOT use bare 'ToastService' - TypeScript would elide this import. Factory:\n{factory_section}"
+    );
+}
+
+/// Regression: Directive with multiple DI deps from different modules gets correct namespace indices.
+///
+/// Each imported module should get a unique namespace alias (i0=@angular/core, i1=first import,
+/// i2=second import, etc.). This test verifies the namespace registry correctly assigns indices
+/// when a directive has dependencies from multiple external modules.
+#[test]
+fn test_directive_multiple_deps_different_modules_correct_namespaces() {
+    let allocator = Allocator::default();
+
+    let source = r#"
+import { Directive, ElementRef } from '@angular/core';
+import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
+import { FormBuilder } from '@angular/forms';
+
+@Directive({
+    selector: '[appMultiDep]',
+    standalone: true,
+})
+export class MultiDepDirective {
+    constructor(
+        private el: ElementRef,
+        private router: Router,
+        private http: HttpClient,
+        private fb: FormBuilder,
+    ) {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "multi-dep.directive.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // ElementRef is from @angular/core (i0) - should be i0.ElementRef
+    assert!(
+        code.contains("i0.ElementRef"),
+        "ElementRef from @angular/core should use i0 namespace. Output:\n{code}"
+    );
+
+    // Each external module should get its own namespace (i1, i2, i3)
+    // The exact indices depend on registration order, but each should be namespace-prefixed
+    assert!(code.contains(".Router"), "Router should be namespace-prefixed. Output:\n{code}");
+    assert!(
+        code.contains(".HttpClient"),
+        "HttpClient should be namespace-prefixed. Output:\n{code}"
+    );
+    assert!(
+        code.contains(".FormBuilder"),
+        "FormBuilder should be namespace-prefixed. Output:\n{code}"
+    );
+
+    // Count the namespace import declarations - should have i0 + at least 3 more
+    let namespace_imports: Vec<&str> =
+        code.lines().filter(|l| l.contains("import * as i")).collect();
+    assert!(
+        namespace_imports.len() >= 4,
+        "Should have at least 4 namespace imports (i0..i3). Found {}:\n{}",
+        namespace_imports.len(),
+        namespace_imports.join("\n")
+    );
+}
+
+/// Regression: `ɵɵi18nPostprocess` must use namespace prefix `i0.ɵɵi18nPostprocess`.
+///
+/// Bug: `wrap_with_postprocess()` in i18n_const_collection.rs used a bare
+/// `ReadVar(ɵɵi18nPostprocess)` which emitted `ɵɵi18nPostprocess(...)` without the `i0.`
+/// namespace prefix. At runtime: `ReferenceError: ɵɵi18nPostprocess is not defined`.
+///
+/// The postprocess function is only called for ICU messages that need sub-expression
+/// replacement (e.g., nested plural/select with multiple sub-messages). Simple i18n
+/// messages don't trigger this code path.
+///
+/// Fix: Changed to `ReadProp(i0.ɵɵi18nPostprocess)` matching all other Angular runtime calls.
+#[test]
+fn test_i18n_icu_postprocess_uses_namespace_prefix() {
+    let allocator = Allocator::default();
+
+    // An ICU plural with sub-messages triggers ɵɵi18nPostprocess.
+    // This is the pattern from ClickUp's ChatBotTriggerComponent.
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-chatbot',
+    standalone: true,
+    template: `<span i18n>{count, plural, =1 {<strong>{{ name }}</strong> item} other {{{ count }} items}}</span>`,
+})
+export class ChatBotTriggerComponent {
+    count = 0;
+    name = '';
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "chatbot-trigger.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // If i18nPostprocess is present, it MUST be namespace-prefixed
+    if code.contains("i18nPostprocess") {
+        assert!(
+            code.contains("i0.ɵɵi18nPostprocess"),
+            "ɵɵi18nPostprocess must be namespace-prefixed as i0.ɵɵi18nPostprocess. \
+             A bare 'ɵɵi18nPostprocess' causes ReferenceError at runtime. Output:\n{code}"
+        );
+
+        // Must NOT have a bare (un-prefixed) call
+        // Check that there's no `ɵɵi18nPostprocess` without `i0.` before it
+        for (i, _) in code.match_indices("ɵɵi18nPostprocess") {
+            let prefix = &code[..i];
+            assert!(
+                prefix.ends_with("i0."),
+                "Found bare ɵɵi18nPostprocess without i0. prefix at position {i}. Output:\n{code}"
+            );
+        }
+    }
+}
+
+/// Regression: Multiple view queries must emit separate statements, not chained calls.
+///
+/// Bug: Multiple `@ViewChild`/`@ViewChildren` queries were chained as
+/// `ɵɵviewQuery(pred1)(pred2)`, treating the return value of `ɵɵviewQuery` as a callable.
+/// Angular 20's `ɵɵviewQuery` returns `void`, so chaining causes:
+/// `TypeError: i0.ɵɵviewQuery(...) is not a function`.
+///
+/// Fix: Emit each query as a separate statement:
+///   `ɵɵviewQuery(pred1); ɵɵviewQuery(pred2);`
+#[test]
+fn test_multiple_view_queries_emit_separate_statements() {
+    let allocator = Allocator::default();
+
+    // Reproduce the ClickUp LoginFormComponent pattern: multiple @ViewChild decorators
+    let source = r#"
+import { Component, ViewChild, ElementRef } from '@angular/core';
+
+@Component({
+    selector: 'app-login',
+    template: '<input #emailInput /><input #passwordInput /><button #submitBtn>Login</button>',
+})
+export class LoginFormComponent {
+    @ViewChild('emailInput') emailInput: ElementRef;
+    @ViewChild('passwordInput') passwordInput: ElementRef;
+    @ViewChild('submitBtn') submitBtn: ElementRef;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "login-form.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Count separate ɵɵviewQuery calls - should be 3 (one per @ViewChild)
+    let view_query_count = code.matches("ɵɵviewQuery(").count();
+    assert_eq!(
+        view_query_count, 3,
+        "Should have exactly 3 separate ɵɵviewQuery calls. Found {view_query_count}. Output:\n{code}"
+    );
+
+    // Must NOT have chained calls: ɵɵviewQuery(...)(...) pattern
+    // This regex-free check: after each `ɵɵviewQuery(` find the matching `)` and check
+    // the next non-whitespace char is NOT `(`
+    let query_fn = "ɵɵviewQuery(";
+    for (start_idx, _) in code.match_indices(query_fn) {
+        let after_fn = &code[start_idx + query_fn.len()..];
+        // Find the closing paren (handle nested parens)
+        let mut depth = 1;
+        let mut end = 0;
+        for (i, ch) in after_fn.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Check what comes after the closing paren
+        let after_close = after_fn[end..].trim_start();
+        assert!(
+            !after_close.starts_with('('),
+            "Found chained ɵɵviewQuery call (return value used as function). \
+             Angular 20's ɵɵviewQuery returns void. Output:\n{code}"
+        );
+    }
+}
+
+/// Regression: Multiple content queries must emit separate statements, not chained calls.
+///
+/// Same issue as view queries but for `@ContentChild`/`@ContentChildren`.
+/// The fix applies to both `create_view_queries_function` and `create_content_queries_function`.
+#[test]
+fn test_multiple_content_queries_emit_separate_statements() {
+    let allocator = Allocator::default();
+
+    let source = r#"
+import { Component, ContentChild, ContentChildren, QueryList, TemplateRef } from '@angular/core';
+
+@Component({
+    selector: 'app-tabs',
+    template: '<ng-content></ng-content>',
+})
+export class TabsComponent {
+    @ContentChild('header') header: TemplateRef<any>;
+    @ContentChildren('tab') tabs: QueryList<TemplateRef<any>>;
+    @ContentChild('footer') footer: TemplateRef<any>;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "tabs.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Count separate ɵɵcontentQuery calls - should be 3
+    let content_query_count = code.matches("ɵɵcontentQuery(").count();
+    assert_eq!(
+        content_query_count, 3,
+        "Should have exactly 3 separate ɵɵcontentQuery calls. Found {content_query_count}. Output:\n{code}"
+    );
+
+    // Must NOT have chained calls
+    let query_fn = "ɵɵcontentQuery(";
+    for (start_idx, _) in code.match_indices(query_fn) {
+        let after_fn = &code[start_idx + query_fn.len()..];
+        let mut depth = 1;
+        let mut end = 0;
+        for (i, ch) in after_fn.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let after_close = after_fn[end..].trim_start();
+        assert!(
+            !after_close.starts_with('('),
+            "Found chained ɵɵcontentQuery call. Angular 20's query functions return void. Output:\n{code}"
+        );
+    }
+}
+
+/// Regression: Mixed view queries (signal + decorator) must all be separate statements.
+///
+/// Signal-based queries (`viewChild()`, `viewChildren()`) and decorator-based queries
+/// (`@ViewChild`, `@ViewChildren`) can coexist on the same component. All of them must
+/// emit as separate statements.
+#[test]
+fn test_mixed_signal_and_decorator_view_queries_separate_statements() {
+    let allocator = Allocator::default();
+
+    let source = r#"
+import { Component, ViewChild, viewChild, viewChildren, ElementRef } from '@angular/core';
+
+@Component({
+    selector: 'app-mixed',
+    template: '<div #a></div><div #b></div><div #c></div>',
+})
+export class MixedQueryComponent {
+    a = viewChild<ElementRef>('a');
+    b = viewChildren<ElementRef>('b');
+    @ViewChild('c') c: ElementRef;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "mixed-query.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Should have signal query calls AND decorator query calls, all separate
+    let total_query_calls = code.matches("ɵɵviewQuery").count();
+    assert!(
+        total_query_calls >= 3,
+        "Should have at least 3 view query calls (signal + decorator). Found {total_query_calls}. Output:\n{code}"
+    );
+
+    // Verify no chaining for any view query variant
+    for query_fn in ["ɵɵviewQuerySignal(", "ɵɵviewQuery("] {
+        for (start_idx, _) in code.match_indices(query_fn) {
+            let after_fn = &code[start_idx + query_fn.len()..];
+            let mut depth = 1;
+            let mut end = 0;
+            for (i, ch) in after_fn.char_indices() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            end = i + 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            let after_close = after_fn[end..].trim_start();
+            assert!(
+                !after_close.starts_with('('),
+                "Found chained {query_fn} call. Output:\n{code}"
+            );
+        }
+    }
+}

@@ -72,17 +72,23 @@ fn build_definition_map<'a>(
 
     // imports: [...] (only if non-empty)
     if metadata.has_imports() {
-        let mut imports_items = Vec::new_in(allocator);
-        for import in &metadata.imports {
-            imports_items.push(import.clone_in(allocator));
-        }
+        // Prefer raw_imports (preserves call expressions like StoreModule.forRoot(...))
+        let imports_value = if let Some(raw_imports) = &metadata.raw_imports {
+            raw_imports.clone_in(allocator)
+        } else {
+            let mut imports_items = Vec::new_in(allocator);
+            for import in &metadata.imports {
+                imports_items.push(import.clone_in(allocator));
+            }
+            OutputExpression::LiteralArray(Box::new_in(
+                LiteralArrayExpr { entries: imports_items, source_span: None },
+                allocator,
+            ))
+        };
 
         entries.push(LiteralMapEntry {
             key: Atom::from("imports"),
-            value: OutputExpression::LiteralArray(Box::new_in(
-                LiteralArrayExpr { entries: imports_items, source_span: None },
-                allocator,
-            )),
+            value: imports_value,
             quoted: false,
         });
     }

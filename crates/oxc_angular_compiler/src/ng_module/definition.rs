@@ -276,14 +276,19 @@ fn generate_ng_module_inj<'a>(
         builder = builder.providers(providers.clone_in(allocator));
     }
 
-    // Add imports for the injector
-    // The injector needs to know about imported modules to resolve their providers
-    for import in &metadata.imports {
-        let import_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-            ReadVarExpr { name: import.clone(), source_span: None },
-            allocator,
-        ));
-        builder = builder.add_import(import_expr);
+    // Add imports for the injector.
+    // Prefer raw_imports_expr which preserves call expressions like StoreModule.forRoot(...)
+    // and spread elements, needed for ModuleWithProviders provider resolution.
+    if let Some(raw_imports) = &metadata.raw_imports_expr {
+        builder = builder.raw_imports(raw_imports.clone_in(allocator));
+    } else {
+        for import in &metadata.imports {
+            let import_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                ReadVarExpr { name: import.clone(), source_span: None },
+                allocator,
+            ));
+            builder = builder.add_import(import_expr);
+        }
     }
 
     let inj_metadata = builder.build().expect("Failed to build injector metadata");

@@ -23,8 +23,13 @@ pub struct R3InjectorMetadata<'a> {
     /// Can be None if no providers are defined.
     pub providers: Option<OutputExpression<'a>>,
 
-    /// Imported modules/injectors.
+    /// Imported modules/injectors (individual expressions).
     pub imports: Vec<'a, OutputExpression<'a>>,
+
+    /// Pre-built raw imports array expression.
+    /// When present, takes precedence over `imports` in the generated output.
+    /// This preserves call expressions like `StoreModule.forRoot(...)` and spread elements.
+    pub raw_imports: Option<OutputExpression<'a>>,
 }
 
 impl<'a> R3InjectorMetadata<'a> {
@@ -35,7 +40,7 @@ impl<'a> R3InjectorMetadata<'a> {
 
     /// Check if this injector has any imports.
     pub fn has_imports(&self) -> bool {
-        !self.imports.is_empty()
+        self.raw_imports.is_some() || !self.imports.is_empty()
     }
 }
 
@@ -45,12 +50,19 @@ pub struct R3InjectorMetadataBuilder<'a> {
     r#type: Option<OutputExpression<'a>>,
     providers: Option<OutputExpression<'a>>,
     imports: Vec<'a, OutputExpression<'a>>,
+    raw_imports: Option<OutputExpression<'a>>,
 }
 
 impl<'a> R3InjectorMetadataBuilder<'a> {
     /// Create a new builder.
     pub fn new(allocator: &'a oxc_allocator::Allocator) -> Self {
-        Self { name: None, r#type: None, providers: None, imports: Vec::new_in(allocator) }
+        Self {
+            name: None,
+            r#type: None,
+            providers: None,
+            imports: Vec::new_in(allocator),
+            raw_imports: None,
+        }
     }
 
     /// Set the injector name.
@@ -77,6 +89,12 @@ impl<'a> R3InjectorMetadataBuilder<'a> {
         self
     }
 
+    /// Set raw imports array expression (takes precedence over individual imports).
+    pub fn raw_imports(mut self, raw_imports: OutputExpression<'a>) -> Self {
+        self.raw_imports = Some(raw_imports);
+        self
+    }
+
     /// Build the metadata.
     ///
     /// Returns None if required fields (name, type) are missing.
@@ -84,6 +102,12 @@ impl<'a> R3InjectorMetadataBuilder<'a> {
         let name = self.name?;
         let r#type = self.r#type?;
 
-        Some(R3InjectorMetadata { name, r#type, providers: self.providers, imports: self.imports })
+        Some(R3InjectorMetadata {
+            name,
+            r#type,
+            providers: self.providers,
+            imports: self.imports,
+            raw_imports: self.raw_imports,
+        })
     }
 }

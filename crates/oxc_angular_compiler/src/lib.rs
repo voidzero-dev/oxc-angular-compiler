@@ -37,6 +37,7 @@ pub mod i18n;
 pub mod injectable;
 pub mod injector;
 pub mod ir;
+pub mod linker;
 pub mod ng_module;
 pub mod optimizer;
 pub mod output;
@@ -133,6 +134,9 @@ pub use class_metadata::{
     compile_component_class_metadata, compile_component_metadata_async_resolver,
     compile_opaque_async_class_metadata,
 };
+
+// Re-export linker types
+pub use linker::{LinkResult, link};
 
 // Re-export optimizer types
 pub use optimizer::{OptimizeOptions, OptimizeResult, optimize};

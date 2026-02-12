@@ -44,7 +44,8 @@ use crate::ng_module::{
     extract_ng_module_metadata, find_ng_module_decorator_span, generate_full_ng_module_definition,
 };
 use crate::output::ast::{
-    DeclareFunctionStmt, FunctionExpr, OutputStatement, ReadVarExpr, StmtModifier,
+    DeclareFunctionStmt, FunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,
+    ReadVarExpr, StmtModifier,
 };
 use crate::output::emitter::JsEmitter;
 use crate::parser::ParseTemplateOptions;
@@ -516,6 +517,48 @@ pub fn build_import_map<'a>(
 
 /// Find the byte position (in the source) just after the last import statement.
 ///
+/// Resolve namespace imports for factory dependency tokens.
+///
+/// The import elision phase removes type-only imports (e.g., `import { Store } from '@ngrx/store'`)
+/// because constructor parameter types are considered type-only. However, the factory function
+/// needs to reference these types at runtime (e.g., `i0.ɵɵinject(Store)`).
+///
+/// This function replaces bare `ReadVar` tokens with namespace-prefixed `ReadProp` references
+/// (e.g., `Store` → `i1.Store`) for any token that has a corresponding import in the import map.
+/// This ensures the factory works correctly even after import elision.
+fn resolve_factory_dep_namespaces<'a>(
+    allocator: &'a Allocator,
+    deps: &mut oxc_allocator::Vec<'a, crate::factory::R3DependencyMetadata<'a>>,
+    import_map: &ImportMap<'a>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+) {
+    for dep in deps.iter_mut() {
+        let Some(ref token) = dep.token else { continue };
+        // Only process bare variable references (ReadVar)
+        let OutputExpression::ReadVar(var) = token else { continue };
+        let name = &var.name;
+        // Look up this identifier in the import map
+        let Some(import_info) = import_map.get(name) else { continue };
+        // Replace with namespace-prefixed reference: i1.Store instead of Store
+        let namespace = namespace_registry.get_or_assign(&import_info.source_module);
+        dep.token = Some(OutputExpression::ReadProp(oxc_allocator::Box::new_in(
+            ReadPropExpr {
+                receiver: oxc_allocator::Box::new_in(
+                    OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                        ReadVarExpr { name: namespace, source_span: None },
+                        allocator,
+                    )),
+                    allocator,
+                ),
+                name: name.clone(),
+                optional: false,
+                source_span: None,
+            },
+            allocator,
+        )));
+    }
+}
+
 /// This is used to determine where to insert namespace imports so they appear
 /// AFTER existing imports but BEFORE other code (like class declarations).
 ///
@@ -881,7 +924,7 @@ pub fn transform_angular_file(
                 // definitions. This prevents Angular's JIT runtime from processing
                 // the directive and creating conflicting property definitions (like
                 // ɵfac getters) that interfere with the AOT-compiled assignments.
-                if let Some(directive_metadata) =
+                if let Some(mut directive_metadata) =
                     extract_directive_metadata(allocator, class, implicit_standalone)
                 {
                     // Track decorator span for removal
@@ -892,6 +935,18 @@ pub fn transform_angular_file(
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
                     // Collect member decorators (@Input, @Output, @HostBinding, etc.)
                     collect_member_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                    // Resolve namespace imports for directive constructor deps.
+                    // Directives can inject services from other modules (e.g., Store from @ngrx/store),
+                    // so factory deps must use namespace-prefixed references (e.g., i1.Store).
+                    if let Some(ref mut deps) = directive_metadata.deps {
+                        resolve_factory_dep_namespaces(
+                            allocator,
+                            deps,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                    }
 
                     // Compile directive and generate definitions
                     // Pass shared_pool_index to ensure unique constant names across the file
@@ -918,8 +973,7 @@ pub fn transform_angular_file(
                     // Track definitions by class name (position is recalculated later)
                     class_definitions
                         .insert(class_name, (property_assignments, String::new(), String::new()));
-                    // Directive only needs @angular/core, which is already pre-registered
-                } else if let Some(injectable_metadata) =
+                } else if let Some(mut injectable_metadata) =
                     extract_injectable_metadata(allocator, class)
                 {
                     // Not a @Component or @Directive - check if it's an @Injectable
@@ -933,6 +987,19 @@ pub fn transform_angular_file(
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                    // Resolve namespace imports for constructor deps.
+                    // The import elision removes type-only imports (e.g., `import { Store } from '@ngrx/store'`),
+                    // so factory deps must use namespace-prefixed references (e.g., `i1.Store`)
+                    // instead of bare identifiers.
+                    if let Some(ref mut deps) = injectable_metadata.deps {
+                        resolve_factory_dep_namespaces(
+                            allocator,
+                            deps,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                    }
 
                     // Compile injectable and generate definitions
                     if let Some(definition) = generate_injectable_definition_from_decorator(
@@ -960,7 +1027,7 @@ pub fn transform_angular_file(
                         );
                         // Injectable only needs @angular/core, which is already pre-registered
                     }
-                } else if let Some(pipe_metadata) =
+                } else if let Some(mut pipe_metadata) =
                     extract_pipe_metadata(allocator, class, implicit_standalone)
                 {
                     // Not a @Component, @Directive, or @Injectable - check if it's a @Pipe
@@ -974,6 +1041,16 @@ pub fn transform_angular_file(
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                    // Resolve namespace imports for pipe constructor deps
+                    if let Some(ref mut deps) = pipe_metadata.deps {
+                        resolve_factory_dep_namespaces(
+                            allocator,
+                            deps,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                    }
 
                     // Compile pipe and generate both ɵfac and ɵpipe definitions as external property assignments
                     if let Some(definition) =
@@ -997,7 +1074,7 @@ pub fn transform_angular_file(
                         );
                         // Pipe only needs @angular/core, which is already pre-registered
                     }
-                } else if let Some(ng_module_metadata) =
+                } else if let Some(mut ng_module_metadata) =
                     extract_ng_module_metadata(allocator, class)
                 {
                     // Not a @Component, @Directive, @Injectable, or @Pipe - check if it's an @NgModule
@@ -1012,6 +1089,16 @@ pub fn transform_angular_file(
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                    // Resolve namespace imports for NgModule constructor deps
+                    if let Some(ref mut deps) = ng_module_metadata.deps {
+                        resolve_factory_dep_namespaces(
+                            allocator,
+                            deps,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                    }
 
                     // Compile NgModule and generate all definitions as external property assignments
                     if let Some(definition) =
@@ -1040,10 +1127,10 @@ pub fn transform_angular_file(
                         }
 
                         // Track definitions by class name (position is recalculated later)
-                        // NgModule: external_decls go BEFORE the class (they're statements, not class refs)
+                        // NgModule: external_decls go AFTER the class (they reference the class name)
                         class_definitions.insert(
                             class_name,
-                            (property_assignments, external_decls, String::new()),
+                            (property_assignments, String::new(), external_decls),
                         );
                         // NgModule only needs @angular/core, which is already pre-registered
                     }
@@ -2035,19 +2122,54 @@ pub fn compile_template_for_hmr<'a>(
     // constant references match. Without this, the HMR module would spread the old ɵcmp
     // which has a different consts array, causing index out of bounds errors.
     let consts_js = if !job.consts.is_empty() {
-        use crate::output::ast::{LiteralArrayExpr, OutputExpression};
+        use crate::output::ast::{
+            FunctionExpr, LiteralArrayExpr, OutputExpression, OutputStatement, ReturnStatement,
+        };
 
         let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
         for const_value in &job.consts {
             const_entries.push(const_value_to_expression(allocator, const_value));
         }
 
-        let consts_array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
-            LiteralArrayExpr { entries: const_entries, source_span: None },
-            allocator,
-        ));
+        let consts_expr = if !job.consts_initializers.is_empty() {
+            // When there are initializers (e.g., i18n variable declarations), wrap consts
+            // in a function that runs initializers first and returns the array.
+            // This matches what definition.rs does for the initial component definition.
+            let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
+                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, allocator);
 
-        Some(emitter.emit_expression(&consts_array))
+            for stmt in job.consts_initializers.drain(..) {
+                fn_stmts.push(stmt);
+            }
+
+            fn_stmts.push(OutputStatement::Return(oxc_allocator::Box::new_in(
+                ReturnStatement {
+                    value: OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+                        LiteralArrayExpr { entries: const_entries, source_span: None },
+                        allocator,
+                    )),
+                    source_span: None,
+                },
+                allocator,
+            )));
+
+            OutputExpression::Function(oxc_allocator::Box::new_in(
+                FunctionExpr {
+                    name: None,
+                    params: OxcVec::new_in(allocator),
+                    statements: fn_stmts,
+                    source_span: None,
+                },
+                allocator,
+            ))
+        } else {
+            OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+                LiteralArrayExpr { entries: const_entries, source_span: None },
+                allocator,
+            ))
+        };
+
+        Some(emitter.emit_expression(&consts_expr))
     } else {
         None
     };
@@ -4055,17 +4177,29 @@ export class TestComponent {
         let result =
             transform_angular_file(&allocator, "test.component.ts", source, &options, None);
 
-        // Should generate namespace import for rxjs (i1 because i0=@angular/core;
-        // DARK_THEME uses bare name via @Inject so @app/theme doesn't get a namespace)
+        // @Inject(DARK_THEME) now uses namespace imports (i1 for @app/theme),
+        // so rxjs gets i2 for Observable.
         assert!(
-            result.code.contains("import * as i1 from 'rxjs'"),
+            result.code.contains("import * as i1 from '@app/theme'"),
+            "Should generate namespace import for @app/theme, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("import * as i2 from 'rxjs'"),
             "Should generate namespace import for rxjs, but got:\n{}",
             result.code
         );
 
-        // The setClassMetadata ctor params should reference i1.Observable
+        // The factory should use namespace-prefixed DARK_THEME
         assert!(
-            result.code.contains("i1.Observable"),
+            result.code.contains("i1.DARK_THEME"),
+            "Factory should use namespace-prefixed DARK_THEME, but got:\n{}",
+            result.code
+        );
+
+        // The setClassMetadata ctor params should reference i2.Observable
+        assert!(
+            result.code.contains("i2.Observable"),
             "setClassMetadata should use namespace-prefixed Observable, but got:\n{}",
             result.code
         );
@@ -4190,6 +4324,75 @@ export class TestComponent {
         assert!(
             !result.code.contains("import * as i1 from './some.interface'"),
             "Should NOT generate namespace import for inline type-only import, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_directive_factory_deps_get_correct_namespace_resolution() {
+        // Regression test for bug where resolve_factory_dep_namespaces() was NOT called
+        // for @Directive constructor deps. This caused bare ReadVar references (e.g., Store)
+        // to remain unresolved, resulting in incorrect namespace prefixes at runtime
+        // (e.g., i0.Store instead of the correct i1.Store).
+        //
+        // The fix: Added resolve_factory_dep_namespaces() call for directive deps in
+        // the directive processing path of transform_angular_file().
+        let allocator = Allocator::default();
+        let source = r#"
+import { Directive } from '@angular/core';
+import { Store } from '@ngrx/store';
+import { SomeService } from '@app/services';
+
+@Directive({ selector: '[myDir]' })
+export class MyDirective {
+    constructor(private store: Store, private svc: SomeService) {}
+}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "my.directive.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
+
+        // Verify namespace imports are generated for the external modules
+        assert!(
+            result.code.contains("import * as i1 from '@ngrx/store'"),
+            "Should generate namespace import for @ngrx/store, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("import * as i2 from '@app/services'"),
+            "Should generate namespace import for @app/services, but got:\n{}",
+            result.code
+        );
+
+        // Verify the factory uses the correct namespace prefixes for deps
+        // Store should be i1.Store (from @ngrx/store), NOT i0.Store
+        assert!(
+            result.code.contains("i1.Store"),
+            "Factory should reference Store as i1.Store (from @ngrx/store), but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("i0.Store"),
+            "Factory should NOT reference Store as i0.Store (that's @angular/core), but got:\n{}",
+            result.code
+        );
+
+        // SomeService should be i2.SomeService (from @app/services), NOT i0.SomeService
+        assert!(
+            result.code.contains("i2.SomeService"),
+            "Factory should reference SomeService as i2.SomeService (from @app/services), but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("i0.SomeService"),
+            "Factory should NOT reference SomeService as i0.SomeService (that's @angular/core), but got:\n{}",
             result.code
         );
     }

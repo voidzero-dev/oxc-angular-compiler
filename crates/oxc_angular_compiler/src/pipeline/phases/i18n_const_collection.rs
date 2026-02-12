@@ -824,9 +824,20 @@ fn wrap_with_postprocess<'a>(
         InvokeFunctionExpr, LiteralArrayExpr, LiteralMapEntry, LiteralMapExpr,
     };
 
-    // Create ɵɵi18nPostprocess function reference
-    let fn_var = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-        ReadVarExpr { name: Atom::from(Identifiers::I18N_POSTPROCESS), source_span: None },
+    // Create ɵɵi18nPostprocess function reference (i0.ɵɵi18nPostprocess)
+    let fn_var = OutputExpression::ReadProp(oxc_allocator::Box::new_in(
+        crate::output::ast::ReadPropExpr {
+            receiver: oxc_allocator::Box::new_in(
+                OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    allocator,
+                )),
+                allocator,
+            ),
+            name: Atom::from(Identifiers::I18N_POSTPROCESS),
+            optional: false,
+            source_span: None,
+        },
         allocator,
     ));
 
@@ -879,4 +890,80 @@ fn wrap_with_postprocess<'a>(
         },
         allocator,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::ast::{LiteralExpr, OutputExpression, ReadVarExpr};
+    use crate::output::emitter::JsEmitter;
+    use oxc_allocator::Allocator;
+    use oxc_span::Atom;
+
+    #[test]
+    fn test_wrap_with_postprocess_uses_namespace_prefix() {
+        // Regression test for bug where wrap_with_postprocess() created a bare
+        // ReadVar(ɵɵi18nPostprocess) instead of ReadProp(i0.ɵɵi18nPostprocess).
+        // At runtime this caused: ReferenceError: ɵɵi18nPostprocess is not defined
+        //
+        // The fix: Changed to use ReadProp(i0.ɵɵi18nPostprocess) so the function
+        // is properly accessed through the Angular core namespace import.
+        let allocator = Allocator::default();
+
+        // Create a simple input expression (simulating a $localize result)
+        let input_expr = OutputExpression::Literal(oxc_allocator::Box::new_in(
+            LiteralExpr {
+                value: LiteralValue::String(Atom::from("test message")),
+                source_span: None,
+            },
+            &allocator,
+        ));
+
+        // Call wrap_with_postprocess with no extra params
+        let result = wrap_with_postprocess(&allocator, input_expr, &[]);
+
+        // Emit the result to a string and verify
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result);
+
+        // The output must contain "i0.ɵɵi18nPostprocess" (namespace-prefixed),
+        // NOT a bare "ɵɵi18nPostprocess" without the i0. prefix.
+        assert!(
+            output.contains("i0.ɵɵi18nPostprocess"),
+            "wrap_with_postprocess should emit i0.ɵɵi18nPostprocess (with namespace prefix), but got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_wrap_with_postprocess_with_params_uses_namespace_prefix() {
+        // Same as above but with postprocessing params to test the full path.
+        let allocator = Allocator::default();
+
+        let input_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+            ReadVarExpr { name: Atom::from("i18n_0"), source_span: None },
+            &allocator,
+        ));
+
+        let params = vec![("ICU_0".to_string(), vec!["i18n_1".to_string(), "i18n_2".to_string()])];
+
+        let result = wrap_with_postprocess(&allocator, input_expr, &params);
+
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result);
+
+        // Verify namespace prefix is present
+        assert!(
+            output.contains("i0.ɵɵi18nPostprocess"),
+            "wrap_with_postprocess with params should emit i0.ɵɵi18nPostprocess, but got:\n{}",
+            output
+        );
+
+        // Verify the function is called with the expression and the params map
+        assert!(
+            output.contains("i18n_0"),
+            "Should contain the input expression, but got:\n{}",
+            output
+        );
+    }
 }
