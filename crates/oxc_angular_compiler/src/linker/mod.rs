@@ -969,8 +969,7 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             // Object: Angular 16+ format with classPropertyName, publicName, isRequired, etc.
             Expression::ObjectExpression(obj) => {
                 let public_name = get_string_property(obj, "publicName").unwrap_or(&key);
-                let declared_name =
-                    get_string_property(obj, "classPropertyName").unwrap_or(public_name);
+                let declared_name = get_string_property(obj, "classPropertyName").unwrap_or(&key);
                 let is_signal = get_bool_property(obj, "isSignal").unwrap_or(false);
                 let is_required = get_bool_property(obj, "isRequired").unwrap_or(false);
                 let transform = get_property_source(obj, "transformFunction", source);
@@ -1196,13 +1195,14 @@ fn build_queries(
         let predicate =
             get_property_source(query_obj.as_ref(), "predicate", source).unwrap_or("null");
 
-        // Calculate flags
+        // Calculate flags: DESCENDANTS=1, IS_STATIC=2, EMIT_DISTINCT_CHANGES_ONLY=4
+        // View queries always have descendants=true; content queries read it from metadata.
         let flags = if is_content_query {
             if descendants { 5u32 } else { 4u32 }
         } else if is_static {
-            7u32
+            7u32 // DESCENDANTS | IS_STATIC | EMIT_DISTINCT_CHANGES_ONLY
         } else {
-            4u32
+            5u32 // DESCENDANTS | EMIT_DISTINCT_CHANGES_ONLY
         };
 
         // Signal queries use different flags
