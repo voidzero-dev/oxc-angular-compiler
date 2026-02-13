@@ -1272,7 +1272,7 @@ fn build_queries(
 /// - `usesInheritance: true` → `ns.ɵɵInheritDefinitionFeature`
 /// - `usesOnChanges: true` → `ns.ɵɵNgOnChangesFeature`
 /// - `providers: [...]` → `ns.ɵɵProvidersFeature([...])`
-/// - `viewProviders: [...]` → `ns.ɵɵViewProvidersFeature([...])`
+/// - `providers` + `viewProviders` → `ns.ɵɵProvidersFeature(providers, viewProviders?)`
 fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
@@ -1282,11 +1282,19 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
     if get_bool_property(meta, "usesOnChanges") == Some(true) {
         features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
     }
-    if let Some(providers) = get_property_source(meta, "providers", source) {
-        features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature({providers})"));
-    }
-    if let Some(view_providers) = get_property_source(meta, "viewProviders", source) {
-        features.push(format!("{ns}.\u{0275}\u{0275}ViewProvidersFeature({view_providers})"));
+    let providers = get_property_source(meta, "providers", source);
+    let view_providers = get_property_source(meta, "viewProviders", source);
+    match (providers, view_providers) {
+        (Some(p), Some(vp)) => {
+            features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature({p}, {vp})"));
+        }
+        (Some(p), None) => {
+            features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature({p})"));
+        }
+        (None, Some(vp)) => {
+            features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature([], {vp})"));
+        }
+        (None, None) => {}
     }
 
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
