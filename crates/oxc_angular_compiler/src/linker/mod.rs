@@ -972,7 +972,10 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
                 let declared_name = get_string_property(obj, "classPropertyName").unwrap_or(&key);
                 let is_signal = get_bool_property(obj, "isSignal").unwrap_or(false);
                 let is_required = get_bool_property(obj, "isRequired").unwrap_or(false);
-                let transform = get_property_source(obj, "transformFunction", source);
+                // Angular emits `transformFunction: null` for signal inputs without
+                // transforms. Filter out "null" to avoid setting HasDecoratorInputTransform.
+                let transform =
+                    get_property_source(obj, "transformFunction", source).filter(|v| *v != "null");
 
                 let mut flags = 0u32;
                 if is_signal {
@@ -1908,5 +1911,27 @@ MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.
             inherit_pos < on_changes_pos,
             "InheritDefinitionFeature must come before NgOnChangesFeature"
         );
+    }
+
+    #[test]
+    fn test_signal_input_null_transform_no_flag() {
+        let allocator = Allocator::default();
+        // Angular emits `transformFunction: null` for signal inputs without transforms.
+        // This must NOT set the HasDecoratorInputTransform flag (2).
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {
+}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", inputs: { name: { classPropertyName: "name", publicName: "name", isSignal: true, isRequired: true, transformFunction: null } }, template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        // Signal input flag = 1, NOT 3 (1 | 2). Must not include HasDecoratorInputTransform.
+        assert!(
+            result.code.contains(r#"name: [1, "name", "name"]"#),
+            "Signal input with null transform should have flags=1 (SignalBased only), got:\n{}",
+            result.code
+        );
+        assert!(!result.code.contains("null]"), "Should not include null transform in output");
     }
 }
