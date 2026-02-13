@@ -1272,16 +1272,12 @@ fn build_queries(
 /// - `usesInheritance: true` → `ns.ɵɵInheritDefinitionFeature`
 /// - `usesOnChanges: true` → `ns.ɵɵNgOnChangesFeature`
 /// - `providers: [...]` → `ns.ɵɵProvidersFeature([...])`
-/// - `providers` + `viewProviders` → `ns.ɵɵProvidersFeature(providers, viewProviders?)`
+/// Order is important: ProvidersFeature → InheritDefinitionFeature → NgOnChangesFeature
+/// (see definition.rs line 990 and packages/compiler/src/render3/view/compiler.ts:119-161)
 fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
-    if get_bool_property(meta, "usesInheritance") == Some(true) {
-        features.push(format!("{ns}.\u{0275}\u{0275}InheritDefinitionFeature"));
-    }
-    if get_bool_property(meta, "usesOnChanges") == Some(true) {
-        features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
-    }
+    // 1. ProvidersFeature — must come before InheritDefinitionFeature
     let providers = get_property_source(meta, "providers", source);
     let view_providers = get_property_source(meta, "viewProviders", source);
     match (providers, view_providers) {
@@ -1295,6 +1291,16 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
             features.push(format!("{ns}.\u{0275}\u{0275}ProvidersFeature([], {vp})"));
         }
         (None, None) => {}
+    }
+
+    // 2. InheritDefinitionFeature
+    if get_bool_property(meta, "usesInheritance") == Some(true) {
+        features.push(format!("{ns}.\u{0275}\u{0275}InheritDefinitionFeature"));
+    }
+
+    // 3. NgOnChangesFeature
+    if get_bool_property(meta, "usesOnChanges") == Some(true) {
+        features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
     }
 
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
@@ -1873,6 +1879,34 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
             !result.code.contains(r#"ctx."onClick($event)""#),
             "Should NOT contain invalid listener expression, got:\n{}",
             result.code
+        );
+    }
+
+    #[test]
+    fn test_features_order_providers_before_inherit() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {
+}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", providers: [SomeProvider], usesInheritance: true, usesOnChanges: true, template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        let code = &result.code;
+        // Canonical order: ProvidersFeature → InheritDefinitionFeature → NgOnChangesFeature
+        let providers_pos = code.find("ProvidersFeature").expect("should have ProvidersFeature");
+        let inherit_pos =
+            code.find("InheritDefinitionFeature").expect("should have InheritDefinitionFeature");
+        let on_changes_pos =
+            code.find("NgOnChangesFeature").expect("should have NgOnChangesFeature");
+        assert!(
+            providers_pos < inherit_pos,
+            "ProvidersFeature must come before InheritDefinitionFeature"
+        );
+        assert!(
+            inherit_pos < on_changes_pos,
+            "InheritDefinitionFeature must come before NgOnChangesFeature"
         );
     }
 }
