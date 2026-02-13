@@ -1444,21 +1444,62 @@ fn link_component(
         }
     }
 
-    // 19. styles
-    if let Some(styles) = get_property_source(meta, "styles", source) {
-        parts.push(format!("styles: {styles}"));
+    // 19-20. styles + encapsulation (interdependent)
+    // Determine encapsulation mode: Emulated is the default
+    let is_emulated = match get_property_source(meta, "encapsulation", source) {
+        Some(encap) if encap.contains("None") => false,
+        Some(encap) if encap.contains("ShadowDom") => false,
+        _ => true, // Emulated is the default
+    };
+    let is_shadow_dom = matches!(
+        get_property_source(meta, "encapsulation", source),
+        Some(encap) if encap.contains("ShadowDom")
+    );
+
+    // Process styles: apply CSS scoping for Emulated encapsulation
+    let mut has_styles = false;
+    if let Some(styles_arr) = get_array_property(meta, "styles") {
+        let mut scoped_styles: Vec<String> = Vec::new();
+        for el in &styles_arr.elements {
+            let expr = match el {
+                ArrayExpressionElement::SpreadElement(_) => continue,
+                _ => el.to_expression(),
+            };
+            if let Expression::StringLiteral(s) = expr {
+                let style = s.value.as_str();
+                if is_emulated {
+                    let scoped =
+                        crate::styles::shim_css_text(style, "_ngcontent-%COMP%", "_nghost-%COMP%");
+                    if !scoped.trim().is_empty() {
+                        scoped_styles.push(format!(
+                            "\"{}\"",
+                            scoped.replace('\\', "\\\\").replace('"', "\\\"")
+                        ));
+                    }
+                } else if !style.trim().is_empty() {
+                    scoped_styles
+                        .push(format!("\"{}\"", style.replace('\\', "\\\\").replace('"', "\\\"")));
+                }
+            }
+        }
+        if !scoped_styles.is_empty() {
+            has_styles = true;
+            parts.push(format!("styles: [{}]", scoped_styles.join(", ")));
+        }
     }
 
-    // 20. encapsulation
-    if let Some(encap) = get_property_source(meta, "encapsulation", source) {
-        // Convert ViewEncapsulation enum to numeric value
-        if encap.contains("None") {
-            parts.push("encapsulation: 2".to_string());
-        } else if encap.contains("ShadowDom") {
-            parts.push("encapsulation: 3".to_string());
-        }
-        // Emulated (0) is the default, no need to emit
+    // Encapsulation: downgrade Emulated → None when no styles
+    // (per Angular compiler.ts: "If there is no style, don't generate css selectors on elements")
+    if is_shadow_dom {
+        parts.push("encapsulation: 3".to_string());
+    } else if !is_emulated {
+        // Explicitly set to None
+        parts.push("encapsulation: 2".to_string());
+    } else if !has_styles {
+        // Emulated with no styles → downgrade to None
+        parts.push("encapsulation: 2".to_string());
     }
+    // else: Emulated with styles is the default (0), no need to emit
 
     // 21. data (animations)
     if let Some(animations) = get_property_source(meta, "animations", source) {
