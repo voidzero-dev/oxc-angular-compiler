@@ -1197,24 +1197,36 @@ fn build_queries(
 
         // Calculate flags: DESCENDANTS=1, IS_STATIC=2, EMIT_DISTINCT_CHANGES_ONLY=4
         // View queries always have descendants=true; content queries read it from metadata.
-        let flags = if is_content_query {
-            if descendants { 5u32 } else { 4u32 }
-        } else if is_static {
-            7u32 // DESCENDANTS | IS_STATIC | EMIT_DISTINCT_CHANGES_ONLY
-        } else {
-            5u32 // DESCENDANTS | EMIT_DISTINCT_CHANGES_ONLY
-        };
+        let has_descendants = if is_content_query { descendants } else { true };
+        let mut flags = 4u32; // EMIT_DISTINCT_CHANGES_ONLY (always on)
+        if has_descendants {
+            flags |= 1; // DESCENDANTS
+        }
+        if is_static {
+            flags |= 2; // IS_STATIC
+        }
 
-        // Signal queries use different flags
-        let flags = if is_signal { flags | 1 } else { flags };
-
-        // Create block
+        // Create block — signal queries use different instructions with ctx.propertyName
         if is_content_query {
-            let mut args = format!("dirIndex, {predicate}, {flags}");
+            if is_signal {
+                let mut args = format!("dirIndex, ctx.{prop_name}, {predicate}, {flags}");
+                if let Some(read_expr) = read {
+                    args = format!("{args}, {read_expr}");
+                }
+                create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuerySignal({args})"));
+            } else {
+                let mut args = format!("dirIndex, {predicate}, {flags}");
+                if let Some(read_expr) = read {
+                    args = format!("{args}, {read_expr}");
+                }
+                create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuery({args})"));
+            }
+        } else if is_signal {
+            let mut args = format!("ctx.{prop_name}, {predicate}, {flags}");
             if let Some(read_expr) = read {
                 args = format!("{args}, {read_expr}");
             }
-            create_stmts.push(format!("{ns}.\u{0275}\u{0275}contentQuery({args})"));
+            create_stmts.push(format!("{ns}.\u{0275}\u{0275}viewQuerySignal({args})"));
         } else {
             let mut args = format!("{predicate}, {flags}");
             if let Some(read_expr) = read {
@@ -1223,17 +1235,21 @@ fn build_queries(
             create_stmts.push(format!("{ns}.\u{0275}\u{0275}viewQuery({args})"));
         }
 
-        // Update block — declare `_t` once before the first query refresh
-        let t_var = if !t_declared {
-            t_declared = true;
-            "let _t;\n"
+        // Update block — signal queries just advance; regular queries refresh+assign
+        if is_signal {
+            update_stmts.push(format!("{ns}.\u{0275}\u{0275}queryAdvance()"));
         } else {
-            ""
-        };
-        let access = if first { ".first" } else { "" };
-        update_stmts.push(format!(
-            "{t_var}{ns}.\u{0275}\u{0275}queryRefresh(_t = {ns}.\u{0275}\u{0275}loadQuery()) && (ctx.{prop_name} = _t{access})"
-        ));
+            let t_var = if !t_declared {
+                t_declared = true;
+                "let _t;\n"
+            } else {
+                ""
+            };
+            let access = if first { ".first" } else { "" };
+            update_stmts.push(format!(
+                "{t_var}{ns}.\u{0275}\u{0275}queryRefresh(_t = {ns}.\u{0275}\u{0275}loadQuery()) && (ctx.{prop_name} = _t{access})"
+            ));
+        }
     }
 
     let create_block = create_stmts.join(";\n");
