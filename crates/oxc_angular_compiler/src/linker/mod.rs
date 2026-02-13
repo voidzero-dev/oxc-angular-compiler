@@ -1471,14 +1471,10 @@ fn link_component(
                     let scoped =
                         crate::styles::shim_css_text(style, "_ngcontent-%COMP%", "_nghost-%COMP%");
                     if !scoped.trim().is_empty() {
-                        scoped_styles.push(format!(
-                            "\"{}\"",
-                            scoped.replace('\\', "\\\\").replace('"', "\\\"")
-                        ));
+                        scoped_styles.push(crate::output::emitter::escape_string(&scoped, false));
                     }
                 } else if !style.trim().is_empty() {
-                    scoped_styles
-                        .push(format!("\"{}\"", style.replace('\\', "\\\\").replace('"', "\\\"")));
+                    scoped_styles.push(crate::output::emitter::escape_string(style, false));
                 }
             }
         }

@@ -1232,7 +1232,7 @@ fn is_nullish_coalesce(expr: &OutputExpression<'_>) -> bool {
 /// Characters above the BMP (U+10000+) are encoded as UTF-16 surrogate pairs
 /// (`\uXXXX\uXXXX`). This matches TypeScript's emitter behavior, which escapes
 /// non-ASCII characters in string literals.
-fn escape_string(input: &str, escape_dollar: bool) -> String {
+pub(crate) fn escape_string(input: &str, escape_dollar: bool) -> String {
     let mut result = String::with_capacity(input.len() + 2);
     result.push('"');
     for c in input.chars() {
