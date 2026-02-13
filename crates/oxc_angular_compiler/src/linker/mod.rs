@@ -1408,6 +1408,11 @@ fn link_component(
     let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
     parts.push(format!("standalone: {standalone}"));
 
+    // 11b. hostDirectives (Directive Composition API)
+    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
+        parts.push(format!("hostDirectives: {host_directives}"));
+    }
+
     // 12. features
     if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
