@@ -119,7 +119,10 @@ test.describe('CSS Style HMR', () => {
       )
     })
 
-    // Also modify HTML to use the new class
+    // Wait for CSS HMR to settle before modifying HTML
+    await waitForHmr()
+
+    // Now modify HTML to use the new class
     await fileModifier.modifyFile('app.html', (content) => {
       return content.replace('<h1>', '<h1 class="hmr-test-class">')
     })

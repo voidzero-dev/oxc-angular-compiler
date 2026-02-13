@@ -1,0 +1,14 @@
+.card {
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin: 10px 0;
+}
+
+.card-title {
+  color: green;
+  margin: 0;
+}
+
+.card-value {
+  font-weight: bold;
+}
