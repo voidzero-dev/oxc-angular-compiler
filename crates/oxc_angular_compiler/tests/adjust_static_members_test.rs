@@ -414,3 +414,26 @@ ClassB.ɵfac = factoryB;
 
     test_wrap_static(input, &["/* @__PURE__ */ (() =>", "return ClassA;", "return ClassB;"], &[]);
 }
+
+#[test]
+fn test_class_declaration_preserves_binding_for_export() {
+    // Regression test: class declarations (not variable declarations) must
+    // produce `let X = /* @__PURE__ */ (() => { ... })()` so the name remains
+    // in scope for subsequent `export { X }` statements.
+    let input = r"
+class ClipboardModule {}
+ClipboardModule.ɵfac = function ClipboardModule_Factory(t) { return new (t || ClipboardModule)(); };
+ClipboardModule.ɵmod = defineNgModule({ type: ClipboardModule });
+export { ClipboardModule };
+";
+
+    test_wrap_static(
+        input,
+        &[
+            "let ClipboardModule = /* @__PURE__ */ (() =>",
+            "return ClipboardModule;",
+            "export { ClipboardModule }",
+        ],
+        &[],
+    );
+}

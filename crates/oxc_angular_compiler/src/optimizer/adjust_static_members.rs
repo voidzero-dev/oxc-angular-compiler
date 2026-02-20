@@ -231,7 +231,7 @@ impl AdjustStaticMembersTransformer {
         // Determine if we need to extract the variable declaration part
         // Pattern: let X = class X {} -> we wrap the class expression and assignments
         let (var_prefix, class_expr_start, class_expr_end) =
-            self.extract_var_declaration_parts(start_span, source)?;
+            self.extract_var_declaration_parts(start_span, source, group.class_name)?;
 
         // Build the wrapped code
         let mut wrapped = String::new();
@@ -287,6 +287,7 @@ impl AdjustStaticMembersTransformer {
         &self,
         stmt_span: Span,
         source: &str,
+        class_name: &str,
     ) -> Option<(String, u32, u32)> {
         let stmt_text = &source[stmt_span.start as usize..stmt_span.end as usize];
 
@@ -324,7 +325,10 @@ impl AdjustStaticMembersTransformer {
             }
         } else {
             // It's a class declaration: class X {}
-            return Some((String::new(), stmt_span.start, stmt_span.end));
+            // We must assign the IIFE result to a variable so the class name
+            // remains in scope for subsequent export statements.
+            let var_prefix = format!("let {} = ", class_name);
+            return Some((var_prefix, stmt_span.start, stmt_span.end));
         }
 
         None
