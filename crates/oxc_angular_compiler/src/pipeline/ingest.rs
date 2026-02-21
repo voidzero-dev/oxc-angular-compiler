@@ -2884,9 +2884,11 @@ fn create_binary_modulo<'a>(
 /// Creates one CREATE op per case (ConditionalOp for first, ConditionalBranchCreateOp for rest)
 /// and one UPDATE op (ConditionalUpdateOp) containing all conditions.
 ///
-/// IMPORTANT: Angular always processes @default LAST, regardless of where it appears in
-/// the template. This affects slot allocation and function naming. To match Angular's behavior,
-/// we reorder the groups to put the @default group at the end before processing.
+/// Angular's `ingestSwitchBlock` in `ingest.ts` iterates groups in source order, but the
+/// `generateConditionalExpressions` phase later splices `@default` out and uses it as the
+/// ternary fallback. Because the Rust pipeline's conditional codegen expects `@default` last,
+/// we reorder here so that slot allocation, function naming, and the conditional expression
+/// all match Angular's compiled output.
 ///
 /// Ported from Angular's `ingestSwitchBlock` in `ingest.ts`.
 fn ingest_switch_block<'a>(
@@ -2904,15 +2906,17 @@ fn ingest_switch_block<'a>(
     // Convert the main switch expression as the test
     let test = convert_ast_to_ir(job, switch_block.expression);
 
-    // Reorder groups to put @default LAST, matching Angular's behavior.
-    // Angular always assigns higher slot numbers to @default regardless of template order.
-    // A group is considered the @default group if ALL its cases have expression: None.
+    // Reorder groups to put @default LAST, matching Angular's compiled output.
+    // While Angular's ingestSwitchBlock iterates in source order, the downstream
+    // generateConditionalExpressions phase (conditionals.ts) splices @default out and
+    // uses it as the ternary fallback base. Because slot allocation and function naming
+    // happen after ingest, moving @default last here ensures our xref/slot/function
+    // ordering matches Angular's final output.
     let mut groups_vec: std::vec::Vec<_> = switch_block.groups.into_iter().collect();
     let default_idx = groups_vec.iter().position(|group| {
         !group.cases.is_empty() && group.cases.iter().all(|c| c.expression.is_none())
     });
     if let Some(idx) = default_idx {
-        // Move the default group to the end
         let default_group = groups_vec.remove(idx);
         groups_vec.push(default_group);
     }
@@ -3432,6 +3436,7 @@ fn ingest_defer_triggers<'a>(
 
     // Handle viewport trigger
     if let Some(viewport_trigger) = triggers.viewport {
+        let options = viewport_trigger.options.map(|opts| convert_ast_to_ir(job, opts));
         let op = CreateOp::DeferOn(DeferOnOp {
             base: CreateOpBase {
                 source_span: Some(viewport_trigger.source_span),
@@ -3446,7 +3451,7 @@ fn ingest_defer_triggers<'a>(
             target_slot_view_steps: None,
             target_name: viewport_trigger.reference,
             delay: None,
-            options: None,
+            options,
         });
         if let Some(view) = job.view_mut(view_xref) {
             view.create.push(op);

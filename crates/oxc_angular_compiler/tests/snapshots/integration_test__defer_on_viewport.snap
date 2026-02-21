@@ -13,6 +13,6 @@ function TestComponent_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵdomTemplate(0,TestComponent_Defer_0_Template,3,0);
     i0.ɵɵdefer(1,0);
-    i0.ɵɵdeferOnViewport();
+    i0.ɵɵdeferOnViewport(null);
   }
 }

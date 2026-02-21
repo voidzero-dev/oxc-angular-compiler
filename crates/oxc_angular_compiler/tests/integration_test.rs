@@ -435,7 +435,9 @@ fn test_switch_block() {
 
 #[test]
 fn test_switch_block_default_first() {
-    // Test @switch with @default appearing first - Angular should reorder to put @default last
+    // Test @switch with @default appearing first - Angular reorders @default last
+    // Angular's ingestSwitchBlock iterates in source order, but generateConditionalExpressions
+    // splices @default out as the ternary fallback. We reorder at ingest to match the final output.
     let js = compile_template_to_js(
         r"@switch (value) { @default { <div>Other</div> } @case (1) { <div>One</div> } @case (2) { <div>Two</div> } }",
         "TestComponent",

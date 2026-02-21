@@ -252,11 +252,11 @@ pub static PHASES: &[Phase] = &[
         run_host: None,
         name: "createVariadicPipes",
     },
-    // Phase 21: generateArrowFunctions (Template only)
+    // Phase 21: generateArrowFunctions (Both)
     Phase {
-        kind: CompilationJobKind::Template,
+        kind: CompilationJobKind::Both,
         run: generate_arrow_functions::generate_arrow_functions,
-        run_host: None,
+        run_host: Some(generate_arrow_functions::generate_arrow_functions_for_host),
         name: "generateArrowFunctions",
     },
     // Phase 22: generatePureLiteralStructures (Both)

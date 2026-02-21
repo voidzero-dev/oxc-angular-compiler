@@ -15,7 +15,7 @@ use crate::ir::ops::{CreateOp, Op};
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr as OutputArrowFunctionExpr, FnParam,
 };
-use crate::pipeline::compilation::ComponentCompilationJob;
+use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
 use oxc_allocator::{Box as AllocBox, Vec as AllocVec};
 
 /// Finds arrow functions written by the user and converts them into
@@ -123,7 +123,9 @@ fn convert_output_arrow_to_ir<'a>(
             // The expression syntax doesn't support multi-line arrow functions,
             // but the output AST does. We don't need to handle them here if
             // the user isn't able to write one.
-            // In TypeScript this throws an error, but we'll just skip it.
+            // Angular throws an assertion error here; we use debug_assert to
+            // catch any internal compiler bugs that produce this in debug builds.
+            debug_assert!(false, "unexpected multi-line arrow function in template expression");
             return None;
         }
     };
@@ -141,6 +143,39 @@ fn convert_output_arrow_to_ir<'a>(
         var_offset: None,
         source_span: arrow_fn.source_span,
     })
+}
+
+/// Generate arrow functions for host binding compilation.
+///
+/// Angular runs this phase for Kind.Both, meaning it applies to both
+/// template and host compilations. Host bindings can contain arrow
+/// function expressions (e.g., in @HostBinding values or event handlers).
+pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>) {
+    let allocator = job.allocator;
+
+    // Process create operations (skip listeners)
+    for op in job.root.create.iter_mut() {
+        if !is_listener_op(op) {
+            transform_expressions_in_create_op(
+                op,
+                &|expr, flags| {
+                    add_arrow_function(expr, allocator, flags);
+                },
+                VisitorContextFlag::NONE,
+            );
+        }
+    }
+
+    // Process update operations
+    for op in job.root.update.iter_mut() {
+        transform_expressions_in_update_op(
+            op,
+            &|expr, flags| {
+                add_arrow_function(expr, allocator, flags);
+            },
+            VisitorContextFlag::NONE,
+        );
+    }
 }
 
 /// Collect arrow functions from a view's operations into its functions set.

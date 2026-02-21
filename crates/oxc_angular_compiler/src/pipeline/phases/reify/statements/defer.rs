@@ -225,12 +225,19 @@ pub fn create_defer_on_stmt<'a>(
                 if let Some(opts) = options {
                     args.push(opts);
                 }
-            } else if let Some(slot) = target_slot {
-                // Regular/Prefetch viewport with explicit target: target_slot, target_slot_view_steps?, options?
-                args.push(OutputExpression::Literal(Box::new_in(
-                    LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-                    allocator,
-                )));
+            } else {
+                // Always emit the first arg: slot number or null if unresolved.
+                // Angular: o.literal(op.trigger.targetSlot?.slot ?? null)
+                args.push(match target_slot {
+                    Some(slot) => OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
+                        allocator,
+                    )),
+                    None => OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Null, source_span: None },
+                        allocator,
+                    )),
+                });
 
                 let view_steps = target_slot_view_steps.unwrap_or(0);
                 if view_steps != 0 {
@@ -253,28 +260,32 @@ pub fn create_defer_on_stmt<'a>(
                     args.push(opts);
                 }
             }
-            // No arguments when no explicit target is specified
         }
         DeferTriggerKind::Interaction | DeferTriggerKind::Hover => {
             // Hydrate triggers don't support targets
             if modifier != DeferOpModifierKind::Hydrate {
-                // Only push arguments if there's an explicit target
-                if let Some(slot) = target_slot {
-                    args.push(OutputExpression::Literal(Box::new_in(
+                // Always emit the first arg: slot number or null if unresolved.
+                // Angular: o.literal(op.trigger.targetSlot?.slot ?? null)
+                args.push(match target_slot {
+                    Some(slot) => OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
                         allocator,
-                    )));
+                    )),
+                    None => OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Null, source_span: None },
+                        allocator,
+                    )),
+                });
 
-                    let view_steps = target_slot_view_steps.unwrap_or(0);
-                    if view_steps != 0 {
-                        args.push(OutputExpression::Literal(Box::new_in(
-                            LiteralExpr {
-                                value: LiteralValue::Number(view_steps as f64),
-                                source_span: None,
-                            },
-                            allocator,
-                        )));
-                    }
+                let view_steps = target_slot_view_steps.unwrap_or(0);
+                if view_steps != 0 {
+                    args.push(OutputExpression::Literal(Box::new_in(
+                        LiteralExpr {
+                            value: LiteralValue::Number(view_steps as f64),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
                 }
             }
         }

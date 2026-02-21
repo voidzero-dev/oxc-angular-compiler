@@ -2313,26 +2313,69 @@ impl<'a> HtmlToR3Transform<'a> {
         let mut unknown_blocks = Vec::new_in(self.allocator);
         let mut collected_cases: std::vec::Vec<R3SwitchBlockCase<'a>> = std::vec::Vec::new();
         let mut first_case_start: Option<Span> = None;
+        let mut has_default = false;
 
         for child in &block.children {
-            // Skip non-block nodes (only process block children)
+            // Skip comments and whitespace-only text nodes (same as Angular)
+            match child {
+                HtmlNode::Comment(_) => continue,
+                HtmlNode::Text(t) if t.value.trim().is_empty() => continue,
+                _ => {}
+            }
+
+            // Non-block children (elements, non-whitespace text, etc.) are invalid
             let child_block = match child {
                 HtmlNode::Block(b) => b,
-                _ => continue,
+                _ => {
+                    self.report_error(
+                        "@switch block can only contain @case and @default blocks",
+                        child.span(),
+                    );
+                    continue;
+                }
             };
 
-            // Check if this is a valid case/default block
-            // Note: @case with no parameters is treated as unknown (same as Angular)
-            let is_case =
-                child_block.block_type == BlockType::Case && !child_block.parameters.is_empty();
-            let is_default = child_block.block_type == BlockType::Default;
-
-            if !is_case && !is_default {
+            // Validate: only @case and @default are allowed inside @switch
+            if child_block.block_type != BlockType::Case
+                && child_block.block_type != BlockType::Default
+            {
+                self.report_error(
+                    "@switch block can only contain @case and @default blocks",
+                    child_block.span,
+                );
                 unknown_blocks.push(crate::ast::r3::R3UnknownBlock {
                     name: child_block.name.clone(),
                     source_span: child_block.span,
                     name_span: child_block.name_span,
                 });
+                continue;
+            }
+
+            let is_default = child_block.block_type == BlockType::Default;
+
+            // Validate @default
+            if is_default {
+                if has_default {
+                    self.report_error(
+                        "@switch block can only have one @default block",
+                        child_block.start_span,
+                    );
+                } else if !child_block.parameters.is_empty() {
+                    self.report_error(
+                        "@default block cannot have parameters",
+                        child_block.start_span,
+                    );
+                }
+                has_default = true;
+            }
+
+            // Validate @case: must have exactly one parameter
+            let is_case = child_block.block_type == BlockType::Case;
+            if is_case && child_block.parameters.len() != 1 {
+                self.report_error(
+                    "@case block must have exactly one parameter",
+                    child_block.start_span,
+                );
                 continue;
             }
 

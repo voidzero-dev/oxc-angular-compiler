@@ -749,6 +749,22 @@ fn humanize_ignore_errors(html: &str) -> Vec<Vec<HumanValue>> {
     humanizer.humanize(&result.nodes)
 }
 
+/// Helper to get transform errors from an HTML template.
+fn get_transform_errors(html: &str) -> Vec<String> {
+    let allocator = Box::new(Allocator::default());
+    let allocator_ref: &'static Allocator =
+        unsafe { &*std::ptr::from_ref::<Allocator>(allocator.as_ref()) };
+
+    let parser = HtmlParser::new(allocator_ref, html, "test.html");
+    let html_result = parser.parse();
+
+    let options = TransformOptions { collect_comment_nodes: false };
+    let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
+    let r3_result = transformer.transform(&html_result.nodes);
+
+    r3_result.errors.iter().map(|e| e.msg.clone()).collect()
+}
+
 // ============================================================================
 // Tests: Nodes without binding
 // ============================================================================
@@ -1941,5 +1957,98 @@ mod complex_control_flow {
         } else {
             panic!("Expected ForLoopBlock");
         }
+    }
+}
+
+// ============================================================================
+// Tests: @switch validation
+// ============================================================================
+
+mod switch_validation {
+    use super::*;
+
+    #[test]
+    fn should_report_error_for_non_block_children_in_switch() {
+        // Angular reports: "@switch block can only contain @case and @default blocks"
+        // for non-whitespace text and element children
+        let errors = get_transform_errors("@switch (expr) { <div>invalid</div> @case (1) { a } }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("@switch block can only contain @case and @default blocks")),
+            "Expected error about non-block children in @switch, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_error_for_non_whitespace_text_in_switch() {
+        let errors = get_transform_errors("@switch (expr) { some text @case (1) { a } }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("@switch block can only contain @case and @default blocks")),
+            "Expected error about non-block text in @switch, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_allow_whitespace_text_in_switch() {
+        // Whitespace-only text nodes should be silently skipped (same as Angular)
+        let errors = get_transform_errors("@switch (expr) { \n  @case (1) { a } }");
+        assert!(
+            errors.is_empty(),
+            "Expected no errors for whitespace-only text in @switch, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_allow_comments_in_switch() {
+        // Comments should be silently skipped (same as Angular)
+        let errors = get_transform_errors("@switch (expr) { <!-- comment --> @case (1) { a } }");
+        assert!(errors.is_empty(), "Expected no errors for comments in @switch, got: {errors:?}");
+    }
+
+    #[test]
+    fn should_report_error_for_case_with_multiple_parameters() {
+        // Angular: "@case block must have exactly one parameter"
+        // Note: the HTML parser may or may not parse this as a valid @case block depending
+        // on how parameters are tokenized. Either way, an error should be reported.
+        let errors = get_transform_errors("@switch (expr) { @case (1) (2) { a } }");
+        assert!(
+            !errors.is_empty(),
+            "Expected errors for @case with multiple parameters, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_error_for_case_with_no_parameters() {
+        // Angular: "@case block must have exactly one parameter"
+        let errors = get_transform_errors("@switch (expr) { @case { a } }");
+        assert!(
+            errors.iter().any(|e| e.contains("@case block must have exactly one parameter")),
+            "Expected error about @case parameters, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_error_for_multiple_default_blocks() {
+        // Angular: "@switch block can only have one @default block"
+        let errors = get_transform_errors(
+            "@switch (expr) { @case (1) { a } @default { b } @default { c } }",
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("@switch block can only have one @default block")),
+            "Expected error about multiple @default blocks, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_error_for_default_with_parameters() {
+        // Angular: "@default block cannot have parameters"
+        let errors = get_transform_errors("@switch (expr) { @case (1) { a } @default (x) { b } }");
+        assert!(
+            errors.iter().any(|e| e.contains("@default block cannot have parameters")),
+            "Expected error about @default with parameters, got: {errors:?}"
+        );
     }
 }

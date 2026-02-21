@@ -29,7 +29,7 @@ function TestComponent_Template(rf,ctx) {
     i0.ɵɵdomTemplate(3,TestComponent_Defer_3_Template,4,0)(4,TestComponent_DeferLoading_4_Template,
         4,0);
     i0.ɵɵdefer(5,3,null,4,null,null,1,null,i0.ɵɵdeferEnableTimerScheduling);
-    i0.ɵɵdeferOnViewport();
+    i0.ɵɵdeferOnViewport(null);
     i0.ɵɵdeferPrefetchOnIdle();
   }
 }

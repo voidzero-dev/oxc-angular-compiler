@@ -30,6 +30,13 @@ pub fn merge_next_context_expressions(job: &mut ComponentCompilationJob<'_>) {
 
     for xref in view_xrefs {
         if let Some(view) = job.view_mut(xref) {
+            // Merge in arrow function op lists (matches Angular's unit.functions traversal)
+            for fn_ptr in view.functions.iter() {
+                // SAFETY: These pointers are valid for the duration of the compilation
+                let arrow_fn = unsafe { &mut **fn_ptr };
+                merge_next_contexts_in_handler_ops(&mut arrow_fn.ops);
+            }
+
             // Merge in create ops for listeners
             for op in view.create.iter_mut() {
                 match op {
