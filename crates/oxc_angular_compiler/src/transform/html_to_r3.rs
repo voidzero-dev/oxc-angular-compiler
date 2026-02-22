@@ -2370,12 +2370,19 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Validate @case: must have exactly one parameter
+            // Angular pushes invalid @case blocks into unknownBlocks for language service support.
+            // Reference: r3_control_flow.ts line 242
             let is_case = child_block.block_type == BlockType::Case;
             if is_case && child_block.parameters.len() != 1 {
                 self.report_error(
                     "@case block must have exactly one parameter",
                     child_block.start_span,
                 );
+                unknown_blocks.push(crate::ast::r3::R3UnknownBlock {
+                    name: child_block.name.clone(),
+                    source_span: child_block.span,
+                    name_span: child_block.name_span,
+                });
                 continue;
             }
 

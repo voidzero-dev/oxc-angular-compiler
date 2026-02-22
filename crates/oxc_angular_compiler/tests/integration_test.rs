@@ -5126,3 +5126,27 @@ export class MixedQueryComponent {
         }
     }
 }
+
+#[test]
+fn test_for_loop_multiple_index_aliases_in_track() {
+    // When multiple aliases reference $index (e.g., `let i = $index, j = $index`),
+    // ALL aliases must be rewritten to $index in the track expression.
+    // Angular stores all $index aliases in a Set<string> and checks membership,
+    // while a bug in OXC previously stored only the last alias (overwriting earlier ones).
+    // Reference: Angular's ingest.ts uses `indexVarNames = new Set<string>()` and `.add()`.
+    let js = compile_template_to_js(
+        r#"@for (item of items; track i + j; let i = $index, j = $index) { {{item}} }"#,
+        "TestComponent",
+    );
+    // The track function should rewrite both `i` and `j` to `$index`.
+    // Expected: ($index,$item)=>($index + $index)
+    // Bug behavior: ($index,$item)=>(this.i + $index)  (only `j` rewritten, `i` left as `this.i`)
+    assert!(
+        !js.contains("this.i"),
+        "Track expression should rewrite all $index aliases, but `i` was not rewritten.\nGenerated JS:\n{js}"
+    );
+    assert!(
+        !js.contains("this.j"),
+        "Track expression should rewrite all $index aliases, but `j` was not rewritten.\nGenerated JS:\n{js}"
+    );
+}
