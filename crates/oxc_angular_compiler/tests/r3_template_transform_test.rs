@@ -2052,3 +2052,77 @@ mod switch_validation {
         );
     }
 }
+
+// ============================================================================
+// Tests: @for duplicate let parameter validation
+// ============================================================================
+
+mod switch_invalid_case_unknown_blocks {
+    use super::*;
+
+    /// Helper that parses HTML to R3 AST and returns the unknown_blocks from the first SwitchBlock.
+    fn get_switch_unknown_block_names(html: &str) -> Vec<String> {
+        let allocator = Box::new(Allocator::default());
+        let allocator_ref: &'static Allocator =
+            unsafe { &*std::ptr::from_ref::<Allocator>(allocator.as_ref()) };
+
+        let parser = HtmlParser::new(allocator_ref, html, "test.html");
+        let html_result = parser.parse();
+
+        let options = TransformOptions { collect_comment_nodes: false };
+        let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
+        let r3_result = transformer.transform(&html_result.nodes);
+
+        // Find the first SwitchBlock and return its unknown_blocks names
+        for node in r3_result.nodes.iter() {
+            if let R3Node::SwitchBlock(b) = node {
+                return b.unknown_blocks.iter().map(|ub| ub.name.to_string()).collect();
+            }
+        }
+        Vec::new()
+    }
+
+    #[test]
+    fn should_add_invalid_case_with_no_params_to_unknown_blocks() {
+        // Angular pushes @case blocks with invalid parameters into unknownBlocks
+        // for language service autocompletion support.
+        // Reference: r3_control_flow.ts line 242
+        let unknown_names =
+            get_switch_unknown_block_names("@switch (expr) { @case { a } @case (1) { b } }");
+        assert!(
+            unknown_names.contains(&"case".to_string()),
+            "Expected invalid @case (no params) to be in unknown_blocks, got: {unknown_names:?}"
+        );
+    }
+}
+
+mod for_loop_duplicate_let_validation {
+    use super::*;
+
+    #[test]
+    fn should_report_duplicate_let_for_implicit_var_aliased_to_itself() {
+        // Angular test: `let $index = $index` should be rejected as a duplicate
+        // because $index is already pre-populated as an implicit context variable.
+        // Reference: r3_template_transform_spec.ts line 2340
+        let errors = get_transform_errors(
+            "@for (item of items.foo.bar; track item.id; let $index = $index) {}",
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("Duplicate \"let\" parameter variable")),
+            "Expected duplicate let parameter error for `let $index = $index`, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_duplicate_let_for_explicit_alias_used_twice() {
+        // Angular test: `let i = $index` used twice should be rejected
+        // Reference: r3_template_transform_spec.ts line 2340
+        let errors = get_transform_errors(
+            "@for (item of items.foo.bar; track item.id; let i = $index, f = $first, i = $index) {}",
+        );
+        assert!(
+            errors.iter().any(|e| e.contains("Duplicate \"let\" parameter variable")),
+            "Expected duplicate let parameter error for duplicate alias `i`, got: {errors:?}"
+        );
+    }
+}

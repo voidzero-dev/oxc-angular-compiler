@@ -1228,8 +1228,9 @@ pub struct RepeaterVarNames<'a> {
     pub item: Option<Atom<'a>>,
     /// Alias for $count.
     pub count: Option<Atom<'a>>,
-    /// Alias for $index.
-    pub index: Option<Atom<'a>>,
+    /// Aliases for $index (can be multiple, e.g. `let i = $index, j = $index`).
+    /// Angular stores these in a `Set<string>`.
+    pub index: Vec<'a, Atom<'a>>,
     /// Alias for $first.
     pub first: Option<Atom<'a>>,
     /// Alias for $last.

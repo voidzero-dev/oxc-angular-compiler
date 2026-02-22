@@ -2502,10 +2502,11 @@ fn ingest_for_block<'a>(
     });
 
     // Build var_names for the repeater, tracking user-defined aliases
+    #[allow(clippy::needless_update)]
     let mut var_names = RepeaterVarNames {
         item: Some(for_block.item.name.clone()),
         count: None,
-        index: None,
+        index: oxc_allocator::Vec::new_in(allocator),
         first: None,
         last: None,
         even: None,
@@ -2525,7 +2526,7 @@ fn ingest_for_block<'a>(
     // This is used for track expression variable replacement
     for var in for_block.context_variables.iter() {
         if var.value.as_str() == "$index" {
-            var_names.index = Some(var.name.clone());
+            var_names.index.push(var.name.clone());
         }
     }
 

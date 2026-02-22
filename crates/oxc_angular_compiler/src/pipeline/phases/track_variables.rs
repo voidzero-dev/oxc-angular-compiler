@@ -37,10 +37,7 @@ pub fn generate_track_variables(job: &mut ComponentCompilationJob<'_>) {
             if let CreateOp::RepeaterCreate(rep) = op {
                 // Get $index names and $implicit name for this repeater
                 let index_names: Vec<Atom<'_>> = {
-                    let mut names = Vec::new();
-                    if let Some(ref index) = rep.var_names.index {
-                        names.push(index.clone());
-                    }
+                    let mut names: Vec<Atom<'_>> = rep.var_names.index.iter().cloned().collect();
                     // Also include '$index' itself
                     names.push(Atom::from("$index"));
                     names

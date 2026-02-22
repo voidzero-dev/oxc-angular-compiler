@@ -531,9 +531,9 @@ fn parse_let_parameter<'a>(
         }
 
         // Check for duplicate alias name
-        let already_has_name = context_variables
-            .iter()
-            .any(|v| v.name.as_str() == name && v.name.as_str() != v.value.as_str());
+        // Angular checks all existing names including implicit context vars (e.g. $index).
+        // Reference: r3_control_flow.ts line 479
+        let already_has_name = context_variables.iter().any(|v| v.name.as_str() == name);
         if already_has_name {
             errors.push(format!("Duplicate \"let\" parameter variable \"{}\"", variable_name));
             current_offset += part.len() as u32 + 1;
