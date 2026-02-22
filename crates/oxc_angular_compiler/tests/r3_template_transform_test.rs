@@ -2126,3 +2126,182 @@ mod for_loop_duplicate_let_validation {
         );
     }
 }
+
+// ============================================================================
+// Tests: Standalone connected blocks emit errors and UnknownBlock
+// ============================================================================
+
+mod standalone_connected_blocks {
+    use super::*;
+
+    #[test]
+    fn standalone_else_should_produce_error_and_unknown_block() {
+        // Reference: r3_template_transform.ts:515-517
+        let errors = get_transform_errors("@else { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("@else block can only be used after an @if")),
+            "Expected error for standalone @else, got: {errors:?}"
+        );
+        let result = parse_with_options("@else { content }", true, false);
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| matches!(n, R3NodeRef::UnknownBlock { name } if name == "else")),
+            "Expected UnknownBlock for standalone @else"
+        );
+    }
+
+    #[test]
+    fn standalone_else_if_should_produce_error_and_unknown_block() {
+        let errors = get_transform_errors("@else if (cond) { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("@else if block can only be used after an @if")),
+            "Expected error for standalone @else if, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_empty_should_produce_error_and_unknown_block() {
+        // Reference: r3_template_transform.ts:512-514
+        let errors = get_transform_errors("@empty { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("@empty block can only be used after an @for")),
+            "Expected error for standalone @empty, got: {errors:?}"
+        );
+        let result = parse_with_options("@empty { content }", true, false);
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| matches!(n, R3NodeRef::UnknownBlock { name } if name == "empty")),
+            "Expected UnknownBlock for standalone @empty"
+        );
+    }
+
+    #[test]
+    fn standalone_placeholder_should_produce_error_and_unknown_block() {
+        // Reference: r3_template_transform.ts:509-511
+        let errors = get_transform_errors("@placeholder { content }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("@placeholder block can only be used after an @defer")),
+            "Expected error for standalone @placeholder, got: {errors:?}"
+        );
+        let result = parse_with_options("@placeholder { content }", true, false);
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| matches!(n, R3NodeRef::UnknownBlock { name } if name == "placeholder")),
+            "Expected UnknownBlock for standalone @placeholder"
+        );
+    }
+
+    #[test]
+    fn standalone_loading_should_produce_error_and_unknown_block() {
+        let errors = get_transform_errors("@loading { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("@loading block can only be used after an @defer")),
+            "Expected error for standalone @loading, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_error_should_produce_error_and_unknown_block() {
+        let errors = get_transform_errors("@error { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("@error block can only be used after an @defer")),
+            "Expected error for standalone @error, got: {errors:?}"
+        );
+    }
+}
+
+// ============================================================================
+// Tests: @defer connected block validation (duplicates / bad params)
+// ============================================================================
+
+mod defer_connected_block_validation {
+    use super::*;
+
+    #[test]
+    fn should_report_duplicate_placeholder() {
+        // Reference: r3_deferred_blocks.ts:124-131
+        let errors =
+            get_transform_errors("@defer { main } @placeholder { first } @placeholder { second }");
+        assert!(
+            errors.iter().any(|e| e.contains("@defer block can only have one @placeholder block")),
+            "Expected duplicate placeholder error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_duplicate_loading() {
+        // Reference: r3_deferred_blocks.ts:137-143
+        let errors = get_transform_errors("@defer { main } @loading { first } @loading { second }");
+        assert!(
+            errors.iter().any(|e| e.contains("@defer block can only have one @loading block")),
+            "Expected duplicate loading error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_duplicate_error() {
+        // Reference: r3_deferred_blocks.ts:149-152
+        let errors = get_transform_errors("@defer { main } @error { first } @error { second }");
+        assert!(
+            errors.iter().any(|e| e.contains("@defer block can only have one @error block")),
+            "Expected duplicate error block error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_error_block_with_parameters() {
+        // Reference: r3_deferred_blocks.ts:252-253
+        let errors = get_transform_errors("@defer { main } @error (something) { err }");
+        assert!(
+            errors.iter().any(|e| e.contains("@error block cannot have parameters")),
+            "Expected error block parameter error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_unrecognized_placeholder_parameter() {
+        // Reference: r3_deferred_blocks.ts:186
+        let errors = get_transform_errors("@defer { main } @placeholder (unknown 100ms) { ph }");
+        assert!(
+            errors.iter().any(|e| e.contains("Unrecognized parameter in @placeholder block")),
+            "Expected unrecognized parameter error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn should_report_unrecognized_loading_parameter() {
+        // Reference: r3_deferred_blocks.ts:234-235
+        let errors = get_transform_errors("@defer { main } @loading (unknown 100ms) { loading }");
+        assert!(
+            errors.iter().any(|e| e.contains("Unrecognized parameter in @loading block")),
+            "Expected unrecognized parameter error, got: {errors:?}"
+        );
+    }
+}
+
+// ============================================================================
+// Tests: @for track expression parsing
+// ============================================================================
+
+mod for_track_expression_parsing {
+    use super::*;
+
+    #[test]
+    fn empty_track_expression_should_report_missing_track() {
+        // Reference: r3_control_flow.ts:406-409
+        // Angular matches "track" keyword but then reports missing expression when empty
+        let errors = get_transform_errors("@for (item of items; track ) {}");
+        assert!(
+            errors.iter().any(|e| e.contains("\"track\" expression")),
+            "Expected missing track expression error, got: {errors:?}"
+        );
+    }
+}

@@ -99,8 +99,10 @@ fn parse_for_of_expression(s: &str) -> Option<(&str, &str)> {
     Some((var_name, expression))
 }
 
-/// Parse "track" expression pattern: `^track\s+([\S\s]+)`
-/// Returns the expression after "track " if matched.
+/// Parse "track" expression pattern: `^track\s+([\S\s]*)`
+/// Returns the expression after "track " if matched, which may be empty.
+/// An empty expression is valid as a match (Angular handles this by checking EmptyExpr).
+/// Reference: r3_control_flow.ts FOR_LOOP_TRACK_PATTERN = /^track\s+([\S\s]*)/
 fn parse_track_expression(s: &str) -> Option<&str> {
     if !s.starts_with("track") {
         return None;
@@ -110,9 +112,6 @@ fn parse_track_expression(s: &str) -> Option<&str> {
         return None;
     }
     let expr = after_track.trim_start();
-    if expr.is_empty() {
-        return None;
-    }
     Some(expr)
 }
 

@@ -80,53 +80,6 @@ pub fn get_trigger_parameters_start(expression: &str) -> usize {
     expression.len()
 }
 
-/// Checks if a parameter string starts with "minimum".
-fn starts_with_minimum(s: &str) -> bool {
-    let s = s.trim_start();
-    s.starts_with("minimum")
-        && s.get(7..8).is_none_or(|c| c.chars().next().is_none_or(char::is_whitespace))
-}
-
-/// Checks if a parameter string starts with "after".
-fn starts_with_after(s: &str) -> bool {
-    let s = s.trim_start();
-    s.starts_with("after")
-        && s.get(5..6).is_none_or(|c| c.chars().next().is_none_or(char::is_whitespace))
-}
-
-/// Parses timing parameters from a @placeholder block.
-///
-/// Returns the minimum time in milliseconds if found.
-pub fn parse_placeholder_parameters(params: &[&str]) -> Option<u32> {
-    for param in params {
-        if starts_with_minimum(param) {
-            let time_str = &param[get_trigger_parameters_start(param)..];
-            return parse_deferred_time(time_str);
-        }
-    }
-    None
-}
-
-/// Parses timing parameters from a @loading block.
-///
-/// Returns (after_time, minimum_time) in milliseconds.
-pub fn parse_loading_parameters(params: &[&str]) -> (Option<u32>, Option<u32>) {
-    let mut after_time = None;
-    let mut minimum_time = None;
-
-    for param in params {
-        if starts_with_after(param) {
-            let time_str = &param[get_trigger_parameters_start(param)..];
-            after_time = parse_deferred_time(time_str);
-        } else if starts_with_minimum(param) {
-            let time_str = &param[get_trigger_parameters_start(param)..];
-            minimum_time = parse_deferred_time(time_str);
-        }
-    }
-
-    (after_time, minimum_time)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -163,39 +116,5 @@ mod tests {
     fn test_parse_deferred_time_with_whitespace() {
         assert_eq!(parse_deferred_time("  500ms  "), Some(500));
         assert_eq!(parse_deferred_time("  1s  "), Some(1000));
-    }
-
-    #[test]
-    fn test_parse_placeholder_parameters() {
-        assert_eq!(parse_placeholder_parameters(&["minimum 500ms"]), Some(500));
-        assert_eq!(parse_placeholder_parameters(&["minimum 1s"]), Some(1000));
-        assert_eq!(parse_placeholder_parameters(&[]), None);
-    }
-
-    #[test]
-    fn test_parse_loading_parameters() {
-        assert_eq!(
-            parse_loading_parameters(&["after 100ms", "minimum 500ms"]),
-            (Some(100), Some(500))
-        );
-        assert_eq!(parse_loading_parameters(&["after 1s"]), (Some(1000), None));
-        assert_eq!(parse_loading_parameters(&["minimum 500ms"]), (None, Some(500)));
-        assert_eq!(parse_loading_parameters(&[]), (None, None));
-    }
-
-    #[test]
-    fn test_starts_with_minimum() {
-        assert!(starts_with_minimum("minimum 500ms"));
-        assert!(starts_with_minimum("  minimum 500ms"));
-        assert!(!starts_with_minimum("after 500ms"));
-        assert!(!starts_with_minimum("minimumValue")); // not followed by whitespace
-    }
-
-    #[test]
-    fn test_starts_with_after() {
-        assert!(starts_with_after("after 500ms"));
-        assert!(starts_with_after("  after 500ms"));
-        assert!(!starts_with_after("minimum 500ms"));
-        assert!(!starts_with_after("afterTime")); // not followed by whitespace
     }
 }

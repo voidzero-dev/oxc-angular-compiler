@@ -30,7 +30,7 @@ use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::decode_entities_in_string;
 use crate::schema::get_security_context;
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
-use crate::util::{ParseError, parse_loading_parameters, parse_placeholder_parameters};
+use crate::util::ParseError;
 
 /// Regex pattern for binding prefixes.
 /// Matches: bind-, let-, ref-/#, on-, bindon-, @
@@ -1721,8 +1721,23 @@ impl<'a> HtmlToR3Transform<'a> {
                 self.visit_if_block(block, &connected)
             }
             BlockType::Else | BlockType::ElseIf => {
-                // These are handled as part of @if
-                None
+                // Standalone @else/@else if without a preceding @if - emit error and create UnknownBlock
+                // Reference: r3_template_transform.ts:515-517
+                self.report_error(
+                    &format!(
+                        "@{} block can only be used after an @if or @else if block.",
+                        block.name
+                    ),
+                    block.span,
+                );
+                Some(R3Node::UnknownBlock(Box::new_in(
+                    crate::ast::r3::R3UnknownBlock {
+                        name: block.name.clone(),
+                        source_span: block.span,
+                        name_span: block.name_span,
+                    },
+                    self.allocator,
+                )))
             }
             BlockType::For => {
                 // First, find and collect connected block indices and whitespace
@@ -1754,8 +1769,17 @@ impl<'a> HtmlToR3Transform<'a> {
                 self.visit_for_block(block, &connected)
             }
             BlockType::Empty => {
-                // Handled as part of @for
-                None
+                // Standalone @empty without a preceding @for - emit error and create UnknownBlock
+                // Reference: r3_template_transform.ts:512-514
+                self.report_error("@empty block can only be used after an @for block.", block.span);
+                Some(R3Node::UnknownBlock(Box::new_in(
+                    crate::ast::r3::R3UnknownBlock {
+                        name: block.name.clone(),
+                        source_span: block.span,
+                        name_span: block.name_span,
+                    },
+                    self.allocator,
+                )))
             }
             BlockType::Switch => self.visit_switch_block(block),
             BlockType::Case | BlockType::Default => {
@@ -1792,8 +1816,20 @@ impl<'a> HtmlToR3Transform<'a> {
                 self.visit_defer_block(block, &connected)
             }
             BlockType::Placeholder | BlockType::Loading | BlockType::Error => {
-                // Handled as part of @defer
-                None
+                // Standalone @placeholder/@loading/@error without a preceding @defer - emit error and create UnknownBlock
+                // Reference: r3_template_transform.ts:509-511
+                self.report_error(
+                    &format!("@{} block can only be used after an @defer block.", block.name),
+                    block.span,
+                );
+                Some(R3Node::UnknownBlock(Box::new_in(
+                    crate::ast::r3::R3UnknownBlock {
+                        name: block.name.clone(),
+                        source_span: block.span,
+                        name_span: block.name_span,
+                    },
+                    self.allocator,
+                )))
             }
         }
     }
@@ -1814,9 +1850,10 @@ impl<'a> HtmlToR3Transform<'a> {
         for i in (primary_index + 1)..siblings.len() {
             let node = &siblings[i];
 
-            // Skip over comments and mark them as consumed
+            // Skip over comments without marking them as processed
+            // Reference: r3_template_transform.ts:543-546 - Angular skips comments
+            // but does NOT add them to processedNodes
             if matches!(node, HtmlNode::Comment(_)) {
-                whitespace_indices.push(i);
                 continue;
             }
 
@@ -2442,6 +2479,16 @@ impl<'a> HtmlToR3Transform<'a> {
             // Visit children of the final case (which has the body)
             let children = self.visit_children(&child_block.children);
 
+            // Propagate i18n metadata for the case group
+            // Reference: r3_control_flow.ts:293 - Angular passes node.i18n to SwitchBlockCaseGroup
+            let i18n = self.create_block_placeholder(
+                &child_block.name,
+                &[],
+                group_source_span,
+                group_start_source_span,
+                child_block.end_span,
+            );
+
             let group = R3SwitchBlockCaseGroup {
                 cases,
                 children,
@@ -2449,7 +2496,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 start_source_span: group_start_source_span,
                 end_source_span: child_block.end_span,
                 name_span: child_block.name_span,
-                i18n: None,
+                i18n,
             };
             groups.push(group);
 
@@ -2513,7 +2560,8 @@ impl<'a> HtmlToR3Transform<'a> {
             });
         }
 
-        // Process connected blocks
+        // Process connected blocks with validation
+        // Reference: r3_deferred_blocks.ts parseConnectedBlocks (lines 106-164)
         let mut placeholder = None;
         let mut loading = None;
         let mut error = None;
@@ -2523,74 +2571,202 @@ impl<'a> HtmlToR3Transform<'a> {
 
             match connected.block_type {
                 BlockType::Placeholder => {
-                    // Parse minimum time from parameters like "minimum 500ms"
-                    let params: std::vec::Vec<&str> =
-                        connected.parameters.iter().map(|p| p.expression.as_str()).collect();
-                    let minimum_time = parse_placeholder_parameters(&params);
+                    if placeholder.is_some() {
+                        // Reference: r3_deferred_blocks.ts:124-131
+                        self.report_error(
+                            "@defer block can only have one @placeholder block",
+                            connected.start_span,
+                        );
+                    } else {
+                        // Parse and validate placeholder parameters
+                        // Reference: r3_deferred_blocks.ts parsePlaceholderBlock (lines 167-198)
+                        let mut minimum_time = None;
+                        let mut has_minimum = false;
+                        for param in &connected.parameters {
+                            let expr = param.expression.as_str();
+                            if expr.trim_start().starts_with("minimum")
+                                && expr.trim_start().get(7..8).is_none_or(|c| {
+                                    c.chars().next().is_none_or(char::is_whitespace)
+                                })
+                            {
+                                if has_minimum {
+                                    self.report_error(
+                                        "@placeholder block can only have one \"minimum\" parameter",
+                                        connected.start_span,
+                                    );
+                                } else {
+                                    has_minimum = true;
+                                    let time_str =
+                                        &expr[crate::util::get_trigger_parameters_start(expr)..];
+                                    let parsed = crate::util::parse_deferred_time(time_str);
+                                    if parsed.is_none() {
+                                        self.report_error(
+                                            "Could not parse time value of parameter \"minimum\"",
+                                            param.span,
+                                        );
+                                    }
+                                    minimum_time = parsed;
+                                }
+                            } else {
+                                self.report_error(
+                                    &format!(
+                                        "Unrecognized parameter in @placeholder block: \"{}\"",
+                                        expr
+                                    ),
+                                    param.span,
+                                );
+                            }
+                        }
 
-                    // Create i18n placeholder if inside an i18n context
-                    let i18n = self.create_block_placeholder(
-                        "placeholder",
-                        &[],
-                        connected.span,
-                        connected.start_span,
-                        connected.end_span,
-                    );
+                        // Create i18n placeholder if inside an i18n context
+                        let i18n = self.create_block_placeholder(
+                            "placeholder",
+                            &[],
+                            connected.span,
+                            connected.start_span,
+                            connected.end_span,
+                        );
 
-                    placeholder = Some(R3DeferredBlockPlaceholder {
-                        children: connected_children,
-                        minimum_time,
-                        source_span: connected.span,
-                        name_span: connected.name_span,
-                        start_source_span: connected.start_span,
-                        end_source_span: connected.end_span,
-                        i18n,
-                    });
+                        placeholder = Some(R3DeferredBlockPlaceholder {
+                            children: connected_children,
+                            minimum_time,
+                            source_span: connected.span,
+                            name_span: connected.name_span,
+                            start_source_span: connected.start_span,
+                            end_source_span: connected.end_span,
+                            i18n,
+                        });
+                    }
                 }
                 BlockType::Loading => {
-                    // Parse after and minimum time from parameters like "after 100ms; minimum 1s"
-                    let params: std::vec::Vec<&str> =
-                        connected.parameters.iter().map(|p| p.expression.as_str()).collect();
-                    let (after_time, minimum_time) = parse_loading_parameters(&params);
+                    if loading.is_some() {
+                        // Reference: r3_deferred_blocks.ts:137-143
+                        self.report_error(
+                            "@defer block can only have one @loading block",
+                            connected.start_span,
+                        );
+                    } else {
+                        // Parse and validate loading parameters
+                        // Reference: r3_deferred_blocks.ts parseLoadingBlock (lines 201-248)
+                        let mut after_time = None;
+                        let mut has_after = false;
+                        let mut minimum_time = None;
+                        let mut has_minimum = false;
+                        for param in &connected.parameters {
+                            let expr = param.expression.as_str();
+                            let trimmed = expr.trim_start();
+                            if trimmed.starts_with("after")
+                                && trimmed.get(5..6).is_none_or(|c| {
+                                    c.chars().next().is_none_or(char::is_whitespace)
+                                })
+                            {
+                                if has_after {
+                                    self.report_error(
+                                        "@loading block can only have one \"after\" parameter",
+                                        connected.start_span,
+                                    );
+                                } else {
+                                    has_after = true;
+                                    let time_str =
+                                        &expr[crate::util::get_trigger_parameters_start(expr)..];
+                                    let parsed = crate::util::parse_deferred_time(time_str);
+                                    if parsed.is_none() {
+                                        self.report_error(
+                                            "Could not parse time value of parameter \"after\"",
+                                            param.span,
+                                        );
+                                    }
+                                    after_time = parsed;
+                                }
+                            } else if trimmed.starts_with("minimum")
+                                && trimmed.get(7..8).is_none_or(|c| {
+                                    c.chars().next().is_none_or(char::is_whitespace)
+                                })
+                            {
+                                if has_minimum {
+                                    self.report_error(
+                                        "@loading block can only have one \"minimum\" parameter",
+                                        connected.start_span,
+                                    );
+                                } else {
+                                    has_minimum = true;
+                                    let time_str =
+                                        &expr[crate::util::get_trigger_parameters_start(expr)..];
+                                    let parsed = crate::util::parse_deferred_time(time_str);
+                                    if parsed.is_none() {
+                                        self.report_error(
+                                            "Could not parse time value of parameter \"minimum\"",
+                                            param.span,
+                                        );
+                                    }
+                                    minimum_time = parsed;
+                                }
+                            } else {
+                                self.report_error(
+                                    &format!(
+                                        "Unrecognized parameter in @loading block: \"{}\"",
+                                        expr
+                                    ),
+                                    param.span,
+                                );
+                            }
+                        }
 
-                    // Create i18n placeholder if inside an i18n context
-                    let i18n = self.create_block_placeholder(
-                        "loading",
-                        &[],
-                        connected.span,
-                        connected.start_span,
-                        connected.end_span,
-                    );
+                        // Create i18n placeholder if inside an i18n context
+                        let i18n = self.create_block_placeholder(
+                            "loading",
+                            &[],
+                            connected.span,
+                            connected.start_span,
+                            connected.end_span,
+                        );
 
-                    loading = Some(R3DeferredBlockLoading {
-                        children: connected_children,
-                        after_time,
-                        minimum_time,
-                        source_span: connected.span,
-                        name_span: connected.name_span,
-                        start_source_span: connected.start_span,
-                        end_source_span: connected.end_span,
-                        i18n,
-                    });
+                        loading = Some(R3DeferredBlockLoading {
+                            children: connected_children,
+                            after_time,
+                            minimum_time,
+                            source_span: connected.span,
+                            name_span: connected.name_span,
+                            start_source_span: connected.start_span,
+                            end_source_span: connected.end_span,
+                            i18n,
+                        });
+                    }
                 }
                 BlockType::Error => {
-                    // Create i18n placeholder if inside an i18n context
-                    let i18n = self.create_block_placeholder(
-                        "error",
-                        &[],
-                        connected.span,
-                        connected.start_span,
-                        connected.end_span,
-                    );
+                    if error.is_some() {
+                        // Reference: r3_deferred_blocks.ts:149-152
+                        self.report_error(
+                            "@defer block can only have one @error block",
+                            connected.start_span,
+                        );
+                    } else {
+                        // Reference: r3_deferred_blocks.ts:252-253
+                        if !connected.parameters.is_empty() {
+                            self.report_error(
+                                "@error block cannot have parameters",
+                                connected.start_span,
+                            );
+                        }
 
-                    error = Some(R3DeferredBlockError {
-                        children: connected_children,
-                        source_span: connected.span,
-                        name_span: connected.name_span,
-                        start_source_span: connected.start_span,
-                        end_source_span: connected.end_span,
-                        i18n,
-                    });
+                        // Create i18n placeholder if inside an i18n context
+                        let i18n = self.create_block_placeholder(
+                            "error",
+                            &[],
+                            connected.span,
+                            connected.start_span,
+                            connected.end_span,
+                        );
+
+                        error = Some(R3DeferredBlockError {
+                            children: connected_children,
+                            source_span: connected.span,
+                            name_span: connected.name_span,
+                            start_source_span: connected.start_span,
+                            end_source_span: connected.end_span,
+                            i18n,
+                        });
+                    }
                 }
                 _ => {}
             }
