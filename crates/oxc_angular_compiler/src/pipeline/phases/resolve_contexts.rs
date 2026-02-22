@@ -42,6 +42,15 @@ pub fn resolve_contexts(job: &mut ComponentCompilationJob<'_>) {
     for view_xref in view_xrefs {
         let is_root = view_xref == root_xref;
         if let Some(view) = job.view_mut(view_xref) {
+            // Process arrow functions' ops first, matching Angular's resolve_contexts.ts:
+            //   for (const expr of unit.functions) { processLexicalScope(unit, expr.ops); }
+            for fn_ptr in view.functions.iter() {
+                // SAFETY: The pointer is valid because it was populated by generate_arrow_functions
+                // and the allocator keeps the data alive.
+                let arrow_fn = unsafe { &mut **fn_ptr };
+                process_lexical_scope_update_vec(allocator, view_xref, is_root, &mut arrow_fn.ops);
+            }
+
             process_lexical_scope_create(allocator, view_xref, is_root, &mut view.create);
             process_lexical_scope_update(allocator, view_xref, is_root, &mut view.update);
         }
@@ -79,7 +88,8 @@ fn process_lexical_scope_create<'a>(
     }
 
     // Second pass: Transform ContextExpr to the appropriate expression
-    // Also recursively process listener handler_ops (per resolve_contexts.ts lines 45-49)
+    // Also recursively process listener handler_ops and RepeaterCreate track_by_ops
+    // (per resolve_contexts.ts lines 40-61)
     for op in ops.iter_mut() {
         match op {
             CreateOp::Listener(listener) => {
@@ -120,6 +130,26 @@ fn process_lexical_scope_create<'a>(
                     is_root,
                     &mut animation.handler_ops,
                     &mut None,
+                );
+            }
+            CreateOp::RepeaterCreate(repeater) => {
+                // Process track_by_ops with their own scope first, matching Angular's
+                // resolve_contexts.ts lines 55-58:
+                //   case ir.OpKind.RepeaterCreate:
+                //     if (op.trackByOps !== null) { processLexicalScope(view, op.trackByOps); }
+                if let Some(ref mut track_by_ops) = repeater.track_by_ops {
+                    process_lexical_scope_update_vec(allocator, view_xref, is_root, track_by_ops);
+                }
+                // Also transform expressions in the RepeaterCreate op itself (e.g., rep.track)
+                // using the parent scope. Note: track_by_ops have already been processed above
+                // so re-visiting them via transform_expressions_in_create_op is a no-op
+                // (ContextExpr nodes in track_by_ops are already resolved).
+                transform_expressions_in_create_op(
+                    op,
+                    &|expr, _flags| {
+                        transform_context_expr(allocator, expr, &scope);
+                    },
+                    VisitorContextFlag::NONE,
                 );
             }
             _ => {
@@ -216,6 +246,50 @@ fn process_lexical_scope_update<'a>(
     view_xref: XrefId,
     is_root: bool,
     ops: &mut UpdateOpList<'a>,
+) {
+    // Track how to access each view's context by its XrefId.
+    let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();
+
+    // The current view's context is accessible via the `ctx` parameter.
+    scope.insert(view_xref, ContextAccess::CtxParameter);
+
+    // First pass: Build scope from Variable operations
+    for op in ops.iter() {
+        if let UpdateOp::Variable(var_op) = op {
+            if var_op.kind == SemanticVariableKind::Context {
+                if let Some(target_view) = var_op.view {
+                    scope.insert(target_view, ContextAccess::ReadVariable(var_op.xref));
+                }
+            }
+        }
+    }
+
+    // If this is the root view, prefer `ctx` over any variables
+    if is_root {
+        scope.insert(view_xref, ContextAccess::CtxParameter);
+    }
+
+    // Second pass: Transform ContextExpr to the appropriate expression
+    for op in ops.iter_mut() {
+        transform_expressions_in_update_op(
+            op,
+            &|expr, _flags| {
+                transform_context_expr(allocator, expr, &scope);
+            },
+            VisitorContextFlag::NONE,
+        );
+    }
+}
+
+/// Process update operations in a Vec (used for arrow function ops and track_by_ops).
+///
+/// This is the same logic as `process_lexical_scope_update` but works with `Vec<UpdateOp>`
+/// instead of `UpdateOpList`. Needed for `ArrowFunctionExpr.ops` and `RepeaterCreate.track_by_ops`.
+fn process_lexical_scope_update_vec<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    view_xref: XrefId,
+    is_root: bool,
+    ops: &mut oxc_allocator::Vec<'a, UpdateOp<'a>>,
 ) {
     // Track how to access each view's context by its XrefId.
     let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();

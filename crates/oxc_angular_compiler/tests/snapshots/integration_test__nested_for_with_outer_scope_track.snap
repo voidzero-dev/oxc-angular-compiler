@@ -1,0 +1,38 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+const _forTrack0 = ($index,$item) =>$item.id;
+function _forTrack1($index,$item) {
+  return this.group.id;
+}
+function TestComponent_For_1_For_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵelementStart(1,"span");
+    i0.ɵɵtext(2);
+    i0.ɵɵelementEnd();
+    i0.ɵɵtext(3," ");
+  }
+  if ((rf & 2)) {
+    const item_r1 = ctx.$implicit;
+    i0.ɵɵadvance(2);
+    i0.ɵɵtextInterpolate(item_r1.name);
+  }
+}
+function TestComponent_For_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵrepeaterCreate(1,TestComponent_For_1_For_2_Template,4,1,null,null,_forTrack1,
+        true);
+  }
+  if ((rf & 2)) {
+    const group_r2 = ctx.$implicit;
+    i0.ɵɵadvance();
+    i0.ɵɵrepeater(group_r2.items);
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵrepeaterCreate(0,TestComponent_For_1_Template,3,0,null,null,_forTrack0); }
+  if ((rf & 2)) { i0.ɵɵrepeater(ctx.groups); }
+}

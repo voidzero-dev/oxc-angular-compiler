@@ -1043,6 +1043,19 @@ fn test_nested_for_loops() {
 }
 
 #[test]
+fn test_nested_for_with_outer_scope_track() {
+    // Reproduces the bug where inner @for track expression captures outer-scope variable.
+    // The inner @for's `track group.id` references `group` from the outer @for.
+    // Angular generates `function _forTrack1($index,$item) { return this.group.id; }` with
+    // usesComponentInstance=true, NOT an arrow function with an out-of-scope identifier.
+    let js = compile_template_to_js(
+        r"@for (group of groups; track group.id) { @for (item of group.items; track group.id) { <span>{{item.name}}</span> } }",
+        "TestComponent",
+    );
+    insta::assert_snapshot!("nested_for_with_outer_scope_track", js);
+}
+
+#[test]
 fn test_if_inside_for() {
     let js = compile_template_to_js(
         r"@for (item of items; track item.id) { @if (item.visible) { <div>{{item.name}}</div> } }",

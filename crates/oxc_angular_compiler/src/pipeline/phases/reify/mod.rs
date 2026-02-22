@@ -480,6 +480,8 @@ fn reify_create_op<'a>(
                 &repeater.track,
                 repeater.track_fn_name.as_ref(),
                 repeater.uses_component_instance,
+                &mut repeater.track_by_ops,
+                diagnostics,
             );
 
             Some(create_repeater_create_stmt_with_track_expr(
@@ -1171,7 +1173,12 @@ fn reify_host_create_op<'a>(
 /// the track expression as the body, registers it with the constant pool,
 /// and returns the function reference.
 ///
+/// When `track_by_ops` is `Some`, the ops are reified into statements and assembled
+/// into a function body. This handles cases where the track expression needs additional
+/// context variable declarations (e.g., `nextContext()` calls for outer-scope access).
+///
 /// Ported from Angular's `reifyTrackBy()` in `reify.ts`.
+#[allow(clippy::too_many_arguments)]
 fn reify_track_by<'a>(
     allocator: &'a oxc_allocator::Allocator,
     pool: &mut ConstantPool<'a>,
@@ -1180,6 +1187,8 @@ fn reify_track_by<'a>(
     track: &IrExpression<'a>,
     track_fn_name: Option<&Atom<'a>>,
     uses_component_instance: bool,
+    track_by_ops: &mut Option<oxc_allocator::Vec<'a, UpdateOp<'a>>>,
+    diagnostics: &mut Vec<OxcDiagnostic>,
 ) -> OutputExpression<'a> {
     // If the tracking function was already set by optimization phase, return a reference to it
     if let Some(fn_name) = track_fn_name {
@@ -1279,42 +1288,99 @@ fn reify_track_by<'a>(
         ));
     }
 
-    // Convert the track expression to output expression
-    let track_body = convert_ir_expression(allocator, track, expressions, root_xref);
-
     // Create the track function with params ($index, $item)
-    // If uses_component_instance is true, use a regular function expression so `this` is bound correctly.
-    // Otherwise, use an arrow function.
-    // Both are registered with the constant pool via getSharedFunctionReference,
-    // which maintains insertion order in pool.statements.
     let mut params = OxcVec::with_capacity_in(2, allocator);
     params.push(FnParam { name: Atom::from("$index") });
     params.push(FnParam { name: Atom::from("$item") });
 
-    let fn_expr = if uses_component_instance {
-        // Regular function expression: function($index, $item) { return track_body; }
-        // Angular uses o.fn(params, [new o.ReturnStatement(op.track)])
-        let mut stmts = OxcVec::with_capacity_in(1, allocator);
-        stmts.push(OutputStatement::Return(Box::new_in(
-            ReturnStatement { value: track_body, source_span: None },
-            allocator,
-        )));
+    let fn_expr = if let Some(track_ops) = track_by_ops {
+        // Complex case: track_by_ops is present (set by track_fn_optimization phase).
+        // This happens when the track expression needs additional ops like context
+        // variable declarations (e.g., `const group_r2 = nextContext().$implicit`).
+        //
+        // Ported from Angular's reify.ts lines 884-904:
+        //   reifyUpdateOperations(unit, op.trackByOps);
+        //   const statements = [...]; // from trackByOps
+        //   fn = op.usesComponentInstance || statements.length !== 1 || !(statements[0] instanceof ReturnStatement)
+        //     ? o.fn(params, statements)
+        //     : o.arrowFn(params, statements[0].value);
 
-        OutputExpression::Function(Box::new_in(
-            FunctionExpr { name: None, params, statements: stmts, source_span: None },
-            allocator,
-        ))
+        // Reify each op in track_by_ops into output statements
+        let mut statements = OxcVec::new_in(allocator);
+        for track_op in track_ops.iter() {
+            if let Some(stmt) = reify_update_op(
+                allocator,
+                track_op,
+                expressions,
+                root_xref,
+                TemplateCompilationMode::Full,
+                diagnostics,
+            ) {
+                statements.push(stmt);
+            }
+        }
+
+        // Determine whether to use function or arrow:
+        // Angular uses function when:
+        //   - usesComponentInstance is true, OR
+        //   - there are multiple statements, OR
+        //   - the single statement is not a ReturnStatement
+        let use_function = uses_component_instance
+            || statements.len() != 1
+            || !matches!(statements.first(), Some(OutputStatement::Return(_)));
+
+        if use_function {
+            OutputExpression::Function(Box::new_in(
+                FunctionExpr { name: None, params, statements, source_span: None },
+                allocator,
+            ))
+        } else {
+            // Single return statement → extract value for arrow function body
+            // Clone the return value since we can't move out of the Box
+            let return_value = if let Some(OutputStatement::Return(ret)) = statements.first() {
+                ret.value.clone_in(allocator)
+            } else {
+                unreachable!("checked above that there's exactly one Return statement");
+            };
+
+            OutputExpression::ArrowFunction(Box::new_in(
+                ArrowFunctionExpr {
+                    params,
+                    body: ArrowFunctionBody::Expression(Box::new_in(return_value, allocator)),
+                    source_span: None,
+                },
+                allocator,
+            ))
+        }
     } else {
-        // Arrow function: ($index, $item) => track_body
-        // Angular uses o.arrowFn(params, op.track)
-        OutputExpression::ArrowFunction(Box::new_in(
-            ArrowFunctionExpr {
-                params,
-                body: ArrowFunctionBody::Expression(Box::new_in(track_body, allocator)),
-                source_span: None,
-            },
-            allocator,
-        ))
+        // Simple case: no track_by_ops. Wrap the raw track expression.
+        // Ported from Angular's reify.ts lines 878-883:
+        //   fn = op.usesComponentInstance
+        //     ? o.fn(params, [new o.ReturnStatement(op.track)])
+        //     : o.arrowFn(params, op.track);
+        let track_body = convert_ir_expression(allocator, track, expressions, root_xref);
+
+        if uses_component_instance {
+            let mut stmts = OxcVec::with_capacity_in(1, allocator);
+            stmts.push(OutputStatement::Return(Box::new_in(
+                ReturnStatement { value: track_body, source_span: None },
+                allocator,
+            )));
+
+            OutputExpression::Function(Box::new_in(
+                FunctionExpr { name: None, params, statements: stmts, source_span: None },
+                allocator,
+            ))
+        } else {
+            OutputExpression::ArrowFunction(Box::new_in(
+                ArrowFunctionExpr {
+                    params,
+                    body: ArrowFunctionBody::Expression(Box::new_in(track_body, allocator)),
+                    source_span: None,
+                },
+                allocator,
+            ))
+        }
     };
 
     // Register with constant pool as a shared function

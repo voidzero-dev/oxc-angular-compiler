@@ -50,25 +50,19 @@ pub fn resolve_names(job: &mut ComponentCompilationJob<'_>) {
     // Collect expression store data we need first
     let expression_store_ptr = &job.expressions as *const ExpressionStore<'_>;
 
-    // Process each view's create and update operation lists
-    // IMPORTANT: We need to build scope from BOTH create and update ops before processing listeners,
-    // because listener handler expressions need access to variables from both phases.
+    // Process each view's create and update operation lists.
+    // Per Angular's TypeScript (resolve_names.ts lines 25-26), create and update ops are
+    // processed as SEPARATE lexical scopes — each builds its own scope/localDefinitions
+    // from its own Variable ops. This is important because variables from update ops
+    // (like @for loop items: $implicit, $index) should NOT be visible when resolving
+    // expressions in create ops (like RepeaterCreate.track). The generateVariables phase
+    // already prepends all necessary variables to each op list.
     for view in job.all_views_mut() {
         // SAFETY: We're only reading from expression_store, not modifying it
         let expressions = unsafe { &*expression_store_ptr };
 
-        // Build scope from update ops first (contains context variables like $implicit, $index, etc.)
-        let update_scope = build_scope_from_update_ops(&view.update);
-
-        // Process create ops with the update scope available for listener handler expressions
-        process_lexical_scope_create(
-            root_xref,
-            &mut view.create,
-            None,
-            &update_scope,
-            allocator,
-            expressions,
-        );
+        // Process create ops with their own scope (no update scope merged in)
+        process_lexical_scope_create(root_xref, &mut view.create, None, allocator, expressions);
         process_lexical_scope_update(root_xref, &mut view.update, None, allocator, expressions);
     }
 
@@ -139,50 +133,17 @@ where
     maps
 }
 
-/// Build scope maps from update operations (for variables like context reads).
-fn build_scope_from_update_ops<'a>(ops: &crate::ir::list::UpdateOpList<'a>) -> ScopeMaps<'a> {
-    let mut maps = ScopeMaps::default();
-    for op in ops.iter() {
-        if let UpdateOp::Variable(var_op) = op {
-            match var_op.kind {
-                SemanticVariableKind::Identifier => {
-                    // Check if this is a local variable (@let declaration)
-                    if var_op.local {
-                        if !maps.local_definitions.contains_key(&var_op.name) {
-                            maps.local_definitions.insert(var_op.name.clone(), var_op.xref);
-                        }
-                    } else if !maps.scope.contains_key(&var_op.name) {
-                        maps.scope.insert(var_op.name.clone(), var_op.xref);
-                    }
-                    // Also add to scope for non-local (always)
-                    if !maps.scope.contains_key(&var_op.name) {
-                        maps.scope.insert(var_op.name.clone(), var_op.xref);
-                    }
-                }
-                SemanticVariableKind::Alias => {
-                    if !maps.scope.contains_key(&var_op.name) {
-                        maps.scope.insert(var_op.name.clone(), var_op.xref);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-    maps
-}
-
 /// Process create operations to build scope and resolve names.
 fn process_lexical_scope_create<'a>(
     root_xref: XrefId,
     ops: &mut crate::ir::list::CreateOpList<'a>,
     saved_view: Option<SavedView>,
-    update_scope: &ScopeMaps<'a>,
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) {
     // Maps variable names to their XrefIds
-    // Start with update_scope to include context variables (like @for loop items)
-    let mut scope: ScopeMaps<'a> = update_scope.clone();
+    // Per Angular's TypeScript, each processLexicalScope call starts with a fresh scope.
+    let mut scope: ScopeMaps<'a> = ScopeMaps::default();
 
     // Track saved view for RestoreView expressions
     let mut current_saved_view = saved_view;
@@ -335,6 +296,12 @@ fn process_lexical_scope_create<'a>(
                 }
             }
             _ => {
+                // Note: RepeaterCreate falls through here. Angular's resolve_names.ts first
+                // pass (lines 88-92) processes trackByOps with its own scope, but trackByOps
+                // is always None at this phase (phase 31) — it's created later by
+                // track_fn_optimization (phase 34). The second pass processes all ops
+                // (including RepeaterCreate) via transformExpressionsInOp with the parent
+                // scope, which is what transform_expressions_in_create_op does here.
                 transform_expressions_in_create_op(
                     op,
                     &|expr, _flags| {
@@ -1521,18 +1488,8 @@ pub fn resolve_names_for_host(job: &mut HostBindingCompilationJob<'_>) {
     // SAFETY: We're only reading from expression_store, not modifying it
     let expressions = unsafe { &*expression_store_ptr };
 
-    // Build scope from update ops
-    let update_scope = build_scope_from_update_ops(&job.root.update);
-
-    // Process create ops with the update scope available
-    process_lexical_scope_create(
-        root_xref,
-        &mut job.root.create,
-        None,
-        &update_scope,
-        allocator,
-        expressions,
-    );
+    // Process create ops with their own scope (no update scope merged in)
+    process_lexical_scope_create(root_xref, &mut job.root.create, None, allocator, expressions);
     process_lexical_scope_update(root_xref, &mut job.root.update, None, allocator, expressions);
 
     // Verify no LexicalRead expressions remain after resolution.
