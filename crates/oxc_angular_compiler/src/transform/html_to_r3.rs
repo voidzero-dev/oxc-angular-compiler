@@ -224,21 +224,21 @@ impl<'a> HtmlToR3Transform<'a> {
 
         for (index, node) in siblings.iter().enumerate() {
             // Skip nodes that were already processed as connected blocks
-            let node_id = node as *const _ as usize;
+            let node_id = std::ptr::from_ref(node) as usize;
             if self.processed_nodes.contains(&node_id) {
                 continue;
             }
 
             // In ngNonBindable context, blocks should be flattened into text nodes + children
             // (not wrapped in a Template). TypeScript returns [startText, ...children, endText].flat()
-            if self.non_bindable_depth > 0 {
-                if let HtmlNode::Block(block) = node {
-                    let block_nodes = self.visit_block_as_text_flat(block);
-                    for child in block_nodes {
-                        result.push(child);
-                    }
-                    continue;
+            if self.non_bindable_depth > 0
+                && let HtmlNode::Block(block) = node
+            {
+                let block_nodes = self.visit_block_as_text_flat(block);
+                for child in block_nodes {
+                    result.push(child);
                 }
+                continue;
             }
 
             if let Some(r3_node) = self.visit_node_with_siblings(node, index, siblings) {
@@ -364,7 +364,9 @@ impl<'a> HtmlToR3Transform<'a> {
         // This is needed because the message text comes from the original HTML content.
         // Ported from Angular's I18nMetaVisitor._generateI18nMessage in i18n/meta.ts.
         let i18n_message_string = if let Some(attr) = i18n_attr {
-            if !element.children.is_empty() {
+            if element.children.is_empty() {
+                String::new()
+            } else {
                 // Use I18nMessageFactory to convert children to i18n AST and serialize
                 let factory = I18nMessageFactory::new(false, true);
                 let source_file = std::sync::Arc::new(crate::util::ParseSourceFile::new(
@@ -398,8 +400,6 @@ impl<'a> HtmlToR3Transform<'a> {
                     source_file,
                 );
                 message.serialize()
-            } else {
-                String::new()
             }
         } else {
             String::new()
@@ -466,7 +466,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Children are passed directly without extra whitespace filtering
         if raw_name == "ng-content" {
             let selector = self.get_ng_content_selector(element);
-            self.ng_content_selectors.push(selector.clone());
+            self.ng_content_selectors.push(selector);
 
             // For ng-content, Angular converts ALL raw HTML attributes to TextAttributes.
             // Reference: r3_template_transform.ts line 193:
@@ -484,8 +484,8 @@ impl<'a> HtmlToR3Transform<'a> {
                     continue;
                 }
                 content_attributes.push(R3TextAttribute {
-                    name: attr.name.clone(),
-                    value: attr.value.clone(),
+                    name: attr.name,
+                    value: attr.value,
                     source_span: attr.span,
                     key_span: Some(attr.name_span),
                     value_span: attr.value_span,
@@ -516,7 +516,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // Check for ng-template
         if raw_name == "ng-template" {
-            let name = self.qualify_element_name(element.name.clone(), element_namespace);
+            let name = self.qualify_element_name(element.name, element_namespace);
             let template = R3Template {
                 tag_name: Some(name),
                 attributes,
@@ -547,7 +547,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Reference: r3_template_transform.ts lines 238-247
         if raw_name == "ng-container" {
             use crate::ast::expression::BindingType;
-            for input in inputs.iter() {
+            for input in &inputs {
                 if input.binding_type == BindingType::Attribute {
                     self.report_error(
                         "Attribute bindings are not supported on ng-container. Use property bindings instead.",
@@ -557,7 +557,7 @@ impl<'a> HtmlToR3Transform<'a> {
             }
         }
 
-        let name = self.qualify_element_name(element.name.clone(), element_namespace);
+        let name = self.qualify_element_name(element.name, element_namespace);
 
         // Check if this is a component (uppercase first letter or underscore)
         let first_char = raw_name.chars().next().unwrap_or('a');
@@ -568,7 +568,7 @@ impl<'a> HtmlToR3Transform<'a> {
             let tag_name_lower = raw_name.to_ascii_lowercase();
             if UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag_name_lower.as_str()) {
                 self.report_error(
-                    &format!("Tag name \"{}\" cannot be used as a component tag", raw_name),
+                    &format!("Tag name \"{raw_name}\" cannot be used as a component tag"),
                     element.start_span,
                 );
                 return None;
@@ -581,14 +581,14 @@ impl<'a> HtmlToR3Transform<'a> {
             // Format: ":prefix:tag_name" (e.g., ":svg:rect") or just "tag_name"
             let tag_name = match (&element.component_prefix, &element.component_tag_name) {
                 (None, None) => None,
-                (None, Some(tag)) => Some(tag.clone()),
+                (None, Some(tag)) => Some(*tag),
                 (Some(prefix), None) => {
                     // Has prefix but no tag name - use "ng-component" as default
-                    Some(Atom::from_in(&format!(":{}:ng-component", prefix), self.allocator))
+                    Some(Atom::from_in(&format!(":{prefix}:ng-component"), self.allocator))
                 }
                 (Some(prefix), Some(tag)) => {
                     // Both prefix and tag name: ":prefix:tag_name"
-                    Some(Atom::from_in(&format!(":{}:{}", prefix, tag), self.allocator))
+                    Some(Atom::from_in(&format!(":{prefix}:{tag}"), self.allocator))
                 }
             };
 
@@ -602,12 +602,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     // Simple format: "MyComp:div"
                     Atom::from_in(&format!("{}:{}", element.name, tag), self.allocator)
                 }
-                None => element.name.clone(),
+                None => element.name,
             };
 
             // Create R3Component for uppercase element names
             let r3_component = R3Component {
-                component_name: element.name.clone(),
+                component_name: element.name,
                 tag_name,
                 full_name,
                 attributes,
@@ -703,7 +703,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Transform selectorless directives from HTML AST
         // For components, tag_name may be None (e.g., `<MyComp>`), in which case we use empty string
         // which matches TypeScript's behavior where elementName can be null.
-        let element_name = component.tag_name.as_ref().map(|a| a.as_str()).unwrap_or("");
+        let element_name = component.tag_name.as_ref().map_or("", oxc_span::Atom::as_str);
         let directives = self.transform_directives(&component.directives, element_name);
 
         // Validate selectorless references
@@ -711,9 +711,9 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // Create R3Component
         let r3_component = R3Component {
-            component_name: component.component_name.clone(),
-            tag_name: component.tag_name.clone(),
-            full_name: component.full_name.clone(),
+            component_name: component.component_name,
+            tag_name: component.tag_name,
+            full_name: component.full_name,
             attributes,
             inputs,
             outputs,
@@ -766,10 +766,10 @@ impl<'a> HtmlToR3Transform<'a> {
     }
 
     fn namespace_from_prefixed_name(raw_name: &str) -> Option<ElementNamespace> {
-        if raw_name.starts_with(':') {
-            if let Some((prefix, _)) = raw_name[1..].split_once(':') {
-                return Self::namespace_from_prefix(prefix);
-            }
+        if raw_name.starts_with(':')
+            && let Some((prefix, _)) = raw_name[1..].split_once(':')
+        {
+            return Self::namespace_from_prefix(prefix);
         }
 
         if let Some((prefix, _)) = raw_name.split_once(':') {
@@ -799,11 +799,11 @@ impl<'a> HtmlToR3Transform<'a> {
             return name;
         }
 
-        if let Some((prefix, local)) = name_str.split_once(':') {
-            if Self::namespace_from_prefix(prefix).is_some() {
-                let qualified = format!(":{}:{}", prefix, local);
-                return Atom::from_in(&qualified, self.allocator);
-            }
+        if let Some((prefix, local)) = name_str.split_once(':')
+            && Self::namespace_from_prefix(prefix).is_some()
+        {
+            let qualified = format!(":{prefix}:{local}");
+            return Atom::from_in(&qualified, self.allocator);
         }
 
         let ns = match namespace {
@@ -811,7 +811,7 @@ impl<'a> HtmlToR3Transform<'a> {
             ElementNamespace::Math => "math",
             ElementNamespace::Html => return name,
         };
-        let qualified = format!(":{}:{}", ns, name_str);
+        let qualified = format!(":{ns}:{name_str}");
         Atom::from_in(&qualified, self.allocator)
     }
 
@@ -833,8 +833,7 @@ impl<'a> HtmlToR3Transform<'a> {
             if seen_directives.contains(directive_name) {
                 self.report_error(
                     &format!(
-                        "Cannot apply directive \"{}\" multiple times on the same element",
-                        directive_name
+                        "Cannot apply directive \"{directive_name}\" multiple times on the same element"
                     ),
                     html_dir.span,
                 );
@@ -850,7 +849,7 @@ impl<'a> HtmlToR3Transform<'a> {
             let mut seen_reference_names: FxHashSet<&str> = FxHashSet::default();
             let mut invalid = false;
 
-            for attr in html_dir.attrs.iter() {
+            for attr in &html_dir.attrs {
                 let attr_name = attr.name.as_str();
                 let attr_value = attr.value.as_str();
 
@@ -859,8 +858,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 if attr_name.starts_with(TEMPLATE_ATTR_PREFIX) {
                     self.report_error(
                         &format!(
-                            "Shorthand template syntax \"{}\" is not supported inside a directive context",
-                            attr_name
+                            "Shorthand template syntax \"{attr_name}\" is not supported inside a directive context"
                         ),
                         attr.span,
                     );
@@ -871,8 +869,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 if attr_name == "ngProjectAs" || attr_name == "ngNonBindable" {
                     self.report_error(
                         &format!(
-                            "Attribute \"{}\" is not supported in a directive context",
-                            attr_name
+                            "Attribute \"{attr_name}\" is not supported in a directive context"
                         ),
                         attr.span,
                     );
@@ -993,7 +990,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
                             // Two-way binding also creates an output event
                             let event_name =
-                                Atom::from_in(&format!("{}Change", rest), self.allocator);
+                                Atom::from_in(&format!("{rest}Change"), self.allocator);
                             let event_parse_result =
                                 self.binding_parser.parse_event(attr_value, value_span);
 
@@ -1058,7 +1055,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     });
 
                     // Two-way binding also creates an output event
-                    let event_name = Atom::from_in(&format!("{}Change", prop_name), self.allocator);
+                    let event_name = Atom::from_in(&format!("{prop_name}Change"), self.allocator);
                     let event_value_str = self.allocator.alloc_str(attr_value);
                     let event_parse_result =
                         self.binding_parser.parse_event(event_value_str, value_span);
@@ -1155,8 +1152,8 @@ impl<'a> HtmlToR3Transform<'a> {
                 } else {
                     // Plain text attribute
                     attributes.push(R3TextAttribute {
-                        name: attr.name.clone(),
-                        value: attr.value.clone(),
+                        name: attr.name,
+                        value: attr.value,
                         source_span: attr.span,
                         key_span: Some(attr.name_span),
                         value_span: attr.value_span,
@@ -1182,7 +1179,7 @@ impl<'a> HtmlToR3Transform<'a> {
             let end_source_span = html_dir.end_paren_span;
 
             directives.push(R3Directive {
-                name: html_dir.name.clone(),
+                name: html_dir.name,
                 attributes,
                 inputs,
                 outputs,
@@ -1208,7 +1205,7 @@ impl<'a> HtmlToR3Transform<'a> {
     fn generate_unique_icu_placeholder(&mut self, base_name: &str) -> String {
         let count = self.icu_placeholder_counts.entry(base_name.to_string()).or_insert(0);
         let result =
-            if *count == 0 { base_name.to_string() } else { format!("{}_{}", base_name, count) };
+            if *count == 0 { base_name.to_string() } else { format!("{base_name}_{count}") };
         *count += 1;
         result
     }
@@ -1245,7 +1242,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // This matches Angular's behavior where expansion.i18n is a Message
         // containing a single IcuPlaceholder node
         let icu_type_upper = expansion.expansion_type.as_str().to_uppercase();
-        let base_name = format!("VAR_{}", icu_type_upper);
+        let base_name = format!("VAR_{icu_type_upper}");
         let expression_placeholder =
             Atom::from_in(&self.generate_unique_icu_placeholder(&base_name), self.allocator);
         let icu_placeholder_name = Atom::from_in("ICU", self.allocator);
@@ -1253,11 +1250,11 @@ impl<'a> HtmlToR3Transform<'a> {
         // Create the I18nIcu for the i18n metadata
         // The cases are empty here since they're parsed separately into R3Icu.placeholders
         let i18n_icu = I18nIcu {
-            expression: expansion.switch_value.clone(),
-            icu_type: expansion.expansion_type.clone(),
+            expression: expansion.switch_value,
+            icu_type: expansion.expansion_type,
             cases: HashMap::new_in(self.allocator),
             source_span: expansion.span,
-            expression_placeholder: Some(expression_placeholder.clone()),
+            expression_placeholder: Some(expression_placeholder),
         };
 
         // Create the IcuPlaceholder wrapping the ICU
@@ -1300,7 +1297,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // and their VAR_* placeholders are added before the outer ICU's VAR_*.
         // Ported from Angular's i18n_parser.ts:137-159
         let mut placeholders = Vec::new_in(self.allocator);
-        for case in expansion.cases.iter() {
+        for case in &expansion.cases {
             self.extract_placeholders_from_nodes(&case.expansion, &mut placeholders, &mut vars);
         }
 
@@ -1310,7 +1307,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // The expression_placeholder was already generated above with getUniquePlaceholder.
         ordered_insert_var(
             &mut vars,
-            expression_placeholder.clone(),
+            expression_placeholder,
             R3BoundText { value: parse_result.ast, source_span: switch_value_span, i18n: None },
         );
 
@@ -1358,14 +1355,14 @@ impl<'a> HtmlToR3Transform<'a> {
                     // The counter is incremented immediately, so nested ICUs get sequential names.
                     // This matches Angular's getUniquePlaceholder in i18n_parser.ts:153
                     let icu_type_upper = nested_expansion.expansion_type.as_str().to_uppercase();
-                    let base_name = format!("VAR_{}", icu_type_upper);
+                    let base_name = format!("VAR_{icu_type_upper}");
                     let unique_name = self.generate_unique_icu_placeholder(&base_name);
                     let var_placeholder_name = Atom::from_in(&unique_name, self.allocator);
 
                     // Recursively extract from nested expansion cases FIRST.
                     // This ensures placeholders and further nested ICU vars are processed
                     // before adding this ICU's VAR_*.
-                    for case in nested_expansion.cases.iter() {
+                    for case in &nested_expansion.cases {
                         self.extract_placeholders_from_nodes(&case.expansion, placeholders, vars);
                     }
 
@@ -1521,7 +1518,7 @@ impl<'a> HtmlToR3Transform<'a> {
             let value_no_ngsp = value_str.replace(NGSP_UNICODE, " ");
             Atom::from_in(&value_no_ngsp, self.allocator)
         } else {
-            text.value.clone()
+            text.value
         };
         let r3_text = R3Text { value: value_atom, source_span: text.span };
         Some(R3Node::Text(Box::new_in(r3_text, self.allocator)))
@@ -1534,7 +1531,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Angular's visitComment (r3_template_transform.ts:344-349) always returns null
         // Comments are NOT included in the AST output - they're collected separately
         if let Some(ref mut comments) = self.comment_nodes {
-            let r3_comment = R3Comment { value: comment.value.clone(), source_span: comment.span };
+            let r3_comment = R3Comment { value: comment.value, source_span: comment.span };
             comments.push(r3_comment);
         }
 
@@ -1699,12 +1696,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     });
                 // Mark connected blocks as processed
                 for &idx in &connected_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Mark whitespace between blocks as processed
                 for &idx in &whitespace_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Collect references to the blocks
@@ -1732,7 +1729,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 );
                 Some(R3Node::UnknownBlock(Box::new_in(
                     crate::ast::r3::R3UnknownBlock {
-                        name: block.name.clone(),
+                        name: block.name,
                         source_span: block.span,
                         name_span: block.name_span,
                     },
@@ -1747,12 +1744,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     });
                 // Mark connected blocks as processed
                 for &idx in &connected_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Mark whitespace between blocks as processed
                 for &idx in &whitespace_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Collect references to the blocks
@@ -1774,7 +1771,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 self.report_error("@empty block can only be used after an @for block.", block.span);
                 Some(R3Node::UnknownBlock(Box::new_in(
                     crate::ast::r3::R3UnknownBlock {
-                        name: block.name.clone(),
+                        name: block.name,
                         source_span: block.span,
                         name_span: block.name_span,
                     },
@@ -1783,8 +1780,17 @@ impl<'a> HtmlToR3Transform<'a> {
             }
             BlockType::Switch => self.visit_switch_block(block),
             BlockType::Case | BlockType::Default => {
-                // Handled as part of @switch
-                None
+                // Standalone @case/@default outside @switch - emit error and create UnknownBlock
+                // Reference: r3_template_transform.ts:518 - falls through to "Unrecognized block"
+                self.report_error(&format!("Unrecognized block @{}.", block.name), block.span);
+                Some(R3Node::UnknownBlock(Box::new_in(
+                    crate::ast::r3::R3UnknownBlock {
+                        name: block.name,
+                        source_span: block.span,
+                        name_span: block.name_span,
+                    },
+                    self.allocator,
+                )))
             }
             BlockType::Defer => {
                 // First, find and collect connected block indices and whitespace
@@ -1794,12 +1800,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     });
                 // Mark connected blocks as processed
                 for &idx in &connected_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Mark whitespace between blocks as processed
                 for &idx in &whitespace_indices {
-                    let node_id = &siblings[idx] as *const _ as usize;
+                    let node_id = &raw const siblings[idx] as usize;
                     self.processed_nodes.insert(node_id);
                 }
                 // Collect references to the blocks
@@ -1824,7 +1830,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 );
                 Some(R3Node::UnknownBlock(Box::new_in(
                     crate::ast::r3::R3UnknownBlock {
-                        name: block.name.clone(),
+                        name: block.name,
                         source_span: block.span,
                         name_span: block.name_span,
                     },
@@ -1858,19 +1864,19 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Skip empty text nodes between blocks and mark them as consumed
-            if let HtmlNode::Text(text) = node {
-                if text.value.trim().is_empty() {
-                    whitespace_indices.push(i);
-                    continue;
-                }
+            if let HtmlNode::Text(text) = node
+                && text.value.trim().is_empty()
+            {
+                whitespace_indices.push(i);
+                continue;
             }
 
             // Check if this is a connected block
-            if let HtmlNode::Block(block) = node {
-                if is_connected(block.block_type) {
-                    connected_indices.push(i);
-                    continue;
-                }
+            if let HtmlNode::Block(block) = node
+                && is_connected(block.block_type)
+            {
+                connected_indices.push(i);
+                continue;
             }
 
             // Stop at any non-connected node
@@ -1911,7 +1917,7 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         let r3_decl = R3LetDeclaration {
-            name: decl.name.clone(),
+            name: decl.name,
             value,
             source_span: decl.span,
             name_span: decl.name_span,
@@ -1943,21 +1949,21 @@ impl<'a> HtmlToR3Transform<'a> {
         self.block_placeholder_counter += 1;
 
         let start_name = if count == 0 {
-            Atom::from_in(format!("START_BLOCK_{}", block_upper).as_str(), self.allocator)
+            Atom::from_in(format!("START_BLOCK_{block_upper}").as_str(), self.allocator)
         } else {
-            Atom::from_in(format!("START_BLOCK_{}_{}", block_upper, count).as_str(), self.allocator)
+            Atom::from_in(format!("START_BLOCK_{block_upper}_{count}").as_str(), self.allocator)
         };
 
         let close_name = if count == 0 {
-            Atom::from_in(format!("CLOSE_BLOCK_{}", block_upper).as_str(), self.allocator)
+            Atom::from_in(format!("CLOSE_BLOCK_{block_upper}").as_str(), self.allocator)
         } else {
-            Atom::from_in(format!("CLOSE_BLOCK_{}_{}", block_upper, count).as_str(), self.allocator)
+            Atom::from_in(format!("CLOSE_BLOCK_{block_upper}_{count}").as_str(), self.allocator)
         };
 
         // Convert parameters to Atom vec
         let mut params = Vec::new_in(self.allocator);
         for p in parameters {
-            params.push(p.clone());
+            params.push(*p);
         }
 
         let placeholder = I18nBlockPlaceholder {
@@ -2337,13 +2343,13 @@ impl<'a> HtmlToR3Transform<'a> {
         use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup};
 
         // Validation: @switch must have exactly one parameter
-        let expression = if block.parameters.len() != 1 {
-            self.report_error("@switch block must have exactly one parameter", block.start_span);
-            self.create_empty_expression(block.span)
-        } else {
+        let expression = if block.parameters.len() == 1 {
             let expr_str = block.parameters[0].expression.as_str();
             let parsed = self.binding_parser.parse_binding(expr_str, block.parameters[0].span);
             parsed.ast
+        } else {
+            self.report_error("@switch block must have exactly one parameter", block.start_span);
+            self.create_empty_expression(block.span)
         };
 
         let mut groups = Vec::new_in(self.allocator);
@@ -2361,15 +2367,14 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Non-block children (elements, non-whitespace text, etc.) are invalid
-            let child_block = match child {
-                HtmlNode::Block(b) => b,
-                _ => {
-                    self.report_error(
-                        "@switch block can only contain @case and @default blocks",
-                        child.span(),
-                    );
-                    continue;
-                }
+            let child_block = if let HtmlNode::Block(b) = child {
+                b
+            } else {
+                self.report_error(
+                    "@switch block can only contain @case and @default blocks",
+                    child.span(),
+                );
+                continue;
             };
 
             // Validate: only @case and @default are allowed inside @switch
@@ -2381,7 +2386,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     child_block.span,
                 );
                 unknown_blocks.push(crate::ast::r3::R3UnknownBlock {
-                    name: child_block.name.clone(),
+                    name: child_block.name,
                     source_span: child_block.span,
                     name_span: child_block.name_span,
                 });
@@ -2407,20 +2412,28 @@ impl<'a> HtmlToR3Transform<'a> {
             }
 
             // Validate @case: must have exactly one parameter
-            // Angular pushes invalid @case blocks into unknownBlocks for language service support.
-            // Reference: r3_control_flow.ts line 242
+            // Reference: r3_control_flow.ts line 242, 250, 589
+            // Angular pushes @case with 0 params into unknownBlocks, but @case with >1 params
+            // still gets parsed using the first parameter (only a validation error is reported).
             let is_case = child_block.block_type == BlockType::Case;
-            if is_case && child_block.parameters.len() != 1 {
+            if is_case && child_block.parameters.is_empty() {
                 self.report_error(
                     "@case block must have exactly one parameter",
                     child_block.start_span,
                 );
                 unknown_blocks.push(crate::ast::r3::R3UnknownBlock {
-                    name: child_block.name.clone(),
+                    name: child_block.name,
                     source_span: child_block.span,
                     name_span: child_block.name_span,
                 });
                 continue;
+            }
+            if is_case && child_block.parameters.len() > 1 {
+                self.report_error(
+                    "@case block must have exactly one parameter",
+                    child_block.start_span,
+                );
+                // Continue parsing with the first parameter (matching Angular behavior)
             }
 
             // Parse expression for @case blocks
@@ -2610,8 +2623,7 @@ impl<'a> HtmlToR3Transform<'a> {
                             } else {
                                 self.report_error(
                                     &format!(
-                                        "Unrecognized parameter in @placeholder block: \"{}\"",
-                                        expr
+                                        "Unrecognized parameter in @placeholder block: \"{expr}\""
                                     ),
                                     param.span,
                                 );
@@ -2704,8 +2716,7 @@ impl<'a> HtmlToR3Transform<'a> {
                             } else {
                                 self.report_error(
                                     &format!(
-                                        "Unrecognized parameter in @loading block: \"{}\"",
-                                        expr
+                                        "Unrecognized parameter in @loading block: \"{expr}\""
                                     ),
                                     param.span,
                                 );
@@ -2867,8 +2878,8 @@ impl<'a> HtmlToR3Transform<'a> {
             // TypeScript NonBindableVisitor.visitElement does this transformation.
             if self.non_bindable_depth > 0 && raw_name != "ngNonBindable" {
                 attributes.push(R3TextAttribute {
-                    name: attr.name.clone(),
-                    value: attr.value.clone(),
+                    name: attr.name,
+                    value: attr.value,
                     source_span: attr.span,
                     key_span: Some(attr.name_span),
                     value_span: attr.value_span,
@@ -2886,8 +2897,8 @@ impl<'a> HtmlToR3Transform<'a> {
                     );
                 } else {
                     template_attr_info = Some(TemplateAttrInfo {
-                        name: attr.name.clone(),
-                        value: attr.value.clone(),
+                        name: attr.name,
+                        value: attr.value,
                         span: attr.span,
                         name_span: attr.name_span,
                         value_span: attr.value_span,
@@ -2965,7 +2976,7 @@ impl<'a> HtmlToR3Transform<'a> {
                             None,
                         ));
                         // Create the output event (propChange)
-                        let event_name = format!("{}Change", rest);
+                        let event_name = format!("{rest}Change");
                         outputs.push(self.create_two_way_event(&event_name, attr));
                     }
                     BindingPrefix::At => {
@@ -3001,7 +3012,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     None,
                 ));
                 // Create the output event (propChange)
-                let event_name = format!("{}Change", prop_name);
+                let event_name = format!("{prop_name}Change");
                 outputs.push(self.create_two_way_event(&event_name, attr));
                 continue;
             }
@@ -3119,8 +3130,8 @@ impl<'a> HtmlToR3Transform<'a> {
         i18n: Option<I18nMeta<'a>>,
     ) -> R3TextAttribute<'a> {
         R3TextAttribute {
-            name: attr.name.clone(),
-            value: attr.value.clone(),
+            name: attr.name,
+            value: attr.value,
             source_span: attr.span,
             key_span: Some(attr.name_span),
             value_span: attr.value_span,
@@ -3390,7 +3401,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let name_atom = Atom::from(self.allocator.alloc_str(name));
         Some(R3Variable {
             name: name_atom,
-            value: attr.value.clone(),
+            value: attr.value,
             source_span: attr.span,
             key_span: attr.name_span,
             value_span: attr.value_span,
@@ -3412,7 +3423,7 @@ impl<'a> HtmlToR3Transform<'a> {
             self.report_error("Reference does not have a name", attr.span);
         } else if existing_refs.iter().any(|r| r.name.as_str() == name) {
             self.report_error(
-                &format!("Reference \"#{}\" is defined more than once", name),
+                &format!("Reference \"#{name}\" is defined more than once"),
                 attr.span,
             );
         }
@@ -3421,7 +3432,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let name_atom = Atom::from(self.allocator.alloc_str(name));
         Some(R3Reference {
             name: name_atom,
-            value: attr.value.clone(),
+            value: attr.value,
             source_span: attr.span,
             key_span: attr.name_span,
             value_span: attr.value_span,
@@ -3541,55 +3552,54 @@ impl<'a> HtmlToR3Transform<'a> {
                     template_attr.name_span.end,
                 );
                 attributes.push(R3TextAttribute {
-                    name: directive_name_atom.clone(),
+                    name: directive_name_atom,
                     value: Atom::from(""),
                     source_span: directive_source_span,
                     key_span: Some(directive_source_span),
                     value_span: None,
                     i18n: None,
                 });
-            } else if let Some(TemplateBinding::Expression(expr)) = result.bindings.first() {
-                if expr.key.source.as_str() == directive_name {
-                    // Add as BoundAttribute with the expression value
-                    let source_span =
-                        Span::new(expr.source_span.start as u32, expr.source_span.end as u32);
-                    // Parse the expression value from source
-                    let expr_value = if let Some(v) = &expr.value {
-                        if let Some(src) = &v.source {
-                            let val_span =
-                                Span::new(v.absolute_offset, v.absolute_offset + src.len() as u32);
-                            self.parse_binding_expression(src, val_span)
-                        } else {
-                            self.create_empty_expression(source_span)
-                        }
+            } else if let Some(TemplateBinding::Expression(expr)) = result.bindings.first()
+                && expr.key.source.as_str() == directive_name
+            {
+                // Add as BoundAttribute with the expression value
+                let source_span = Span::new(expr.source_span.start, expr.source_span.end);
+                // Parse the expression value from source
+                let expr_value = if let Some(v) = &expr.value {
+                    if let Some(src) = &v.source {
+                        let val_span =
+                            Span::new(v.absolute_offset, v.absolute_offset + src.len() as u32);
+                        self.parse_binding_expression(src, val_span)
                     } else {
                         self.create_empty_expression(source_span)
-                    };
+                    }
+                } else {
+                    self.create_empty_expression(source_span)
+                };
 
-                    let value_span_opt = expr.value.as_ref().map(|v| {
-                        Span::new(
-                            v.absolute_offset,
-                            v.absolute_offset + v.source.as_ref().map_or(0, |s| s.len() as u32),
-                        )
-                    });
+                let value_span_opt = expr.value.as_ref().map(|v| {
+                    Span::new(
+                        v.absolute_offset,
+                        v.absolute_offset + v.source.as_ref().map_or(0, |s| s.len() as u32),
+                    )
+                });
 
-                    inputs.push(R3BoundAttribute {
-                        name: directive_name_atom.clone(),
-                        binding_type: BindingType::Property,
-                        security_context: SecurityContext::None,
-                        value: expr_value,
-                        unit: None,
-                        source_span,
-                        key_span,
-                        value_span: value_span_opt,
-                        i18n: None,
-                    });
-                }
+                inputs.push(R3BoundAttribute {
+                    name: directive_name_atom,
+                    binding_type: BindingType::Property,
+                    security_context: SecurityContext::None,
+                    value: expr_value,
+                    unit: None,
+                    source_span,
+                    key_span,
+                    value_span: value_span_opt,
+                    i18n: None,
+                });
             }
 
             // Process all bindings
             let mut first_expr_handled = false;
-            for binding in result.bindings.iter() {
+            for binding in &result.bindings {
                 match binding {
                     TemplateBinding::Variable(var) => {
                         variables.push(self.create_template_variable(var));
@@ -3606,8 +3616,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         let full_name = expr.key.source.as_str();
                         let binding_name_atom = Atom::from(self.allocator.alloc_str(full_name));
 
-                        let source_span =
-                            Span::new(expr.source_span.start as u32, expr.source_span.end as u32);
+                        let source_span = Span::new(expr.source_span.start, expr.source_span.end);
                         // Parse the expression value from source
                         let expr_value = if let Some(v) = &expr.value {
                             if let Some(src) = &v.source {
@@ -3637,10 +3646,7 @@ impl<'a> HtmlToR3Transform<'a> {
                             value: expr_value,
                             unit: None,
                             source_span,
-                            key_span: Span::new(
-                                expr.key.span.start as u32,
-                                expr.key.span.end as u32,
-                            ),
+                            key_span: Span::new(expr.key.span.start, expr.key.span.end),
                             value_span: value_span_opt,
                             i18n: None,
                         });
@@ -3673,10 +3679,10 @@ impl<'a> HtmlToR3Transform<'a> {
         // The directive-related attributes go into template_attrs
         // The hoisted element attributes become the template's main attributes
         let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(self.allocator);
-        for attr in attributes.into_iter() {
+        for attr in attributes {
             template_attrs.push(R3TemplateAttr::Text(attr));
         }
-        for input in inputs.into_iter() {
+        for input in inputs {
             template_attrs.push(R3TemplateAttr::Bound(input));
         }
 
@@ -3795,52 +3801,51 @@ impl<'a> HtmlToR3Transform<'a> {
                 let directive_source_span =
                     Span::new(template_attr.name_span.start + 1, template_attr.name_span.end);
                 attributes.push(R3TextAttribute {
-                    name: directive_name_atom.clone(),
+                    name: directive_name_atom,
                     value: Atom::from(""),
                     source_span: directive_source_span,
                     key_span: Some(directive_source_span),
                     value_span: None,
                     i18n: None,
                 });
-            } else if let Some(TemplateBinding::Expression(expr)) = result.bindings.first() {
-                if expr.key.source.as_str() == directive_name {
-                    let source_span =
-                        Span::new(expr.source_span.start as u32, expr.source_span.end as u32);
-                    let expr_value = if let Some(v) = &expr.value {
-                        if let Some(src) = &v.source {
-                            let val_span =
-                                Span::new(v.absolute_offset, v.absolute_offset + src.len() as u32);
-                            self.parse_binding_expression(src, val_span)
-                        } else {
-                            self.create_empty_expression(source_span)
-                        }
+            } else if let Some(TemplateBinding::Expression(expr)) = result.bindings.first()
+                && expr.key.source.as_str() == directive_name
+            {
+                let source_span = Span::new(expr.source_span.start, expr.source_span.end);
+                let expr_value = if let Some(v) = &expr.value {
+                    if let Some(src) = &v.source {
+                        let val_span =
+                            Span::new(v.absolute_offset, v.absolute_offset + src.len() as u32);
+                        self.parse_binding_expression(src, val_span)
                     } else {
                         self.create_empty_expression(source_span)
-                    };
+                    }
+                } else {
+                    self.create_empty_expression(source_span)
+                };
 
-                    let value_span_opt = expr.value.as_ref().map(|v| {
-                        Span::new(
-                            v.absolute_offset,
-                            v.absolute_offset + v.source.as_ref().map_or(0, |s| s.len() as u32),
-                        )
-                    });
+                let value_span_opt = expr.value.as_ref().map(|v| {
+                    Span::new(
+                        v.absolute_offset,
+                        v.absolute_offset + v.source.as_ref().map_or(0, |s| s.len() as u32),
+                    )
+                });
 
-                    inputs.push(R3BoundAttribute {
-                        name: directive_name_atom.clone(),
-                        binding_type: BindingType::Property,
-                        security_context: SecurityContext::None,
-                        value: expr_value,
-                        unit: None,
-                        source_span,
-                        key_span,
-                        value_span: value_span_opt,
-                        i18n: None,
-                    });
-                }
+                inputs.push(R3BoundAttribute {
+                    name: directive_name_atom,
+                    binding_type: BindingType::Property,
+                    security_context: SecurityContext::None,
+                    value: expr_value,
+                    unit: None,
+                    source_span,
+                    key_span,
+                    value_span: value_span_opt,
+                    i18n: None,
+                });
             }
 
             let mut first_expr_handled = false;
-            for binding in result.bindings.iter() {
+            for binding in &result.bindings {
                 match binding {
                     TemplateBinding::Variable(var) => {
                         variables.push(self.create_template_variable(var));
@@ -3854,8 +3859,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         let full_name = expr.key.source.as_str();
                         let binding_name_atom = Atom::from(self.allocator.alloc_str(full_name));
 
-                        let source_span =
-                            Span::new(expr.source_span.start as u32, expr.source_span.end as u32);
+                        let source_span = Span::new(expr.source_span.start, expr.source_span.end);
                         let expr_value = if let Some(v) = &expr.value {
                             if let Some(src) = &v.source {
                                 let val_span = Span::new(
@@ -3884,10 +3888,7 @@ impl<'a> HtmlToR3Transform<'a> {
                             value: expr_value,
                             unit: None,
                             source_span,
-                            key_span: Span::new(
-                                expr.key.span.start as u32,
-                                expr.key.span.end as u32,
-                            ),
+                            key_span: Span::new(expr.key.span.start, expr.key.span.end),
                             value_span: value_span_opt,
                             i18n: None,
                         });
@@ -3912,10 +3913,10 @@ impl<'a> HtmlToR3Transform<'a> {
             self.get_hoisted_attrs_from_node(&children[0]);
 
         let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(self.allocator);
-        for attr in attributes.into_iter() {
+        for attr in attributes {
             template_attrs.push(R3TemplateAttr::Text(attr));
         }
-        for input in inputs.into_iter() {
+        for input in inputs {
             template_attrs.push(R3TemplateAttr::Bound(input));
         }
 
@@ -3945,11 +3946,11 @@ impl<'a> HtmlToR3Transform<'a> {
         attributes: &Vec<'a, R3TextAttribute<'a>>,
     ) -> Vec<'a, R3TextAttribute<'a>> {
         let mut result = Vec::new_in(self.allocator);
-        for attr in attributes.iter() {
+        for attr in attributes {
             if !attr.name.as_str().starts_with("animate.") {
                 result.push(R3TextAttribute {
-                    name: attr.name.clone(),
-                    value: attr.value.clone(),
+                    name: attr.name,
+                    value: attr.value,
                     source_span: attr.source_span,
                     key_span: attr.key_span,
                     value_span: attr.value_span,
@@ -3967,14 +3968,14 @@ impl<'a> HtmlToR3Transform<'a> {
         inputs: &Vec<'a, R3BoundAttribute<'a>>,
     ) -> Vec<'a, R3BoundAttribute<'a>> {
         let mut result = Vec::new_in(self.allocator);
-        for input in inputs.iter() {
+        for input in inputs {
             if input.binding_type != BindingType::Animation {
                 result.push(R3BoundAttribute {
-                    name: input.name.clone(),
+                    name: input.name,
                     binding_type: input.binding_type,
                     security_context: input.security_context,
                     value: self.clone_angular_expression(&input.value),
-                    unit: input.unit.clone(),
+                    unit: input.unit,
                     source_span: input.source_span,
                     key_span: input.key_span,
                     value_span: input.value_span,
@@ -3990,7 +3991,7 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Reference: r3_template_transform.ts lines 1018-1026
     fn get_wrapped_tag_name(&self, node: &R3Node<'a>) -> Option<Atom<'a>> {
         match node {
-            R3Node::Element(elem) => Some(elem.name.clone()),
+            R3Node::Element(elem) => Some(elem.name),
             R3Node::Template(_) => None,
             // Content has a readonly name = 'ng-content' in TypeScript
             R3Node::Content(_) => Some(Atom::from("ng-content")),
@@ -4146,9 +4147,9 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Creates a shallow copy of bound events.
     fn copy_bound_events(&self, events: &Vec<'a, R3BoundEvent<'a>>) -> Vec<'a, R3BoundEvent<'a>> {
         let mut result = Vec::new_in(self.allocator);
-        for event in events.iter() {
+        for event in events {
             result.push(R3BoundEvent {
-                name: event.name.clone(),
+                name: event.name,
                 event_type: event.event_type,
                 handler: self.clone_angular_expression(&event.handler),
                 target: event.target,
@@ -4171,9 +4172,9 @@ impl<'a> HtmlToR3Transform<'a> {
         &self,
         var: &crate::ast::expression::VariableBinding<'a>,
     ) -> R3Variable<'a> {
-        let name = var.key.source.clone();
+        let name = var.key.source;
         // When value is None, Angular uses "$implicit" as the default binding
-        let value = var.value.as_ref().map_or(Atom::from("$implicit"), |v| v.source.clone());
+        let value = var.value.as_ref().map_or(Atom::from("$implicit"), |v| v.source);
         let value_span = var.value.as_ref().map(|v| Span::new(v.span.start, v.span.end));
 
         R3Variable {
@@ -4188,11 +4189,11 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Checks if text contains interpolation.
     /// Ensures that `{{` appears before `}}` in the string.
     fn has_interpolation(&self, text: &str) -> bool {
-        if let Some(open_pos) = text.find("{{") {
-            if let Some(close_pos) = text.find("}}") {
-                // Ensure the opening delimiter comes before the closing delimiter
-                return open_pos < close_pos;
-            }
+        if let Some(open_pos) = text.find("{{")
+            && let Some(close_pos) = text.find("}}")
+        {
+            // Ensure the opening delimiter comes before the closing delimiter
+            return open_pos < close_pos;
         }
         false
     }
@@ -4304,7 +4305,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // This ensures the final result has strings.len() == expressions.len() + 1.
         let mut current_string = String::new();
 
-        for token in text.tokens.iter() {
+        for token in &text.tokens {
             match token.token_type {
                 InterpolatedTokenType::Text => {
                     // Add text part (possibly with ngsp replaced)
@@ -4369,7 +4370,7 @@ impl<'a> HtmlToR3Transform<'a> {
         strings.push(Atom::from_in(current_string.as_str(), self.allocator));
 
         // Create the Interpolation expression
-        let span = ParseSpan::new(0, (text.span.end - text.span.start) as u32);
+        let span = ParseSpan::new(0, (text.span.end - text.span.start));
         let source_span = AbsoluteSourceSpan { start: text.span.start, end: text.span.end };
         let interpolation = Interpolation { span, source_span, strings, expressions };
         Some(AngularExpression::Interpolation(Box::new_in(interpolation, self.allocator)))
@@ -4396,7 +4397,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // This ensures the final result has strings.len() == expressions.len() + 1.
         let mut current_string = String::new();
 
-        for token in tokens.iter() {
+        for token in tokens {
             match token.token_type {
                 InterpolatedTokenType::Text => {
                     // Add text part (possibly with ngsp replaced)
@@ -4603,10 +4604,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Gets text content from an element.
     fn get_text_content(&self, element: &HtmlElement<'a>) -> Option<Atom<'a>> {
-        if element.children.len() == 1 {
-            if let HtmlNode::Text(text) = &element.children[0] {
-                return Some(text.value.clone());
-            }
+        if element.children.len() == 1
+            && let HtmlNode::Text(text) = &element.children[0]
+        {
+            return Some(text.value);
         }
         None
     }
@@ -4626,7 +4627,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 let href_value = attr.value.as_str();
                 // Only include resolvable URLs
                 if is_style_url_resolvable(href_value) {
-                    href = Some(attr.value.clone());
+                    href = Some(attr.value);
                 }
             }
         }
@@ -4646,7 +4647,7 @@ impl<'a> HtmlToR3Transform<'a> {
     fn get_ng_content_selector(&self, element: &HtmlElement<'a>) -> Atom<'a> {
         for attr in &element.attrs {
             if attr.name.as_str() == "select" && !attr.value.is_empty() {
-                return attr.value.clone();
+                return attr.value;
             }
         }
         Atom::from("*")
