@@ -1062,7 +1062,7 @@ pub struct DeferOnOp<'a> {
     /// Target name for local ref targeting.
     pub target_name: Option<Atom<'a>>,
     /// Timer delay.
-    pub delay: Option<u32>,
+    pub delay: Option<f64>,
     /// Viewport options (for viewport trigger).
     pub options: Option<Box<'a, IrExpression<'a>>>,
 }

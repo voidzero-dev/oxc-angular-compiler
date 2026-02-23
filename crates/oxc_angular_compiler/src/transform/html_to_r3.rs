@@ -2202,6 +2202,9 @@ impl<'a> HtmlToR3Transform<'a> {
             block.start_span,
         );
 
+        // Track whether the core expression failed to parse (to skip track validation).
+        let expression_parse_failed = params.expression_parse_failed;
+
         // Add any parse errors
         for error in params.errors {
             self.errors.push(crate::util::ParseError {
@@ -2234,12 +2237,16 @@ impl<'a> HtmlToR3Transform<'a> {
         let expression = params.expression;
         let context_variables = params.context_variables;
 
-        // Get track expression or create empty one for error recovery
+        // Get track expression or create empty one for error recovery.
+        // Only report missing-track error if the expression itself parsed successfully
+        // (matching Angular which returns null params and skips track validation on parse failure).
         let (track_by, track_keyword_span) = if let Some(track_info) = params.track_by {
             (track_info.expression, track_info.keyword_span)
         } else {
-            // Track is required but missing - report error and create empty for error recovery
-            self.report_error("@for loop must have a \"track\" expression", block.start_span);
+            if !expression_parse_failed {
+                // Track is required but missing - report error and create empty for error recovery
+                self.report_error("@for loop must have a \"track\" expression", block.start_span);
+            }
             let empty_ast = ASTWithSource {
                 ast: self.create_empty_expression(block.span),
                 source: None,

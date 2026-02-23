@@ -289,6 +289,9 @@ pub struct ForLoopParams<'a> {
     pub context_variables: Vec<'a, R3Variable<'a>>,
     /// Parse errors.
     pub errors: std::vec::Vec<String>,
+    /// Whether the core expression failed to parse (no parameters, unclosed parens, or missing "of").
+    /// When true, secondary validations like missing track should be skipped.
+    pub expression_parse_failed: bool,
 }
 
 /// Track expression info.
@@ -318,6 +321,7 @@ pub fn parse_for_loop_parameters<'a>(
             track_by: None,
             context_variables: create_default_context_variables(allocator, block_start_span),
             errors,
+            expression_parse_failed: true,
         };
     }
 
@@ -334,6 +338,7 @@ pub fn parse_for_loop_parameters<'a>(
             track_by: None,
             context_variables: create_default_context_variables(allocator, block_start_span),
             errors,
+            expression_parse_failed: true,
         };
     };
 
@@ -348,6 +353,7 @@ pub fn parse_for_loop_parameters<'a>(
             track_by: None,
             context_variables: create_default_context_variables(allocator, block_start_span),
             errors,
+            expression_parse_failed: true,
         };
     };
 
@@ -460,7 +466,14 @@ pub fn parse_for_loop_parameters<'a>(
         errors.push(format!("Unrecognized @for loop parameter \"{}\"", param_str));
     }
 
-    ForLoopParams { item, expression, track_by, context_variables, errors }
+    ForLoopParams {
+        item,
+        expression,
+        track_by,
+        context_variables,
+        errors,
+        expression_parse_failed: false,
+    }
 }
 
 /// Parses the `let` parameter of a @for loop.
@@ -490,7 +503,9 @@ fn parse_let_parameter<'a>(
             continue;
         }
 
-        let parts: std::vec::Vec<&str> = trimmed.splitn(2, '=').collect();
+        // Use full split (not splitn) to detect malformed patterns like "a=b=c"
+        // which has 3 segments. Angular checks expressionParts.length === 2.
+        let parts: std::vec::Vec<&str> = trimmed.split('=').collect();
         if parts.len() != 2 {
             errors.push(
                 "Invalid @for loop \"let\" parameter. Parameter should match the pattern \"<name> = <variable name>\"".to_string()
@@ -700,7 +715,7 @@ fn strip_optional_parentheses(expr: &str, errors: &mut std::vec::Vec<String>) ->
     Some(inner.trim().to_string())
 }
 
-/// Checks if an expression contains a pipe.
+/// Checks if an expression contains a pipe (full recursive traversal matching Angular's visitor).
 fn contains_pipe(expr: &AngularExpression<'_>) -> bool {
     match expr {
         AngularExpression::BindingPipe(_) => true,
@@ -715,10 +730,31 @@ fn contains_pipe(expr: &AngularExpression<'_>) -> bool {
         AngularExpression::Call(f) => {
             contains_pipe(&f.receiver) || f.args.iter().any(|a| contains_pipe(a))
         }
+        AngularExpression::SafeCall(f) => {
+            contains_pipe(&f.receiver) || f.args.iter().any(|a| contains_pipe(a))
+        }
         AngularExpression::PrefixNot(p) => contains_pipe(&p.expression),
         AngularExpression::Unary(u) => contains_pipe(&u.expr),
         AngularExpression::TypeofExpression(t) => contains_pipe(&t.expression),
-        _ => false,
+        AngularExpression::LiteralArray(a) => a.expressions.iter().any(|e| contains_pipe(e)),
+        AngularExpression::LiteralMap(m) => m.values.iter().any(|v| contains_pipe(v)),
+        AngularExpression::Chain(c) => c.expressions.iter().any(|e| contains_pipe(e)),
+        AngularExpression::Interpolation(i) => i.expressions.iter().any(|e| contains_pipe(e)),
+        AngularExpression::VoidExpression(v) => contains_pipe(&v.expression),
+        AngularExpression::NonNullAssert(n) => contains_pipe(&n.expression),
+        AngularExpression::ParenthesizedExpression(p) => contains_pipe(&p.expression),
+        AngularExpression::SpreadElement(s) => contains_pipe(&s.expression),
+        AngularExpression::ArrowFunction(f) => contains_pipe(&f.body),
+        AngularExpression::TaggedTemplateLiteral(t) => {
+            contains_pipe(&t.tag) || t.template.expressions.iter().any(|e| contains_pipe(e))
+        }
+        AngularExpression::TemplateLiteral(t) => t.expressions.iter().any(|e| contains_pipe(e)),
+        // Leaf nodes that cannot contain pipes
+        AngularExpression::Empty(_)
+        | AngularExpression::ImplicitReceiver(_)
+        | AngularExpression::ThisReceiver(_)
+        | AngularExpression::LiteralPrimitive(_)
+        | AngularExpression::RegularExpressionLiteral(_) => false,
     }
 }
 
@@ -1329,6 +1365,16 @@ fn parse_single_on_trigger<'a>(
                 errors.push("Hydration trigger \"hover\" cannot have parameters".to_string());
                 return;
             }
+            // Validate zero or one parameter (matching Angular's validatePlainReferenceBasedTrigger)
+            if let Some(p) = params {
+                let param_parts: std::vec::Vec<&str> =
+                    p.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                if param_parts.len() > 1 {
+                    errors
+                        .push("\"hover\" trigger can only have zero or one parameters".to_string());
+                    return;
+                }
+            }
             let reference = params.map(|s| Atom::from(s.trim()));
             triggers.hover = Some(R3HoverDeferredTrigger {
                 reference,
@@ -1349,6 +1395,17 @@ fn parse_single_on_trigger<'a>(
             if hydrate_span.is_some() && params.is_some() {
                 errors.push("Hydration trigger \"interaction\" cannot have parameters".to_string());
                 return;
+            }
+            // Validate zero or one parameter (matching Angular's validatePlainReferenceBasedTrigger)
+            if let Some(p) = params {
+                let param_parts: std::vec::Vec<&str> =
+                    p.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+                if param_parts.len() > 1 {
+                    errors.push(
+                        "\"interaction\" trigger can only have zero or one parameters".to_string(),
+                    );
+                    return;
+                }
             }
             let reference = params.map(|s| Atom::from(s.trim()));
             triggers.interaction = Some(R3InteractionDeferredTrigger {
@@ -1403,28 +1460,9 @@ fn parse_single_on_trigger<'a>(
             });
         }
 
-        "never" => {
-            // "never" is only valid as "hydrate never", not as "on never"
-            // Reference: r3_deferred_blocks.ts - HYDRATE_NEVER_PATTERN only matches "hydrate never"
-            // The OnTriggerParser switch statement has no case for NEVER, so "on never" falls to default
-            if hydrate_span.is_none() {
-                errors.push(format!("Unrecognized trigger type \"{}\"", name));
-                return;
-            }
-            if triggers.never.is_some() {
-                errors.push("Duplicate 'never' trigger is not allowed".to_string());
-                return;
-            }
-            triggers.never = Some(R3NeverDeferredTrigger {
-                source_span,
-                name_span: Some(trigger_span),
-                prefetch_span,
-                when_or_on_source_span: Some(trigger_span),
-                hydrate_span,
-            });
-        }
-
         _ => {
+            // "never" is only valid as "hydrate never" (top-level pattern), not as an on-trigger.
+            // Angular's OnTriggerParser switch has no case for NEVER, so it falls to default.
             errors.push(format!("Unrecognized trigger type \"{}\"", name));
         }
     }
@@ -1536,20 +1574,17 @@ fn extract_viewport_trigger_and_options<'a>(
             }
         }
 
-        // If we have remaining keys, create a new LiteralMap for options
-        let options = if !filtered_keys.is_empty() {
-            Some(AngularExpression::LiteralMap(oxc_allocator::Box::new_in(
-                LiteralMap {
-                    span: map_span,
-                    source_span: map_source_span,
-                    keys: filtered_keys,
-                    values: filtered_values,
-                },
-                allocator,
-            )))
-        } else {
-            None
-        };
+        // Always create a LiteralMap for options, even if empty (matching Angular behavior).
+        // Angular keeps an empty LiteralMap {} when only the trigger key was present.
+        let options = Some(AngularExpression::LiteralMap(oxc_allocator::Box::new_in(
+            LiteralMap {
+                span: map_span,
+                source_span: map_source_span,
+                keys: filtered_keys,
+                values: filtered_values,
+            },
+            allocator,
+        )));
 
         ViewportTriggerResult { reference: trigger_ref, options, errors }
     } else {
@@ -1562,7 +1597,8 @@ fn extract_viewport_trigger_and_options<'a>(
 }
 
 /// Parses a time value like "500ms" or "1.5s" to milliseconds.
-fn parse_deferred_time(value: &str) -> Option<u32> {
+/// Returns f64 to preserve fractional precision (matching Angular's parseFloat behavior).
+fn parse_deferred_time(value: &str) -> Option<f64> {
     let value = value.trim();
 
     if !is_valid_time_pattern(value) {
@@ -1581,7 +1617,7 @@ fn parse_deferred_time(value: &str) -> Option<u32> {
     let num: f64 = num_str.parse().ok()?;
     let millis = if unit == "s" { num * 1000.0 } else { num };
 
-    Some(millis as u32)
+    Some(millis)
 }
 
 #[cfg(test)]
@@ -1644,20 +1680,23 @@ mod tests {
     #[test]
     fn test_parse_deferred_time() {
         // Milliseconds
-        assert_eq!(parse_deferred_time("500ms"), Some(500));
-        assert_eq!(parse_deferred_time("100ms"), Some(100));
-        assert_eq!(parse_deferred_time("0ms"), Some(0));
+        assert_eq!(parse_deferred_time("500ms"), Some(500.0));
+        assert_eq!(parse_deferred_time("100ms"), Some(100.0));
+        assert_eq!(parse_deferred_time("0ms"), Some(0.0));
+
+        // Fractional milliseconds (must preserve precision)
+        assert_eq!(parse_deferred_time("1.5ms"), Some(1.5));
 
         // Seconds
-        assert_eq!(parse_deferred_time("1s"), Some(1000));
-        assert_eq!(parse_deferred_time("2s"), Some(2000));
-        assert_eq!(parse_deferred_time("1.5s"), Some(1500));
+        assert_eq!(parse_deferred_time("1s"), Some(1000.0));
+        assert_eq!(parse_deferred_time("2s"), Some(2000.0));
+        assert_eq!(parse_deferred_time("1.5s"), Some(1500.0));
 
         // No unit defaults to ms
-        assert_eq!(parse_deferred_time("500"), Some(500));
+        assert_eq!(parse_deferred_time("500"), Some(500.0));
 
         // With whitespace
-        assert_eq!(parse_deferred_time(" 500ms "), Some(500));
+        assert_eq!(parse_deferred_time(" 500ms "), Some(500.0));
 
         // Invalid
         assert_eq!(parse_deferred_time("abc"), None);
