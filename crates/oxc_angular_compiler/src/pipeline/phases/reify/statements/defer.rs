@@ -200,7 +200,7 @@ pub fn create_defer_on_stmt<'a>(
     target_slot: Option<u32>,
     target_slot_view_steps: Option<i32>,
     modifier: DeferOpModifierKind,
-    delay: Option<u32>,
+    delay: Option<f64>,
     options: Option<OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -214,7 +214,7 @@ pub fn create_defer_on_stmt<'a>(
             // Timer trigger takes the delay as first argument
             if let Some(d) = delay {
                 args.push(OutputExpression::Literal(Box::new_in(
-                    LiteralExpr { value: LiteralValue::Number(d as f64), source_span: None },
+                    LiteralExpr { value: LiteralValue::Number(d), source_span: None },
                     allocator,
                 )));
             }

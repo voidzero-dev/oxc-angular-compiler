@@ -1084,8 +1084,8 @@ pub struct R3HoverDeferredTrigger<'a> {
 /// A timer deferred trigger.
 #[derive(Debug)]
 pub struct R3TimerDeferredTrigger {
-    /// Delay in milliseconds.
-    pub delay: u32,
+    /// Delay in milliseconds (f64 to preserve fractional precision).
+    pub delay: f64,
     /// Source span.
     pub source_span: Span,
     /// Name span.
