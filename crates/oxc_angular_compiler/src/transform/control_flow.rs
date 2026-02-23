@@ -837,13 +837,16 @@ fn is_hydrate_never_pattern(s: &str) -> bool {
 }
 
 /// Pattern to identify a `when` parameter in a block.
+/// Matches "when" followed by whitespace, or bare "when" (which can occur after trimming).
 fn is_when_pattern(s: &str) -> bool {
-    s.starts_with("when") && s.len() > 4 && s.as_bytes()[4].is_ascii_whitespace()
+    s.starts_with("when")
+        && (s.len() == 4 || (s.len() > 4 && s.as_bytes()[4].is_ascii_whitespace()))
 }
 
 /// Pattern to identify an `on` parameter in a block.
+/// Matches "on" followed by whitespace, or bare "on" (which can occur after trimming).
 fn is_on_pattern(s: &str) -> bool {
-    s.starts_with("on") && s.len() > 2 && s.as_bytes()[2].is_ascii_whitespace()
+    s.starts_with("on") && (s.len() == 2 || (s.len() > 2 && s.as_bytes()[2].is_ascii_whitespace()))
 }
 
 /// Gets the index within an expression at which the trigger parameters start.
@@ -1050,9 +1053,9 @@ fn parse_when_trigger_from_expr<'a>(
                 triggers,
                 errors,
             );
-        } else {
-            errors.push("@defer 'when' trigger requires a condition expression".to_string());
         }
+        // If no condition found (e.g., bare "when" after trimming),
+        // Angular silently accepts it with no triggers. Match that behavior.
     } else {
         errors.push("Could not find \"when\" keyword in expression".to_string());
     }
@@ -1092,9 +1095,9 @@ fn parse_on_trigger_from_expr<'a>(
                 errors,
                 binding_parser,
             );
-        } else {
-            errors.push("@defer 'on' trigger requires trigger types".to_string());
         }
+        // If no trigger parameters found (e.g., bare "on" after trimming),
+        // Angular silently accepts it with no triggers. Match that behavior.
     } else {
         errors.push("Could not find \"on\" keyword in expression".to_string());
     }
@@ -1282,7 +1285,9 @@ fn parse_single_on_trigger<'a>(
         let name = trigger_str[..paren_start].trim();
         let params_end = trigger_str.rfind(')').unwrap_or(trigger_str.len());
         let params_str = trigger_str[paren_start + 1..params_end].trim();
-        (name, Some(params_str))
+        // Empty parentheses like `idle()` should be treated as zero parameters,
+        // matching Angular's consumeParameters() which returns an empty array for `()`.
+        (name, if params_str.is_empty() { None } else { Some(params_str) })
     } else {
         (trigger_str.trim(), None)
     };
@@ -1422,6 +1427,31 @@ fn parse_single_on_trigger<'a>(
             if triggers.viewport.is_some() {
                 errors.push("Duplicate 'viewport' trigger is not allowed".to_string());
                 return;
+            }
+
+            // Validate parameter count before parsing (matching Angular's validator).
+            // Non-hydrate: validatePlainReferenceBasedTrigger → max 1 parameter
+            // Hydrate: validateHydrateReferenceBasedTrigger → max 1 parameter
+            // Use top-level comma splitting to respect nested {}, [], () in object literals.
+            if let Some(p) = params {
+                let param_parts: std::vec::Vec<&str> = split_by_top_level_comma(p)
+                    .into_iter()
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                if param_parts.len() > 1 {
+                    if hydrate_span.is_some() {
+                        errors.push(
+                            "Hydration trigger \"viewport\" cannot have more than one parameter"
+                                .to_string(),
+                        );
+                    } else {
+                        errors.push(
+                            "\"viewport\" trigger can only have zero or one parameters".to_string(),
+                        );
+                    }
+                    return;
+                }
             }
 
             let (reference, options) = if let Some(param_str) = params {

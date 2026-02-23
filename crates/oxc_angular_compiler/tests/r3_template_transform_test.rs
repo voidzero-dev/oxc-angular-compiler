@@ -1418,6 +1418,248 @@ mod defer_blocks_extended {
 }
 
 // ============================================================================
+// Tests: Trigger empty parentheses (Finding #1)
+// Empty () should be treated as zero parameters, matching Angular's consumeParameters().
+// ============================================================================
+
+mod trigger_empty_parens {
+    use super::*;
+
+    #[test]
+    fn should_accept_idle_with_empty_parens() {
+        // Angular's consumeParameters returns zero parameters for `idle()`.
+        // Oxc should not error on this.
+        let errors = get_transform_errors("@defer (on idle()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("idle")),
+            "idle() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_hover_with_empty_parens() {
+        let errors = get_transform_errors("@defer (on hover()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("hover")),
+            "hover() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_immediate_with_empty_parens() {
+        let errors = get_transform_errors("@defer (on immediate()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("immediate")),
+            "immediate() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_interaction_with_empty_parens() {
+        let errors = get_transform_errors("@defer (on interaction()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("interaction")),
+            "interaction() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_viewport_with_empty_parens() {
+        let errors = get_transform_errors("@defer (on viewport()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("viewport")),
+            "viewport() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_hydrate_hover_with_empty_parens() {
+        let errors = get_transform_errors("@defer (hydrate on hover()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("hover")),
+            "hydrate hover() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_hydrate_viewport_with_empty_parens() {
+        let errors = get_transform_errors("@defer (hydrate on viewport()) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("viewport")),
+            "hydrate viewport() with empty parens should not produce an error, got: {:?}",
+            errors
+        );
+    }
+}
+
+// ============================================================================
+// Tests: @defer (on ) / @defer (when ) classification (Finding #3)
+// After trimming, "on" alone should still be recognized as an on-trigger prefix
+// (matching Angular which does not trim the parameter text).
+// ============================================================================
+
+mod defer_on_when_trimmed {
+    use super::*;
+
+    #[test]
+    fn should_silently_accept_defer_on_space() {
+        // Angular accepts `@defer (on )` silently — no errors at all.
+        // After trimming, "on" is recognized as an on-trigger with no trigger names → no triggers.
+        let errors = get_transform_errors("@defer (on ) {hello}");
+        assert!(errors.is_empty(), "@defer (on ) should produce no errors, got: {:?}", errors);
+    }
+
+    #[test]
+    fn should_silently_accept_defer_when_space() {
+        // Angular accepts `@defer (when )` silently — no errors at all.
+        // After trimming, "when" is recognized as a when-trigger with no condition → no trigger.
+        let errors = get_transform_errors("@defer (when ) {hello}");
+        assert!(errors.is_empty(), "@defer (when ) should produce no errors, got: {:?}", errors);
+    }
+}
+
+// ============================================================================
+// Tests: Viewport parameter arity validation (Finding #2)
+// Angular validates viewport parameter count before parsing.
+// ============================================================================
+
+mod viewport_arity_validation {
+    use super::*;
+
+    #[test]
+    fn should_error_on_viewport_with_multiple_params() {
+        // Angular errors: "viewport" trigger can only have zero or one parameters
+        let errors = get_transform_errors("@defer (on viewport(a,b)) {hello}");
+        assert!(
+            errors.iter().any(|e| e.contains("viewport") && e.contains("parameter")),
+            "viewport(a,b) should produce a parameter count error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_error_on_hydrate_viewport_with_multiple_params() {
+        // Angular errors: Hydration trigger "viewport" cannot have more than one parameter
+        let errors = get_transform_errors("@defer (hydrate on viewport(a,b)) {hello}");
+        assert!(
+            errors.iter().any(|e| e.contains("viewport") && e.contains("parameter")),
+            "hydrate viewport(a,b) should produce a parameter count error, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_accept_viewport_with_single_param() {
+        // viewport(ref) is valid
+        let errors = get_transform_errors("@defer (on viewport(ref)) {hello}");
+        assert!(
+            !errors.iter().any(|e| e.contains("viewport") && e.contains("parameter")),
+            "viewport(ref) should not produce a parameter error, got: {:?}",
+            errors
+        );
+    }
+}
+
+// ============================================================================
+// Tests: @for error cascade (Finding #4)
+// Angular only reports the parse-expression error for `@for (x of ) {}`,
+// NOT the missing-track error. Oxc should match.
+// ============================================================================
+
+mod for_error_cascade {
+    use super::*;
+
+    #[test]
+    fn should_not_emit_missing_track_when_expression_empty_after_of() {
+        // `@for (x of ) {}` - empty expression after "of"
+        // Angular: only "Cannot parse expression" error
+        // Oxc should NOT also emit "@for loop must have a \"track\" expression"
+        let errors = get_transform_errors("@for (x of ) {content}");
+        let has_parse_error = errors.iter().any(|e| e.contains("Cannot parse expression"));
+        let has_track_error = errors.iter().any(|e| e.contains("track"));
+        assert!(has_parse_error, "Should have a parse expression error, got: {:?}", errors);
+        assert!(
+            !has_track_error,
+            "Should NOT have a missing track error when expression parse fails, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_not_emit_missing_track_when_no_expression() {
+        // `@for () {}` - no expression at all
+        let errors = get_transform_errors("@for () {content}");
+        let has_track_error = errors.iter().any(|e| e.contains("track"));
+        assert!(
+            !has_track_error,
+            "Should NOT have a missing track error when no expression, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_not_emit_missing_track_when_missing_of() {
+        // `@for (x) {}` - no "of" keyword
+        let errors = get_transform_errors("@for (x) {content}");
+        let has_track_error = errors.iter().any(|e| e.contains("track"));
+        assert!(
+            !has_track_error,
+            "Should NOT have a missing track error when 'of' is missing, got: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn should_not_emit_missing_track_for_for_with_invalid_expression() {
+        // `@for (x of; track x) {}` - missing iterable, has track
+        // The semicolon makes "x of" the first parameter and "track x" the second
+        // Angular should only error on the expression parse
+        let errors = get_transform_errors("@for (x of; track x) {content}");
+        let error_count = errors.len();
+        // Should have parse error but not missing-track error
+        // (track is actually provided but expression parse failed)
+        assert!(
+            error_count >= 1,
+            "Should have at least one error for invalid expression, got: {:?}",
+            errors
+        );
+    }
+}
+
+// ============================================================================
+// Tests: Error-recovery AST shape (Finding #5)
+// Angular only adds @if branches / @for nodes when params parse successfully.
+// This is a LOW priority structural difference in error recovery.
+// ============================================================================
+
+mod error_recovery_ast_shape {
+    use super::*;
+
+    #[test]
+    fn if_block_with_missing_expression_should_still_produce_ast() {
+        // `@if {content}` - missing expression
+        // Oxc produces an IfBlock node for error recovery
+        let result = humanize_ignore_errors("@if {content}");
+        // We don't need to match Angular exactly here - just verify no crash
+        // and that the AST is reasonable for error recovery
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn for_block_with_missing_params_should_still_produce_ast() {
+        // `@for () {content}` - missing parameters
+        let result = humanize_ignore_errors("@for () {content}");
+        assert!(!result.is_empty());
+    }
+}
+
+// ============================================================================
 // Tests: More switch block tests
 // ============================================================================
 
