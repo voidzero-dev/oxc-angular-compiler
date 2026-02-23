@@ -2351,7 +2351,8 @@ fn ingest_if_block<'a>(
 
         // Extract i18n placeholder metadata from the branch
         // Angular checks that branch.i18n is a BlockPlaceholder type
-        let i18n_placeholder = convert_i18n_meta_to_placeholder(branch.i18n);
+        let i18n_placeholder =
+            convert_i18n_meta_to_placeholder(branch.i18n, &mut job.diagnostics, branch.source_span);
 
         // Infer tag name from single root element for content projection
         let tag_name =
@@ -2932,7 +2933,8 @@ fn ingest_switch_block<'a>(
 
         // Extract i18n placeholder metadata from the group
         // Angular checks that group.i18n is a BlockPlaceholder type
-        let i18n_placeholder = convert_i18n_meta_to_placeholder(group.i18n);
+        let i18n_placeholder =
+            convert_i18n_meta_to_placeholder(group.i18n, &mut job.diagnostics, group.source_span);
 
         // Infer tag name from single root element for content projection
         let tag_name =
@@ -3082,7 +3084,11 @@ fn ingest_defer_view<'a>(
     // Convert i18n metadata to placeholder, matching Angular's ingestDeferView which passes
     // i18nMeta through to createTemplateOp. This enables propagate_i18n_blocks to wrap the
     // deferred template with i18nStart/i18nEnd when inside an i18n context.
-    let i18n_placeholder = convert_i18n_meta_to_placeholder(i18n);
+    let i18n_placeholder = convert_i18n_meta_to_placeholder(
+        i18n,
+        &mut job.diagnostics,
+        source_span.unwrap_or(oxc_span::SPAN),
+    );
 
     let template_op = CreateOp::Template(TemplateOp {
         base: CreateOpBase { source_span, ..Default::default() },
@@ -4201,7 +4207,11 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
 /// is specifically a BlockPlaceholder type and extract its start_name/close_name.
 ///
 /// Ported from Angular's i18n handling in `ingest.ts` (lines 531-537, 1088-1094).
-fn convert_i18n_meta_to_placeholder(i18n: Option<I18nMeta<'_>>) -> Option<I18nPlaceholder<'_>> {
+fn convert_i18n_meta_to_placeholder<'a>(
+    i18n: Option<I18nMeta<'a>>,
+    diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
+    source_span: oxc_span::Span,
+) -> Option<I18nPlaceholder<'a>> {
     match i18n {
         Some(I18nMeta::Node(I18nNode::BlockPlaceholder(bp))) => {
             Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name)))
@@ -4209,7 +4219,17 @@ fn convert_i18n_meta_to_placeholder(i18n: Option<I18nMeta<'_>>) -> Option<I18nPl
         Some(I18nMeta::BlockPlaceholder(bp)) => {
             Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name)))
         }
-        _ => None,
+        // Reference: ingest.ts lines 533-537, 587-591
+        // Angular throws an assertion error for unexpected i18n metadata types.
+        // We report a diagnostic instead to avoid crashing the process.
+        Some(_) => {
+            diagnostics.push(
+                OxcDiagnostic::error("Unhandled i18n metadata type for conditional block")
+                    .with_label(source_span),
+            );
+            None
+        }
+        None => None,
     }
 }
 

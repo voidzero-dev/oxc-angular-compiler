@@ -2094,6 +2094,34 @@ mod switch_invalid_case_unknown_blocks {
             "Expected invalid @case (no params) to be in unknown_blocks, got: {unknown_names:?}"
         );
     }
+
+    #[test]
+    fn should_still_parse_case_with_extra_params_using_first_param() {
+        // Reference: r3_control_flow.ts line 242, 250
+        // Angular reports an error for @case with >1 parameter, but still parses the
+        // first parameter and creates a SwitchBlockCase. It does NOT push to unknownBlocks.
+        // `@case (a; b)` produces 2 parameters in Angular's parser.
+        let result = parse_with_options("@switch (expr) { @case (a; b) { content } }", true, false);
+        // Should still have a SwitchBlock with a case group (not pushed to unknown_blocks)
+        let has_switch_block = result.nodes.iter().any(|n| {
+            if let R3NodeRef::SwitchBlock { groups, .. } = n {
+                groups.iter().any(|g| g.cases.iter().any(|c| c.expression.is_some()))
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_switch_block,
+            "Expected @case with extra params to still be parsed as a case with expression"
+        );
+        // Should NOT be in unknown_blocks
+        let unknown_names =
+            get_switch_unknown_block_names("@switch (expr) { @case (a; b) { content } }");
+        assert!(
+            !unknown_names.contains(&"case".to_string()),
+            "Expected @case with extra params NOT to be in unknown_blocks, got: {unknown_names:?}"
+        );
+    }
 }
 
 mod for_loop_duplicate_let_validation {
@@ -2214,6 +2242,42 @@ mod standalone_connected_blocks {
         assert!(
             errors.iter().any(|e| e.contains("@error block can only be used after an @defer")),
             "Expected error for standalone @error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn standalone_case_should_produce_error_and_unknown_block() {
+        // Reference: r3_template_transform.ts:518 - falls through to "Unrecognized block"
+        let errors = get_transform_errors("@case (value) { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("Unrecognized block @case")),
+            "Expected error for standalone @case, got: {errors:?}"
+        );
+        let result = parse_with_options("@case (value) { content }", true, false);
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| matches!(n, R3NodeRef::UnknownBlock { name } if name == "case")),
+            "Expected UnknownBlock for standalone @case"
+        );
+    }
+
+    #[test]
+    fn standalone_default_should_produce_error_and_unknown_block() {
+        // Reference: r3_template_transform.ts:518 - falls through to "Unrecognized block"
+        let errors = get_transform_errors("@default { content }");
+        assert!(
+            errors.iter().any(|e| e.contains("Unrecognized block @default")),
+            "Expected error for standalone @default, got: {errors:?}"
+        );
+        let result = parse_with_options("@default { content }", true, false);
+        assert!(
+            result
+                .nodes
+                .iter()
+                .any(|n| matches!(n, R3NodeRef::UnknownBlock { name } if name == "default")),
+            "Expected UnknownBlock for standalone @default"
         );
     }
 }
