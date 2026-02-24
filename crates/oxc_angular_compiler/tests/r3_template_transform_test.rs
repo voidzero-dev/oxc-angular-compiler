@@ -1070,6 +1070,21 @@ mod if_blocks {
         assert_eq!(result[1], h!["IfBlockBranch", "cond1"]);
         assert_eq!(result[3], h!["IfBlockBranch", "cond2"]);
     }
+
+    /// Angular uses the regex `/^else[^\S\r\n]+if/` to detect "else if" blocks,
+    /// which means block names like "else ifx" still match as connected else-if
+    /// branches. Our parser must replicate this behavior to avoid emitting two
+    /// independent conditionals instead of a single chained one.
+    #[test]
+    fn should_treat_else_if_prefix_as_connected_block() {
+        // "else ifx" should still be chained as a connected else-if branch,
+        // matching Angular's regex-based ELSE_IF_PATTERN: /^else[^\S\r\n]+if/
+        let result = humanize_ignore_errors("@if (cond1) { a } @else ifx (cond2) { b }");
+        // Should produce a single IfBlock with two branches, not two independent blocks
+        assert_eq!(result[0], h!["IfBlock"]);
+        assert_eq!(result[1], h!["IfBlockBranch", "cond1"]);
+        assert_eq!(result[3], h!["IfBlockBranch", "cond2"]);
+    }
 }
 
 // ============================================================================

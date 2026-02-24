@@ -36,8 +36,12 @@ fn parse_as_alias(s: &str) -> Option<&str> {
     Some(after_as.trim_start())
 }
 
-/// Check if string matches `^else\s+if` pattern.
-fn is_else_if_pattern(s: &str) -> bool {
+/// Check if string matches Angular's `ELSE_IF_PATTERN`: `/^else[^\S\r\n]+if/`.
+///
+/// Any name starting with "else" followed by at least one whitespace character
+/// and then "if" is treated as an else-if block. This means names like
+/// "else ifx" also match, which is intentional to mirror Angular's behavior.
+pub fn is_else_if_pattern(s: &str) -> bool {
     if !s.starts_with("else") {
         return false;
     }

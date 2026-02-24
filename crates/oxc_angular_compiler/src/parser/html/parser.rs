@@ -15,6 +15,7 @@ use crate::ast::html::{
     InterpolatedToken, InterpolatedTokenType,
 };
 use crate::parser::expression::BindingParser;
+use crate::transform::control_flow::is_else_if_pattern;
 use crate::util::{ParseError, ParseLocation, ParseSourceFile, ParseSourceSpan};
 
 use super::entities::decode_entities_in_string;
@@ -1501,7 +1502,11 @@ impl<'a> HtmlParser<'a> {
         let block_type = match name.as_str() {
             "if" => BlockType::If,
             "else" => BlockType::Else,
-            "else if" => BlockType::ElseIf,
+            // Match Angular's ELSE_IF_PATTERN: /^else[^\S\r\n]+if/
+            // Any block name starting with "else " followed by "if" (e.g. "else if",
+            // "else ifx") is classified as ElseIf, matching Angular's regex-based
+            // connected-block detection.
+            _ if is_else_if_pattern(&name) => BlockType::ElseIf,
             "for" => BlockType::For,
             "empty" => BlockType::Empty,
             "switch" => BlockType::Switch,
