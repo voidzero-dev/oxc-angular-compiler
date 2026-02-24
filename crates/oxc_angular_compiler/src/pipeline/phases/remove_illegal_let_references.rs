@@ -73,22 +73,32 @@ pub fn remove_illegal_let_references(job: &mut ComponentCompilationJob<'_>) {
             None => continue,
         };
 
-        // We process by iterating and tracking which let names have been "declared"
-        // A let name is "declared" when we encounter its Variable op
+        // We process by iterating and tracking which let names have been "declared".
+        // A let name is "declared" AFTER we finish transforming its Variable op.
+        // This matches Angular which walks backward from the declaration op itself,
+        // replacing self-references (e.g. `@let x = x + 1`) with `undefined`.
         let mut declared_names: Vec<Atom<'_>> = Vec::new();
 
         for op in view.update.iter_mut() {
-            // Check if this is a Variable op that declares a let
-            if let UpdateOp::Variable(var) = op {
+            // Check if this op declares a let variable — extract the name before
+            // transforming so we can mark it as declared AFTER the transform.
+            let newly_declared = if let UpdateOp::Variable(var) = &*op {
                 if var.kind == SemanticVariableKind::Identifier {
                     if let IrExpression::StoreLet(_) = var.initializer.as_ref() {
-                        // Mark this name as declared (after this point, refs are legal)
-                        declared_names.push(var.name.clone());
+                        Some(var.name.clone())
+                    } else {
+                        None
                     }
+                } else {
+                    None
                 }
-            }
+            } else {
+                None
+            };
 
-            // Replace any LexicalRead with undeclared let names with undefined
+            // Replace any LexicalRead with undeclared let names with undefined.
+            // This runs BEFORE marking the current op's name as declared, so
+            // self-references in the declaration op are also replaced.
             let let_names_ref = &let_names;
             let declared_ref = &declared_names;
 
@@ -113,6 +123,12 @@ pub fn remove_illegal_let_references(job: &mut ComponentCompilationJob<'_>) {
                 },
                 VisitorContextFlag::NONE,
             );
+
+            // Mark this name as declared AFTER transforming, so subsequent ops
+            // can legally reference it, but the declaration op itself cannot.
+            if let Some(name) = newly_declared {
+                declared_names.push(name);
+            }
         }
     }
 }

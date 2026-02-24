@@ -1,0 +1,17 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵelementStart(1,"div");
+    i0.ɵɵtext(2);
+    i0.ɵɵelementEnd();
+  }
+  if ((rf & 2)) {
+    const x_r1 = (undefined + 1);
+    i0.ɵɵadvance(2);
+    i0.ɵɵtextInterpolate(x_r1);
+  }
+}

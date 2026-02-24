@@ -1644,18 +1644,32 @@ mod error_recovery_ast_shape {
     #[test]
     fn if_block_with_missing_expression_should_still_produce_ast() {
         // `@if {content}` - missing expression
-        // Oxc produces an IfBlock node for error recovery
+        // Angular creates an IfBlock with 0 branches (main branch skipped
+        // because parseConditionalBlockParameters returns null).
         let result = humanize_ignore_errors("@if {content}");
-        // We don't need to match Angular exactly here - just verify no crash
-        // and that the AST is reasonable for error recovery
+        // The IfBlock node is still emitted (with 0 branches) — verify no crash.
         assert!(!result.is_empty());
     }
 
     #[test]
-    fn for_block_with_missing_params_should_still_produce_ast() {
+    fn for_block_with_missing_params_returns_no_node() {
         // `@for () {content}` - missing parameters
+        // Angular's createForLoop returns null node when parseForLoopParameters
+        // fails (expression doesn't match "<identifier> of <expression>").
         let result = humanize_ignore_errors("@for () {content}");
-        assert!(!result.is_empty());
+        // Angular returns null node, so no ForLoopBlock should appear.
+        let has_for = result.iter().any(|r| {
+            r.first()
+                .map(|v| match v {
+                    HumanValue::Str(s) => s == "ForLoopBlock",
+                    _ => false,
+                })
+                .unwrap_or(false)
+        });
+        assert!(
+            !has_for,
+            "Angular returns null for @for with invalid params, but Rust produced a ForLoopBlock"
+        );
     }
 }
 

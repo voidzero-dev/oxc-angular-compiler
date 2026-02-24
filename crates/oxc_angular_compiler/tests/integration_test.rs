@@ -5,7 +5,7 @@
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    AngularVersion, ResolvedResources, TransformOptions as ComponentTransformOptions,
+    AngularVersion, R3Node, ResolvedResources, TransformOptions as ComponentTransformOptions,
     output::ast::FunctionExpr,
     output::emitter::JsEmitter,
     parser::html::HtmlParser,
@@ -739,6 +739,20 @@ fn test_let_with_pipe_multiple_in_child_view_varoffset() {
         "Expected at least 2 storeLet calls for 2 @let declarations with pipes used in child view, got {store_let_count}. Output:\n{js}"
     );
     insta::assert_snapshot!("let_with_pipe_multiple_in_child_view_varoffset", js);
+}
+
+// ============================================================================
+// @let self-reference / forward-reference Tests
+// ============================================================================
+
+#[test]
+fn test_let_self_reference_replaced_with_undefined() {
+    // A @let that references itself (self-reference) should have that reference
+    // replaced with `undefined`, matching Angular's behavior.
+    // Angular walks backward from the declaration op and replaces LexicalRead
+    // in the declaration op itself.
+    let js = compile_template_to_js(r"@let x = x + 1; <div>{{x}}</div>", "TestComponent");
+    insta::assert_snapshot!("let_self_reference", js);
 }
 
 // ============================================================================
@@ -5203,4 +5217,105 @@ fn test_for_loop_multiple_index_aliases_in_track() {
         !js.contains("this.j"),
         "Track expression should rewrite all $index aliases, but `j` was not rewritten.\nGenerated JS:\n{js}"
     );
+}
+
+// ============================================================================
+// Error Recovery Conformance Tests (R3 Transform Level)
+// ============================================================================
+
+/// Transforms an Angular template to R3 AST and returns the nodes + error messages.
+/// Unlike `compile_template_to_js`, this does NOT panic on parse/transform errors.
+fn transform_to_r3(template: &str) -> (std::vec::Vec<String>, bool) {
+    let allocator = Allocator::default();
+
+    let parser = HtmlParser::with_expansion_forms(&allocator, template, "test.html");
+    let html_result = parser.parse();
+
+    let mut errors: std::vec::Vec<String> =
+        html_result.errors.iter().map(|e| e.msg.clone()).collect();
+
+    let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
+    let r3_result = transformer.transform(&html_result.nodes);
+
+    errors.extend(r3_result.errors.iter().map(|e| e.msg.clone()));
+
+    // Check if any ForLoopBlock nodes exist in the result
+    let has_for_block = r3_result.nodes.iter().any(|n| matches!(n, R3Node::ForLoopBlock(_)));
+    (errors, has_for_block)
+}
+
+/// Returns (errors, r3_nodes_debug) for deeper node inspection.
+fn transform_to_r3_nodes(template: &str) -> (std::vec::Vec<String>, std::vec::Vec<String>) {
+    let allocator = Allocator::default();
+
+    let parser = HtmlParser::with_expansion_forms(&allocator, template, "test.html");
+    let html_result = parser.parse();
+
+    let mut errors: std::vec::Vec<String> =
+        html_result.errors.iter().map(|e| e.msg.clone()).collect();
+
+    let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
+    let r3_result = transformer.transform(&html_result.nodes);
+
+    errors.extend(r3_result.errors.iter().map(|e| e.msg.clone()));
+
+    let node_types: std::vec::Vec<String> = r3_result
+        .nodes
+        .iter()
+        .map(|n| match n {
+            R3Node::ForLoopBlock(_) => "ForLoopBlock".to_string(),
+            R3Node::IfBlock(b) => format!("IfBlock(branches={})", b.branches.len()),
+            R3Node::SwitchBlock(_) => "SwitchBlock".to_string(),
+            R3Node::Text(_) => "Text".to_string(),
+            R3Node::Element(_) => "Element".to_string(),
+            R3Node::BoundText(_) => "BoundText".to_string(),
+            other => format!("{other:?}").chars().take(30).collect(),
+        })
+        .collect();
+
+    (errors, node_types)
+}
+
+#[test]
+fn test_for_block_no_expression_returns_none() {
+    // Finding 2: @for with no expression should return None (no ForLoopBlock node),
+    // matching Angular's behavior where parseForLoopParameters returns null.
+    let (errors, has_for_block) = transform_to_r3("@for { <div></div> }");
+    assert!(
+        !has_for_block,
+        "Angular returns null node when @for expression fails to parse, but Rust emitted a ForLoopBlock"
+    );
+    assert!(!errors.is_empty(), "Should report a parse error for @for without expression");
+}
+
+#[test]
+fn test_for_block_missing_track_returns_none() {
+    // Finding 2: @for with valid expression but missing track should return None,
+    // matching Angular's behavior (params.trackBy === null → node stays null).
+    let (errors, has_for_block) = transform_to_r3("@for (item of items) { <div></div> }");
+    assert!(
+        !has_for_block,
+        "Angular returns null node when @for has no track expression, but Rust emitted a ForLoopBlock"
+    );
+    assert!(
+        errors.iter().any(|e| e.contains("track")),
+        "Should report an error about missing track expression. Errors: {errors:?}"
+    );
+}
+
+#[test]
+fn test_if_block_no_expression_skips_main_branch() {
+    // Finding 3: @if with no parameters should not push a main branch,
+    // matching Angular where parseConditionalBlockParameters returns null.
+    let (errors, node_types) = transform_to_r3_nodes("@if { <div></div> }");
+    // The IfBlock should have 0 branches (main branch skipped)
+    for node_type in &node_types {
+        if node_type.starts_with("IfBlock") {
+            assert_eq!(
+                node_type, "IfBlock(branches=0)",
+                "Angular skips the main branch when parameters are missing, expected 0 branches"
+            );
+        }
+    }
+    assert!(!errors.is_empty(), "Should report a parse error for @if without expression");
 }

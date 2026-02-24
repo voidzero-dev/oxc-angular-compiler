@@ -10,7 +10,7 @@ use oxc_span::{Atom, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::expression::{
-    ASTWithSource, AbsoluteSourceSpan, AngularExpression, BindingType, ParseSpan, ParsedEventType,
+    AbsoluteSourceSpan, AngularExpression, BindingType, ParseSpan, ParsedEventType,
 };
 use crate::ast::html::{
     BlockType, HtmlAttribute, HtmlBlock, HtmlComponent, HtmlDirective, HtmlElement, HtmlExpansion,
@@ -2025,30 +2025,38 @@ impl<'a> HtmlToR3Transform<'a> {
             });
         }
 
-        let children = self.visit_children(&block.children);
+        // Match Angular's createIfBlock: only push the main branch when
+        // parseConditionalBlockParameters succeeds (returns non-null).
+        // When parameters are empty, Angular returns null and skips the branch.
+        if main_params.expression.is_some() {
+            let children = self.visit_children(&block.children);
 
-        // Create i18n placeholder if inside an i18n context
-        let i18n =
-            self.create_block_placeholder("if", &[], block.span, block.start_span, block.end_span);
+            // Create i18n placeholder if inside an i18n context
+            let i18n = self.create_block_placeholder(
+                "if",
+                &[],
+                block.span,
+                block.start_span,
+                block.end_span,
+            );
 
-        let main_branch = R3IfBlockBranch {
-            expression: main_params.expression.map(|e| e.ast),
-            children,
-            expression_alias: main_params.expression_alias,
-            source_span: block.span,
-            start_source_span: block.start_span,
-            end_source_span: block.end_span,
-            name_span: block.name_span,
-            i18n,
-        };
-        branches.push(main_branch);
+            let main_branch = R3IfBlockBranch {
+                expression: main_params.expression.map(|e| e.ast),
+                children,
+                expression_alias: main_params.expression_alias,
+                source_span: block.span,
+                start_source_span: block.start_span,
+                end_source_span: block.end_span,
+                name_span: block.name_span,
+                i18n,
+            };
+            branches.push(main_branch);
+        }
 
         // Validate connected blocks and process @else if and @else blocks
         let mut has_else = false;
 
         for (i, connected) in connected_blocks.iter().enumerate() {
-            let children = self.visit_children(&connected.children);
-
             match connected.block_type {
                 BlockType::ElseIf => {
                     // Parse @else if parameters (condition and optional "as" alias)
@@ -2088,26 +2096,32 @@ impl<'a> HtmlToR3Transform<'a> {
                         });
                     }
 
-                    // Create i18n placeholder if inside an i18n context
-                    let i18n = self.create_block_placeholder(
-                        "else if",
-                        &[],
-                        connected.span,
-                        connected.start_span,
-                        connected.end_span,
-                    );
+                    // Match Angular: only push the branch when params are non-null
+                    // (i.e., when an expression was successfully parsed).
+                    if params.expression.is_some() {
+                        let children = self.visit_children(&connected.children);
 
-                    let branch = R3IfBlockBranch {
-                        expression: params.expression.map(|e| e.ast),
-                        children,
-                        expression_alias: params.expression_alias,
-                        source_span: connected.span,
-                        start_source_span: connected.start_span,
-                        end_source_span: connected.end_span,
-                        name_span: connected.name_span,
-                        i18n,
-                    };
-                    branches.push(branch);
+                        // Create i18n placeholder if inside an i18n context
+                        let i18n = self.create_block_placeholder(
+                            "else if",
+                            &[],
+                            connected.span,
+                            connected.start_span,
+                            connected.end_span,
+                        );
+
+                        let branch = R3IfBlockBranch {
+                            expression: params.expression.map(|e| e.ast),
+                            children,
+                            expression_alias: params.expression_alias,
+                            source_span: connected.span,
+                            start_source_span: connected.start_span,
+                            end_source_span: connected.end_span,
+                            name_span: connected.name_span,
+                            i18n,
+                        };
+                        branches.push(branch);
+                    }
                 }
                 BlockType::Else => {
                     // Validation: check for duplicate @else
@@ -2133,7 +2147,12 @@ impl<'a> HtmlToR3Transform<'a> {
                     }
                     has_else = true;
 
+                    // @else has no condition (null expression) and no alias
+                    let children = self.visit_children(&connected.children);
+
                     // Create i18n placeholder if inside an i18n context
+                    // (must be after visit_children to match @if/@else if ordering
+                    // and preserve i18n placeholder numbering)
                     let i18n = self.create_block_placeholder(
                         "else",
                         &[],
@@ -2141,8 +2160,6 @@ impl<'a> HtmlToR3Transform<'a> {
                         connected.start_span,
                         connected.end_span,
                     );
-
-                    // @else has no condition (null expression) and no alias
                     let branch = R3IfBlockBranch {
                         expression: None,
                         children,
@@ -2233,32 +2250,8 @@ impl<'a> HtmlToR3Transform<'a> {
             });
         }
 
-        let item = params.item;
-        let expression = params.expression;
-        let context_variables = params.context_variables;
-
-        // Get track expression or create empty one for error recovery.
-        // Only report missing-track error if the expression itself parsed successfully
-        // (matching Angular which returns null params and skips track validation on parse failure).
-        let (track_by, track_keyword_span) = if let Some(track_info) = params.track_by {
-            (track_info.expression, track_info.keyword_span)
-        } else {
-            if !expression_parse_failed {
-                // Track is required but missing - report error and create empty for error recovery
-                self.report_error("@for loop must have a \"track\" expression", block.start_span);
-            }
-            let empty_ast = ASTWithSource {
-                ast: self.create_empty_expression(block.span),
-                source: None,
-                location: Atom::from(""),
-                absolute_offset: block.span.start,
-            };
-            (empty_ast, block.name_span)
-        };
-
-        let children = self.visit_children(&block.children);
-
-        // Process and validate connected @empty block
+        // Process and validate connected @empty block.
+        // Angular processes connected blocks before checking params, so we do too.
         let mut empty: Option<R3ForLoopBlockEmpty<'a>> = None;
 
         for connected in connected_blocks {
@@ -2303,6 +2296,28 @@ impl<'a> HtmlToR3Transform<'a> {
                 }
             }
         }
+
+        // Match Angular's createForLoop: if expression parsing failed entirely
+        // (params === null in Angular), return None — no ForLoopBlock is emitted.
+        if expression_parse_failed {
+            return None;
+        }
+
+        let item = params.item;
+        let expression = params.expression;
+        let context_variables = params.context_variables;
+
+        // Match Angular's createForLoop: if track is missing and expression parsed OK,
+        // report the error and return None (Angular only creates the node when
+        // params !== null AND params.trackBy !== null).
+        let (track_by, track_keyword_span) = if let Some(track_info) = params.track_by {
+            (track_info.expression, track_info.keyword_span)
+        } else {
+            self.report_error("@for loop must have a \"track\" expression", block.start_span);
+            return None;
+        };
+
+        let children = self.visit_children(&block.children);
 
         // Calculate the outer span to encompass @empty block if present
         let end_source_span =
@@ -2349,14 +2364,19 @@ impl<'a> HtmlToR3Transform<'a> {
         use crate::ast::html::{BlockType, HtmlNode};
         use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup};
 
-        // Validation: @switch must have exactly one parameter
-        let expression = if block.parameters.len() == 1 {
+        // Validation: @switch must have exactly one parameter.
+        // Match Angular's createSwitchBlock: always parse the first parameter when present
+        // (even if there are extra parameters), only use empty when there are no parameters.
+        // Validation errors are reported by validateSwitchBlock in Angular; we report inline.
+        if block.parameters.len() != 1 {
+            self.report_error("@switch block must have exactly one parameter", block.start_span);
+        }
+        let expression = if !block.parameters.is_empty() {
             let expr_str = block.parameters[0].expression.as_str();
             let parsed = self.binding_parser.parse_binding(expr_str, block.parameters[0].span);
             parsed.ast
         } else {
-            self.report_error("@switch block must have exactly one parameter", block.start_span);
-            self.create_empty_expression(block.span)
+            self.binding_parser.parse_binding("", block.span).ast
         };
 
         let mut groups = Vec::new_in(self.allocator);

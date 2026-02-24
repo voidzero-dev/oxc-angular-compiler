@@ -829,16 +829,15 @@ fn reify_update_op<'a>(
             Some(create_repeater_stmt(allocator, expr))
         }
         UpdateOp::Conditional(cond) => {
-            // Use processed expression (built by conditionals phase) or fall back to test
+            // Use processed expression (built by conditionals phase).
+            // Angular asserts that processed is always set by this point
+            // (throws "Conditional test was not set." in reify.ts:698).
             let expr = if let Some(ref processed) = cond.processed {
                 convert_ir_expression(allocator, processed, expressions, root_xref)
-            } else if let Some(ref test) = cond.test {
-                convert_ir_expression(allocator, test, expressions, root_xref)
             } else {
-                OutputExpression::Literal(Box::new_in(
-                    LiteralExpr { value: LiteralValue::Null, source_span: None },
-                    allocator,
-                ))
+                diagnostics
+                    .push(OxcDiagnostic::error("AssertionError: Conditional test was not set."));
+                return None;
             };
             let context_value = cond
                 .context_value
