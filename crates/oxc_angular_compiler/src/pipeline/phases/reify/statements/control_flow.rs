@@ -4,8 +4,8 @@ use oxc_allocator::{Box, Vec as OxcVec};
 use oxc_span::Atom;
 
 use crate::output::ast::{
-    DeclareVarStmt, LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadVarExpr,
-    StmtModifier,
+    DeclareVarStmt, LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
+    ReadVarExpr, StmtModifier,
 };
 use crate::r3::Identifiers;
 
@@ -20,7 +20,7 @@ use super::super::utils::create_instruction_call_stmt;
 /// - vars: Number of variable slots
 /// - tag: Optional tag name (null for control flow blocks)
 /// - constIndex: Optional const array index for attributes
-/// - localRefs: Optional local refs index (not implemented yet)
+/// - localRefs: Optional local refs index (if present, also adds templateRefExtractor)
 ///
 /// Ported from Angular's `conditionalCreate()` in `instruction.ts`.
 /// Args are trimmed from the end if they are null values.
@@ -32,6 +32,7 @@ pub fn create_conditional_create_stmt<'a>(
     vars: Option<u32>,
     tag: Option<&Atom<'a>>,
     attributes: Option<u32>,
+    local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
 
@@ -92,6 +93,31 @@ pub fn create_conditional_create_stmt<'a>(
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
+            allocator,
+        )));
+    }
+
+    // Local refs index and templateRefExtractor
+    // Ported from Angular's instruction.ts conditionalCreate(): when localRefs !== null,
+    // push the refs const index and i0.ɵɵtemplateRefExtractor.
+    if let Some(refs_idx) = local_refs_index {
+        args.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
+            allocator,
+        )));
+        args.push(OutputExpression::ReadProp(Box::new_in(
+            ReadPropExpr {
+                receiver: Box::new_in(
+                    OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        allocator,
+                    )),
+                    allocator,
+                ),
+                name: Atom::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
+                optional: false,
+                source_span: None,
+            },
             allocator,
         )));
     }
@@ -135,7 +161,7 @@ pub fn create_conditional_update_stmt<'a>(
 /// - vars: Number of variable slots
 /// - tag: Optional tag name (null for control flow blocks)
 /// - constIndex: Optional const array index for attributes
-/// - localRefs: Optional local refs index (not implemented yet)
+/// - localRefs: Optional local refs index (if present, also adds templateRefExtractor)
 ///
 /// Ported from Angular's `conditionalBranchCreate()` in `instruction.ts`.
 /// Args are trimmed from the end if they are null values.
@@ -147,6 +173,7 @@ pub fn create_conditional_branch_create_stmt<'a>(
     vars: Option<u32>,
     tag: Option<&Atom<'a>>,
     attributes: Option<u32>,
+    local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
 
@@ -207,6 +234,31 @@ pub fn create_conditional_branch_create_stmt<'a>(
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
+            allocator,
+        )));
+    }
+
+    // Local refs index and templateRefExtractor
+    // Ported from Angular's instruction.ts conditionalBranchCreate(): when localRefs !== null,
+    // push the refs const index and i0.ɵɵtemplateRefExtractor.
+    if let Some(refs_idx) = local_refs_index {
+        args.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
+            allocator,
+        )));
+        args.push(OutputExpression::ReadProp(Box::new_in(
+            ReadPropExpr {
+                receiver: Box::new_in(
+                    OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        allocator,
+                    )),
+                    allocator,
+                ),
+                name: Atom::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
+                optional: false,
+                source_span: None,
+            },
             allocator,
         )));
     }
@@ -456,3 +508,111 @@ pub fn create_declare_let_stmt<'a>(
 // StoreLet as an update op should have been converted to a StoreLet expression
 // during the store_let_optimization phase. If it reaches reify, it's a compiler bug.
 // This matches Angular's behavior which throws: "AssertionError: unexpected storeLet"
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::output::emitter::JsEmitter;
+
+    #[test]
+    fn conditional_create_emits_local_refs_and_template_ref_extractor() {
+        let allocator = oxc_allocator::Allocator::default();
+        let emitter = JsEmitter::new();
+
+        // With local_refs_index = Some(3), the instruction should include the refs index
+        // and i0.ɵɵtemplateRefExtractor, matching Angular's instruction.ts conditionalCreate().
+        let stmt = create_conditional_create_stmt(
+            &allocator,
+            0,
+            Some(Atom::from("TestComponent_Conditional_0_Template")),
+            Some(1),
+            Some(0),
+            None,
+            None,
+            Some(3),
+        );
+        let js = emitter.emit_statement(&stmt);
+        assert!(
+            js.contains("i0.ɵɵtemplateRefExtractor"),
+            "conditionalCreate with localRefs should emit templateRefExtractor. Got: {js}"
+        );
+        // When tag and constIndex are null but localRefs is set, they remain as null placeholders
+        // because localRefs+templateRefExtractor come after them, preventing null-trimming.
+        assert!(
+            js.contains("ɵɵconditionalCreate(0,TestComponent_Conditional_0_Template,1,0,null,null,3,i0.ɵɵtemplateRefExtractor)"),
+            "conditionalCreate should emit: slot, fnRef, decls, vars, tag, constIndex, refsIdx, templateRefExtractor. Got: {js}"
+        );
+    }
+
+    #[test]
+    fn conditional_create_without_local_refs_omits_template_ref_extractor() {
+        let allocator = oxc_allocator::Allocator::default();
+        let emitter = JsEmitter::new();
+
+        // Without local refs, templateRefExtractor should not appear
+        let stmt = create_conditional_create_stmt(
+            &allocator,
+            0,
+            Some(Atom::from("TestComponent_Conditional_0_Template")),
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+        );
+        let js = emitter.emit_statement(&stmt);
+        assert!(
+            !js.contains("templateRefExtractor"),
+            "conditionalCreate without localRefs should NOT emit templateRefExtractor. Got: {js}"
+        );
+    }
+
+    #[test]
+    fn conditional_branch_create_emits_local_refs_and_template_ref_extractor() {
+        let allocator = oxc_allocator::Allocator::default();
+        let emitter = JsEmitter::new();
+
+        let stmt = create_conditional_branch_create_stmt(
+            &allocator,
+            1,
+            Some(Atom::from("TestComponent_Conditional_1_Template")),
+            Some(1),
+            Some(0),
+            None,
+            None,
+            Some(5),
+        );
+        let js = emitter.emit_statement(&stmt);
+        assert!(
+            js.contains("i0.ɵɵtemplateRefExtractor"),
+            "conditionalBranchCreate with localRefs should emit templateRefExtractor. Got: {js}"
+        );
+        // When tag and constIndex are null but localRefs is set, they remain as null placeholders.
+        assert!(
+            js.contains("ɵɵconditionalBranchCreate(1,TestComponent_Conditional_1_Template,1,0,null,null,\n    5,i0.ɵɵtemplateRefExtractor)"),
+            "conditionalBranchCreate should emit: slot, fnRef, decls, vars, tag, constIndex, refsIdx, templateRefExtractor. Got: {js}"
+        );
+    }
+
+    #[test]
+    fn conditional_branch_create_without_local_refs_omits_template_ref_extractor() {
+        let allocator = oxc_allocator::Allocator::default();
+        let emitter = JsEmitter::new();
+
+        let stmt = create_conditional_branch_create_stmt(
+            &allocator,
+            1,
+            Some(Atom::from("TestComponent_Conditional_1_Template")),
+            Some(1),
+            Some(0),
+            None,
+            None,
+            None,
+        );
+        let js = emitter.emit_statement(&stmt);
+        assert!(
+            !js.contains("templateRefExtractor"),
+            "conditionalBranchCreate without localRefs should NOT emit templateRefExtractor. Got: {js}"
+        );
+    }
+}

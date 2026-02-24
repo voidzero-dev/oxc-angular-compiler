@@ -459,6 +459,7 @@ fn reify_create_op<'a>(
                 cond.vars,
                 cond.tag.as_ref(),
                 cond.attributes,
+                cond.local_refs_index,
             ))
         }
         CreateOp::RepeaterCreate(repeater) => {
@@ -719,6 +720,7 @@ fn reify_create_op<'a>(
                 branch.vars,
                 branch.tag.as_ref(),
                 branch.attributes,
+                branch.local_refs_index,
             ))
         }
         CreateOp::ControlCreate(_) => {
