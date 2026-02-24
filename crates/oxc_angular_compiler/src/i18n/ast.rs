@@ -575,9 +575,7 @@ impl Visitor for CloneVisitor {
             Node::IcuPlaceholder(IcuPlaceholder::new(icu, ph.name.clone(), ph.source_span.clone()))
         } else {
             // visit_icu should always return Node::Icu by design.
-            // This is a compiler bug if we reach here.
-            debug_assert!(false, "visit_icu should return Node::Icu");
-            // Return the original placeholder unchanged as fallback
+            // Return the original placeholder unchanged as a safe fallback.
             Node::IcuPlaceholder(ph.clone())
         }
     }

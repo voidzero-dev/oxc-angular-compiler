@@ -435,21 +435,19 @@ fn count_safe_ternary_depth(expr: &IrExpression<'_>) -> usize {
 }
 
 /// Navigates to the SafeTernary at the given depth and returns a mutable reference.
+/// Returns `None` if the expression chain is shorter than expected (should not
+/// happen if `count_safe_ternary_depth` was used to determine the depth).
 fn get_safe_ternary_at_depth<'a, 'b>(
     expr: &'b mut IrExpression<'a>,
     depth: usize,
-) -> &'b mut SafeTernaryExpr<'a> {
+) -> Option<&'b mut SafeTernaryExpr<'a>> {
     let mut current = expr;
     for _ in 0..depth - 1 {
         if let IrExpression::SafeTernary(st) = current {
             current = st.expr.as_mut();
         }
     }
-    if let IrExpression::SafeTernary(st) = current {
-        st.as_mut()
-    } else {
-        unreachable!("Expected SafeTernary at depth")
-    }
+    if let IrExpression::SafeTernary(st) = current { Some(st.as_mut()) } else { None }
 }
 
 /// Finds and modifies the deepest SafeTernary in a SafeTernary chain.
@@ -468,7 +466,10 @@ fn modify_deepest_safe_ternary<'a>(
     }
 
     // Then navigate to the deepest SafeTernary (mutable borrow)
-    let deepest = get_safe_ternary_at_depth(receiver, depth);
+    let Some(deepest) = get_safe_ternary_at_depth(receiver, depth) else {
+        // SafeTernary chain was shorter than expected; skip modification.
+        return new_expr;
+    };
 
     // Take the current expr from the deepest SafeTernary
     let old_expr = std::mem::replace(deepest.expr.as_mut(), make_placeholder(allocator));

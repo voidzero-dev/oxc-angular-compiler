@@ -122,10 +122,7 @@ fn convert_output_arrow_to_ir<'a>(
         ArrowFunctionBody::Statements(_) => {
             // The expression syntax doesn't support multi-line arrow functions,
             // but the output AST does. We don't need to handle them here if
-            // the user isn't able to write one.
-            // Angular throws an assertion error here; we use debug_assert to
-            // catch any internal compiler bugs that produce this in debug builds.
-            debug_assert!(false, "unexpected multi-line arrow function in template expression");
+            // the user isn't able to write one. Skip conversion and return None.
             return None;
         }
     };

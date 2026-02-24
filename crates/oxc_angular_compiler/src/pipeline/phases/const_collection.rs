@@ -9,6 +9,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/const_collection.ts`.
 
 use oxc_allocator::Vec as OxcVec;
+use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::Atom;
 use rustc_hash::FxHashMap;
 
@@ -889,10 +890,11 @@ pub fn collect_element_consts_for_host(job: &mut HostBindingCompilationJob<'_>) 
                 // if (xref !== job.root.xref) {
                 //   throw new Error("An attribute would be const collected...");
                 // }
-                debug_assert!(
-                    attr.target == root_xref,
-                    "Host binding attribute should target root xref"
-                );
+                if attr.target != root_xref {
+                    job.diagnostics.push(OxcDiagnostic::error(
+                        "Host binding attribute should target root xref",
+                    ));
+                }
                 attrs.add_for_host(attr);
                 true
             } else {

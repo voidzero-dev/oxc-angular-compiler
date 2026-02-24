@@ -113,7 +113,8 @@ impl EmitterContext {
     /// Lines is always non-empty: initialized with one element in `new()`,
     /// and `println()` only pushes (never pops below 1).
     fn current_line(&self) -> &EmittedLine {
-        debug_assert!(!self.lines.is_empty(), "lines should never be empty");
+        // Invariant: lines is always non-empty (initialized with one element in new(),
+        // and println() only pushes, never pops below 1).
         &self.lines[self.lines.len() - 1]
     }
 
@@ -123,7 +124,8 @@ impl EmitterContext {
     /// Lines is always non-empty: initialized with one element in `new()`,
     /// and `println()` only pushes (never pops below 1).
     fn current_line_mut(&mut self) -> &mut EmittedLine {
-        debug_assert!(!self.lines.is_empty(), "lines should never be empty");
+        // Invariant: lines is always non-empty (initialized with one element in new(),
+        // and println() only pushes, never pops below 1).
         let len = self.lines.len();
         &mut self.lines[len - 1]
     }

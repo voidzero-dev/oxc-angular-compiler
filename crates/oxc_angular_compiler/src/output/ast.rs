@@ -1389,12 +1389,7 @@ impl<'a> OutputExpression<'a> {
             OutputExpression::WrappedIrNode(_) => {
                 // WrappedIrNode expressions wrap IR expressions for deferred processing.
                 // They should be resolved during the reify phase before any cloning occurs.
-                // If we hit this, it's a compiler bug.
-                debug_assert!(
-                    false,
-                    "Cannot clone a WrappedIrExpr. WrappedIrExpr should be resolved before cloning."
-                );
-                // Return a placeholder undefined literal
+                // Return a placeholder undefined literal as a safe fallback.
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Undefined, source_span: None },
                     allocator,

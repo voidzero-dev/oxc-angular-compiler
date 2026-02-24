@@ -552,7 +552,17 @@ fn scope_keyframes_names(
                             result.push_str(name);
                             result.push_str(trailing);
                         }
-                        _ => unreachable!(),
+                        Some(q) => {
+                            // Other quote characters (shouldn't happen in practice,
+                            // but handle gracefully).
+                            result.push_str(prefix);
+                            result.push(q);
+                            result.push_str(scope_selector);
+                            result.push('_');
+                            result.push_str(name);
+                            result.push(q);
+                            result.push_str(trailing);
+                        }
                     }
 
                     i = trailing_end;

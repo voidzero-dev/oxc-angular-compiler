@@ -12,10 +12,11 @@ use std::collections::{HashMap, HashSet};
 use std::ptr::NonNull;
 
 use oxc_allocator::{Box as OxcBox, Vec as OxcVec};
+use oxc_diagnostics::OxcDiagnostic;
 
 use crate::ir::enums::VariableFlags;
 use crate::ir::expression::IrExpression;
-use crate::ir::ops::{CreateOp, StatementOp, UpdateOp, UpdateOpBase, UpdateVariableOp, XrefId};
+use crate::ir::ops::{CreateOp, Op, StatementOp, UpdateOp, UpdateOpBase, UpdateVariableOp, XrefId};
 use crate::output::ast::{
     ExpressionStatement, OutputExpression, OutputStatement, ReturnStatement, WrappedIrExpr,
 };
@@ -1671,6 +1672,7 @@ fn uncount_variable_usages_in_expr(
 /// save/restore view optimization after variable optimization.
 fn optimize_arrow_function_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
     let allocator = job.allocator;
+    let mut local_diagnostics = Vec::new();
 
     // Collect view xrefs
     let view_xrefs: Vec<XrefId> =
@@ -1694,12 +1696,14 @@ fn optimize_arrow_function_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
 
             // Step 1: Optimize variables in the arrow function's ops
             // (No handler_expression for arrow functions)
-            optimize_handler_ops(&mut func.ops, None, allocator);
+            optimize_handler_ops(&mut func.ops, None, allocator, &mut local_diagnostics);
 
             // Step 2: Apply save/restore view optimization
             optimize_save_restore_view(&mut func.ops, allocator);
         }
     }
+
+    job.diagnostics.extend(local_diagnostics);
 }
 
 /// Optimize variables within listener handler_ops.
@@ -1711,6 +1715,7 @@ fn optimize_arrow_function_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
 fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
     // Get allocator reference
     let allocator = job.allocator;
+    let mut local_diagnostics = Vec::new();
 
     // Collect view xrefs
     let view_xrefs: Vec<XrefId> =
@@ -1736,19 +1741,35 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                         &mut listener.handler_ops,
                         listener.handler_expression.as_ref().map(|e| e.as_ref()),
                         allocator,
+                        &mut local_diagnostics,
                     );
                     optimize_save_restore_view(&mut listener.handler_ops, allocator);
                 }
                 CreateOp::TwoWayListener(listener) => {
-                    optimize_handler_ops(&mut listener.handler_ops, None, allocator);
+                    optimize_handler_ops(
+                        &mut listener.handler_ops,
+                        None,
+                        allocator,
+                        &mut local_diagnostics,
+                    );
                     optimize_save_restore_view(&mut listener.handler_ops, allocator);
                 }
                 CreateOp::AnimationListener(listener) => {
-                    optimize_handler_ops(&mut listener.handler_ops, None, allocator);
+                    optimize_handler_ops(
+                        &mut listener.handler_ops,
+                        None,
+                        allocator,
+                        &mut local_diagnostics,
+                    );
                     optimize_save_restore_view(&mut listener.handler_ops, allocator);
                 }
                 CreateOp::Animation(animation) => {
-                    optimize_handler_ops(&mut animation.handler_ops, None, allocator);
+                    optimize_handler_ops(
+                        &mut animation.handler_ops,
+                        None,
+                        allocator,
+                        &mut local_diagnostics,
+                    );
                     // Note: We intentionally do NOT call optimize_save_restore_view on
                     // Animation handler_ops. Angular's ngtsc output keeps restoreView/resetView
                     // in animation callbacks even when the return value doesn't reference the
@@ -1759,6 +1780,8 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
             }
         }
     }
+
+    job.diagnostics.extend(local_diagnostics);
 }
 
 /// Optimize variables within a single handler_ops Vec.
@@ -1777,10 +1800,12 @@ fn optimize_handler_ops<'a>(
     handler_ops: &mut OxcVec<'a, UpdateOp<'a>>,
     handler_expression: Option<&IrExpression<'a>>,
     allocator: &'a oxc_allocator::Allocator,
+    diagnostics: &mut Vec<OxcDiagnostic>,
 ) {
     // Step 1: Remove unused variables (loop until stable)
     loop {
-        let changed = optimize_handler_ops_once(handler_ops, handler_expression, allocator);
+        let changed =
+            optimize_handler_ops_once(handler_ops, handler_expression, allocator, diagnostics);
         if !changed {
             break;
         }
@@ -1789,7 +1814,7 @@ fn optimize_handler_ops<'a>(
     // Step 2: Inline context variables (nextContext()) into other variable ops.
     // Per TypeScript's allowConservativeInlining (lines 536-538):
     // "Context can only be inlined into other variables."
-    inline_context_vars_in_handler_ops(handler_ops, handler_expression, allocator);
+    inline_context_vars_in_handler_ops(handler_ops, handler_expression, allocator, diagnostics);
 }
 
 /// After variables have been optimized in nested ops (e.g. handlers or functions), we may end up
@@ -1908,6 +1933,7 @@ fn optimize_handler_ops_once<'a>(
     handler_ops: &mut OxcVec<'a, UpdateOp<'a>>,
     handler_expression: Option<&IrExpression<'a>>,
     allocator: &'a oxc_allocator::Allocator,
+    diagnostics: &mut Vec<OxcDiagnostic>,
 ) -> bool {
     // Build OpInfo for each operation: fences and variable usage
     // We need indices to track operations
@@ -2125,7 +2151,7 @@ fn optimize_handler_ops_once<'a>(
             result_ops.push(replacement);
         } else {
             // Clone the original op
-            result_ops.push(clone_update_op(op, allocator));
+            result_ops.push(clone_update_op(op, allocator, diagnostics));
         }
     }
 
@@ -2136,7 +2162,11 @@ fn optimize_handler_ops_once<'a>(
 }
 
 /// Clone an UpdateOp, focusing on the types we care about in handler_ops.
-fn clone_update_op<'a>(op: &UpdateOp<'a>, allocator: &'a oxc_allocator::Allocator) -> UpdateOp<'a> {
+fn clone_update_op<'a>(
+    op: &UpdateOp<'a>,
+    allocator: &'a oxc_allocator::Allocator,
+    diagnostics: &mut Vec<OxcDiagnostic>,
+) -> UpdateOp<'a> {
     match op {
         UpdateOp::Variable(var) => UpdateOp::Variable(UpdateVariableOp {
             base: UpdateOpBase::default(),
@@ -2152,12 +2182,34 @@ fn clone_update_op<'a>(op: &UpdateOp<'a>, allocator: &'a oxc_allocator::Allocato
             base: UpdateOpBase::default(),
             statement: clone_statement_with_ir_nodes(&stmt.statement, allocator),
         }),
-        // For other op types that might appear in handler_ops, we'd need to clone them too
-        // For now, these are the main ones we care about
+        // For other op types that might appear in handler_ops, we'd need to clone them too.
+        // This shouldn't happen in practice for handler_ops but we handle it gracefully
+        // by emitting a no-op statement and reporting a diagnostic.
         _ => {
-            // This shouldn't happen in practice for handler_ops
-            // but we need to handle it somehow
-            panic!("Unexpected op type in handler_ops during clone")
+            diagnostics.push(OxcDiagnostic::error(format!(
+                "Unexpected UpdateOp variant {:?} in clone_update_op",
+                op.kind()
+            )));
+            UpdateOp::Statement(StatementOp {
+                base: UpdateOpBase::default(),
+                statement: crate::output::ast::OutputStatement::Expression(
+                    oxc_allocator::Box::new_in(
+                        crate::output::ast::ExpressionStatement {
+                            expr: crate::output::ast::OutputExpression::Literal(
+                                oxc_allocator::Box::new_in(
+                                    crate::output::ast::LiteralExpr {
+                                        value: crate::output::ast::LiteralValue::Undefined,
+                                        source_span: None,
+                                    },
+                                    allocator,
+                                ),
+                            ),
+                            source_span: None,
+                        },
+                        allocator,
+                    ),
+                ),
+            })
         }
     }
 }
@@ -3682,6 +3734,7 @@ fn inline_context_vars_in_handler_ops<'a>(
     handler_ops: &mut OxcVec<'a, UpdateOp<'a>>,
     handler_expression: Option<&IrExpression<'a>>,
     allocator: &'a oxc_allocator::Allocator,
+    diagnostics: &mut Vec<OxcDiagnostic>,
 ) {
     use crate::ir::enums::SemanticVariableKind;
 
@@ -3803,7 +3856,7 @@ fn inline_context_vars_in_handler_ops<'a>(
                 continue;
             }
         }
-        new_ops.push(clone_update_op(op, allocator));
+        new_ops.push(clone_update_op(op, allocator, diagnostics));
     }
 
     *handler_ops = new_ops;

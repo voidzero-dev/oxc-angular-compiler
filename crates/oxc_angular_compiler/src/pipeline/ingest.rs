@@ -2349,10 +2349,17 @@ fn ingest_if_block<'a>(
             }
         }
 
-        // Extract i18n placeholder metadata from the branch
-        // Angular checks that branch.i18n is a BlockPlaceholder type
-        let i18n_placeholder =
-            convert_i18n_meta_to_placeholder(branch.i18n, &mut job.diagnostics, branch.source_span);
+        // Extract i18n placeholder metadata from the branch.
+        // Angular throws for unexpected types; we return early to avoid emitting broken IR.
+        let i18n_placeholder = match convert_i18n_meta_to_placeholder(
+            branch.i18n,
+            &mut job.diagnostics,
+            branch.source_span,
+            "@if",
+        ) {
+            Ok(placeholder) => placeholder,
+            Err(()) => return,
+        };
 
         // Infer tag name from single root element for content projection
         let tag_name =
@@ -2564,14 +2571,19 @@ fn ingest_for_block<'a>(
             }
             _ => {
                 // User-defined alias (e.g., 'let i = $index', 'let isFirst = $first')
-                // Create an alias with the appropriate expression
-                let expression = get_computed_for_loop_variable_expression(
+                // Create an alias with the appropriate expression.
+                // Angular throws for unknown variables; we return early to avoid
+                // emitting broken IR.
+                let expression = match get_computed_for_loop_variable_expression(
                     allocator,
                     var.value.as_str(),
                     &index_name,
                     &count_name,
                     &mut job.diagnostics,
-                );
+                ) {
+                    Ok(expr) => expr,
+                    Err(()) => return,
+                };
                 aliases.push(AliasVariable { identifier: var.name.clone(), expression });
 
                 // Track in var_names for track expression variable replacement
@@ -2611,19 +2623,15 @@ fn ingest_for_block<'a>(
 
         // Extract i18n placeholder from @empty block if present.
         // Per Angular's ingest.ts lines 970-974, only BlockPlaceholder is valid for @empty.
-        let empty_i18n_placeholder = match empty.i18n {
-            Some(I18nMeta::BlockPlaceholder(ref placeholder)) => Some(I18nPlaceholder::new(
-                placeholder.start_name.clone(),
-                Some(placeholder.close_name.clone()),
-            )),
-            Some(_) => {
-                job.diagnostics.push(
-                    OxcDiagnostic::error("Unhandled i18n metadata type for @empty")
-                        .with_label(empty.source_span),
-                );
-                None
-            }
-            None => None,
+        // Angular throws for unexpected types; we return early to avoid emitting broken IR.
+        let empty_i18n_placeholder = match convert_i18n_meta_to_placeholder(
+            empty.i18n,
+            &mut job.diagnostics,
+            empty.source_span,
+            "@empty",
+        ) {
+            Ok(placeholder) => placeholder,
+            Err(()) => return,
         };
 
         for child in empty.children {
@@ -2636,19 +2644,15 @@ fn ingest_for_block<'a>(
 
     // Extract i18n placeholder from @for block if present.
     // Per Angular's ingest.ts lines 967-969, only BlockPlaceholder is valid for @for.
-    let i18n_placeholder = match for_block.i18n {
-        Some(I18nMeta::BlockPlaceholder(ref placeholder)) => Some(I18nPlaceholder::new(
-            placeholder.start_name.clone(),
-            Some(placeholder.close_name.clone()),
-        )),
-        Some(_) => {
-            job.diagnostics.push(
-                OxcDiagnostic::error("Unhandled i18n metadata type for @for")
-                    .with_label(for_block.source_span),
-            );
-            None
-        }
-        None => None,
+    // Angular throws for unexpected types; we return early to avoid emitting broken IR.
+    let i18n_placeholder = match convert_i18n_meta_to_placeholder(
+        for_block.i18n,
+        &mut job.diagnostics,
+        for_block.source_span,
+        "@for",
+    ) {
+        Ok(placeholder) => placeholder,
+        Err(()) => return,
     };
 
     // Convert the track expression from the for block.
@@ -2700,39 +2704,41 @@ fn ingest_for_block<'a>(
 /// Creates a computed expression for @for loop variables.
 ///
 /// Ported from Angular's `getComputedForLoopVariableExpression` in `ingest.ts`.
+/// Returns `Ok(expression)` for known loop variables, or `Err(())` for unknown
+/// variables (matching Angular's throw behavior). A diagnostic is pushed on error.
 fn get_computed_for_loop_variable_expression<'a>(
     allocator: &'a Allocator,
     value: &str,
     index_name: &Atom<'a>,
     count_name: &Atom<'a>,
     diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
-) -> IrExpression<'a> {
+) -> Result<IrExpression<'a>, ()> {
     match value {
         "$index" => {
             // Return LexicalRead of the index variable
-            IrExpression::LexicalRead(Box::new_in(
+            Ok(IrExpression::LexicalRead(Box::new_in(
                 LexicalReadExpr { name: index_name.clone(), source_span: None },
                 allocator,
-            ))
+            )))
         }
         "$count" => {
             // Return LexicalRead of the count variable
-            IrExpression::LexicalRead(Box::new_in(
+            Ok(IrExpression::LexicalRead(Box::new_in(
                 LexicalReadExpr { name: count_name.clone(), source_span: None },
                 allocator,
-            ))
+            )))
         }
         "$first" => {
             // $index === 0
-            create_binary_identical(
+            Ok(create_binary_identical(
                 allocator,
                 create_lexical_read(allocator, index_name),
                 create_number_literal(allocator, 0.0),
-            )
+            ))
         }
         "$last" => {
             // $index === $count - 1
-            create_binary_identical(
+            Ok(create_binary_identical(
                 allocator,
                 create_lexical_read(allocator, index_name),
                 create_binary_minus(
@@ -2740,11 +2746,11 @@ fn get_computed_for_loop_variable_expression<'a>(
                     create_lexical_read(allocator, count_name),
                     create_number_literal(allocator, 1.0),
                 ),
-            )
+            ))
         }
         "$even" => {
             // $index % 2 === 0
-            create_binary_identical(
+            Ok(create_binary_identical(
                 allocator,
                 create_binary_modulo(
                     allocator,
@@ -2752,11 +2758,11 @@ fn get_computed_for_loop_variable_expression<'a>(
                     create_number_literal(allocator, 2.0),
                 ),
                 create_number_literal(allocator, 0.0),
-            )
+            ))
         }
         "$odd" => {
             // $index % 2 !== 0
-            create_binary_not_identical(
+            Ok(create_binary_not_identical(
                 allocator,
                 create_binary_modulo(
                     allocator,
@@ -2764,15 +2770,17 @@ fn get_computed_for_loop_variable_expression<'a>(
                     create_number_literal(allocator, 2.0),
                 ),
                 create_number_literal(allocator, 0.0),
-            )
+            ))
         }
         _ => {
             // Angular throws: "AssertionError: unknown @for loop variable ${variable.value}"
             // This should not happen if the parser correctly validates loop variables.
+            // We report a diagnostic and return Err to stop ingestion of this block,
+            // matching Angular's fail-fast behavior.
             diagnostics.push(OxcDiagnostic::error(format!(
                 "AssertionError: unknown @for loop variable {value}"
             )));
-            IrExpression::empty(allocator, None)
+            Err(())
         }
     }
 }
@@ -2937,10 +2945,17 @@ fn ingest_switch_block<'a>(
         // Allocate a new view for this group
         let group_view_xref = job.allocate_view(Some(view_xref));
 
-        // Extract i18n placeholder metadata from the group
-        // Angular checks that group.i18n is a BlockPlaceholder type
-        let i18n_placeholder =
-            convert_i18n_meta_to_placeholder(group.i18n, &mut job.diagnostics, group.source_span);
+        // Extract i18n placeholder metadata from the group.
+        // Angular throws for unexpected types; we return early to avoid emitting broken IR.
+        let i18n_placeholder = match convert_i18n_meta_to_placeholder(
+            group.i18n,
+            &mut job.diagnostics,
+            group.source_span,
+            "@switch",
+        ) {
+            Ok(placeholder) => placeholder,
+            Err(()) => return,
+        };
 
         // Infer tag name from single root element for content projection
         let tag_name =
@@ -3090,11 +3105,16 @@ fn ingest_defer_view<'a>(
     // Convert i18n metadata to placeholder, matching Angular's ingestDeferView which passes
     // i18nMeta through to createTemplateOp. This enables propagate_i18n_blocks to wrap the
     // deferred template with i18nStart/i18nEnd when inside an i18n context.
-    let i18n_placeholder = convert_i18n_meta_to_placeholder(
+    // Angular throws for unexpected types; we return early to avoid emitting broken IR.
+    let i18n_placeholder = match convert_i18n_meta_to_placeholder(
         i18n,
         &mut job.diagnostics,
         source_span.unwrap_or(oxc_span::SPAN),
-    );
+        "@defer",
+    ) {
+        Ok(placeholder) => placeholder,
+        Err(()) => return None,
+    };
 
     let template_op = CreateOp::Template(TemplateOp {
         base: CreateOpBase { source_span, ..Default::default() },
@@ -4213,29 +4233,34 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
 /// is specifically a BlockPlaceholder type and extract its start_name/close_name.
 ///
 /// Ported from Angular's i18n handling in `ingest.ts` (lines 531-537, 1088-1094).
+/// Returns `Ok(Some(placeholder))` for valid BlockPlaceholder metadata,
+/// `Ok(None)` when no i18n metadata is present, or `Err(())` when an
+/// unexpected metadata type is encountered (matching Angular's throw behavior).
 fn convert_i18n_meta_to_placeholder<'a>(
     i18n: Option<I18nMeta<'a>>,
     diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
     source_span: oxc_span::Span,
-) -> Option<I18nPlaceholder<'a>> {
+    block_name: &str,
+) -> Result<Option<I18nPlaceholder<'a>>, ()> {
     match i18n {
         Some(I18nMeta::Node(I18nNode::BlockPlaceholder(bp))) => {
-            Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name)))
+            Ok(Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name))))
         }
         Some(I18nMeta::BlockPlaceholder(bp)) => {
-            Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name)))
+            Ok(Some(I18nPlaceholder::new(bp.start_name, Some(bp.close_name))))
         }
         // Reference: ingest.ts lines 533-537, 587-591
         // Angular throws an assertion error for unexpected i18n metadata types.
-        // We report a diagnostic instead to avoid crashing the process.
+        // We report a diagnostic and return Err to stop ingestion of this block,
+        // matching Angular's fail-fast behavior.
         Some(_) => {
             diagnostics.push(
-                OxcDiagnostic::error("Unhandled i18n metadata type for conditional block")
+                OxcDiagnostic::error(format!("Unhandled i18n metadata type for {block_name}"))
                     .with_label(source_span),
             );
-            None
+            Err(())
         }
-        None => None,
+        None => Ok(None),
     }
 }
 
@@ -4456,6 +4481,113 @@ impl<'a, 'b> RootNodeRef<'a, 'b> {
                 // Template should have a tag_name since we checked for it
                 tmpl.tag_name.clone().unwrap_or_else(|| Atom::from(""))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::r3::I18nMessage;
+    use oxc_allocator::Allocator;
+
+    /// Issue #1: convert_i18n_meta_to_placeholder should return Err for unexpected
+    /// i18n metadata types, matching Angular's throw behavior.
+    /// Angular reference: ingest.ts lines 533-537, 587-591, 970-974
+    #[test]
+    fn convert_i18n_meta_to_placeholder_returns_err_for_unexpected_type() {
+        let allocator = Allocator::default();
+        let mut diagnostics = std::vec::Vec::new();
+
+        // Create an unexpected i18n metadata type (Message instead of BlockPlaceholder).
+        // Control flow blocks should only have BlockPlaceholder metadata.
+        let unexpected_i18n = I18nMeta::Message(I18nMessage {
+            instance_id: 0,
+            nodes: Vec::new_in(&allocator),
+            meaning: Atom::from(""),
+            description: Atom::from(""),
+            custom_id: Atom::from(""),
+            id: Atom::from(""),
+            legacy_ids: Vec::new_in(&allocator),
+            message_string: Atom::from(""),
+        });
+
+        let result = convert_i18n_meta_to_placeholder(
+            Some(unexpected_i18n),
+            &mut diagnostics,
+            oxc_span::SPAN,
+            "@for",
+        );
+
+        assert!(result.is_err(), "Should return Err for unexpected i18n metadata type");
+        assert_eq!(diagnostics.len(), 1, "Should push exactly one diagnostic");
+        assert!(
+            diagnostics[0].message.contains("Unhandled i18n metadata type for @for"),
+            "Diagnostic message should name the specific block type, got: {}",
+            diagnostics[0].message,
+        );
+    }
+
+    /// Issue #1: convert_i18n_meta_to_placeholder should return Ok(None) when
+    /// no i18n metadata is present.
+    #[test]
+    fn convert_i18n_meta_to_placeholder_returns_none_for_absent_metadata() {
+        let mut diagnostics = std::vec::Vec::new();
+
+        let result =
+            convert_i18n_meta_to_placeholder(None, &mut diagnostics, oxc_span::SPAN, "@if");
+
+        assert!(result.is_ok(), "Should return Ok for absent metadata");
+        assert!(result.unwrap().is_none(), "Should return None when no i18n metadata");
+        assert!(diagnostics.is_empty(), "Should not push any diagnostics");
+    }
+
+    /// Issue #2: get_computed_for_loop_variable_expression should return Err for
+    /// unknown loop variables, matching Angular's AssertionError throw.
+    /// Angular reference: ingest.ts lines 1043-1044
+    #[test]
+    fn get_computed_for_loop_variable_expression_returns_err_for_unknown_var() {
+        let allocator = Allocator::default();
+        let mut diagnostics = std::vec::Vec::new();
+        let index_name = Atom::from("ɵ$index_0");
+        let count_name = Atom::from("ɵ$count_0");
+
+        let result = get_computed_for_loop_variable_expression(
+            &allocator,
+            "$unknown",
+            &index_name,
+            &count_name,
+            &mut diagnostics,
+        );
+
+        assert!(result.is_err(), "Should return Err for unknown loop variable");
+        assert_eq!(diagnostics.len(), 1, "Should push exactly one diagnostic");
+        assert!(
+            diagnostics[0].message.contains("unknown @for loop variable $unknown"),
+            "Diagnostic should name the unknown variable"
+        );
+    }
+
+    /// Issue #2: get_computed_for_loop_variable_expression should return Ok for
+    /// all known loop variables ($index, $count, $first, $last, $even, $odd).
+    #[test]
+    fn get_computed_for_loop_variable_expression_returns_ok_for_known_vars() {
+        let allocator = Allocator::default();
+        let index_name = Atom::from("ɵ$index_0");
+        let count_name = Atom::from("ɵ$count_0");
+
+        for var in &["$index", "$count", "$first", "$last", "$even", "$odd"] {
+            let mut diagnostics = std::vec::Vec::new();
+            let result = get_computed_for_loop_variable_expression(
+                &allocator,
+                var,
+                &index_name,
+                &count_name,
+                &mut diagnostics,
+            );
+
+            assert!(result.is_ok(), "Should return Ok for known variable {var}");
+            assert!(diagnostics.is_empty(), "Should not push diagnostics for {var}");
         }
     }
 }
