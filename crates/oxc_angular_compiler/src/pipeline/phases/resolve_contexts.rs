@@ -6,6 +6,9 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_contexts.ts`.
 
+use std::cell::RefCell;
+
+use oxc_diagnostics::OxcDiagnostic;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::SemanticVariableKind;
@@ -35,6 +38,9 @@ pub fn resolve_contexts(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
     let root_xref = job.root.xref;
 
+    // Collect errors in a RefCell to allow mutation from within Fn closures
+    let errors: RefCell<Vec<OxcDiagnostic>> = RefCell::new(Vec::new());
+
     // Collect view xrefs to avoid borrow issues
     let view_xrefs: Vec<_> = job.all_views().map(|v| v.xref).collect();
 
@@ -48,13 +54,22 @@ pub fn resolve_contexts(job: &mut ComponentCompilationJob<'_>) {
                 // SAFETY: The pointer is valid because it was populated by generate_arrow_functions
                 // and the allocator keeps the data alive.
                 let arrow_fn = unsafe { &mut **fn_ptr };
-                process_lexical_scope_update_vec(allocator, view_xref, is_root, &mut arrow_fn.ops);
+                process_lexical_scope_update_vec(
+                    allocator,
+                    view_xref,
+                    is_root,
+                    &mut arrow_fn.ops,
+                    &errors,
+                );
             }
 
-            process_lexical_scope_create(allocator, view_xref, is_root, &mut view.create);
-            process_lexical_scope_update(allocator, view_xref, is_root, &mut view.update);
+            process_lexical_scope_create(allocator, view_xref, is_root, &mut view.create, &errors);
+            process_lexical_scope_update(allocator, view_xref, is_root, &mut view.update, &errors);
         }
     }
+
+    // Add all collected errors to job diagnostics
+    job.diagnostics.extend(errors.into_inner());
 }
 
 /// Process create operations to build scope and resolve context expressions.
@@ -63,6 +78,7 @@ fn process_lexical_scope_create<'a>(
     view_xref: XrefId,
     is_root: bool,
     ops: &mut CreateOpList<'a>,
+    errors: &RefCell<Vec<OxcDiagnostic>>,
 ) {
     // Track how to access each view's context by its XrefId.
     let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();
@@ -100,6 +116,7 @@ fn process_lexical_scope_create<'a>(
                     is_root,
                     &mut listener.handler_ops,
                     &mut listener.handler_expression,
+                    errors,
                 );
             }
             CreateOp::TwoWayListener(listener) => {
@@ -110,6 +127,7 @@ fn process_lexical_scope_create<'a>(
                     is_root,
                     &mut listener.handler_ops,
                     &mut None,
+                    errors,
                 );
             }
             CreateOp::AnimationListener(listener) => {
@@ -120,6 +138,7 @@ fn process_lexical_scope_create<'a>(
                     is_root,
                     &mut listener.handler_ops,
                     &mut None,
+                    errors,
                 );
             }
             CreateOp::Animation(animation) => {
@@ -130,6 +149,7 @@ fn process_lexical_scope_create<'a>(
                     is_root,
                     &mut animation.handler_ops,
                     &mut None,
+                    errors,
                 );
             }
             CreateOp::RepeaterCreate(repeater) => {
@@ -138,7 +158,13 @@ fn process_lexical_scope_create<'a>(
                 //   case ir.OpKind.RepeaterCreate:
                 //     if (op.trackByOps !== null) { processLexicalScope(view, op.trackByOps); }
                 if let Some(ref mut track_by_ops) = repeater.track_by_ops {
-                    process_lexical_scope_update_vec(allocator, view_xref, is_root, track_by_ops);
+                    process_lexical_scope_update_vec(
+                        allocator,
+                        view_xref,
+                        is_root,
+                        track_by_ops,
+                        errors,
+                    );
                 }
                 // Also transform expressions in the RepeaterCreate op itself (e.g., rep.track)
                 // using the parent scope. Note: track_by_ops have already been processed above
@@ -147,7 +173,7 @@ fn process_lexical_scope_create<'a>(
                 transform_expressions_in_create_op(
                     op,
                     &|expr, _flags| {
-                        transform_context_expr(allocator, expr, &scope);
+                        transform_context_expr(allocator, expr, &scope, view_xref, errors);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -156,7 +182,7 @@ fn process_lexical_scope_create<'a>(
                 transform_expressions_in_create_op(
                     op,
                     &|expr, _flags| {
-                        transform_context_expr(allocator, expr, &scope);
+                        transform_context_expr(allocator, expr, &scope, view_xref, errors);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -181,6 +207,7 @@ fn process_listener_handler_ops<'a>(
     is_root: bool,
     handler_ops: &mut oxc_allocator::Vec<'a, UpdateOp<'a>>,
     handler_expression: &mut Option<oxc_allocator::Box<'a, IrExpression<'a>>>,
+    errors: &RefCell<Vec<OxcDiagnostic>>,
 ) {
     // Build scope from handler_ops - look for Context variables (restoreView/nextContext)
     let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();
@@ -220,7 +247,7 @@ fn process_listener_handler_ops<'a>(
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                transform_context_expr(allocator, expr, &scope);
+                transform_context_expr(allocator, expr, &scope, view_xref, errors);
             },
             VisitorContextFlag::NONE,
         );
@@ -233,7 +260,7 @@ fn process_listener_handler_ops<'a>(
         transform_expressions_in_expression(
             expr.as_mut(),
             &|e, _flags| {
-                transform_context_expr(allocator, e, &scope);
+                transform_context_expr(allocator, e, &scope, view_xref, errors);
             },
             VisitorContextFlag::NONE,
         );
@@ -246,6 +273,7 @@ fn process_lexical_scope_update<'a>(
     view_xref: XrefId,
     is_root: bool,
     ops: &mut UpdateOpList<'a>,
+    errors: &RefCell<Vec<OxcDiagnostic>>,
 ) {
     // Track how to access each view's context by its XrefId.
     let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();
@@ -274,7 +302,7 @@ fn process_lexical_scope_update<'a>(
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                transform_context_expr(allocator, expr, &scope);
+                transform_context_expr(allocator, expr, &scope, view_xref, errors);
             },
             VisitorContextFlag::NONE,
         );
@@ -290,6 +318,7 @@ fn process_lexical_scope_update_vec<'a>(
     view_xref: XrefId,
     is_root: bool,
     ops: &mut oxc_allocator::Vec<'a, UpdateOp<'a>>,
+    errors: &RefCell<Vec<OxcDiagnostic>>,
 ) {
     // Track how to access each view's context by its XrefId.
     let mut scope: FxHashMap<XrefId, ContextAccess> = FxHashMap::default();
@@ -318,7 +347,7 @@ fn process_lexical_scope_update_vec<'a>(
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                transform_context_expr(allocator, expr, &scope);
+                transform_context_expr(allocator, expr, &scope, view_xref, errors);
             },
             VisitorContextFlag::NONE,
         );
@@ -333,6 +362,8 @@ fn transform_context_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expr: &mut IrExpression<'a>,
     scope: &FxHashMap<XrefId, ContextAccess>,
+    view_xref: XrefId,
+    errors: &RefCell<Vec<OxcDiagnostic>>,
 ) {
     if let IrExpression::Context(ctx_expr) = expr {
         match scope.get(&ctx_expr.view) {
@@ -348,8 +379,12 @@ fn transform_context_expr<'a>(
                 ));
             }
             None => {
-                // No context found - this is an error condition but we'll keep
-                // the expression as-is for now. The reify phase will handle it.
+                // Angular throws: "No context found for reference to view X from view Y"
+                // This indicates a compiler bug (missing context variable generation).
+                errors.borrow_mut().push(OxcDiagnostic::error(format!(
+                    "No context found for reference to view {:?} from view {:?}",
+                    ctx_expr.view, view_xref
+                )));
             }
         }
     }
@@ -361,7 +396,10 @@ fn transform_context_expr<'a>(
 pub fn resolve_contexts_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
     let view_xref = job.root.xref;
+    let errors: RefCell<Vec<OxcDiagnostic>> = RefCell::new(Vec::new());
     // Host bindings are always at the root level
-    process_lexical_scope_create(allocator, view_xref, true, &mut job.root.create);
-    process_lexical_scope_update(allocator, view_xref, true, &mut job.root.update);
+    process_lexical_scope_create(allocator, view_xref, true, &mut job.root.create, &errors);
+    process_lexical_scope_update(allocator, view_xref, true, &mut job.root.update, &errors);
+    // Add all collected errors to job diagnostics
+    job.diagnostics.extend(errors.into_inner());
 }

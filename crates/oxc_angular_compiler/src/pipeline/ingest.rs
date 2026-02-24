@@ -2570,6 +2570,7 @@ fn ingest_for_block<'a>(
                     var.value.as_str(),
                     &index_name,
                     &count_name,
+                    &mut job.diagnostics,
                 );
                 aliases.push(AliasVariable { identifier: var.name.clone(), expression });
 
@@ -2704,6 +2705,7 @@ fn get_computed_for_loop_variable_expression<'a>(
     value: &str,
     index_name: &Atom<'a>,
     count_name: &Atom<'a>,
+    diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> IrExpression<'a> {
     match value {
         "$index" => {
@@ -2765,7 +2767,11 @@ fn get_computed_for_loop_variable_expression<'a>(
             )
         }
         _ => {
-            // Unknown variable - return empty expression
+            // Angular throws: "AssertionError: unknown @for loop variable ${variable.value}"
+            // This should not happen if the parser correctly validates loop variables.
+            diagnostics.push(OxcDiagnostic::error(format!(
+                "AssertionError: unknown @for loop variable {value}"
+            )));
             IrExpression::empty(allocator, None)
         }
     }

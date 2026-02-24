@@ -88,23 +88,11 @@ fn optimize_track_expression<'a>(
         return;
     }
 
-    // Check for simple property read on the component: this.fn (without calling it)
-    // This pattern is used when the track function is a pre-defined function on the component.
-    // Example: `track trackByFn` where trackByFn is a property/method on the component.
-    if let Some(prop_name) = check_component_property_track(&rep.track, expressions) {
-        rep.uses_component_instance = true;
-        // In root view, emit as ctx.propName; otherwise use componentInstance()
-        if view_xref == root_xref {
-            let fn_name = format!("ctx.{}", prop_name);
-            let name_str = allocator.alloc_str(&fn_name);
-            rep.track_fn_name = Some(Atom::from(name_str));
-        } else {
-            let fn_name = format!("{}().{}", Identifiers::COMPONENT_INSTANCE, prop_name);
-            let name_str = allocator.alloc_str(&fn_name);
-            rep.track_fn_name = Some(Atom::from(name_str));
-        }
-        return;
-    }
+    // Note: Angular does NOT optimize bare property reads like `track trackByFn` into
+    // direct references (e.g., `ctx.trackByFn`). Only `$index`, `$item`, and
+    // `fn($index[, $item])` call patterns are optimized. Bare property reads fall through
+    // to the non-optimizable case below, which creates a wrapper function like:
+    //   `function _forTrack($index,$item) { return this.trackByFn; }`
 
     // First check if the expression contains any ContextExpr or AST expressions
     // that reference the component instance (implicit receiver)
@@ -384,57 +372,6 @@ fn check_ast_for_simple_track_variable(
             }
         }
     }
-    None
-}
-
-/// Check if the track expression is a simple property read on the component (e.g., `trackByFn`).
-///
-/// This pattern is used when the track function is a pre-bound function on the component,
-/// like `track trackByFn` where `trackByFn` is a method/property on the component.
-/// Angular emits `ctx.trackByFn` directly instead of wrapping it.
-///
-/// Returns the property name if found.
-fn check_component_property_track(
-    track: &IrExpression<'_>,
-    expressions: &crate::pipeline::expression_store::ExpressionStore<'_>,
-) -> Option<String> {
-    use crate::ast::expression::AngularExpression;
-
-    // Handle different expression types
-    match track {
-        // AST PropertyRead on implicit receiver
-        IrExpression::Ast(ast) => {
-            if let AngularExpression::PropertyRead(pr) = ast.as_ref() {
-                if matches!(&pr.receiver, AngularExpression::ImplicitReceiver(_)) {
-                    // Don't match $index or $item - those are handled by check_simple_track_variable
-                    let name = pr.name.as_str();
-                    if name != "$index" && name != "$item" {
-                        return Some(name.to_string());
-                    }
-                }
-            }
-        }
-        // ExpressionRef - look up the stored expression
-        IrExpression::ExpressionRef(id) => {
-            let stored_expr = expressions.get(*id);
-            if let AngularExpression::PropertyRead(pr) = stored_expr {
-                if matches!(&pr.receiver, AngularExpression::ImplicitReceiver(_)) {
-                    let name = pr.name.as_str();
-                    if name != "$index" && name != "$item" {
-                        return Some(name.to_string());
-                    }
-                }
-            }
-        }
-        // ResolvedPropertyRead with Context receiver (after resolveNames phase)
-        IrExpression::ResolvedPropertyRead(rp) => {
-            if matches!(rp.receiver.as_ref(), IrExpression::Context(_)) {
-                return Some(rp.name.to_string());
-            }
-        }
-        _ => {}
-    }
-
     None
 }
 

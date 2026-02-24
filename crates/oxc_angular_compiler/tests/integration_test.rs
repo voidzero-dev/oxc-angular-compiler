@@ -1033,6 +1033,47 @@ export class ExternalComponent {
 // Nested Control Flow Tests
 // ============================================================================
 
+/// Tests that bare component property tracks like `track id` generate a wrapper function,
+/// NOT a direct `ctx.id` reference. Angular emits:
+///   `function _forTrack($index,$item) { return this.id; }` then `ɵɵrepeaterCreate(..., _forTrack, true)`
+/// Previously, oxc incorrectly optimized this to `ctx.id` passed directly, which changes
+/// runtime semantics (passes a non-function value instead of a track function).
+#[test]
+fn test_for_track_bare_component_property() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track id) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    // Angular wraps bare property reads in a function: _forTrack($index,$item){ return this.id; }
+    // It should NOT be optimized to ctx.id directly
+    assert!(
+        js.contains("_forTrack"),
+        "Bare component property track should generate a wrapper function _forTrack, not a direct ctx.id reference. Output:\n{js}"
+    );
+    assert!(
+        js.contains("return this.id"),
+        "Track wrapper function should use 'this.id' (not ctx.id) since usesComponentInstance is true. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_bare_component_property", js);
+}
+
+/// Tests that `track trackByFn` (bare method reference) also generates a wrapper function.
+/// Angular does NOT optimize bare property reads like `track trackByFn` into direct references.
+/// Only `track trackByFn($index)` or `track trackByFn($index, $item)` get optimized.
+#[test]
+fn test_for_track_bare_method_reference() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track trackByFn) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    // Angular wraps bare method references in a function
+    assert!(
+        js.contains("_forTrack"),
+        "Bare method reference track should generate a wrapper function _forTrack. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_bare_method_reference", js);
+}
+
 #[test]
 fn test_nested_for_loops() {
     let js = compile_template_to_js(
