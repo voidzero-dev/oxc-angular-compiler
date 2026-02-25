@@ -1341,7 +1341,15 @@ fn reify_track_by<'a>(
             let return_value = if let Some(OutputStatement::Return(ret)) = statements.first() {
                 ret.value.clone_in(allocator)
             } else {
-                unreachable!("checked above that there's exactly one Return statement");
+                // The condition at line 1331 guarantees a single Return statement here.
+                // Fall back to function expression if the invariant is somehow violated.
+                diagnostics.push(OxcDiagnostic::error(
+                    "Expected single Return statement for arrow function conversion",
+                ));
+                return OutputExpression::Function(Box::new_in(
+                    FunctionExpr { name: None, params, statements, source_span: None },
+                    allocator,
+                ));
             };
 
             OutputExpression::ArrowFunction(Box::new_in(
