@@ -29,7 +29,7 @@
     "zone.js": "^0.16.0"
   },
   "devDependencies": {
-    "@oxc-angular/compiler": "workspace:*",
+    "@oxc-angular/vite": "workspace:*",
     "@oxc-node/cli": "catalog:",
     "@oxc-node/core": "catalog:",
     "@types/node": "catalog:",

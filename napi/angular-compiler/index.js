@@ -79,9 +79,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-android-arm64')
+        const binding = require('@oxc-angular/binding-android-arm64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-android-arm64/package.json').version
+          require('@oxc-angular/binding-android-arm64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -102,9 +102,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-android-arm-eabi')
+        const binding = require('@oxc-angular/binding-android-arm-eabi')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-android-arm-eabi/package.json').version
+          require('@oxc-angular/binding-android-arm-eabi/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -133,9 +133,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-win32-x64-gnu')
+          const binding = require('@oxc-angular/binding-win32-x64-gnu')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-win32-x64-gnu/package.json').version
+            require('@oxc-angular/binding-win32-x64-gnu/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -156,9 +156,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-win32-x64-msvc')
+          const binding = require('@oxc-angular/binding-win32-x64-msvc')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-win32-x64-msvc/package.json').version
+            require('@oxc-angular/binding-win32-x64-msvc/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -180,9 +180,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-win32-ia32-msvc')
+        const binding = require('@oxc-angular/binding-win32-ia32-msvc')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-win32-ia32-msvc/package.json').version
+          require('@oxc-angular/binding-win32-ia32-msvc/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -203,9 +203,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-win32-arm64-msvc')
+        const binding = require('@oxc-angular/binding-win32-arm64-msvc')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-win32-arm64-msvc/package.json').version
+          require('@oxc-angular/binding-win32-arm64-msvc/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -229,9 +229,9 @@ function requireNative() {
       loadErrors.push(e)
     }
     try {
-      const binding = require('@oxc-angular/compiler-darwin-universal')
+      const binding = require('@oxc-angular/binding-darwin-universal')
       const bindingPackageVersion =
-        require('@oxc-angular/compiler-darwin-universal/package.json').version
+        require('@oxc-angular/binding-darwin-universal/package.json').version
       if (
         bindingPackageVersion !== '0.0.3' &&
         process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -252,9 +252,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-darwin-x64')
+        const binding = require('@oxc-angular/binding-darwin-x64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-darwin-x64/package.json').version
+          require('@oxc-angular/binding-darwin-x64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -275,9 +275,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-darwin-arm64')
+        const binding = require('@oxc-angular/binding-darwin-arm64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-darwin-arm64/package.json').version
+          require('@oxc-angular/binding-darwin-arm64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -302,9 +302,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-freebsd-x64')
+        const binding = require('@oxc-angular/binding-freebsd-x64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-freebsd-x64/package.json').version
+          require('@oxc-angular/binding-freebsd-x64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -325,9 +325,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-freebsd-arm64')
+        const binding = require('@oxc-angular/binding-freebsd-arm64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-freebsd-arm64/package.json').version
+          require('@oxc-angular/binding-freebsd-arm64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -353,9 +353,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-x64-musl')
+          const binding = require('@oxc-angular/binding-linux-x64-musl')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-x64-musl/package.json').version
+            require('@oxc-angular/binding-linux-x64-musl/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -376,9 +376,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-x64-gnu')
+          const binding = require('@oxc-angular/binding-linux-x64-gnu')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-x64-gnu/package.json').version
+            require('@oxc-angular/binding-linux-x64-gnu/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -401,9 +401,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-arm64-musl')
+          const binding = require('@oxc-angular/binding-linux-arm64-musl')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-arm64-musl/package.json').version
+            require('@oxc-angular/binding-linux-arm64-musl/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -424,9 +424,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-arm64-gnu')
+          const binding = require('@oxc-angular/binding-linux-arm64-gnu')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-arm64-gnu/package.json').version
+            require('@oxc-angular/binding-linux-arm64-gnu/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -449,9 +449,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-arm-musleabihf')
+          const binding = require('@oxc-angular/binding-linux-arm-musleabihf')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-arm-musleabihf/package.json').version
+            require('@oxc-angular/binding-linux-arm-musleabihf/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -472,9 +472,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-arm-gnueabihf')
+          const binding = require('@oxc-angular/binding-linux-arm-gnueabihf')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-arm-gnueabihf/package.json').version
+            require('@oxc-angular/binding-linux-arm-gnueabihf/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -497,9 +497,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-loong64-musl')
+          const binding = require('@oxc-angular/binding-linux-loong64-musl')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-loong64-musl/package.json').version
+            require('@oxc-angular/binding-linux-loong64-musl/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -520,9 +520,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-loong64-gnu')
+          const binding = require('@oxc-angular/binding-linux-loong64-gnu')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-loong64-gnu/package.json').version
+            require('@oxc-angular/binding-linux-loong64-gnu/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -545,9 +545,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-riscv64-musl')
+          const binding = require('@oxc-angular/binding-linux-riscv64-musl')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-riscv64-musl/package.json').version
+            require('@oxc-angular/binding-linux-riscv64-musl/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -568,9 +568,9 @@ function requireNative() {
           loadErrors.push(e)
         }
         try {
-          const binding = require('@oxc-angular/compiler-linux-riscv64-gnu')
+          const binding = require('@oxc-angular/binding-linux-riscv64-gnu')
           const bindingPackageVersion =
-            require('@oxc-angular/compiler-linux-riscv64-gnu/package.json').version
+            require('@oxc-angular/binding-linux-riscv64-gnu/package.json').version
           if (
             bindingPackageVersion !== '0.0.3' &&
             process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -592,9 +592,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-linux-ppc64-gnu')
+        const binding = require('@oxc-angular/binding-linux-ppc64-gnu')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-linux-ppc64-gnu/package.json').version
+          require('@oxc-angular/binding-linux-ppc64-gnu/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -615,9 +615,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-linux-s390x-gnu')
+        const binding = require('@oxc-angular/binding-linux-s390x-gnu')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-linux-s390x-gnu/package.json').version
+          require('@oxc-angular/binding-linux-s390x-gnu/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -642,9 +642,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-openharmony-arm64')
+        const binding = require('@oxc-angular/binding-openharmony-arm64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-openharmony-arm64/package.json').version
+          require('@oxc-angular/binding-openharmony-arm64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -665,9 +665,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-openharmony-x64')
+        const binding = require('@oxc-angular/binding-openharmony-x64')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-openharmony-x64/package.json').version
+          require('@oxc-angular/binding-openharmony-x64/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -688,9 +688,9 @@ function requireNative() {
         loadErrors.push(e)
       }
       try {
-        const binding = require('@oxc-angular/compiler-openharmony-arm')
+        const binding = require('@oxc-angular/binding-openharmony-arm')
         const bindingPackageVersion =
-          require('@oxc-angular/compiler-openharmony-arm/package.json').version
+          require('@oxc-angular/binding-openharmony-arm/package.json').version
         if (
           bindingPackageVersion !== '0.0.3' &&
           process.env.NAPI_RS_ENFORCE_VERSION_CHECK &&
@@ -727,7 +727,7 @@ if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
   }
   if (!nativeBinding || process.env.NAPI_RS_FORCE_WASI) {
     try {
-      wasiBinding = require('@oxc-angular/compiler-wasm32-wasi')
+      wasiBinding = require('@oxc-angular/binding-wasm32-wasi')
       nativeBinding = wasiBinding
     } catch (err) {
       if (process.env.NAPI_RS_FORCE_WASI) {

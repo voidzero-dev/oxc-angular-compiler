@@ -2,7 +2,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Use our local vite-plugin implementation
-import { angular } from '@oxc-angular/compiler'
+import { angular } from '@oxc-angular/vite'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 

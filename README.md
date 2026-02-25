@@ -16,11 +16,11 @@ A high-performance Angular template compiler written in Rust, leveraging the [Ox
 ## Installation
 
 ```bash
-npm install @oxc-angular/compiler
+npm install @oxc-angular/vite
 # or
-pnpm add @oxc-angular/compiler
+pnpm add @oxc-angular/vite
 # or
-yarn add @oxc-angular/compiler
+yarn add @oxc-angular/vite
 ```
 
 ## Quick Start
@@ -30,7 +30,7 @@ yarn add @oxc-angular/compiler
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { angular } from '@oxc-angular/compiler'
+import { angular } from '@oxc-angular/vite'
 
 export default defineConfig({
   plugins: [
@@ -46,7 +46,7 @@ export default defineConfig({
 ### Programmatic API
 
 ```typescript
-import { compileTemplate, transformAngularFile } from '@oxc-angular/compiler/api'
+import { compileTemplate, transformAngularFile } from '@oxc-angular/vite/api'
 
 // Compile a template string
 const result = await compileTemplate(

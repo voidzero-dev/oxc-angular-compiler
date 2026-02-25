@@ -46,7 +46,7 @@ async function linkCode(
 
 export function angularLinkerPlugin(): Plugin {
   return {
-    name: '@oxc-angular/compiler-linker',
+    name: '@oxc-angular/vite-linker',
     config(_, { command }) {
       return {
         optimizeDeps: {

@@ -9,7 +9,7 @@ import type {
   ExtractedInputMetadata,
   ExtractedOutputMetadata,
   ExtractedQueryMetadata,
-} from '@oxc-angular/compiler/api'
+} from '@oxc-angular/vite/api'
 import fg from 'fast-glob'
 import pLimit from 'p-limit'
 

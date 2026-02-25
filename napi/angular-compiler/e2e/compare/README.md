@@ -2,7 +2,7 @@
 
 A testing tool that validates the OXC Angular compiler by comparing its output against the official Angular compiler.
 
-> **Note**: This is a development/testing tool within the `@oxc-angular/compiler` package. For the main package documentation, see the [parent README](../../README.md).
+> **Note**: This is a development/testing tool within the `@oxc-angular/vite` package. For the main package documentation, see the [parent README](../../README.md).
 
 ## Purpose
 

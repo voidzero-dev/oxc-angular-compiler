@@ -21,7 +21,7 @@
   "devDependencies": {
     "@angular/build": "^21.0.0",
     "@angular/compiler-cli": "^21.0.0",
-    "@oxc-angular/compiler": "workspace:^",
+    "@oxc-angular/vite": "workspace:^",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
     "tailwindcss": "catalog:",

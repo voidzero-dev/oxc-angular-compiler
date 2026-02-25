@@ -2,7 +2,7 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 // Use our local vite-plugin implementation
-import { angular } from '@oxc-angular/compiler/vite-plugin'
+import { angular } from '@oxc-angular/vite/vite-plugin'
 import { defineConfig, type UserConfig } from 'vite'
 import wasm from 'vite-plugin-wasm'
 import tsconfigPaths from 'vite-tsconfig-paths'

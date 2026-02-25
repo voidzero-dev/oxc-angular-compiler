@@ -14,9 +14,9 @@ A high-performance, Rust-based Angular compiler for Node.js. Provides both a sta
 ## Installation
 
 ```bash
-npm install @oxc-angular/compiler
+npm install @oxc-angular/vite
 # or
-pnpm add @oxc-angular/compiler
+pnpm add @oxc-angular/vite
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ pnpm add @oxc-angular/compiler
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { angular } from '@oxc-angular/compiler/vite-plugin'
+import { angular } from '@oxc-angular/vite/vite-plugin'
 
 export default defineConfig({
   plugins: [
@@ -45,7 +45,7 @@ import {
   transformAngularFile,
   compileTemplateSync,
   extractComponentUrlsSync,
-} from '@oxc-angular/compiler'
+} from '@oxc-angular/vite'
 
 // Transform an entire Angular file
 const result = await transformAngularFile(sourceCode, 'app.component.ts', {
@@ -60,10 +60,10 @@ const template = compileTemplateSync('<div>{{ title }}</div>', 'AppComponent', '
 
 ### Package Exports
 
-| Export                      | Description   |
-| --------------------------- | ------------- |
-| `@oxc-angular/compiler`     | Vite plugin   |
-| `@oxc-angular/compiler/api` | Low level API |
+| Export                  | Description   |
+| ----------------------- | ------------- |
+| `@oxc-angular/vite`     | Vite plugin   |
+| `@oxc-angular/vite/api` | Low level API |
 
 ### Core Functions
 

@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@angular/compiler-cli": "^21.0.0",
-    "@oxc-angular/compiler": "workspace:^",
+    "@oxc-angular/vite": "workspace:^",
     "typescript": "catalog:",
     "vite": "catalog:"
   }

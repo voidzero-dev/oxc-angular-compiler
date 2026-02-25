@@ -39,7 +39,7 @@
     "zone.js": "0.15.1"
   },
   "devDependencies": {
-    "@oxc-angular/compiler": "workspace:^",
+    "@oxc-angular/vite": "workspace:^",
     "@sanity/types": "3.97.1",
     "@types/d3-force": "3.0.4",
     "@types/fontfaceobserver": "2.1.1",

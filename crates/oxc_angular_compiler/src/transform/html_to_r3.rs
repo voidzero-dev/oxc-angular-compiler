@@ -4397,7 +4397,7 @@ impl<'a> HtmlToR3Transform<'a> {
         strings.push(Atom::from_in(current_string.as_str(), self.allocator));
 
         // Create the Interpolation expression
-        let span = ParseSpan::new(0, (text.span.end - text.span.start));
+        let span = ParseSpan::new(0, text.span.end - text.span.start);
         let source_span = AbsoluteSourceSpan { start: text.span.start, end: text.span.end };
         let interpolation = Interpolation { span, source_span, strings, expressions };
         Some(AngularExpression::Interpolation(Box::new_in(interpolation, self.allocator)))

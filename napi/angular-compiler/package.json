@@ -1,5 +1,5 @@
 {
-  "name": "@oxc-angular/compiler",
+  "name": "@oxc-angular/vite",
   "version": "0.0.3",
   "description": "Oxc Angular Compiler Vite plugin",
   "keywords": [
@@ -48,6 +48,10 @@
       "default": "./index.js"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "artifacts": "napi artifacts",
     "build-dev": "oxnode build.ts --esm --platform --features allocator",
@@ -80,7 +84,7 @@
   },
   "napi": {
     "binaryName": "angular-compiler",
-    "packageName": "@oxc-angular/compiler",
+    "packageName": "@oxc-angular/binding",
     "targets": [
       "aarch64-apple-darwin",
       "aarch64-pc-windows-msvc",

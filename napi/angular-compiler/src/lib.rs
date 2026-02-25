@@ -2535,7 +2535,7 @@ pub struct OptimizeResult {
 /// # Example
 ///
 /// ```typescript
-/// import { optimizeAngularPackageSync } from '@oxc-angular/compiler';
+/// import { optimizeAngularPackageSync } from '@oxc-angular/vite';
 ///
 /// const result = optimizeAngularPackageSync(
 ///   `let MyComponent = class MyComponent {};

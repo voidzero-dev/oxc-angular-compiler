@@ -139,7 +139,7 @@ importers:
         specifier: ~0.15.0
         version: 0.15.1
     devDependencies:
-      '@oxc-angular/compiler':
+      '@oxc-angular/vite':
         specifier: workspace:^
         version: link:../..
       '@oxc-node/cli':
@@ -269,7 +269,7 @@ importers:
         specifier: 0.15.1
         version: 0.15.1
     devDependencies:
-      '@oxc-angular/compiler':
+      '@oxc-angular/vite':
         specifier: workspace:^
         version: link:../..
       '@sanity/types':
@@ -327,7 +327,7 @@ importers:
       '@angular/compiler-cli':
         specifier: ^21.0.0
         version: 21.0.6(@angular/compiler@21.0.6)(typescript@5.9.3)
-      '@oxc-angular/compiler':
+      '@oxc-angular/vite':
         specifier: workspace:^
         version: link:../..
       typescript:
@@ -379,7 +379,7 @@ importers:
         specifier: ^0.16.0
         version: 0.16.0
     devDependencies:
-      '@oxc-angular/compiler':
+      '@oxc-angular/vite':
         specifier: workspace:*
         version: link:../..
       '@oxc-node/cli':
@@ -440,7 +440,7 @@ importers:
       '@angular/compiler-cli':
         specifier: ^21.0.0
         version: 21.0.6(@angular/compiler@21.0.6)(typescript@5.9.3)
-      '@oxc-angular/compiler':
+      '@oxc-angular/vite':
         specifier: workspace:^
         version: link:../angular-compiler
       '@tailwindcss/vite':

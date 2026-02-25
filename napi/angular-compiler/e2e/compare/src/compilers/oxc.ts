@@ -6,7 +6,7 @@ import {
   Severity,
   type TransformOptions,
   type ResolvedResources,
-} from '@oxc-angular/compiler/api'
+} from '@oxc-angular/vite/api'
 import {
   transformSync as oxcTransformSync,
   type TransformOptions as OxcTransformOptions,
@@ -15,7 +15,7 @@ import {
 import type { CompilerOutput, ProjectCompilationResult } from '../types.js'
 
 // Re-export ResolvedResources type for use in runner
-export type { ResolvedResources } from '@oxc-angular/compiler/api'
+export type { ResolvedResources } from '@oxc-angular/vite/api'
 
 // Plain object version of ResolvedResources that NAPI-RS actually expects
 // (NAPI-RS HashMap bindings expect plain objects, not JavaScript Map objects)
