@@ -1088,6 +1088,63 @@ fn test_for_track_bare_method_reference() {
     insta::assert_snapshot!("for_track_bare_method_reference", js);
 }
 
+/// Tests that `track trackByFn($index)` inside a nested view (e.g. @if) uses
+/// `componentInstance().trackByFn` instead of `ctx.trackByFn`.
+///
+/// Angular's `isTrackByFunctionCall` (track_fn_optimization.ts:84-115) only optimizes
+/// when the context receiver's view is the root view. The main optimization then checks
+/// `receiver.receiver.view === unit.xref` to decide between `ctx.method` (root view)
+/// and `componentInstance().method` (non-root view).
+///
+/// When the @for is inside @if, the repeater is in a non-root view, so Angular uses
+/// the `componentInstance().method` path.
+#[test]
+fn test_for_track_method_call_in_nested_view() {
+    // @for inside @if: repeater is in a non-root view
+    let js = compile_template_to_js(
+        r"@if (showItems) { @for (item of items; track trackByFn($index)) { <div>{{item.name}}</div> } }",
+        "TestComponent",
+    );
+    // In a nested view, Angular uses componentInstance().trackByFn
+    assert!(
+        js.contains("componentInstance"),
+        "Track method call in nested view should use componentInstance().trackByFn. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_method_call_in_nested_view", js);
+}
+
+/// Tests that `track trackByFn($index)` in the root view uses `ctx.trackByFn`.
+#[test]
+fn test_for_track_method_call_in_root_view() {
+    // @for directly in root view
+    let js = compile_template_to_js(
+        r"@for (item of items; track trackByFn($index)) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    // In the root view, Angular uses ctx.trackByFn directly
+    assert!(
+        js.contains("ctx.trackByFn"),
+        "Track method call in root view should use ctx.trackByFn. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_method_call_in_root_view", js);
+}
+
+/// Tests that `track trackByFn($index, item)` in the root view uses `ctx.trackByFn`.
+/// Note: The loop variable name (e.g. `item`) is used, not the literal `$item`.
+/// `generateTrackVariables` converts `item` → `$item` ReadVarExpr, which is then optimizable.
+#[test]
+fn test_for_track_method_call_with_both_args() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track trackByFn($index, item)) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("ctx.trackByFn"),
+        "Track method call with ($index, item) in root view should use ctx.trackByFn. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_method_call_with_both_args", js);
+}
+
 #[test]
 fn test_nested_for_loops() {
     let js = compile_template_to_js(

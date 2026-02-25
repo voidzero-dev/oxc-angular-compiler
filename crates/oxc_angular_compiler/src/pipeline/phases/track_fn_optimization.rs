@@ -69,7 +69,7 @@ fn optimize_track_expression<'a>(
     // Check for method call pattern: this.fn($index) or this.fn($index, $item)
     // These can be passed directly to the repeater runtime.
     if let Some((method_name, is_root_context)) =
-        check_track_by_function_call(&rep.track, root_xref, expressions)
+        check_track_by_function_call(&rep.track, root_xref)
     {
         rep.uses_component_instance = true;
         if is_root_context && view_xref == root_xref {
@@ -381,11 +381,8 @@ fn check_ast_for_simple_track_variable(
 /// Returns the method name (as String) and whether the context is the root view.
 fn check_track_by_function_call(
     track: &IrExpression<'_>,
-    _root_xref: XrefId,
-    expressions: &crate::pipeline::expression_store::ExpressionStore<'_>,
+    root_xref: XrefId,
 ) -> Option<(String, bool)> {
-    use crate::ast::expression::AngularExpression;
-
     // Handle ResolvedCall expressions (created by resolveNames phase)
     if let IrExpression::ResolvedCall(rc) = track {
         // Must have 1 or 2 arguments
@@ -411,60 +408,25 @@ fn check_track_by_function_call(
             return None;
         }
 
-        // Check receiver: must be a ResolvedPropertyRead on Context
+        // Check receiver: must be a ResolvedPropertyRead on Context whose view is the root view.
+        // Angular's isTrackByFunctionCall (track_fn_optimization.ts:96-100) requires
+        // receiver.receiver.view === rootView, rejecting non-root-view contexts.
         if let IrExpression::ResolvedPropertyRead(rp) = rc.receiver.as_ref() {
-            if matches!(rp.receiver.as_ref(), IrExpression::Context(_)) {
-                return Some((rp.name.to_string(), true));
+            if let IrExpression::Context(ctx) = rp.receiver.as_ref() {
+                if ctx.view == root_xref {
+                    return Some((rp.name.to_string(), true));
+                }
             }
         }
 
         return None;
     }
 
-    // Get the AST expression, handling both direct Ast and ExpressionRef
-    let ast = match track {
-        IrExpression::Ast(ast) => ast.as_ref(),
-        IrExpression::ExpressionRef(id) => expressions.get(*id),
-        _ => return None,
-    };
-
-    // Check for Call expression
-    if let AngularExpression::Call(call) = ast {
-        // Must have 1 or 2 arguments
-        if call.args.is_empty() || call.args.len() > 2 {
-            return None;
-        }
-
-        // Check arguments: first must be $index, second (if present) must be $item
-        let first_is_index = matches!(&call.args[0], AngularExpression::PropertyRead(pr)
-            if matches!(&pr.receiver, AngularExpression::ImplicitReceiver(_))
-            && pr.name.as_str() == "$index");
-
-        if !first_is_index {
-            return None;
-        }
-
-        if call.args.len() == 2 {
-            let second_is_item = matches!(&call.args[1], AngularExpression::PropertyRead(pr)
-                if matches!(&pr.receiver, AngularExpression::ImplicitReceiver(_))
-                && pr.name.as_str() == "$item");
-            if !second_is_item {
-                return None;
-            }
-        }
-
-        // Check receiver: must be a property read on the component context
-        // Pattern: receiver.methodName where receiver is context (this)
-        if let AngularExpression::PropertyRead(method_read) = &call.receiver {
-            // The receiver of the property read should be the implicit receiver (this/context)
-            if matches!(&method_read.receiver, AngularExpression::ImplicitReceiver(_)) {
-                // This is a method call on the implicit receiver: this.methodName($index, ...)
-                // In Angular, this is a call on the component context
-                return Some((method_read.name.to_string(), true));
-            }
-        }
-    }
-
+    // AST fallback path: After resolve_names (phase 31), track expressions should already
+    // be ResolvedCall/ResolvedPropertyRead with Context receivers. If we reach here with
+    // raw AST expressions, ImplicitReceiver lacks a view field so we cannot verify the
+    // root-view guard that Angular's isTrackByFunctionCall requires. Reject optimization
+    // to avoid mis-optimizing nested-view track calls.
     None
 }
 
@@ -495,5 +457,75 @@ fn is_item_variable(expr: &IrExpression<'_>) -> bool {
             }
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::expression::{ContextExpr, ResolvedCallExpr, ResolvedPropertyReadExpr};
+    use crate::ir::ops::XrefId;
+    use crate::output::ast::ReadVarExpr;
+    use oxc_allocator::Allocator;
+
+    /// Build a ResolvedCall IR expression representing `ctx.methodName($index)`,
+    /// where the Context has the given `context_view`.
+    fn make_track_method_call<'a>(
+        alloc: &'a Allocator,
+        method_name: &'a str,
+        context_view: XrefId,
+    ) -> IrExpression<'a> {
+        let ctx = IrExpression::Context(oxc_allocator::Box::new_in(
+            ContextExpr { view: context_view, source_span: None },
+            alloc,
+        ));
+        let prop_read = IrExpression::ResolvedPropertyRead(oxc_allocator::Box::new_in(
+            ResolvedPropertyReadExpr {
+                receiver: oxc_allocator::Box::new_in(ctx, alloc),
+                name: Atom::from(method_name),
+                source_span: None,
+            },
+            alloc,
+        ));
+        let index_arg = IrExpression::OutputExpr(oxc_allocator::Box::new_in(
+            OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                ReadVarExpr { name: Atom::from("$index"), source_span: None },
+                alloc,
+            )),
+            alloc,
+        ));
+        let mut args = oxc_allocator::Vec::new_in(alloc);
+        args.push(index_arg);
+        IrExpression::ResolvedCall(oxc_allocator::Box::new_in(
+            ResolvedCallExpr {
+                receiver: oxc_allocator::Box::new_in(prop_read, alloc),
+                args,
+                source_span: None,
+            },
+            alloc,
+        ))
+    }
+
+    #[test]
+    fn test_root_view_context_is_accepted() {
+        let alloc = Allocator::default();
+        let root_xref = XrefId(0);
+        let track = make_track_method_call(&alloc, "trackByFn", root_xref);
+
+        let result = check_track_by_function_call(&track, root_xref);
+        assert_eq!(result, Some(("trackByFn".to_string(), true)));
+    }
+
+    #[test]
+    fn test_non_root_view_context_is_rejected() {
+        let alloc = Allocator::default();
+        let root_xref = XrefId(0);
+        let non_root_xref = XrefId(5);
+        let track = make_track_method_call(&alloc, "trackByFn", non_root_xref);
+
+        // Before the fix, this would return Some — incorrectly accepting a
+        // non-root context. After the fix, it returns None.
+        let result = check_track_by_function_call(&track, root_xref);
+        assert_eq!(result, None, "non-root context should NOT be optimized");
     }
 }
