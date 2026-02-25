@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@angular/compiler-cli": "^21.0.0",
-    "@voidzero-dev/vite-plugin-angular": "workspace:^",
+    "@oxc-angular/compiler": "workspace:^",
     "typescript": "catalog:",
     "vite": "catalog:"
   }

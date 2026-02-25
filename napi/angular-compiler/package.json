@@ -1,5 +1,5 @@
 {
-  "name": "@voidzero-dev/vite-plugin-angular",
+  "name": "@oxc-angular/compiler",
   "version": "0.0.3",
   "description": "Oxc Angular Compiler Vite plugin",
   "keywords": [
@@ -80,7 +80,7 @@
   },
   "napi": {
     "binaryName": "angular-compiler",
-    "packageName": "@voidzero-dev/vite-plugin-angular",
+    "packageName": "@oxc-angular/compiler",
     "targets": [
       "aarch64-apple-darwin",
       "aarch64-pc-windows-msvc",

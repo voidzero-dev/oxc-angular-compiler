@@ -183,7 +183,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
    */
   function angularPlugin(): Plugin {
     return {
-      name: '@voidzero-dev/vite-plugin-angular',
+      name: '@oxc-angular/compiler',
       async config(_, { command }) {
         watchMode = command === 'serve'
 
@@ -549,7 +549,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
    */
   function stylesPlugin(): Plugin {
     return {
-      name: '@voidzero-dev/vite-plugin-angular-styles',
+      name: '@oxc-angular/compiler-styles',
       transform: {
         filter: {
           id: /ngcomp/,

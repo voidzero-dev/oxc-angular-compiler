@@ -81,4 +81,4 @@ jobs:
           pnpm --filter ./napi/angular-compiler exec playwright install --with-deps
           pnpm test:e2e
       - name: Compare tests
-        run: pnpm --filter @oxc/angular-compare compare --fixtures
+        run: pnpm --filter @oxc-angular/compare compare --fixtures

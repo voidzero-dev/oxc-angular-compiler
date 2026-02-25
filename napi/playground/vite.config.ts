@@ -1,9 +1,9 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import tailwindcss from '@tailwindcss/vite'
 // Use our local vite-plugin implementation
-import { angular } from '@voidzero-dev/vite-plugin-angular'
+import { angular } from '@oxc-angular/compiler'
+import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 
 const __filename = fileURLToPath(import.meta.url)

@@ -9,7 +9,7 @@ import type {
   ExtractedInputMetadata,
   ExtractedOutputMetadata,
   ExtractedQueryMetadata,
-} from '@voidzero-dev/vite-plugin-angular/api'
+} from '@oxc-angular/compiler/api'
 import fg from 'fast-glob'
 import pLimit from 'p-limit'
 

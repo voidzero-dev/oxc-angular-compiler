@@ -21,9 +21,9 @@
   "devDependencies": {
     "@angular/build": "^21.0.0",
     "@angular/compiler-cli": "^21.0.0",
+    "@oxc-angular/compiler": "workspace:^",
     "@tailwindcss/vite": "catalog:",
     "@types/node": "catalog:",
-    "@voidzero-dev/vite-plugin-angular": "workspace:^",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"

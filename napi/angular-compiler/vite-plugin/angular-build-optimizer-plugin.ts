@@ -26,7 +26,7 @@ export function buildOptimizerPlugin({
   let isProd = false
 
   return {
-    name: '@voidzero-dev/vite-plugin-angular-optimizer',
+    name: '@oxc-angular/compiler-optimizer',
     apply: 'build',
     config(userConfig) {
       isProd = userConfig.mode === 'production' || process.env['NODE_ENV'] === 'production'

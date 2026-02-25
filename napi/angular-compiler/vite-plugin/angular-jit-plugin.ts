@@ -6,7 +6,7 @@ export function jitPlugin({ inlineStylesExtension }: { inlineStylesExtension: st
   let config: ResolvedConfig
 
   return {
-    name: '@voidzero-dev/vite-plugin-angular-jit',
+    name: '@oxc-angular/compiler-jit',
     configResolved(_config) {
       config = _config
     },

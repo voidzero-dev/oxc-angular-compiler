@@ -14,9 +14,9 @@ A high-performance, Rust-based Angular compiler for Node.js. Provides both a sta
 ## Installation
 
 ```bash
-npm install @voidzero-dev/vite-plugin-angular
+npm install @oxc-angular/compiler
 # or
-pnpm add @voidzero-dev/vite-plugin-angular
+pnpm add @oxc-angular/compiler
 ```
 
 ## Quick Start
@@ -26,7 +26,7 @@ pnpm add @voidzero-dev/vite-plugin-angular
 ```typescript
 // vite.config.ts
 import { defineConfig } from 'vite'
-import { angular } from '@voidzero-dev/vite-plugin-angular/vite-plugin'
+import { angular } from '@oxc-angular/compiler/vite-plugin'
 
 export default defineConfig({
   plugins: [
@@ -45,7 +45,7 @@ import {
   transformAngularFile,
   compileTemplateSync,
   extractComponentUrlsSync,
-} from '@voidzero-dev/vite-plugin-angular'
+} from '@oxc-angular/compiler'
 
 // Transform an entire Angular file
 const result = await transformAngularFile(sourceCode, 'app.component.ts', {
@@ -60,10 +60,10 @@ const template = compileTemplateSync('<div>{{ title }}</div>', 'AppComponent', '
 
 ### Package Exports
 
-| Export                                  | Description   |
-| --------------------------------------- | ------------- |
-| `@voidzero-dev/vite-plugin-angular`     | Vite plugin   |
-| `@voidzero-dev/vite-plugin-angular/api` | Low level API |
+| Export                      | Description   |
+| --------------------------- | ------------- |
+| `@oxc-angular/compiler`     | Vite plugin   |
+| `@oxc-angular/compiler/api` | Low level API |
 
 ### Core Functions
 

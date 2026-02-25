@@ -1,5 +1,5 @@
 {
-  "name": "@oxc/typedb-web-benchmark",
+  "name": "@oxc-angular/typedb-web-benchmark",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -39,12 +39,12 @@
     "zone.js": "0.15.1"
   },
   "devDependencies": {
+    "@oxc-angular/compiler": "workspace:^",
     "@sanity/types": "3.97.1",
     "@types/d3-force": "3.0.4",
     "@types/fontfaceobserver": "2.1.1",
     "@types/node": "^22.19.3",
     "@types/prismjs": "1.26.0",
-    "@voidzero-dev/vite-plugin-angular": "workspace:^",
     "sass": "^1.97.2",
     "tsx": "^4.21.0",
     "typescript": "catalog:",

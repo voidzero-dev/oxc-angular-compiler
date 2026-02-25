@@ -5,7 +5,7 @@
  * compiler features not covered by real-world project testing.
  */
 
-import type { TransformOptions } from '@voidzero-dev/vite-plugin-angular/api'
+import type { TransformOptions } from '@oxc-angular/compiler/api'
 
 import type { ImportDiff, ExportDiff, ClassDiff, StaticFieldDiff } from '../src/compare.js'
 import type { FunctionLevelComparison, AstDiff, ClassMetadataDiff } from '../src/types.js'

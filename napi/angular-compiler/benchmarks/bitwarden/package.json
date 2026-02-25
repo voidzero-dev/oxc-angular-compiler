@@ -1,5 +1,5 @@
 {
-  "name": "@oxc/bitwarden-benchmark",
+  "name": "@oxc-angular/bitwarden-benchmark",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -28,11 +28,11 @@
     "zone.js": "~0.15.0"
   },
   "devDependencies": {
+    "@oxc-angular/compiler": "workspace:^",
     "@oxc-node/cli": "catalog:",
     "@oxc-node/core": "catalog:",
     "@tailwindcss/container-queries": "^0.1.1",
     "@types/node": "^22.19.3",
-    "@voidzero-dev/vite-plugin-angular": "workspace:^",
     "autoprefixer": "^10.4.23",
     "buffer": "^6.0.3",
     "path-browserify": "^1.0.1",

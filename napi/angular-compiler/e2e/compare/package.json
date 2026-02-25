@@ -1,5 +1,5 @@
 {
-  "name": "@oxc/angular-compare",
+  "name": "@oxc-angular/compare",
   "version": "0.1.0",
   "private": true,
   "description": "Compare oxc_angular_compiler output with @angular/compiler",
@@ -29,10 +29,10 @@
     "zone.js": "^0.16.0"
   },
   "devDependencies": {
+    "@oxc-angular/compiler": "workspace:*",
     "@oxc-node/cli": "catalog:",
     "@oxc-node/core": "catalog:",
     "@types/node": "catalog:",
-    "@voidzero-dev/vite-plugin-angular": "workspace:*",
     "oxc-parser": "^0.110.0",
     "oxc-transform": "^0.110.0",
     "oxfmt": "catalog:",

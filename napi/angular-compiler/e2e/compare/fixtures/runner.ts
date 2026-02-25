@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { cpus } from 'os'
 
 import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
-import { compileFactory, Severity } from '@voidzero-dev/vite-plugin-angular/api'
+import { compileFactory, Severity } from '@oxc-angular/compiler/api'
 import pLimit from 'p-limit'
 
 import { compareJsSemantically, compareFullFileSemantically } from '../src/compare.js'

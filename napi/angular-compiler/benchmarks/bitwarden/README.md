@@ -89,7 +89,7 @@ If your bitwarden-clients repository is in a different location, update the `BIT
 The `vite.config.ts` includes:
 
 - **vite-tsconfig-paths**: Resolves 70+ path aliases from bitwarden's tsconfig
-- **@voidzero-dev/vite-plugin-angular**: OXC's Angular compiler plugin
+- **@oxc-angular/compiler**: OXC's Angular compiler plugin
 - **SCSS preprocessing**: With proper include paths for bitwarden's styles
 - **PostCSS**: Matching bitwarden's configuration (tailwind, autoprefixer, etc.)
 - **process.env polyfills**: For bitwarden's environment variable usage
