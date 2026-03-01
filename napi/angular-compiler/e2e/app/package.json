@@ -9,7 +9,7 @@
   "dependencies": {
     "@angular/common": "^21.0.0",
     "@angular/compiler": "^21.0.0",
-    "@angular/core": "^21.0.0",
+    "@angular/core": "^21.1.6",
     "@angular/platform-browser": "^21.0.0",
     "rxjs": "catalog:",
     "tslib": "catalog:"
