@@ -1478,7 +1478,15 @@ export async function compareJsSemantically(
     workingTsCode = normalizeNullishCoalescing(workingTsCode)
     workingOxcCode = removeNullishCoalescingParens(workingOxcCode)
 
-    // Fast path after template/inject/nullish normalization
+    // Normalize numeric literals: 1e3 → 1000 (OXC emits scientific notation)
+    workingOxcCode = normalizeNumericLiterals(workingOxcCode)
+    workingTsCode = normalizeNumericLiterals(workingTsCode)
+
+    // Normalize inline object literal formatting: collapse multi-line simple objects
+    workingOxcCode = collapseInlineObjectLiterals(workingOxcCode)
+    workingTsCode = collapseInlineObjectLiterals(workingTsCode)
+
+    // Fast path after template/inject/nullish/format normalization
     if (workingOxcCode === workingTsCode) {
       return { match: true }
     }
@@ -2906,7 +2914,15 @@ export async function compareFullFileSemantically(
     workingTsCode = normalizeNullishCoalescing(workingTsCode)
     workingOxcCode = removeNullishCoalescingParens(workingOxcCode)
 
-    // Fast path after template/inject/nullish normalization
+    // Normalize numeric literals: 1e3 → 1000 (OXC emits scientific notation)
+    workingOxcCode = normalizeNumericLiterals(workingOxcCode)
+    workingTsCode = normalizeNumericLiterals(workingTsCode)
+
+    // Normalize inline object literal formatting: collapse multi-line simple objects
+    workingOxcCode = collapseInlineObjectLiterals(workingOxcCode)
+    workingTsCode = collapseInlineObjectLiterals(workingTsCode)
+
+    // Fast path after template/inject/nullish/format normalization
     if (workingOxcCode === workingTsCode) {
       return { match: true }
     }
@@ -3212,4 +3228,109 @@ async function formatCodeForComparison(code: string): Promise<string> {
     // Fall back to original code if formatting throws
     return code
   }
+}
+
+/**
+ * AST node type used for traversal in normalization functions.
+ */
+interface NormAstNode {
+  type?: string
+  value?: unknown
+  start?: number
+  end?: number
+  [key: string]: unknown
+}
+
+/**
+ * Recursively walk an AST node, calling the visitor for each object node.
+ */
+function walkAst(node: unknown, visitor: (n: NormAstNode) => void): void {
+  if (node === null || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    for (const item of node) walkAst(item, visitor)
+    return
+  }
+  const obj = node as NormAstNode
+  visitor(obj)
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === 'object') {
+      walkAst(value, visitor)
+    }
+  }
+}
+
+/**
+ * Normalize numeric scientific notation to decimal form using oxc-parser.
+ * Finds Literal nodes (ESTree format) whose source text contains scientific notation
+ * (e.g. `1e3`) and replaces them with their decimal representation (`1000`).
+ */
+function normalizeNumericLiterals(code: string): string {
+  let ast
+  try {
+    ast = parseSync('numeric.js', code, { sourceType: 'module' })
+  } catch {
+    return code
+  }
+
+  const replacements: Array<{ start: number; end: number; replacement: string }> = []
+
+  // oxc-parser returns character offsets (not byte offsets), so use start/end directly
+  walkAst(ast.program, (node) => {
+    if (node.type === 'Literal' && typeof node.value === 'number') {
+      if (typeof node.start !== 'number' || typeof node.end !== 'number') return
+      const originalText = code.slice(node.start as number, node.end as number)
+      // Check if the source text uses scientific notation (exclude hex/octal/binary prefixes)
+      if (/e\+?\d/i.test(originalText) && !/^0[xob]/i.test(originalText)) {
+        const num = node.value as number
+        if (Number.isFinite(num) && Number.isSafeInteger(num)) {
+          replacements.push({
+            start: node.start as number,
+            end: node.end as number,
+            replacement: String(num),
+          })
+        }
+      }
+    }
+  })
+
+  if (replacements.length === 0) return code
+
+  // Apply replacements from end to start
+  replacements.sort((a, b) => b.start - a.start)
+  let result = code
+  for (const { start, end, replacement } of replacements) {
+    result = result.slice(0, start) + replacement + result.slice(end)
+  }
+  return result
+}
+
+/**
+ * Collapse multi-line simple object literals in function call arguments to single lines.
+ *
+ * Matches patterns like:
+ *   .emit({
+ *     content: $event,
+ *     format: item_r3.format,
+ *     type: item_r3.id,
+ *   })
+ *
+ * And collapses to:
+ *   .emit({ content: $event, format: item_r3.format, type: item_r3.id})
+ *
+ * Only targets objects where every property value is a simple expression
+ * (identifiers, member access, $event) — no strings, nested objects, or calls.
+ */
+const COLLAPSE_OBJ_RE = /\(\{\s*\n((?:\s*\w+:\s*[\w.$]+,?\s*\n)+)\s*\}\)/g
+
+function collapseInlineObjectLiterals(code: string): string {
+  return code.replace(COLLAPSE_OBJ_RE, (_match, propsBlock: string) => {
+    const lines = propsBlock.trim().split('\n')
+    const props = lines.map((l) => l.trim()).filter(Boolean)
+    // Remove trailing comma from last property
+    const last = props.length - 1
+    if (last >= 0 && props[last].endsWith(',')) {
+      props[last] = props[last].slice(0, -1)
+    }
+    return '({ ' + props.join(' ') + '})'
+  })
 }
