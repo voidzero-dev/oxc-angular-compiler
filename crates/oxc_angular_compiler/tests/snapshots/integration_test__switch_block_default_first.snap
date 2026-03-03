@@ -6,7 +6,7 @@ function TestComponent_Case_0_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵtext(0," ");
     i0.ɵɵelementStart(1,"div");
-    i0.ɵɵtext(2,"One");
+    i0.ɵɵtext(2,"Other");
     i0.ɵɵelementEnd();
     i0.ɵɵtext(3," ");
   }
@@ -15,7 +15,7 @@ function TestComponent_Case_1_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵtext(0," ");
     i0.ɵɵelementStart(1,"div");
-    i0.ɵɵtext(2,"Two");
+    i0.ɵɵtext(2,"One");
     i0.ɵɵelementEnd();
     i0.ɵɵtext(3," ");
   }
@@ -24,7 +24,7 @@ function TestComponent_Case_2_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵtext(0," ");
     i0.ɵɵelementStart(1,"div");
-    i0.ɵɵtext(2,"Other");
+    i0.ɵɵtext(2,"Two");
     i0.ɵɵelementEnd();
     i0.ɵɵtext(3," ");
   }
@@ -34,6 +34,6 @@ function TestComponent_Template(rf,ctx) {
       4,0)(2,TestComponent_Case_2_Template,4,0); }
   if ((rf & 2)) {
     let tmp_0_0;
-    i0.ɵɵconditional((((tmp_0_0 = ctx.value) === 1)? 0: ((tmp_0_0 === 2)? 1: 2)));
+    i0.ɵɵconditional((((tmp_0_0 = ctx.value) === 1)? 1: ((tmp_0_0 === 2)? 2: 0)));
   }
 }

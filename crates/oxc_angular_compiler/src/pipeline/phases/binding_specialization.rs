@@ -300,8 +300,8 @@ fn specialize_in_view<'a>(
                             });
                             cursor.replace_current(new_op);
                         }
-                    } else if name.as_str() == "field" {
-                        // Check for special "field" property (control binding)
+                    } else if name.as_str() == "formField" {
+                        // Check for special "formField" property (control binding)
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(
                                 &mut binding.expression,

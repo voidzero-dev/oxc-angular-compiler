@@ -1,5 +1,3 @@
-import { readFile } from 'node:fs/promises'
-
 import { linkAngularPackage } from '#binding'
 import type { Plugin } from 'vite'
 
@@ -71,7 +69,9 @@ export function angularLinkerPlugin(): Plugin {
                       return
                     }
 
-                    const code = await readFile(id, 'utf-8')
+                    const code = await this.fs.readFile(id, {
+                      encoding: 'utf8',
+                    })
 
                     // Quick check: skip files without partial declarations
                     if (!code.includes(LINKER_DECLARATION_PREFIX)) {

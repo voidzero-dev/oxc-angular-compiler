@@ -369,12 +369,23 @@ fn get_metadata_object<'a>(call: &'a CallExpression<'a>) -> Option<&'a ObjectExp
 }
 
 /// Extract a string property value from an object expression.
+/// Handles both regular string literals (`"..."`) and template literals with no expressions (`` `...` ``).
 fn get_string_property<'a>(obj: &'a ObjectExpression<'a>, name: &str) -> Option<&'a str> {
     for prop in &obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                if let Expression::StringLiteral(lit) = &prop.value {
-                    return Some(lit.value.as_str());
+                match &prop.value {
+                    Expression::StringLiteral(lit) => {
+                        return Some(lit.value.as_str());
+                    }
+                    Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+                        if let Some(quasi) = tl.quasis.first() {
+                            if let Some(cooked) = &quasi.value.cooked {
+                                return Some(cooked.as_str());
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1933,5 +1944,83 @@ MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "20.0.
             result.code
         );
         assert!(!result.code.contains("null]"), "Should not include null transform in output");
+    }
+
+    #[test]
+    fn test_link_component_with_template_literal() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.0.6", ngImport: i0, type: MyComponent, selector: "my-comp", template: `<div>Hello</div>`, isInline: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Component with template literal should be linked");
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("\u{0275}\u{0275}ngDeclareComponent"),
+            "Should not contain ngDeclareComponent, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_template_literal_static_field() {
+        let allocator = Allocator::default();
+        // This matches Angular 21's actual output format for @angular/router's ɵEmptyOutletComponent
+        let code = r#"
+import * as i0 from "@angular/core";
+class EmptyOutletComponent {
+  static ɵfac = i0.ɵɵngDeclareFactory({
+    minVersion: "12.0.0",
+    version: "21.0.6",
+    ngImport: i0,
+    type: EmptyOutletComponent,
+    deps: [],
+    target: i0.ɵɵFactoryTarget.Component
+  });
+  static ɵcmp = i0.ɵɵngDeclareComponent({
+    minVersion: "14.0.0",
+    version: "21.0.6",
+    type: EmptyOutletComponent,
+    isStandalone: true,
+    selector: "ng-component",
+    exportAs: ["emptyRouterOutlet"],
+    ngImport: i0,
+    template: `<router-outlet />`,
+    isInline: true,
+    dependencies: [{
+      kind: "directive",
+      type: RouterOutlet,
+      selector: "router-outlet",
+      inputs: ["name", "routerOutletData"],
+      outputs: ["activate", "deactivate", "attach", "detach"],
+      exportAs: ["outlet"]
+    }]
+  });
+}
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Component with template literal in static field should be linked");
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("\u{0275}\u{0275}ngDeclareComponent"),
+            "Should not contain ngDeclareComponent, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: [RouterOutlet]"),
+            "Should extract dependency types, got:\n{}",
+            result.code
+        );
     }
 }

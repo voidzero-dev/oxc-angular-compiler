@@ -1031,14 +1031,14 @@ fn ingest_element<'a>(
     // Process local references
     let local_refs = ingest_references_owned(allocator, element.references);
 
-    // Check for field property binding to create ControlCreateOp.
+    // Check for formField property binding to create ControlCreateOp.
     // This matches TypeScript's ingest.ts which checks:
     // const fieldInput = element.inputs.find(
-    //   (input) => input.name === 'field' && input.type === e.BindingType.Property
+    //   (input) => input.name === 'formField' && input.type === e.BindingType.Property
     // );
     use crate::ast::expression::BindingType;
     let field_input_span = element.inputs.iter().find_map(|input| {
-        if input.name.as_str() == "field" && input.binding_type == BindingType::Property {
+        if input.name.as_str() == "formField" && input.binding_type == BindingType::Property {
             Some(input.source_span)
         } else {
             None
@@ -2922,26 +2922,14 @@ fn ingest_switch_block<'a>(
     // Convert the main switch expression as the test
     let test = convert_ast_to_ir(job, switch_block.expression);
 
-    // Reorder groups to put @default LAST, matching Angular's compiled output.
-    // While Angular's ingestSwitchBlock iterates in source order, the downstream
-    // generateConditionalExpressions phase (conditionals.ts) splices @default out and
-    // uses it as the ternary fallback base. Because slot allocation and function naming
-    // happen after ingest, moving @default last here ensures our xref/slot/function
-    // ordering matches Angular's final output.
-    let mut groups_vec: std::vec::Vec<_> = switch_block.groups.into_iter().collect();
-    let default_idx = groups_vec.iter().position(|group| {
-        !group.cases.is_empty() && group.cases.iter().all(|c| c.expression.is_none())
-    });
-    if let Some(idx) = default_idx {
-        let default_group = groups_vec.remove(idx);
-        groups_vec.push(default_group);
-    }
-
+    // Iterate groups in source order, matching Angular TS's ingestSwitchBlock.
+    // The downstream generate_conditional_expressions phase handles @default at
+    // any position by splicing it out as the ternary fallback base.
     let mut first_xref: Option<XrefId> = None;
     let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(allocator);
     let mut create_ops: std::vec::Vec<CreateOp<'a>> = std::vec::Vec::new();
 
-    for (i, group) in groups_vec.into_iter().enumerate() {
+    for (i, group) in switch_block.groups.into_iter().enumerate() {
         // Allocate a new view for this group
         let group_view_xref = job.allocate_view(Some(view_xref));
 

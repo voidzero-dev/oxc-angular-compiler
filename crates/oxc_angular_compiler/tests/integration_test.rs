@@ -3054,9 +3054,9 @@ fn test_svg_in_switch_case_with_whitespace() {
 
 #[test]
 fn test_control_binding_attribute_extraction() {
-    // Test that [field] (control binding) is extracted into the consts array.
+    // Test that [formField] (control binding) is extracted into the consts array.
     // Before the fix, UpdateOp::Control was not handled in attribute extraction,
-    // causing the control binding name ("field") to be missing from the element's
+    // causing the control binding name ("formField") to be missing from the element's
     // extracted attributes. This resulted in duplicate/shifted const entries.
     let allocator = Allocator::default();
     let source = r#"
@@ -3064,7 +3064,7 @@ import { Component } from '@angular/core';
 
 @Component({
     selector: 'test-comp',
-    template: '<cu-comp [field]="myField" [open]="isOpen"></cu-comp>',
+    template: '<cu-comp [formField]="myField" [open]="isOpen"></cu-comp>',
     standalone: true,
 })
 export class TestComponent {
@@ -3084,24 +3084,26 @@ export class TestComponent {
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     eprintln!("OUTPUT:\n{}", result.code);
 
-    // The consts array should contain "field" as an extracted property binding name.
-    // Without the fix, only "open" would appear (missing "field"), resulting in
+    // The consts array should contain "formField" as an extracted property binding name.
+    // Without the fix, only "open" would appear (missing "formField"), resulting in
     // incorrect const array entries and shifted indices.
     assert!(
-        result.code.contains(r#""field""#),
-        "Consts should contain 'field' from control binding extraction. Output:\n{}",
+        result.code.contains(r#""formField""#),
+        "Consts should contain 'formField' from control binding extraction. Output:\n{}",
         result.code
     );
 
-    // Both "field" and "open" should appear in the same consts entry (same element).
+    // Both "formField" and "open" should appear in the same consts entry (same element).
     // The property marker (3) should precede both names.
-    // Expected: [3, "field", "open"] (property marker followed by both binding names)
-    // Without the fix: [3, "open"] (missing "field")
-    let has_both_in_same_const =
-        result.code.lines().any(|line| line.contains(r#""field""#) && line.contains(r#""open""#));
+    // Expected: [3, "formField", "open"] (property marker followed by both binding names)
+    // Without the fix: [3, "open"] (missing "formField")
+    let has_both_in_same_const = result
+        .code
+        .lines()
+        .any(|line| line.contains(r#""formField""#) && line.contains(r#""open""#));
     assert!(
         has_both_in_same_const,
-        "Both 'field' and 'open' should appear in the same consts entry. Output:\n{}",
+        "Both 'formField' and 'open' should appear in the same consts entry. Output:\n{}",
         result.code
     );
 }
@@ -3125,7 +3127,7 @@ fn test_pipe_slot_in_control_binding_exact_slot() {
     // Element is at slot 0, pipe is at slot 1.
     // The pipeBind1 call should reference slot 1, not slot 0.
     let js = compile_template_to_js(
-        r#"<cu-comp [field]="myField$ | async"></cu-comp>"#,
+        r#"<cu-comp [formField]="myField$ | async"></cu-comp>"#,
         "TestComponent",
     );
     eprintln!("OUTPUT:\n{js}");
@@ -3147,7 +3149,7 @@ fn test_pipe_slot_in_control_binding_exact_slot() {
 #[test]
 fn test_pipe_in_field_binding_with_safe_nav() {
     let js = compile_template_to_js(
-        r#"<cu-comp [field]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp>"#,
+        r#"<cu-comp [formField]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp>"#,
         "TestComponent",
     );
     eprintln!("OUTPUT:\n{js}");
@@ -3163,7 +3165,7 @@ fn test_pipe_in_field_binding_with_safe_nav() {
 #[test]
 fn test_pipe_in_field_in_ngif() {
     let js = compile_template_to_js(
-        r#"<div *ngIf="show"><cu-comp [field]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp></div>"#,
+        r#"<div *ngIf="show"><cu-comp [formField]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp></div>"#,
         "TestComponent",
     );
     eprintln!("OUTPUT:\n{js}");
@@ -3174,7 +3176,7 @@ fn test_pipe_in_field_in_ngif() {
 #[test]
 fn test_pipe_in_field_in_if_block() {
     let js = compile_template_to_js(
-        r#"@if (show) {<cu-comp [field]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp>}"#,
+        r#"@if (show) {<cu-comp [formField]="(settings$ | async)?.workload?.field" [title]="name | uppercase"></cu-comp>}"#,
         "TestComponent",
     );
     eprintln!("OUTPUT:\n{js}");
@@ -5375,4 +5377,63 @@ fn test_if_block_no_expression_skips_main_branch() {
         }
     }
     assert!(!errors.is_empty(), "Should report a parse error for @if without expression");
+}
+
+// ============================================================================
+// Regression: @switch with @default first should preserve source order
+// ============================================================================
+
+#[test]
+fn test_switch_default_first_preserves_source_order() {
+    // When @default appears first in source, Angular TS preserves source order:
+    // Case_0 = default (Other), Case_1 = case(1) (One), Case_2 = case(2) (Two)
+    // The conditional expression puts default's slot as the ternary fallback.
+    let js = compile_template_to_js(
+        r"@switch (value) { @default { <div>Other</div> } @case (1) { <div>One</div> } @case (2) { <div>Two</div> } }",
+        "TestComponent",
+    );
+
+    // Case_0 should be the default (Other), NOT reordered
+    assert!(js.contains("Case_0_Template"), "Expected Case_0_Template in output. Got:\n{}", js);
+    let case0_start = js.find("Case_0_Template").unwrap();
+    let case0_body = &js[case0_start..case0_start + 200];
+    assert!(
+        case0_body.contains("Other"),
+        "Case_0 should render 'Other' (default in source order). Got:\n{}",
+        js
+    );
+
+    // Conditional ternary: default slot (0) should be the fallback base
+    // Expected: (tmp === 1) ? 1 : (tmp === 2) ? 2 : 0
+    assert!(js.contains("2: 0)"), "Ternary fallback should be slot 0 (default). Got:\n{}", js);
+}
+
+// ============================================================================
+// Regression: [field] should be a regular property, not a control binding
+// ============================================================================
+
+#[test]
+fn test_field_property_not_control_binding() {
+    // [field] is a regular property binding, NOT a form control binding.
+    // Only [formField] should trigger control binding behavior.
+    // Before fix: [field] emitted controlCreate()/control() instructions.
+    // After fix: [field] emits regular property() instruction.
+    let js = compile_template_to_js(r#"<cu-comp [field]="myField"></cu-comp>"#, "TestComponent");
+
+    // Should NOT have controlCreate
+    assert!(
+        !js.contains("controlCreate"),
+        "[field] should NOT produce controlCreate. Got:\n{}",
+        js
+    );
+
+    // Should NOT have control() call
+    assert!(!js.contains("ɵɵcontrol("), "[field] should NOT produce ɵɵcontrol(). Got:\n{}", js);
+
+    // Should have regular property binding
+    assert!(
+        js.contains(r#"ɵɵproperty("field""#),
+        "[field] should produce regular ɵɵproperty(\"field\", ...). Got:\n{}",
+        js
+    );
 }
