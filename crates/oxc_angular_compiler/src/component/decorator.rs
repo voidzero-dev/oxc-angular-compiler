@@ -1023,6 +1023,19 @@ fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Opti
 // Decorator Span Collection for Removal
 // =============================================================================
 
+/// Collect all class-level decorator spans.
+///
+/// When an Angular class decorator is found (e.g. `@Component`, `@Directive`), ALL class-level
+/// decorators must be removed — not just the Angular one. Non-Angular decorators like
+/// `@UntilDestroy()` would otherwise remain in front of the compiled class output, producing
+/// invalid JavaScript (a decorator on a non-class construct).
+///
+/// These spans are used by `transform.rs` to remove the decorators from the
+/// source text during transformation.
+pub fn collect_all_class_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+    spans.extend(class.decorators.iter().map(|d| d.span));
+}
+
 /// Collect all decorator spans from constructor parameters.
 ///
 /// Parameter decorators like `@Optional()`, `@Inject()`, `@Host()`, `@Self()`,
