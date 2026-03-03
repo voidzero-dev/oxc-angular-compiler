@@ -18,9 +18,8 @@ use rustc_hash::FxHashMap;
 #[cfg(feature = "cross_file_elision")]
 use super::cross_file_elision::CrossFileAnalyzer;
 use super::decorator::{
-    collect_all_class_decorator_spans, collect_constructor_decorator_spans,
-    collect_member_decorator_spans, extract_component_metadata, find_component_decorator,
-    find_component_decorator_span,
+    collect_constructor_decorator_spans, collect_member_decorator_spans,
+    extract_component_metadata, find_component_decorator, find_component_decorator_span,
 };
 use super::definition::{const_value_to_expression, generate_component_definitions};
 use super::import_elision::{ImportElisionAnalyzer, filter_imports};
@@ -791,13 +790,10 @@ pub fn transform_angular_file(
                                 );
                             }
 
-                            // Track ALL class decorator spans for removal (Angular + non-Angular).
-                            // Non-Angular decorators (e.g. @UntilDestroy()) must also be removed,
-                            // otherwise they end up decorating the compiled output which is invalid JS.
-                            collect_all_class_decorator_spans(
-                                class,
-                                &mut decorator_spans_to_remove,
-                            );
+                            // Track the decorator span to remove
+                            if let Some(span) = find_component_decorator_span(class) {
+                                decorator_spans_to_remove.push(span);
+                            }
                             // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                             collect_constructor_decorator_spans(
                                 class,
@@ -931,8 +927,10 @@ pub fn transform_angular_file(
                 if let Some(mut directive_metadata) =
                     extract_directive_metadata(allocator, class, implicit_standalone)
                 {
-                    // Track ALL class decorator spans for removal (Angular + non-Angular)
-                    collect_all_class_decorator_spans(class, &mut decorator_spans_to_remove);
+                    // Track decorator span for removal
+                    if let Some(span) = find_directive_decorator_span(class) {
+                        decorator_spans_to_remove.push(span);
+                    }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
                     // Collect member decorators (@Input, @Output, @HostBinding, etc.)
@@ -983,8 +981,10 @@ pub fn transform_angular_file(
                     // - ɵprov: Provider metadata for Angular's DI system
                     // - ɵfac: Factory function to instantiate the class
 
-                    // Track ALL class decorator spans for removal (Angular + non-Angular)
-                    collect_all_class_decorator_spans(class, &mut decorator_spans_to_remove);
+                    // Track decorator span for removal
+                    if let Some(span) = find_injectable_decorator_span(class) {
+                        decorator_spans_to_remove.push(span);
+                    }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
 
@@ -1035,8 +1035,10 @@ pub fn transform_angular_file(
                     // - ɵpipe: Pipe definition for Angular's pipe system
                     // - ɵfac: Factory function for dependency injection (when pipe has constructor deps)
 
-                    // Track ALL class decorator spans for removal (Angular + non-Angular)
-                    collect_all_class_decorator_spans(class, &mut decorator_spans_to_remove);
+                    // Track decorator span for removal
+                    if let Some(span) = find_pipe_decorator_span(class) {
+                        decorator_spans_to_remove.push(span);
+                    }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
 
@@ -1081,8 +1083,10 @@ pub fn transform_angular_file(
                     // - ɵfac: Factory function for instantiation (with constructor dependencies)
                     // - ɵinj: Injector definition with providers and imports
 
-                    // Track ALL class decorator spans for removal (Angular + non-Angular)
-                    collect_all_class_decorator_spans(class, &mut decorator_spans_to_remove);
+                    // Track decorator span for removal
+                    if let Some(span) = find_ng_module_decorator_span(class) {
+                        decorator_spans_to_remove.push(span);
+                    }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
 
@@ -1165,22 +1169,25 @@ pub fn transform_angular_file(
                 _ => None,
             };
             if let Some(class) = class {
-                // Check if this is an Angular-decorated class (component, directive, etc.)
-                // and collect ALL decorator spans for removal (Angular + non-Angular)
-                let is_component = find_component_decorator_span(class).is_some();
-                let is_directive = !is_component && find_directive_decorator_span(class).is_some();
-                let is_angular_class = is_component
-                    || is_directive
-                    || find_injectable_decorator_span(class).is_some()
-                    || find_pipe_decorator_span(class).is_some()
-                    || find_ng_module_decorator_span(class).is_some();
-
-                if is_angular_class {
-                    collect_all_class_decorator_spans(class, &mut new_decorator_spans);
+                // Check for component, directive, injectable, pipe, or ngmodule decorators
+                // and collect associated parameter/member decorator spans
+                if let Some(span) = find_component_decorator_span(class) {
+                    new_decorator_spans.push(span);
                     collect_constructor_decorator_spans(class, &mut new_decorator_spans);
-                    if is_component || is_directive {
-                        collect_member_decorator_spans(class, &mut new_decorator_spans);
-                    }
+                    collect_member_decorator_spans(class, &mut new_decorator_spans);
+                } else if let Some(span) = find_directive_decorator_span(class) {
+                    new_decorator_spans.push(span);
+                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                    collect_member_decorator_spans(class, &mut new_decorator_spans);
+                } else if let Some(span) = find_injectable_decorator_span(class) {
+                    new_decorator_spans.push(span);
+                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                } else if let Some(span) = find_pipe_decorator_span(class) {
+                    new_decorator_spans.push(span);
+                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                } else if let Some(span) = find_ng_module_decorator_span(class) {
+                    new_decorator_spans.push(span);
+                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
                 }
             }
         }
