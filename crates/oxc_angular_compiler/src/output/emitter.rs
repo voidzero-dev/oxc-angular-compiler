@@ -764,9 +764,14 @@ impl JsEmitter {
                 ctx.print(") =>");
                 match &e.body {
                     ArrowFunctionBody::Expression(body_expr) => {
-                        // Check if the body is an object literal (needs parens)
-                        let is_object_literal =
-                            matches!(body_expr.as_ref(), OutputExpression::LiteralMap(_));
+                        // Check if the body is an object literal (needs parens).
+                        // Also unwrap Parenthesized wrapper, which comes from converting
+                        // OXC's ParenthesizedExpression (e.g. `() => ({ key: val })`).
+                        let inner = match body_expr.as_ref() {
+                            OutputExpression::Parenthesized(p) => p.expr.as_ref(),
+                            other => other,
+                        };
+                        let is_object_literal = matches!(inner, OutputExpression::LiteralMap(_));
                         if is_object_literal {
                             ctx.print("(");
                         }
@@ -2615,5 +2620,146 @@ mod tests {
 
         let output = emitter.emit_statement(&stmt);
         assert_eq!(output, "function foo() {\n}");
+    }
+
+    // ========================================================================
+    // Arrow Function Object Literal Paren Tests (issue #43)
+    // ========================================================================
+
+    #[test]
+    fn test_emit_arrow_function_direct_object_literal_body() {
+        use super::super::ast::{
+            ArrowFunctionBody, ArrowFunctionExpr, LiteralMapEntry, LiteralMapExpr,
+        };
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Build: () =>({showMenu:signal(true)})
+        let signal_call = OutputExpression::InvokeFunction(Box::new_in(
+            super::super::ast::InvokeFunctionExpr {
+                fn_expr: Box::new_in(
+                    OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: Atom::from("signal"), source_span: None },
+                        &alloc,
+                    )),
+                    &alloc,
+                ),
+                args: {
+                    let mut args = oxc_allocator::Vec::new_in(&alloc);
+                    args.push(OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
+                        &alloc,
+                    )));
+                    args
+                },
+                pure: false,
+                optional: false,
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let mut entries = oxc_allocator::Vec::new_in(&alloc);
+        entries.push(LiteralMapEntry {
+            key: Atom::from("showMenu"),
+            value: signal_call,
+            quoted: false,
+        });
+
+        let obj_literal = OutputExpression::LiteralMap(Box::new_in(
+            LiteralMapExpr { entries, source_span: None },
+            &alloc,
+        ));
+
+        let params = oxc_allocator::Vec::new_in(&alloc);
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params,
+                body: ArrowFunctionBody::Expression(Box::new_in(obj_literal, &alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Object literal body must be wrapped in parens to avoid ambiguity with block
+        assert!(output.contains("=>({"), "Expected parens around object literal, got: {output}");
+        assert!(output.ends_with(")"), "Expected closing paren, got: {output}");
+    }
+
+    #[test]
+    fn test_emit_arrow_function_parenthesized_object_literal_body() {
+        use super::super::ast::{
+            ArrowFunctionBody, ArrowFunctionExpr, LiteralMapEntry, LiteralMapExpr,
+            ParenthesizedExpr,
+        };
+
+        let emitter = JsEmitter::new();
+        let alloc = Allocator::default();
+
+        // Build: () =>({showMenu:signal(true)})
+        // But the body is Parenthesized(LiteralMap(...)) as would come from OXC AST conversion
+        let signal_call = OutputExpression::InvokeFunction(Box::new_in(
+            super::super::ast::InvokeFunctionExpr {
+                fn_expr: Box::new_in(
+                    OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: Atom::from("signal"), source_span: None },
+                        &alloc,
+                    )),
+                    &alloc,
+                ),
+                args: {
+                    let mut args = oxc_allocator::Vec::new_in(&alloc);
+                    args.push(OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
+                        &alloc,
+                    )));
+                    args
+                },
+                pure: false,
+                optional: false,
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let mut entries = oxc_allocator::Vec::new_in(&alloc);
+        entries.push(LiteralMapEntry {
+            key: Atom::from("showMenu"),
+            value: signal_call,
+            quoted: false,
+        });
+
+        let obj_literal = OutputExpression::LiteralMap(Box::new_in(
+            LiteralMapExpr { entries, source_span: None },
+            &alloc,
+        ));
+
+        // Wrap in Parenthesized (this is what convert_oxc_expression produces)
+        let parenthesized = OutputExpression::Parenthesized(Box::new_in(
+            ParenthesizedExpr { expr: Box::new_in(obj_literal, &alloc), source_span: None },
+            &alloc,
+        ));
+
+        let params = oxc_allocator::Vec::new_in(&alloc);
+
+        let expr = OutputExpression::ArrowFunction(Box::new_in(
+            ArrowFunctionExpr {
+                params,
+                body: ArrowFunctionBody::Expression(Box::new_in(parenthesized, &alloc)),
+                source_span: None,
+            },
+            &alloc,
+        ));
+
+        let output = emitter.emit_expression(&expr);
+        // Even when wrapped in Parenthesized, the object literal body must have parens
+        assert!(
+            output.contains("=>({"),
+            "Expected parens around parenthesized object literal, got: {output}"
+        );
+        assert!(output.ends_with(")"), "Expected closing paren, got: {output}");
     }
 }
