@@ -23,15 +23,17 @@ oxc_parser = { workspace = true }
 oxc_semantic = { workspace = true }
 oxc_span = { workspace = true }
 oxc_sourcemap = { workspace = true }
+oxc_transformer = { workspace = true }
+oxc_codegen = { workspace = true }
 miette = { workspace = true }
 rustc-hash = { workspace = true }
 indexmap = { workspace = true }
-oxc_resolver = { version = "11", optional = true }
+oxc_resolver = { version = "11" }
 pathdiff = { version = "0.2", optional = true }
 
 [features]
 default = []
-cross_file_elision = ["oxc_resolver", "pathdiff"]
+cross_file_elision = ["pathdiff"]
 
 [dev-dependencies]
 insta = { workspace = true, features = ["glob"] }

@@ -8,10 +8,10 @@
  * - Hot Module Replacement (HMR)
  */
 
-import { watch } from 'node:fs'
+import { existsSync, watch } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { ServerResponse } from 'node:http'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 import { createDebug } from 'obug'
 import type { Plugin, ResolvedConfig, ViteDevServer, Connect } from 'vite'
@@ -25,7 +25,7 @@ import {
   transformAngularFile,
   extractComponentUrls,
   encapsulateStyle,
-  compileForHmrSync,
+  compileForHmr,
   type TransformOptions,
   type ResolvedResources,
 } from '#binding'
@@ -68,6 +68,44 @@ const ANGULAR_TS_REGEX = /\.tsx?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
 /**
+ * Strip JSON comments (single-line and block) and trailing commas.
+ * tsconfig.json files commonly use these, but JSON.parse doesn't support them.
+ */
+function stripJsonComments(text: string): string {
+  // Remove single-line comments
+  let result = text.replace(/\/\/.*$/gm, '')
+  // Remove block comments
+  result = result.replace(/\/\*[\s\S]*?\*\//g, '')
+  // Remove trailing commas before } or ]
+  result = result.replace(/,\s*([}\]])/g, '$1')
+  return result
+}
+
+/**
+ * Read a tsconfig.json file and extract the TypeScript compiler options
+ * relevant to the Angular compiler transform: experimentalDecorators,
+ * emitDecoratorMetadata, and verbatimModuleSyntax (mapped to onlyRemoveTypeImports).
+ *
+ * Returns a pre-resolved options object that bypasses per-file tsconfig resolution.
+ */
+async function readTsCompilerOptions(tsconfigPath: string): Promise<{
+  experimentalDecorators?: boolean
+  emitDecoratorMetadata?: boolean
+  onlyRemoveTypeImports?: boolean
+}> {
+  const content = await readFile(tsconfigPath, 'utf-8')
+  const parsed = JSON.parse(stripJsonComments(content))
+  const compilerOptions = parsed?.compilerOptions ?? {}
+
+  return {
+    experimentalDecorators: compilerOptions.experimentalDecorators,
+    emitDecoratorMetadata: compilerOptions.emitDecoratorMetadata,
+    // verbatimModuleSyntax maps to onlyRemoveTypeImports in the Rust compiler
+    onlyRemoveTypeImports: compilerOptions.verbatimModuleSyntax,
+  }
+}
+
+/**
  * Create the Angular Vite plugin.
  */
 export function angular(options: PluginOptions = {}): Plugin[] {
@@ -101,6 +139,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   let resolvedConfig: ResolvedConfig
   let viteServer: ViteDevServer | undefined
   let watchMode = false
+
+  // Pre-resolved TypeScript compiler options, populated once during setup.
+  // This avoids creating a new Resolver per file in the Rust compiler.
+  let resolvedTypescript:
+    | {
+        experimentalDecorators?: boolean
+        emitDecoratorMetadata?: boolean
+        onlyRemoveTypeImports?: boolean
+      }
+    | undefined
 
   // Track component IDs for HMR
   const componentIds = new Map<string, string>()
@@ -196,8 +244,36 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // using server.watcher.unwatch(). This is more precise than static glob patterns.
         }
       },
-      configResolved(config) {
+      async configResolved(config) {
         resolvedConfig = config
+
+        // Resolve tsconfig once to avoid per-file I/O in the Rust compiler.
+        // When typescript option is `true` or a path string, we read the tsconfig
+        // and extract the relevant compiler options upfront.
+        try {
+          const tsconfigOption = options.tsconfig
+          let tsconfigPath: string | undefined
+
+          if (typeof tsconfigOption === 'string') {
+            tsconfigPath = resolve(workspaceRoot, tsconfigOption)
+          } else {
+            // Auto-discover: look for tsconfig.json in the workspace root
+            const candidate = join(workspaceRoot, 'tsconfig.json')
+            if (existsSync(candidate)) {
+              tsconfigPath = candidate
+            }
+          }
+
+          if (tsconfigPath) {
+            resolvedTypescript = await readTsCompilerOptions(tsconfigPath)
+          }
+        } catch (e) {
+          // If reading tsconfig fails, fall back to per-file resolution
+          console.warn(
+            '[oxc-angular] Failed to pre-resolve tsconfig, falling back to per-file resolution:',
+            (e as Error).message,
+          )
+        }
       },
       configureServer(server) {
         viteServer = server
@@ -359,7 +435,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   }
                 }
 
-                const result = compileForHmrSync(templateContent, className, resolvedId, styles)
+                const result = await compileForHmr(templateContent, className, resolvedId, styles)
 
                 res.setHeader('Content-Type', 'text/javascript')
                 res.setHeader('Cache-Control', 'no-cache')
@@ -444,6 +520,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             sourcemap: pluginOptions.sourceMap,
             jit: pluginOptions.jit,
             hmr: pluginOptions.liveReload && watchMode,
+            // Use pre-resolved tsconfig options to avoid per-file Resolver creation.
+            // Falls back to the original behavior if pre-resolution failed.
+            typescript: resolvedTypescript ?? options.tsconfig ?? true,
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)

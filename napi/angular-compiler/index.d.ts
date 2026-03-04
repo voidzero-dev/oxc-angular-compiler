@@ -821,6 +821,20 @@ export interface TransformOptions {
    * and provide the actual file paths here.
    */
   resolvedImports?: Map<string, string>
+  /**
+   * TypeScript-to-JavaScript transformation.
+   * - `true`: auto-discover nearest tsconfig.json
+   * - string: explicit tsconfig path
+   * - object: pre-resolved options
+   */
+  typescript?:
+    | boolean
+    | string
+    | {
+        experimentalDecorators?: boolean
+        emitDecoratorMetadata?: boolean
+        onlyRemoveTypeImports?: boolean
+      }
 }
 
 /** Result of transforming an Angular file. */
@@ -839,6 +853,16 @@ export interface TransformResult {
   errors: Array<OxcError>
   /** Compilation warnings. */
   warnings: Array<OxcError>
+}
+
+/** Pre-resolved TypeScript transform options. */
+export interface TypeScriptTransformOptions {
+  /** Use legacy (experimental) decorators. Default: true. */
+  experimentalDecorators?: boolean
+  /** Emit decorator metadata for reflection. Default: false. */
+  emitDecoratorMetadata?: boolean
+  /** Only remove type-only imports (verbatimModuleSyntax). Default: true. */
+  onlyRemoveTypeImports?: boolean
 }
 export interface Comment {
   type: 'Line' | 'Block'

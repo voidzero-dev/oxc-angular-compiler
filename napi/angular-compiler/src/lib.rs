@@ -13,14 +13,17 @@
 static ALLOC: mimalloc_safe::MiMalloc = mimalloc_safe::MiMalloc;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use napi::{Task, bindgen_prelude::AsyncTask};
+use napi::{Either, Task, bindgen_prelude::AsyncTask};
 use napi_derive::napi;
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
     AngularVersion as RustAngularVersion, ChangeDetectionStrategy as RustChangeDetectionStrategy,
-    HostMetadataInput as RustHostMetadataInput, TransformOptions as RustTransformOptions,
+    HostMetadataInput as RustHostMetadataInput,
+    ResolvedTypeScriptOptions as RustResolvedTypeScriptOptions,
+    TransformOptions as RustTransformOptions, TypeScriptOption as RustTypeScriptOption,
     ViewEncapsulation as RustViewEncapsulation,
     build_ctor_params_metadata as core_build_ctor_params_metadata,
     build_decorator_metadata_array as core_build_decorator_metadata_array,
@@ -106,6 +109,18 @@ impl From<HostMetadataInput> for RustHostMetadataInput {
             style_attr: h.style_attr,
         }
     }
+}
+
+/// Pre-resolved TypeScript transform options.
+#[derive(Default, Clone)]
+#[napi(object)]
+pub struct TypeScriptTransformOptions {
+    /// Use legacy (experimental) decorators. Default: true.
+    pub experimental_decorators: Option<bool>,
+    /// Emit decorator metadata for reflection. Default: false.
+    pub emit_decorator_metadata: Option<bool>,
+    /// Only remove type-only imports (verbatimModuleSyntax). Default: true.
+    pub only_remove_type_imports: Option<bool>,
 }
 
 /// Options for transforming an Angular component.
@@ -200,6 +215,15 @@ pub struct TransformOptions {
     /// and provide the actual file paths here.
     #[napi(ts_type = "Map<string, string>")]
     pub resolved_imports: Option<HashMap<String, String>>,
+
+    /// TypeScript-to-JavaScript transformation.
+    /// - `true`: auto-discover nearest tsconfig.json
+    /// - string: explicit tsconfig path
+    /// - object: pre-resolved options
+    #[napi(
+        ts_type = "boolean | string | { experimentalDecorators?: boolean, emitDecoratorMetadata?: boolean, onlyRemoveTypeImports?: boolean }"
+    )]
+    pub typescript: Option<Either<bool, Either<String, TypeScriptTransformOptions>>>,
 }
 
 impl From<TransformOptions> for RustTransformOptions {
@@ -231,6 +255,26 @@ impl From<TransformOptions> for RustTransformOptions {
             resolved_imports: options.resolved_imports,
             // Class metadata for TestBed support
             emit_class_metadata: options.emit_class_metadata.unwrap_or(false),
+            // TypeScript transform
+            typescript: options.typescript.and_then(|ts| match ts {
+                Either::A(enabled) => {
+                    if enabled {
+                        Some(RustTypeScriptOption::Auto)
+                    } else {
+                        None
+                    }
+                }
+                Either::B(either) => Some(match either {
+                    Either::A(path) => RustTypeScriptOption::TsConfigPath(PathBuf::from(path)),
+                    Either::B(opts) => {
+                        RustTypeScriptOption::Resolved(RustResolvedTypeScriptOptions {
+                            experimental_decorators: opts.experimental_decorators.unwrap_or(true),
+                            emit_decorator_metadata: opts.emit_decorator_metadata.unwrap_or(false),
+                            only_remove_type_imports: opts.only_remove_type_imports.unwrap_or(true),
+                        })
+                    }
+                }),
+            }),
         }
     }
 }

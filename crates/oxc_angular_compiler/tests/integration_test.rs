@@ -5,7 +5,8 @@
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
-    AngularVersion, R3Node, ResolvedResources, TransformOptions as ComponentTransformOptions,
+    AngularVersion, R3Node, ResolvedResources, ResolvedTypeScriptOptions,
+    TransformOptions as ComponentTransformOptions, TypeScriptOption,
     output::ast::FunctionExpr,
     output::emitter::JsEmitter,
     parser::html::HtmlParser,
@@ -5856,4 +5857,125 @@ fn test_host_binding_pure_function_declarations_emitted() {
             panic!("Compilation failed: {e:?}");
         }
     }
+}
+
+// =============================================================================
+// TypeScript Transform Integration Tests
+// =============================================================================
+
+#[test]
+fn typescript_transform_strips_type_annotations() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: `<span>hello</span>`,
+})
+export class TestComponent {
+  title: string = 'hello';
+}
+"#;
+
+    let options = ComponentTransformOptions {
+        typescript: Some(TypeScriptOption::Resolved(ResolvedTypeScriptOptions {
+            experimental_decorators: true,
+            emit_decorator_metadata: false,
+            only_remove_type_imports: false,
+        })),
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    // Type annotation should be stripped
+    assert!(
+        !result.code.contains(": string"),
+        "Type annotation should be stripped from output. Got:\n{}",
+        result.code
+    );
+    // Angular static fields should still be present
+    assert!(
+        result.code.contains("\u{0275}fac") || result.code.contains("ɵfac"),
+        "Angular factory should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn typescript_transform_lowers_custom_decorator() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+function TrackChanges() {
+  return function(target: any) { return target; };
+}
+
+@TrackChanges()
+@Component({
+  selector: 'app-custom',
+  standalone: true,
+  template: `<span>custom decorator</span>`,
+})
+export class CustomDecoratorComponent {}
+"#;
+
+    let options = ComponentTransformOptions {
+        typescript: Some(TypeScriptOption::Resolved(ResolvedTypeScriptOptions {
+            experimental_decorators: true,
+            emit_decorator_metadata: false,
+            only_remove_type_imports: false,
+        })),
+        ..ComponentTransformOptions::default()
+    };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    // The @TrackChanges decorator syntax should no longer be present as raw syntax
+    assert!(
+        !result.code.contains("@TrackChanges"),
+        "Custom decorator should be lowered (not present as @TrackChanges). Got:\n{}",
+        result.code
+    );
+    // Angular static fields should still be present
+    assert!(
+        result.code.contains("\u{0275}cmp") || result.code.contains("ɵcmp"),
+        "Angular component definition should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn typescript_transform_none_preserves_typescript() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: `<span>hello</span>`,
+})
+export class TestComponent {
+  title: string = 'hello';
+}
+"#;
+
+    let options =
+        ComponentTransformOptions { typescript: None, ..ComponentTransformOptions::default() };
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    // Type annotation should still be present when typescript is None
+    assert!(
+        result.code.contains(": string"),
+        "Type annotation should be preserved when typescript option is None. Got:\n{}",
+        result.code
+    );
 }

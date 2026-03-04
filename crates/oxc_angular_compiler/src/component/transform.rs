@@ -4,15 +4,26 @@
 //! containing Angular components into compiled JavaScript.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
     Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier, ImportOrExportKind,
     Statement,
 };
+use oxc_codegen::Codegen;
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
+use oxc_resolver::{
+    ResolveOptions, Resolver, TsconfigDiscovery, TsconfigOptions, TsconfigReferences,
+};
+use oxc_semantic::SemanticBuilder;
 use oxc_span::{Atom, SourceType, Span};
+use oxc_transformer::{
+    DecoratorOptions, HelperLoaderMode, HelperLoaderOptions,
+    TransformOptions as OxcTransformOptions, Transformer as OxcTransformer,
+    TypeScriptOptions as OxcTypeScriptOptions,
+};
 use rustc_hash::FxHashMap;
 
 #[cfg(feature = "cross_file_elision")]
@@ -64,6 +75,28 @@ use crate::pipeline::ingest::{
 };
 use crate::transform::HtmlToR3Transform;
 use crate::transform::html_to_r3::TransformOptions as R3TransformOptions;
+
+/// How to resolve TypeScript transform options.
+#[derive(Debug, Clone)]
+pub enum TypeScriptOption {
+    /// Auto-discover nearest tsconfig.json from the source file.
+    Auto,
+    /// Use explicit tsconfig path.
+    TsConfigPath(PathBuf),
+    /// Use pre-resolved options (for testing/NAPI).
+    Resolved(ResolvedTypeScriptOptions),
+}
+
+/// Pre-resolved TypeScript transform options.
+#[derive(Debug, Clone)]
+pub struct ResolvedTypeScriptOptions {
+    /// Use legacy (experimental) decorators.
+    pub experimental_decorators: bool,
+    /// Emit decorator metadata for reflection.
+    pub emit_decorator_metadata: bool,
+    /// Only remove type-only imports (verbatimModuleSyntax).
+    pub only_remove_type_imports: bool,
+}
 
 /// Options for Angular file transformation.
 #[derive(Debug, Clone)]
@@ -171,6 +204,11 @@ pub struct TransformOptions {
     ///
     /// Default: false (metadata is dev-only and usually stripped in production)
     pub emit_class_metadata: bool,
+
+    /// TypeScript-to-JavaScript transformation.
+    /// When `Some`, runs oxc_transformer after Angular transforms to strip types
+    /// and lower decorators. Reads tsconfig.json to derive decorator and TS options.
+    pub typescript: Option<TypeScriptOption>,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -220,6 +258,8 @@ impl Default for TransformOptions {
             resolved_imports: None,
             // Class metadata for TestBed support (disabled by default)
             emit_class_metadata: false,
+            // TypeScript transform (disabled by default)
+            typescript: None,
         }
     }
 }
@@ -1313,7 +1353,16 @@ pub fn transform_angular_file(
                 if let Some(id) = &class.id {
                     let name = id.name.to_string();
                     if class_definitions.contains_key(&name) {
-                        class_positions.push((name, stmt_start, class.body.span.end));
+                        // Account for non-Angular decorators that precede the class.
+                        // Decorators like @Log(...) appear before `export class` in source,
+                        // so we must insert decls_before_class before those decorators.
+                        let effective_start = class
+                            .decorators
+                            .iter()
+                            .map(|d| d.span.start)
+                            .min()
+                            .map_or(stmt_start, |dec_start| dec_start.min(stmt_start));
+                        class_positions.push((name, effective_start, class.body.span.end));
                     }
                 }
             }
@@ -1360,11 +1409,195 @@ pub fn transform_angular_file(
         }
     }
 
-    result.code = final_code;
+    // Apply TypeScript transform if requested
+    if let Some(ts_option) = &options.typescript {
+        match apply_typescript_transform(&final_code, path, ts_option) {
+            Ok(transformed) => {
+                result.code = transformed;
+            }
+            Err(diags) => {
+                result.diagnostics.extend(diags);
+                result.code = final_code;
+            }
+        }
+    } else {
+        result.code = final_code;
+    }
+
     // Note: source maps not supported with string manipulation approach
     result.map = None;
 
     result
+}
+
+/// Resolve `TypeScriptOption` into `ResolvedTypeScriptOptions` by reading tsconfig.json.
+fn resolve_typescript_options(
+    file_path: &str,
+    ts_option: &TypeScriptOption,
+) -> Result<ResolvedTypeScriptOptions, Vec<OxcDiagnostic>> {
+    match ts_option {
+        TypeScriptOption::Resolved(resolved) => Ok(resolved.clone()),
+        TypeScriptOption::Auto => {
+            let resolver = Resolver::new(ResolveOptions {
+                tsconfig: Some(TsconfigDiscovery::Auto),
+                ..ResolveOptions::default()
+            });
+
+            match resolver.find_tsconfig(&PathBuf::from(file_path)) {
+                Ok(Some(tsconfig)) => {
+                    let co = &tsconfig.compiler_options;
+                    Ok(ResolvedTypeScriptOptions {
+                        experimental_decorators: co.experimental_decorators.unwrap_or(false),
+                        emit_decorator_metadata: co.emit_decorator_metadata.unwrap_or(false),
+                        only_remove_type_imports: co.verbatim_module_syntax.unwrap_or(false),
+                    })
+                }
+                Ok(None) => {
+                    // No tsconfig found, use defaults matching NAPI layer defaults
+                    Ok(ResolvedTypeScriptOptions {
+                        experimental_decorators: true,
+                        emit_decorator_metadata: false,
+                        only_remove_type_imports: true,
+                    })
+                }
+                Err(e) => {
+                    Err(vec![OxcDiagnostic::error(format!("Failed to resolve tsconfig: {e}"))])
+                }
+            }
+        }
+        TypeScriptOption::TsConfigPath(p) => {
+            let resolver = Resolver::new(ResolveOptions {
+                tsconfig: Some(TsconfigDiscovery::Manual(TsconfigOptions {
+                    config_file: p.clone(),
+                    references: TsconfigReferences::Auto,
+                })),
+                ..ResolveOptions::default()
+            });
+
+            match resolver.find_tsconfig(p) {
+                Ok(Some(tsconfig)) => {
+                    let co = &tsconfig.compiler_options;
+                    Ok(ResolvedTypeScriptOptions {
+                        experimental_decorators: co.experimental_decorators.unwrap_or(false),
+                        emit_decorator_metadata: co.emit_decorator_metadata.unwrap_or(false),
+                        only_remove_type_imports: co.verbatim_module_syntax.unwrap_or(false),
+                    })
+                }
+                Ok(None) => {
+                    // Specific tsconfig path was given but not found, use defaults
+                    Ok(ResolvedTypeScriptOptions {
+                        experimental_decorators: true,
+                        emit_decorator_metadata: false,
+                        only_remove_type_imports: true,
+                    })
+                }
+                Err(e) => {
+                    Err(vec![OxcDiagnostic::error(format!("Failed to resolve tsconfig: {e}"))])
+                }
+            }
+        }
+    }
+}
+
+/// Apply TypeScript transformation to the final code string.
+///
+/// This re-parses the code, runs `oxc_transformer` to strip TypeScript types
+/// and lower decorators, then re-emits via `oxc_codegen`.
+fn apply_typescript_transform(
+    code: &str,
+    file_path: &str,
+    ts_option: &TypeScriptOption,
+) -> Result<String, Vec<OxcDiagnostic>> {
+    let resolved = resolve_typescript_options(file_path, ts_option)?;
+
+    let allocator = Allocator::default();
+    let source_type = SourceType::from_path(file_path).unwrap_or_default();
+    let parser_ret = Parser::new(&allocator, code, source_type).parse();
+
+    if !parser_ret.errors.is_empty() {
+        return Err(parser_ret
+            .errors
+            .into_iter()
+            .map(|e| OxcDiagnostic::error(e.to_string()))
+            .collect());
+    }
+
+    let mut program = parser_ret.program;
+
+    // Build semantic info for the transformer
+    let semantic_ret = SemanticBuilder::new().build(&program);
+    if !semantic_ret.errors.is_empty() {
+        return Err(semantic_ret
+            .errors
+            .into_iter()
+            .map(|e| OxcDiagnostic::error(e.to_string()))
+            .collect());
+    }
+
+    let scoping = semantic_ret.semantic.into_scoping();
+
+    // Map resolved options to oxc_transformer options.
+    // Use External helper mode to emit `babelHelpers.decorate(...)` instead of
+    // importing from `@oxc-project/runtime` (which may not be installed).
+    let transform_options = OxcTransformOptions {
+        typescript: OxcTypeScriptOptions {
+            only_remove_type_imports: resolved.only_remove_type_imports,
+            ..OxcTypeScriptOptions::default()
+        },
+        decorator: DecoratorOptions {
+            legacy: resolved.experimental_decorators,
+            emit_decorator_metadata: resolved.emit_decorator_metadata,
+        },
+        helper_loader: HelperLoaderOptions {
+            mode: HelperLoaderMode::External,
+            ..HelperLoaderOptions::default()
+        },
+        ..OxcTransformOptions::default()
+    };
+
+    let path = Path::new(file_path);
+    let transformer = OxcTransformer::new(&allocator, path, &transform_options);
+    let transform_ret = transformer.build_with_scoping(scoping, &mut program);
+
+    if !transform_ret.errors.is_empty() {
+        return Err(transform_ret
+            .errors
+            .into_iter()
+            .map(|e| OxcDiagnostic::error(e.to_string()))
+            .collect());
+    }
+
+    let codegen_ret = Codegen::new().build(&program);
+    let mut code = codegen_ret.code;
+
+    // If the output references babelHelpers (from External helper mode),
+    // inject a minimal polyfill. Must go AFTER imports to be valid ESM.
+    if code.contains("babelHelpers.decorate") {
+        let helper = "var babelHelpers = { decorate(decorators, target) { \
+                       for (var i = decorators.length - 1; i >= 0; i--) { \
+                       target = decorators[i](target) || target; } return target; } };\n";
+        // Find the end of the last import statement to insert after it.
+        let insert_pos = find_after_last_import(&code);
+        code.insert_str(insert_pos, helper);
+    }
+
+    Ok(code)
+}
+
+/// Find the byte offset right after the last `import` statement in the code.
+/// Falls back to position 0 if no imports found.
+fn find_after_last_import(code: &str) -> usize {
+    // Find lines starting with "import " — the codegen output is clean and predictable.
+    let mut last_import_end = 0;
+    let mut pos = 0;
+    for line in code.lines() {
+        let line_end = pos + line.len() + 1; // +1 for newline
+        if line.starts_with("import ") {
+            last_import_end = line_end.min(code.len());
+        }
+        pos = line_end;
+    }
+    last_import_end
 }
 
 /// Result of full component compilation including ɵcmp/ɵfac.
