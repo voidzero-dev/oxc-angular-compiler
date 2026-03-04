@@ -1313,7 +1313,16 @@ pub fn transform_angular_file(
                 if let Some(id) = &class.id {
                     let name = id.name.to_string();
                     if class_definitions.contains_key(&name) {
-                        class_positions.push((name, stmt_start, class.body.span.end));
+                        // Account for non-Angular decorators that precede the class.
+                        // Decorators like @Log(...) appear before `export class` in source,
+                        // so we must insert decls_before_class before those decorators.
+                        let effective_start = class
+                            .decorators
+                            .iter()
+                            .map(|d| d.span.start)
+                            .min()
+                            .map_or(stmt_start, |dec_start| dec_start.min(stmt_start));
+                        class_positions.push((name, effective_start, class.body.span.end));
                     }
                 }
             }
