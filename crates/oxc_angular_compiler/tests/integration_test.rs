@@ -145,13 +145,13 @@ fn test_multiple_interpolations() {
 
 #[test]
 fn test_html_entity_between_interpolations() {
-    // HTML entity &times; between two interpolations should produce \u00D7 in the output
+    // HTML entity &times; between two interpolations should produce raw × in the output
     let js = compile_template_to_js("<div>{{ a }}&times;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "\u00D7", ctx.b)
-    // Note: × (multiplication sign) = U+00D7, escaped as \u00D7
+    // Should produce: textInterpolate2("", ctx.a, "×", ctx.b)
+    // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains(r#"textInterpolate2("",ctx.a,"\u00D7",ctx.b)"#),
-        "Expected textInterpolate2 with escaped times character. Got:\n{js}"
+        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00D7}\",ctx.b)"),
+        "Expected textInterpolate2 with raw times character. Got:\n{js}"
     );
 }
 
@@ -159,12 +159,12 @@ fn test_html_entity_between_interpolations() {
 fn test_html_entity_at_start_of_interpolation() {
     // Entity at start: &times;{{ a }}
     let js = compile_template_to_js("<div>&times;{{ a }}</div>", "TestComponent");
-    // Should produce: textInterpolate1("\u00D7", ctx.a)
-    // Note: × (multiplication sign) = U+00D7, escaped as \u00D7
+    // Should produce: textInterpolate1("×", ctx.a)
+    // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains(r#"textInterpolate1("\u00D7",ctx.a)"#)
-            || js.contains(r#"textInterpolate("\u00D7",ctx.a)"#),
-        "Expected textInterpolate with escaped times character at start. Got:\n{js}"
+        js.contains("textInterpolate1(\"\u{00D7}\",ctx.a)")
+            || js.contains("textInterpolate(\"\u{00D7}\",ctx.a)"),
+        "Expected textInterpolate with raw times character at start. Got:\n{js}"
     );
 }
 
@@ -173,11 +173,11 @@ fn test_multiple_html_entities_between_interpolations() {
     // Multiple entities: {{ a }}&nbsp;&times;&nbsp;{{ b }}
     let js =
         compile_template_to_js("<div>{{ a }}&nbsp;&times;&nbsp;{{ b }}</div>", "TestComponent");
-    // Should produce: textInterpolate2("", ctx.a, "\u00A0\u00D7\u00A0", ctx.b)
-    // Note: &nbsp; = U+00A0, &times; = U+00D7, both escaped as \uNNNN
+    // Should produce: textInterpolate2("", ctx.a, "\u{00A0}×\u{00A0}", ctx.b)
+    // Note: &nbsp; = U+00A0, &times; = U+00D7, both emitted as raw UTF-8
     assert!(
-        js.contains(r#"textInterpolate2("",ctx.a,"\u00A0\u00D7\u00A0",ctx.b)"#),
-        "Expected textInterpolate2 with escaped Unicode entities. Got:\n{js}"
+        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00A0}\u{00D7}\u{00A0}\",ctx.b)"),
+        "Expected textInterpolate2 with raw Unicode entities. Got:\n{js}"
     );
 }
 
@@ -3803,14 +3803,14 @@ fn test_animation_enter_string_literal_in_embedded_view() {
 #[test]
 fn test_animation_enter_string_literal_only_in_embedded_view() {
     // Tests the case where an animation handler returning a string literal is the ONLY
-    // listener-like op in an embedded view. Angular's ngtsc always keeps restoreView/resetView
-    // in animation handler callbacks in embedded views, even when the return value is a simple
-    // string literal that doesn't reference the view context.
+    // listener-like op in an embedded view. Per Angular's variable_optimization.ts (lines 61-66),
+    // Animation handlers also get `optimizeSaveRestoreView`, so when the return value is a
+    // simple string literal that doesn't reference the view context, restoreView/resetView
+    // should be optimized away.
     //
-    // Expected NG output pattern:
+    // Expected output pattern:
     //   i0.ɵɵanimateEnter(function ...() {
-    //     i0.ɵɵrestoreView(_r1);
-    //     return i0.ɵɵresetView("animate-in");
+    //     return "animate-in";
     //   });
     let js = compile_template_to_js(
         r#"@if (show) {
@@ -3824,14 +3824,9 @@ fn test_animation_enter_string_literal_only_in_embedded_view() {
         !js.contains("_unnamed_"),
         "Generated JS contains _unnamed_ references.\nGenerated JS:\n{js}"
     );
-    assert!(
-        js.contains("restoreView"),
-        "Animation handler in embedded view should keep restoreView.\nGenerated JS:\n{js}"
-    );
-    assert!(
-        js.contains("resetView"),
-        "Animation handler in embedded view should keep resetView.\nGenerated JS:\n{js}"
-    );
+    // The animation handler only returns a string literal, so restoreView/resetView
+    // should be optimized away. But the view's listener (if any) may still need it,
+    // so we check that the animation callback itself doesn't have unnecessary wrapping.
     insta::assert_snapshot!("animation_enter_string_literal_only_embedded_view", js);
 }
 
@@ -5436,4 +5431,429 @@ fn test_field_property_not_control_binding() {
         "[field] should produce regular ɵɵproperty(\"field\", ...). Got:\n{}",
         js
     );
+}
+
+// ============================================================================
+// Regression: optimize_save_restore_view should remove restoreView/resetView
+// when the listener body doesn't reference any parent context variables.
+// ============================================================================
+
+#[test]
+fn test_optimize_save_restore_view_stop_propagation() {
+    // Listener in embedded view that returns $event.stopPropagation()
+    // should NOT have restoreView/resetView wrapping because the listener
+    // doesn't reference any parent context variables.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div *ngIf="show"><button (click)="$event.stopPropagation()">Click</button></div>',
+    standalone: true,
+})
+export class TestComponent {
+    show = true;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Angular optimizes away restoreView/resetView when the listener doesn't
+    // reference any parent context. The output should just be:
+    //   return $event.stopPropagation();
+    // NOT:
+    //   i0.ɵɵrestoreView(_r1);
+    //   return i0.ɵɵresetView($event.stopPropagation());
+    assert!(
+        !code.contains("restoreView") || !code.contains("$event.stopPropagation"),
+        "Listener that only calls $event.stopPropagation() should not have restoreView/resetView. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_optimize_save_restore_view_return_false() {
+    // Listener in embedded view that returns false
+    // should NOT have restoreView/resetView wrapping.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div *ngIf="show"><a (click)="false">Link</a></div>',
+    standalone: true,
+})
+export class TestComponent {
+    show = true;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // The listener should just return false without restoreView/resetView
+    assert!(
+        !code.contains("restoreView"),
+        "Listener that returns false should not have restoreView. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("resetView"),
+        "Listener that returns false should not have resetView. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_optimize_save_restore_view_prevent_default() {
+    // Listener in embedded view that returns $event.preventDefault()
+    // should NOT have restoreView/resetView wrapping.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div *ngIf="show"><form (submit)="$event.preventDefault()">Form</form></div>',
+    standalone: true,
+})
+export class TestComponent {
+    show = true;
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // The listener should just return $event.preventDefault() without restoreView/resetView
+    assert!(
+        !code.contains("restoreView"),
+        "Listener that only calls $event.preventDefault() should not have restoreView. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("resetView"),
+        "Listener that only calls $event.preventDefault() should not have resetView. Got:\n{code}"
+    );
+}
+
+// ============================================================================
+// Unicode / Non-ASCII Character Tests
+// ============================================================================
+
+#[test]
+fn test_unicode_text_not_escaped() {
+    // Unicode characters like en-dash should be emitted as raw UTF-8, not escaped.
+    // Angular's TypeScript emitter does NOT escape non-ASCII printable characters.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<span>Hello \u{2013} World</span>',
+    standalone: true,
+})
+export class TestComponent {}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    // Should contain raw en-dash, not escaped
+    assert!(
+        code.contains("\u{2013}") && !code.contains("\\u2013"),
+        "En-dash should be emitted as raw UTF-8, not as \\u2013. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_unicode_non_breaking_space_not_escaped() {
+    // Non-breaking space (U+00A0) should also be emitted as raw UTF-8
+    let allocator = Allocator::default();
+    let source = "
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<span>Hello\u{00A0}World</span>',
+    standalone: true,
+})
+export class TestComponent {}
+";
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    // Should contain raw non-breaking space, not escaped
+    assert!(
+        code.contains("\u{00A0}") && !code.contains("\\u00A0"),
+        "Non-breaking space should be emitted as raw UTF-8, not as \\u00A0. Got:\n{code}"
+    );
+}
+
+/// Test that variable naming in embedded view listeners matches Angular TS output.
+///
+/// This is based on a real-world example from the ClickUp codebase where Angular TS
+/// generates `_r1` and `ctx_r1` but OXC generates `_r2` and `ctx_r2` (off by 1).
+///
+/// The root cause is that the root view's SavedView variable (prepended by
+/// save_and_restore_view) uses up a counter slot even though it gets optimized
+/// away. The naming phase should produce the same numbering as Angular TS.
+#[test]
+fn test_variable_naming_in_embedded_view_listener() {
+    let allocator = Allocator::default();
+    // Template has ng-template with a listener that accesses the component context.
+    // This is a simplified version of ObjectMentionsSelectV2Component.
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: `
+        <ng-template>
+            <button (click)="onClick($event)">Click</button>
+        </ng-template>
+    `,
+    standalone: true,
+})
+export class TestComponent {
+    onClick(e: any) {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Angular TS generates:
+    //   const _r1 = i0.ɵɵgetCurrentView();   <-- SavedView in embedded view
+    //   ...
+    //   i0.ɵɵrestoreView(_r1);
+    //   const ctx_r1 = i0.ɵɵnextContext();    <-- Context variable
+    //
+    // If the root view's unused SavedView variable consumes a counter slot,
+    // OXC would produce _r2 and ctx_r2 instead.
+    assert!(
+        code.contains("_r1") && !code.contains("_r2"),
+        "Embedded view should use _r1 for saved view, not _r2. Got:\n{code}"
+    );
+}
+
+/// Test that variable naming matches Angular TS when root view has listeners.
+///
+/// When the root view has listeners (that don't need RestoreView), the root's
+/// SavedView variable should still be optimized away. Angular TS's root template
+/// does NOT have getCurrentView() in this case.
+#[test]
+fn test_variable_naming_root_listener_no_savedview() {
+    let allocator = Allocator::default();
+    // Template: root view has a listener + an ng-template with its own listener.
+    // The root listener uses `ctx` directly, so the root's SavedView is unnecessary.
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: `
+        <div (click)="onRootClick()">Root</div>
+        <ng-template>
+            <button (click)="onClick($event)">Click</button>
+        </ng-template>
+    `,
+    standalone: true,
+})
+export class TestComponent {
+    onRootClick() {}
+    onClick(e: any) {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // The root template should NOT have getCurrentView() since the root listener
+    // doesn't need RestoreView (it accesses ctx directly).
+    // The embedded view should use _r1 (not _r2).
+    //
+    // If the root's unused SavedView leaks into the naming counter,
+    // the embedded view would use _r2 instead of _r1.
+    let root_template_section = code.split("function TestComponent_Template(").nth(1).unwrap_or("");
+
+    let has_root_getcurrentview =
+        root_template_section.split("function ").next().unwrap_or("").contains("getCurrentView");
+
+    assert!(
+        !has_root_getcurrentview,
+        "Root template should NOT have getCurrentView() since root listeners don't need RestoreView. Got:\n{code}"
+    );
+
+    // The embedded view should use _r1, not _r2
+    assert!(code.contains("_r1"), "Embedded view should use _r1 for saved view. Got:\n{code}");
+    // _r2 should NOT appear
+    assert!(
+        !code.contains("_r2"),
+        "No _r2 should appear (would indicate counter offset from unused root SavedView). Got:\n{code}"
+    );
+}
+
+/// Test variable naming with a template reference (like #notifyFooter).
+///
+/// Based on the real ClickUp ObjectMentionsSelectV2Component which uses:
+///   <ng-template #notifyFooter> with a listener inside
+/// Angular TS uses _r1 for the embedded view, but OXC may use _r2 if the
+/// root's SavedView consumes the counter.
+#[test]
+fn test_variable_naming_with_template_ref() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: `
+        <div (click)="onRootClick()">Root</div>
+        <ng-template #myRef>
+            <button (click)="onClick($event)">Click</button>
+        </ng-template>
+    `,
+    standalone: true,
+})
+export class TestComponent {
+    onRootClick() {}
+    onClick(e: any) {}
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    // Angular TS uses _r1 for the embedded view's saved view
+    assert!(code.contains("_r1"), "Embedded view should use _r1 for saved view. Got:\n{code}");
+    // If the root's SavedView consumed the counter, we'd see _r2
+    assert!(!code.contains("_r2"), "No _r2 should appear. Got:\n{code}");
+}
+
+/// Test that host binding pure function declarations are emitted in the output.
+///
+/// When a component has a host `[class]` binding with an array literal containing
+/// a dynamic value, the compiler extracts a pure function constant (e.g., `_c0`).
+/// This constant must be emitted in the output — not silently dropped.
+///
+/// Regression test for: host binding pool constants not being emitted in
+/// compile_template_to_js_with_options path.
+#[test]
+fn test_host_binding_pure_function_declarations_emitted() {
+    use oxc_angular_compiler::{HostMetadataInput, compile_template_to_js_with_options};
+
+    let allocator = Allocator::default();
+    let template = "<p>hello</p>";
+
+    let options = ComponentTransformOptions {
+        host: Some(HostMetadataInput {
+            properties: vec![("[class]".to_string(), r#"["my-class", typeClass()]"#.to_string())],
+            attributes: vec![],
+            listeners: vec![],
+            class_attr: None,
+            style_attr: None,
+        }),
+        selector: Some("my-comp".to_string()),
+        ..Default::default()
+    };
+
+    let result = compile_template_to_js_with_options(
+        &allocator,
+        template,
+        "MyComponent",
+        "test.ts",
+        &options,
+    );
+
+    match result {
+        Ok(output) => {
+            let code = &output.code;
+            // The pure function constant DEFINITION (e.g., `const _c0 = ...`) must be present.
+            // Without the fix, the host binding function body references _c0 but the
+            // const definition is silently dropped, causing a runtime ReferenceError.
+            assert!(
+                code.contains("const _c"),
+                "Host binding pure function constant definition (const _c0 = ...) must be emitted. Got:\n{code}"
+            );
+            // The pureFunction1 call must reference the constant
+            assert!(
+                code.contains("pureFunction1"),
+                "Host binding should use pureFunction1 for array literal with dynamic value. Got:\n{code}"
+            );
+        }
+        Err(e) => {
+            panic!("Compilation failed: {e:?}");
+        }
+    }
 }

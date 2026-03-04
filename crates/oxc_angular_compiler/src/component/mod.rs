@@ -35,8 +35,9 @@ pub use metadata::{
 pub use namespace_registry::NamespaceRegistry;
 pub use transform::{
     CompiledComponent, HmrTemplateCompileOutput, HostMetadataInput, ImportInfo, ImportMap,
-    LinkerTemplateOutput, ResolvedResources, TemplateCompileOutput, TransformOptions,
-    TransformResult, build_import_map, compile_component_template, compile_for_hmr,
-    compile_host_bindings_for_linker, compile_template_for_hmr, compile_template_for_linker,
-    compile_template_to_js, compile_template_to_js_with_options, transform_angular_file,
+    LinkerHostBindingOutput, LinkerTemplateOutput, ResolvedResources, TemplateCompileOutput,
+    TransformOptions, TransformResult, build_import_map, compile_component_template,
+    compile_for_hmr, compile_host_bindings_for_linker, compile_template_for_hmr,
+    compile_template_for_linker, compile_template_to_js, compile_template_to_js_with_options,
+    transform_angular_file,
 };

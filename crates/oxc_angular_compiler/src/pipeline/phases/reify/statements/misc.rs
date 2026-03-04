@@ -379,16 +379,22 @@ pub fn create_animation_binding_stmt<'a>(
 ///
 /// The control instruction takes:
 /// - expression: The expression to evaluate for the control value
+/// - name: The property name as a string literal
 /// - sanitizer: Optional sanitizer (only if not null)
 ///
-/// Note: Unlike property(), control() does NOT take a name as the first argument.
-/// Ported from Angular's `control()` in `instruction.ts`.
+/// Note: Unlike property() which takes (name, expression), control() takes (expression, name).
+/// Ported from Angular's `control()` in `instruction.ts` lines 598-614.
 pub fn create_control_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     value: OutputExpression<'a>,
+    name: &Atom<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(value);
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
+        allocator,
+    )));
     // Note: sanitizer would be pushed here if not null, but it's always null for ControlOp
     create_instruction_call_stmt(allocator, Identifiers::CONTROL, args)
 }

@@ -50,42 +50,55 @@ pub fn decode_entity(entity: &str) -> Option<String> {
 /// For backward compatibility (matching Angular's behavior), this decodes
 /// HTML entities that appear in interpolation expressions.
 ///
-/// Pattern: `&entity;` where entity can be:
-/// - Named: `amp`, `lt`, `gt`, `quot`, etc.
-/// - Decimal: `#123`
-/// - Hex: `#x7B` or `#X7B`
+/// Uses greedy matching to replicate Angular TS's `/&([^;]+);/g` regex behavior
+/// in `parser.ts` line 365. The regex matches from `&` to the first `;` with
+/// ANY characters in between. When decoding fails, the regex cursor advances
+/// past the `;`, which means earlier `&` characters can "consume" later `;`
+/// characters and prevent entity decoding.
+///
+/// Example: `foo && bar ? '&infin;' : baz` — the regex matches from the first
+/// `&` of `&&` all the way to the `;` in `&infin;`, creating one invalid match.
+/// The entity is not decoded because the entire span is consumed.
 pub fn decode_entities_in_string(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.char_indices().peekable();
 
     while let Some((i, ch)) = chars.next() {
         if ch == '&' {
-            // Look for entity pattern: &...;
-            let mut entity_end = None;
+            // Greedy match: find the first ';' (mimics /&([^;]+);/g)
             let remaining = &s[i..];
+            let mut entity_end_byte = None;
+            let mut chars_after_ampersand = 0u32;
 
-            // Find the semicolon
+            // Skip the '&' at j=0, find the first ';'
             for (j, c) in remaining.char_indices() {
-                if c == ';' {
-                    entity_end = Some(j);
-                    break;
-                }
-                // Entities shouldn't be too long, and should contain valid chars
-                if j > 32 || (!c.is_ascii_alphanumeric() && c != '#' && c != '&') {
-                    break;
+                if j > 0 {
+                    chars_after_ampersand += 1;
+                    if c == ';' {
+                        entity_end_byte = Some(j);
+                        break;
+                    }
                 }
             }
 
-            if let Some(end) = entity_end {
+            if let Some(end) = entity_end_byte {
                 let entity = &remaining[..=end];
                 if let Some(decoded) = decode_entity(entity) {
                     result.push_str(&decoded);
-                    // Skip past the entity in the input
-                    for _ in 0..end {
+                    // Skip past the entity in the outer iterator.
+                    // Use char count (not byte offset) since .next() advances by character.
+                    for _ in 0..chars_after_ampersand {
                         chars.next();
                     }
                     continue;
                 }
+                // Failed to decode: push the full matched text and advance past ';'
+                // This matches regex behavior where the cursor advances past the match
+                result.push_str(entity);
+                for _ in 0..chars_after_ampersand {
+                    chars.next();
+                }
+                continue;
             }
         }
         result.push(ch);
@@ -2276,5 +2289,65 @@ mod tests {
         let entities = get_named_entities();
         // "Afr" maps to Mathematical Fraktur A (U+1D504)
         assert!(entities.contains_key("Afr"));
+    }
+
+    #[test]
+    fn test_decode_entities_in_string_basic() {
+        assert_eq!(decode_entities_in_string("hello &amp; world"), "hello & world");
+        assert_eq!(decode_entities_in_string("&lt;div&gt;"), "<div>");
+        assert_eq!(decode_entities_in_string("no entities here"), "no entities here");
+    }
+
+    #[test]
+    fn test_decode_entities_greedy_matching() {
+        // Angular TS regex /&([^;]+);/g greedily matches from && to &infin;'s semicolon,
+        // consuming the entire span as one failed match — so &infin; is NOT decoded.
+        let input = "foo && bar ? '&infin;' : baz";
+        assert_eq!(
+            decode_entities_in_string(input),
+            "foo && bar ? '&infin;' : baz",
+            "greedy match from && should prevent &infin; decoding"
+        );
+    }
+
+    #[test]
+    fn test_decode_entities_multibyte_between_ampersand_and_semicolon() {
+        // When multi-byte characters appear between & and ;, the skip count must use
+        // character count (not byte offset) to avoid over-consuming from the iterator.
+        // 'café' has 4 chars but 5 bytes (é is 2 bytes in UTF-8).
+        // &café; is not a valid entity, so the full span is pushed as-is.
+        // The text after the semicolon ("rest") must be preserved.
+        let input = "&café;rest";
+        assert_eq!(
+            decode_entities_in_string(input),
+            "&café;rest",
+            "multi-byte chars between & and ; must not cause data loss after ;"
+        );
+    }
+
+    #[test]
+    fn test_decode_entities_multibyte_cjk_between_ampersand_and_semicolon() {
+        // CJK characters are 3 bytes each in UTF-8.
+        // &日本; has 3 chars between & and ; but 7 bytes.
+        // Using byte offset as skip count would consume 7 chars instead of 3,
+        // eating into " after" and silently dropping characters.
+        let input = "&日本;after";
+        assert_eq!(
+            decode_entities_in_string(input),
+            "&日本;after",
+            "CJK chars between & and ; must not cause data loss"
+        );
+    }
+
+    #[test]
+    fn test_decode_entities_emoji_between_ampersand_and_semicolon() {
+        // Emoji are 4 bytes each in UTF-8.
+        // &😀; byte offset of ; is 5, but only 1 char to skip after &.
+        let input = "&😀;tail";
+        assert_eq!(
+            decode_entities_in_string(input),
+            "&😀;tail",
+            "4-byte emoji between & and ; must not cause data loss"
+        );
     }
 }

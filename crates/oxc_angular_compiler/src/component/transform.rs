@@ -1569,10 +1569,20 @@ fn compile_component_full<'a>(
         compile_component_host_bindings(allocator, metadata, template_pool_index);
 
     // Extract the result and update pool index if host bindings were compiled
-    let (host_binding_result, host_binding_next_pool_index) = match host_binding_output {
-        Some(output) => (Some(output.result), Some(output.next_pool_index)),
-        None => (None, None),
-    };
+    let (host_binding_result, host_binding_next_pool_index, host_binding_declarations) =
+        match host_binding_output {
+            Some(output) => {
+                let declarations = output.result.declarations;
+                let result = HostBindingCompilationResult {
+                    host_binding_fn: output.result.host_binding_fn,
+                    host_attrs: output.result.host_attrs,
+                    host_vars: output.result.host_vars,
+                    declarations: OxcVec::new_in(allocator),
+                };
+                (Some(result), Some(output.next_pool_index), declarations)
+            }
+            None => (None, None, OxcVec::new_in(allocator)),
+        };
 
     // Stage 7: Generate ɵcmp/ɵfac definitions
     // The namespace registry is shared across all components in the file to ensure
@@ -1596,6 +1606,11 @@ fn compile_component_full<'a>(
     // Emit declarations (child view functions, constants)
     let mut declarations_js = String::new();
     for decl in compiled.declarations.iter() {
+        declarations_js.push_str(&emitter.emit_statement(decl));
+        declarations_js.push('\n');
+    }
+    // Emit host binding declarations (pooled constants like pure functions)
+    for decl in host_binding_declarations.iter() {
         declarations_js.push_str(&emitter.emit_statement(decl));
         declarations_js.push('\n');
     }
@@ -1972,6 +1987,11 @@ pub fn compile_template_to_js_with_options<'a>(
             component_name,
             options.selector.as_deref(),
         ) {
+            // Add host binding pool declarations (pure functions, etc.)
+            for decl in host_result.declarations {
+                all_statements.push(decl);
+            }
+
             // Add the host bindings function as a declaration if present
             if let Some(host_fn) = host_result.host_binding_fn {
                 if let Some(fn_name) = host_fn.name.clone() {
@@ -2556,6 +2576,16 @@ fn compile_host_bindings_from_input<'a>(
     Some(result)
 }
 
+/// Result of compiling host bindings for the linker.
+pub struct LinkerHostBindingOutput {
+    /// The host binding function as JS.
+    pub fn_js: String,
+    /// Number of host variables.
+    pub host_vars: u32,
+    /// Pool constant declarations (pure functions, etc.) as JS.
+    pub declarations_js: String,
+}
+
 /// Compile host bindings for the linker, returning the emitted JS function + hostVars count.
 ///
 /// This takes host property/listener data extracted from a partial declaration and compiles
@@ -2566,7 +2596,7 @@ pub fn compile_host_bindings_for_linker(
     host_input: &HostMetadataInput,
     component_name: &str,
     selector: Option<&str>,
-) -> Option<(String, u32)> {
+) -> Option<LinkerHostBindingOutput> {
     let allocator = Allocator::default();
     let result =
         compile_host_bindings_from_input(&allocator, host_input, component_name, selector)?;
@@ -2575,12 +2605,19 @@ pub fn compile_host_bindings_for_linker(
 
     let host_vars = result.host_vars.unwrap_or(0);
 
+    // Emit host binding pool declarations (pure functions, etc.)
+    let mut declarations_js = String::new();
+    for decl in result.declarations.iter() {
+        declarations_js.push_str(&emitter.emit_statement(decl));
+        declarations_js.push('\n');
+    }
+
     let fn_js = result.host_binding_fn.map(|f| {
         let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &allocator));
         emitter.emit_expression(&expr)
     })?;
 
-    Some((fn_js, host_vars))
+    Some(LinkerHostBindingOutput { fn_js, host_vars, declarations_js })
 }
 
 /// Output from compiling a template for the linker.

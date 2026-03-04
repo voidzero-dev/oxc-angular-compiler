@@ -1362,6 +1362,7 @@ fn link_component(
 
     // Build the defineComponent properties
     let mut parts: Vec<String> = Vec::new();
+    let mut host_binding_declarations_js = String::new();
 
     // 1. type
     parts.push(format!("type: {type_name}"));
@@ -1398,13 +1399,16 @@ fn link_component(
         // through the full Angular expression parser for correct output.
         let host_input = extract_host_metadata_input(host_obj);
         let selector = get_string_property(meta, "selector");
-        if let Some((host_fn, host_vars)) =
+        if let Some(host_output) =
             crate::component::compile_host_bindings_for_linker(&host_input, type_name, selector)
         {
-            if host_vars > 0 {
-                parts.push(format!("hostVars: {host_vars}"));
+            if host_output.host_vars > 0 {
+                parts.push(format!("hostVars: {}", host_output.host_vars));
             }
-            parts.push(format!("hostBindings: {host_fn}"));
+            parts.push(format!("hostBindings: {}", host_output.fn_js));
+            if !host_output.declarations_js.is_empty() {
+                host_binding_declarations_js = host_output.declarations_js;
+            }
         }
     }
 
@@ -1533,8 +1537,11 @@ fn link_component(
     let define_component =
         format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
 
-    // Wrap in IIFE with template declarations
-    let declarations = &template_output.declarations_js;
+    // Wrap in IIFE with template and host binding declarations
+    let mut declarations = template_output.declarations_js;
+    if !host_binding_declarations_js.is_empty() {
+        declarations.push_str(&host_binding_declarations_js);
+    }
     if declarations.trim().is_empty() {
         Some(define_component)
     } else {

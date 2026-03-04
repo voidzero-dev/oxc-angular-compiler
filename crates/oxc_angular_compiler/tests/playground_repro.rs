@@ -668,11 +668,16 @@ fn test_listener_unused_refs_removed() {
         "Click handler should NOT contain reference() calls for unused refs.\nListener body:\n{listener_body}"
     );
 
-    // The listener SHOULD contain restoreView as a statement (not variable)
-    // since restore view is side-effectful but unused
+    // The listener should NOT contain restoreView/resetView since the listener
+    // doesn't reference any parent context variables. The optimizer should
+    // strip restoreView/resetView entirely, leaving just `return ctx.setMenuWidth();`
     assert!(
-        listener_body.contains("restoreView(") && !listener_body.contains("const _ctx = "),
-        "Click handler should have restoreView as statement, not variable.\nListener body:\n{listener_body}"
+        !listener_body.contains("restoreView("),
+        "Click handler should NOT contain restoreView - handler doesn't use refs.\nListener body:\n{listener_body}"
+    );
+    assert!(
+        !listener_body.contains("resetView("),
+        "Click handler should NOT contain resetView - handler doesn't use refs.\nListener body:\n{listener_body}"
     );
 }
 

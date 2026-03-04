@@ -27,6 +27,7 @@ fn is_handled_update_op_kind(kind: OpKind) -> bool {
             | OpKind::TwoWayProperty
             | OpKind::DomProperty
             | OpKind::Attribute
+            | OpKind::Control
     )
 }
 
@@ -64,8 +65,10 @@ fn update_op_priority(op: &UpdateOp<'_>) -> u32 {
         (OpKind::TwoWayProperty, _) => 6, // Non-interpolation TwoWayProperty
         (OpKind::Property, false) => 6, // Non-interpolation Property
         (OpKind::Attribute, false) => 7, // Attribute without interpolation
+        // Control comes last per Angular's UPDATE_ORDERING (line 69 of ordering.ts)
+        (OpKind::Control, _) => 8,
         // DomProperty is not used in template bindings, but include for completeness
-        (OpKind::DomProperty, _) => 8,
+        (OpKind::DomProperty, _) => 9,
         _ => 100, // Other ops go last
     }
 }
@@ -124,6 +127,7 @@ fn get_update_op_target(op: &UpdateOp<'_>) -> Option<XrefId> {
         UpdateOp::ClassMap(p) => Some(p.target),
         UpdateOp::Attribute(p) => Some(p.target),
         UpdateOp::DomProperty(p) => Some(p.target),
+        UpdateOp::Control(c) => Some(c.target),
         _ => None,
     }
 }

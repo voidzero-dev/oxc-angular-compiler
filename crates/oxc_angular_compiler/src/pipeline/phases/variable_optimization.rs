@@ -389,72 +389,69 @@ fn collect_create_op_fences(op: &CreateOp<'_>) -> Fence {
 ///
 /// Note: SavedView variables (from `getCurrentView()`) can be removed if unused
 /// because `GetCurrentViewExpr` has no side effects.
+///
+/// CRITICAL: The order of optimization must match Angular's TypeScript implementation
+/// (variable_optimization.ts lines 32-80). Specifically:
+/// 1. inlineAlwaysInlineVariables on all op lists (arrow funcs, create, update, handlers)
+/// 2. optimizeVariablesInOpList on arrow function ops
+/// 3. optimizeVariablesInOpList on listener handler_ops (+ optimizeSaveRestoreView)
+/// 4. optimizeVariablesInOpList on create + update ops
+///
+/// Steps 2-3 MUST run BEFORE step 4. This is because `count_variable_usages` for
+/// create ops visits into listener handler_ops. If handler_ops haven't been optimized
+/// yet, unused ReadVariable references in handler_ops inflate the usage counts of
+/// variables declared in create ops (e.g., SavedView), preventing their removal.
 pub fn optimize_variables(job: &mut ComponentCompilationJob<'_>) {
     // Step 1: Inline AlwaysInline variables unconditionally
-    // Per TypeScript's variable_optimization.ts lines 33-46
+    // Per TypeScript's variable_optimization.ts lines 33-51
     inline_always_inline_variables(job);
 
     // Step 2: Inline Identifier variables whose initializer is just `ctx`.
     // Per TypeScript's allowConservativeInlining (lines 527-535):
-    // ```typescript
-    // case ir.SemanticVariableKind.Identifier:
-    //   if (decl.initializer instanceof o.ReadVarExpr && decl.initializer.name === 'ctx') {
-    //     return true;  // Allow inlining for conditional aliases
-    //   }
-    //   return false;
-    // ```
     // This handles conditional aliases like `@if (icon(); as icon)` where the child view
     // creates an Identifier variable `icon` with initializer `ctx`. TypeScript inlines
     // these to use `ctx` directly: `ɵɵclassMap(ctx)` instead of `const icon = ctx; ɵɵclassMap(icon)`.
     inline_identifier_ctx_variables(job);
 
-    // Step 3: Remove unused variables and inline single-use variables
-    // Iterate until no more variables can be removed.
-    // This handles cases where variable A is only used by variable B,
-    // and B is unused - we need to remove B first, then A becomes unused.
-    //
-    // IMPORTANT: This must run BEFORE Context inlining so that unused Identifier
-    // variables are removed first, reducing the usage count of Context variables.
-    loop {
-        let removed = optimize_variables_once(job);
-        if !removed {
-            break;
-        }
-    }
-
-    // Step 4: Inline Context variables (nextContext()) into other Variable ops.
-    // Per TypeScript's allowConservativeInlining (lines 536-538):
-    // "Context can only be inlined into other variables."
-    // This is safe because we only inline into Variable ops, not into arbitrary ops.
-    //
-    // This runs AFTER unused variable removal so that Context variables have
-    // minimal usage counts (ideally 1 for single-use inlining).
-    inline_context_variables_into_variable_ops(job);
-
-    // Step 5: Run unused variable removal again after context inlining.
-    // Context inlining may reduce usage counts of Context variables to 0, making them
-    // eligible for removal. Without this, unused Context variables would be converted
-    // to statements (standalone nextContext() calls) instead of being removed entirely.
-    //
-    // Example: If we have ctx_a = nextContext() followed by ctx_b = nextContext(),
-    // and ctx_b is inlined into another variable, ctx_b's usage drops to 0. At this point,
-    // ctx_a may also become removable if nothing depends on its context write.
-    loop {
-        let removed = optimize_variables_once(job);
-        if !removed {
-            break;
-        }
-    }
-
-    // Step 6: Optimize arrow function ops (per Angular's variable_optimization.ts lines 53-56)
-    // for (const expr of unit.functions) {
-    //   optimizeVariablesInOpList(expr.ops, job.compatibility, null);
-    //   optimizeSaveRestoreView(expr.ops);
-    // }
+    // Step 3: Optimize arrow function ops (per Angular's variable_optimization.ts lines 53-56)
+    // These must be optimized BEFORE create/update ops so that usage counts from
+    // arrow function expressions don't interfere with create/update variable counting.
     optimize_arrow_function_ops(job);
 
-    // Step 7: Optimize listener handler_ops separately (per Angular's variable_optimization.ts lines 58-70)
+    // Step 4: Optimize listener handler_ops separately (per Angular's variable_optimization.ts lines 58-70)
+    // This MUST run BEFORE create/update ops optimization. When handler_ops contain
+    // unused Reference variables, save_and_restore_view adds RestoreView + SavedView.
+    // Optimizing handler_ops first removes these unused references and the associated
+    // RestoreView/ResetView via optimizeSaveRestoreView. This reduces the usage count
+    // of SavedView variables in create ops, allowing them to be properly removed.
     optimize_listener_handler_ops(job);
+
+    // Step 5: Remove unused variables and inline single-use variables in create/update ops.
+    // Per Angular's variable_optimization.ts lines 77-78:
+    //   optimizeVariablesInOpList(unit.create, skipArrowFunctionOps);
+    //   optimizeVariablesInOpList(unit.update, skipArrowFunctionOps);
+    // Iterate until no more variables can be removed.
+    loop {
+        let removed = optimize_variables_once(job);
+        if !removed {
+            break;
+        }
+    }
+
+    // Step 6: Inline Context variables (nextContext()) into other Variable ops.
+    // Per TypeScript's allowConservativeInlining (lines 536-538):
+    // "Context can only be inlined into other variables."
+    inline_context_variables_into_variable_ops(job);
+
+    // Step 7: Run unused variable removal again after context inlining.
+    // Context inlining may reduce usage counts of Context variables to 0, making them
+    // eligible for removal.
+    loop {
+        let removed = optimize_variables_once(job);
+        if !removed {
+            break;
+        }
+    }
 }
 
 /// Inlines variables that should always be inlined.
@@ -1699,7 +1696,7 @@ fn optimize_arrow_function_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
             optimize_handler_ops(&mut func.ops, None, allocator, &mut local_diagnostics);
 
             // Step 2: Apply save/restore view optimization
-            optimize_save_restore_view(&mut func.ops, allocator);
+            optimize_save_restore_view(&mut func.ops, &mut None, allocator);
         }
     }
 
@@ -1743,7 +1740,11 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                         allocator,
                         &mut local_diagnostics,
                     );
-                    optimize_save_restore_view(&mut listener.handler_ops, allocator);
+                    optimize_save_restore_view(
+                        &mut listener.handler_ops,
+                        &mut listener.handler_expression,
+                        allocator,
+                    );
                 }
                 CreateOp::TwoWayListener(listener) => {
                     optimize_handler_ops(
@@ -1752,7 +1753,7 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                         allocator,
                         &mut local_diagnostics,
                     );
-                    optimize_save_restore_view(&mut listener.handler_ops, allocator);
+                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, allocator);
                 }
                 CreateOp::AnimationListener(listener) => {
                     optimize_handler_ops(
@@ -1761,7 +1762,7 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                         allocator,
                         &mut local_diagnostics,
                     );
-                    optimize_save_restore_view(&mut listener.handler_ops, allocator);
+                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, allocator);
                 }
                 CreateOp::Animation(animation) => {
                     optimize_handler_ops(
@@ -1770,11 +1771,9 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                         allocator,
                         &mut local_diagnostics,
                     );
-                    // Note: We intentionally do NOT call optimize_save_restore_view on
-                    // Animation handler_ops. Angular's ngtsc output keeps restoreView/resetView
-                    // in animation callbacks even when the return value doesn't reference the
-                    // view context (e.g., `return "animate-in"`). Skipping this optimization
-                    // for Animation handlers matches the observed Angular output.
+                    // Per Angular's variable_optimization.ts lines 61-66,
+                    // Animation handlers also get optimizeSaveRestoreView.
+                    optimize_save_restore_view(&mut animation.handler_ops, &mut None, allocator);
                 }
                 _ => {}
             }
@@ -1823,18 +1822,61 @@ fn optimize_handler_ops<'a>(
 ///
 /// Ported from Angular's `optimizeSaveRestoreView` in `variable_optimization.ts` (lines 575-596).
 ///
-/// We can only optimize if we have exactly two ops:
-/// 1. A call to `restoreView` (ExpressionStatement with RestoreViewExpr).
-/// 2. A return statement with a `resetView` in it.
+/// In Angular's TypeScript, handler_ops is an OpList that contains both the restoreView expression
+/// statement and the return statement. In Oxc, the return value for Listeners is stored separately
+/// in `handler_expression`. This function handles both cases:
 ///
-/// If these conditions are met:
-/// - Remove the restoreView call (first op)
-/// - Unwrap the resetView in the return statement (replace ResetView(expr) with just expr)
+/// **Case 1: handler_expression is Some (Listener)**
+/// handler_ops has 1 op (restoreView expression statement) and handler_expression has ResetView(expr).
+/// We remove the restoreView op and unwrap ResetView from handler_expression.
+///
+/// **Case 2: handler_expression is None (TwoWayListener, AnimationListener)**
+/// handler_ops has 2 ops: restoreView expression statement + return ResetView(expr).
+/// We remove the restoreView and unwrap the ResetView in the return statement.
 fn optimize_save_restore_view<'a>(
     handler_ops: &mut OxcVec<'a, UpdateOp<'a>>,
+    handler_expression: &mut Option<OxcBox<'a, IrExpression<'a>>>,
     allocator: &'a oxc_allocator::Allocator,
 ) {
-    // We need exactly 2 ops to optimize
+    // Case 1: handler_expression contains the return value (Listener)
+    // handler_ops should have exactly 1 op (restoreView expression statement)
+    // and handler_expression should contain ResetView(expr)
+    if let Some(expr) = handler_expression.as_ref() {
+        if handler_ops.len() == 1 {
+            // Check the single op: must be a Statement with ExpressionStatement containing RestoreViewExpr
+            let first_is_restore_view = matches!(
+                &handler_ops[0],
+                UpdateOp::Statement(stmt) if matches!(
+                    &stmt.statement,
+                    OutputStatement::Expression(expr_stmt) if matches!(
+                        &expr_stmt.expr,
+                        OutputExpression::WrappedIrNode(wrapped) if matches!(
+                            wrapped.node.as_ref(),
+                            IrExpression::RestoreView(_)
+                        )
+                    )
+                )
+            );
+
+            // Check handler_expression: must be ResetView(expr)
+            let expr_is_reset_view = matches!(expr.as_ref(), IrExpression::ResetView(_));
+
+            if first_is_restore_view && expr_is_reset_view {
+                // Extract the inner expression from ResetView
+                if let IrExpression::ResetView(reset_view) = expr.as_ref() {
+                    let inner_expr = reset_view.expr.clone_in(allocator);
+                    // Remove the restoreView op
+                    handler_ops.clear();
+                    // Unwrap the ResetView from handler_expression
+                    *handler_expression = Some(OxcBox::new_in(inner_expr, allocator));
+                }
+                return;
+            }
+        }
+    }
+
+    // Case 2: No handler_expression (TwoWayListener, AnimationListener)
+    // Both ops are in handler_ops
     if handler_ops.len() != 2 {
         return;
     }
@@ -1878,9 +1920,6 @@ fn optimize_save_restore_view<'a>(
     }
 
     // Both conditions met - apply the optimization
-    // 1. Remove the first op (restoreView call)
-    // 2. Unwrap the ResetView in the return statement
-
     // Extract the inner expression from the ResetView in the return statement
     let inner_expr = if let UpdateOp::Statement(stmt) = &handler_ops[1] {
         if let OutputStatement::Return(ret_stmt) = &stmt.statement {

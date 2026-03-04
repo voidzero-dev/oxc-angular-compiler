@@ -8,8 +8,7 @@ function TestComponent_Conditional_0_Template(rf,ctx) {
     i0.ɵɵtext(0,"\n            ");
     i0.ɵɵelementStart(1,"div",0);
     i0.ɵɵanimateEnter(function TestComponent_Conditional_0_Template_animateenter_cb() {
-      i0.ɵɵrestoreView(_r1);
-      return i0.ɵɵresetView("animate-in");
+      return "animate-in";
     });
     i0.ɵɵlistener("click",function TestComponent_Conditional_0_Template_div_click_1_listener() {
       i0.ɵɵrestoreView(_r1);

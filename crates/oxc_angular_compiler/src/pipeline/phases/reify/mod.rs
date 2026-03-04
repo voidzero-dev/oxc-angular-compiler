@@ -886,7 +886,7 @@ fn reify_update_op<'a>(
         }
         UpdateOp::Control(ctrl) => {
             let expr = convert_ir_expression(allocator, &ctrl.expression, expressions, root_xref);
-            Some(create_control_stmt(allocator, expr))
+            Some(create_control_stmt(allocator, expr, &ctrl.name))
         }
         UpdateOp::Variable(var) => {
             // Emit variable declaration with initializer for update phase

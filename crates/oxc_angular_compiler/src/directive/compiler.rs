@@ -71,7 +71,7 @@ pub fn compile_directive_from_metadata<'a>(
     pool_starting_index: u32,
 ) -> DirectiveCompileResult<'a> {
     // Build the base directive fields, passing pool_starting_index for host bindings
-    let (definition_map, next_pool_index) =
+    let (definition_map, next_pool_index, host_declarations) =
         build_base_directive_fields(allocator, metadata, pool_starting_index);
 
     // Add features
@@ -81,22 +81,30 @@ pub fn compile_directive_from_metadata<'a>(
     // Create the expression: ɵɵdefineDirective(definitionMap)
     let expression = create_define_directive_call(allocator, definition_map);
 
-    DirectiveCompileResult { expression, statements: Vec::new_in(allocator), next_pool_index }
+    // Convert host binding declarations to statements
+    let mut statements = Vec::new_in(allocator);
+    for decl in host_declarations {
+        statements.push(decl);
+    }
+
+    DirectiveCompileResult { expression, statements, next_pool_index }
 }
 
 /// Builds the base directive definition map.
 ///
 /// Corresponds to `baseDirectiveFields()` in Angular's compiler.
 ///
-/// Returns a tuple of (entries, next_pool_index) where next_pool_index is the
-/// next available constant pool index after host binding compilation.
+/// Returns a tuple of (entries, next_pool_index, host_declarations) where next_pool_index is the
+/// next available constant pool index after host binding compilation, and host_declarations
+/// contains any pooled constants (pure functions) from host binding compilation.
 fn build_base_directive_fields<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
-) -> (Vec<'a, LiteralMapEntry<'a>>, u32) {
+) -> (Vec<'a, LiteralMapEntry<'a>>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
     let mut entries = Vec::new_in(allocator);
     let mut next_pool_index = pool_starting_index;
+    let mut host_declarations = oxc_allocator::Vec::new_in(allocator);
 
     // type: MyDirective
     entries.push(LiteralMapEntry {
@@ -196,6 +204,9 @@ fn build_base_directive_fields<'a>(
                     quoted: false,
                 });
             }
+
+            // Collect host binding pool declarations (pure functions, etc.)
+            host_declarations = result.declarations;
         }
     }
 
@@ -264,7 +275,7 @@ fn build_base_directive_fields<'a>(
         });
     }
 
-    (entries, next_pool_index)
+    (entries, next_pool_index, host_declarations)
 }
 
 /// Adds features to the definition map.

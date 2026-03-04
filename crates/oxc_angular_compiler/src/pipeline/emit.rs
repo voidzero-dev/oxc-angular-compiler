@@ -1525,6 +1525,10 @@ pub struct HostBindingCompilationResult<'a> {
     /// Number of host variables for change detection.
     /// Only set if > 0.
     pub host_vars: Option<u32>,
+    /// Additional declarations (pooled constants like pure functions).
+    /// In Angular TS, template and host binding share the same ConstantPool,
+    /// so host binding constants get emitted alongside template constants.
+    pub declarations: OxcVec<'a, OutputStatement<'a>>,
 }
 
 /// Compile host bindings from start to finish.
@@ -1538,6 +1542,10 @@ pub struct HostBindingCompilationResult<'a> {
 pub fn compile_host_bindings<'a>(
     job: &mut HostBindingCompilationJob<'a>,
 ) -> HostBindingCompilationResult<'a> {
+    use crate::output::ast::DeclareVarStmt;
+
+    let allocator = job.allocator;
+
     // Run all transformation phases for host bindings
     transform_host(job);
 
@@ -1553,7 +1561,28 @@ pub fn compile_host_bindings<'a>(
     let host_attrs = job.root.attributes.take();
     let host_vars = job.root.vars.filter(|&v| v > 0);
 
-    HostBindingCompilationResult { host_binding_fn, host_attrs, host_vars }
+    // Collect declarations from host binding pool constants.
+    // In Angular TS, template and host binding share the same ConstantPool,
+    // so host binding pure functions get emitted alongside template constants.
+    let mut declarations = OxcVec::new_in(allocator);
+    for constant in job.pool.constants_mut() {
+        let value = emit_pooled_constant_value(allocator, &mut constant.kind);
+        declarations.push(OutputStatement::DeclareVar(Box::new_in(
+            DeclareVarStmt {
+                name: constant.name.clone(),
+                value: Some(value),
+                modifiers: StmtModifier::FINAL,
+                leading_comment: None,
+                source_span: None,
+            },
+            allocator,
+        )));
+    }
+    for stmt in job.pool.statements.iter() {
+        declarations.push(clone_output_statement(stmt, allocator));
+    }
+
+    HostBindingCompilationResult { host_binding_fn, host_attrs, host_vars, declarations }
 }
 
 /// Converts an IR binary operator to an output binary operator.
