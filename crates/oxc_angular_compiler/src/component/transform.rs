@@ -1989,12 +1989,14 @@ pub fn compile_template_to_js_with_options<'a>(
     }
 
     // Stage 6: Compile host bindings if provided via options
+    let host_pool_starting_index = job.pool.next_name_index();
     if let Some(ref host_input) = options.host {
         if let Some(host_result) = compile_host_bindings_from_input(
             allocator,
             host_input,
             component_name,
             options.selector.as_deref(),
+            host_pool_starting_index,
         ) {
             // Add host binding pool declarations (pure functions, etc.)
             for decl in host_result.declarations {
@@ -2556,6 +2558,7 @@ fn compile_host_bindings_from_input<'a>(
     host_input: &HostMetadataInput,
     component_name: &str,
     selector: Option<&str>,
+    pool_starting_index: u32,
 ) -> Option<HostBindingCompilationResult<'a>> {
     use oxc_allocator::FromIn;
 
@@ -2576,10 +2579,9 @@ fn compile_host_bindings_from_input<'a>(
         selector.map(|s| Atom::from_in(s, allocator)).unwrap_or_else(|| Atom::from(""));
 
     // Convert to HostBindingInput and compile
-    // Use 0 as starting index since this is standalone compilation (not part of a larger file)
     let input =
         convert_host_metadata_to_input(allocator, &host, component_name_atom, component_selector);
-    let mut job = ingest_host_binding(allocator, input, 0);
+    let mut job = ingest_host_binding(allocator, input, pool_starting_index);
     let result = compile_host_bindings(&mut job);
 
     Some(result)
@@ -2605,10 +2607,16 @@ pub fn compile_host_bindings_for_linker(
     host_input: &HostMetadataInput,
     component_name: &str,
     selector: Option<&str>,
+    pool_starting_index: u32,
 ) -> Option<LinkerHostBindingOutput> {
     let allocator = Allocator::default();
-    let result =
-        compile_host_bindings_from_input(&allocator, host_input, component_name, selector)?;
+    let result = compile_host_bindings_from_input(
+        &allocator,
+        host_input,
+        component_name,
+        selector,
+        pool_starting_index,
+    )?;
 
     let emitter = JsEmitter::new();
 
@@ -2653,6 +2661,10 @@ pub struct LinkerTemplateOutput {
 
     /// The ngContentSelectors array as a JavaScript expression string, if any.
     pub ng_content_selectors_js: Option<String>,
+
+    /// The next available pool index after template compilation.
+    /// Used to continue constant numbering in host binding compilation.
+    pub next_pool_index: u32,
 }
 
 /// Compile a template for the linker, returning all data needed to build a `defineComponent` call.
@@ -2824,6 +2836,7 @@ pub fn compile_template_for_linker<'a>(
     }
 
     let declarations_js = emitter.emit_statements(&all_statements);
+    let next_pool_index = job.pool.next_name_index();
 
     Ok(LinkerTemplateOutput {
         declarations_js,
@@ -2832,6 +2845,7 @@ pub fn compile_template_for_linker<'a>(
         vars,
         consts_js,
         ng_content_selectors_js,
+        next_pool_index,
     })
 }
 

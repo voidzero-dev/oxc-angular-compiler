@@ -1399,9 +1399,12 @@ fn link_component(
         // through the full Angular expression parser for correct output.
         let host_input = extract_host_metadata_input(host_obj);
         let selector = get_string_property(meta, "selector");
-        if let Some(host_output) =
-            crate::component::compile_host_bindings_for_linker(&host_input, type_name, selector)
-        {
+        if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
+            &host_input,
+            type_name,
+            selector,
+            template_output.next_pool_index,
+        ) {
             if host_output.host_vars > 0 {
                 parts.push(format!("hostVars: {}", host_output.host_vars));
             }
@@ -1972,6 +1975,63 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         assert!(
             !result.code.contains("\u{0275}\u{0275}ngDeclareComponent"),
             "Should not contain ngDeclareComponent, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Regression test for https://github.com/voidzero-dev/oxc-angular-compiler/issues/59
+    /// When a component has both <ng-content> (which pools a `_c0` constant for selectors)
+    /// and a host style binding (which pools a `_c0` constant for the style factory),
+    /// the linker must use unique names (`_c0`, `_c1`) instead of duplicating `_c0`.
+    #[test]
+    fn test_link_component_ng_content_with_host_style_no_duplicate_constants() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from '@angular/core';
+import { ChangeDetectionStrategy, Component } from '@angular/core';
+
+class MyCheckbox {
+  static ɵfac = i0.ɵɵngDeclareFactory({
+    minVersion: "12.0.0", version: "19.2.8", ngImport: i0,
+    type: MyCheckbox, deps: [], target: i0.ɵɵFactoryTarget.Component
+  });
+  static ɵcmp = i0.ɵɵngDeclareComponent({
+    minVersion: "14.0.0", version: "19.2.8", ngImport: i0,
+    type: MyCheckbox, isStandalone: true, selector: "my-checkbox",
+    host: {
+      properties: { "style": "{display: \"contents\"}" }
+    },
+    template: `<button><ng-content /></button>`,
+    isInline: true,
+    changeDetection: i0.ChangeDetectionStrategy.OnPush
+  });
+}
+
+export { MyCheckbox };
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Component should be linked");
+        assert!(
+            result.code.contains("defineComponent"),
+            "Should contain defineComponent, got:\n{}",
+            result.code
+        );
+        // Must not have duplicate _c0 declarations
+        let c0_count = result.code.matches("const _c0").count();
+        assert!(
+            c0_count <= 1,
+            "Should not have duplicate 'const _c0' declarations (found {c0_count}), got:\n{}",
+            result.code
+        );
+        // Should have both ngContentSelectors and hostBindings
+        assert!(
+            result.code.contains("ngContentSelectors"),
+            "Should contain ngContentSelectors, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("hostBindings"),
+            "Should contain hostBindings, got:\n{}",
             result.code
         );
     }
