@@ -801,4 +801,91 @@ export class ForwardAllComponent {}
 `.trim(),
     expectedFeatures: ['ɵɵdefineComponent', 'ɵɵHostDirectivesFeature'],
   },
+
+  // ==========================================================================
+  // Host Directives on Directives (not just Components)
+  // ==========================================================================
+
+  {
+    type: 'full-transform',
+    name: 'directive-host-directive-input-mapping',
+    category: 'host-directives',
+    description: 'Directive with host directive input mappings (issue #67)',
+    className: 'UnityTooltipTrigger',
+    sourceCode: `
+import { Directive, Input } from '@angular/core';
+
+@Directive({ selector: '[brnTooltipTrigger]', standalone: true })
+export class BrnTooltipTrigger {
+  @Input() brnTooltipTrigger: string = '';
+}
+
+@Directive({
+  selector: '[uTooltip]',
+  standalone: true,
+  hostDirectives: [{
+    directive: BrnTooltipTrigger,
+    inputs: ['brnTooltipTrigger: uTooltip']
+  }]
+})
+export class UnityTooltipTrigger {}
+`.trim(),
+    expectedFeatures: ['ɵɵdefineDirective', 'ɵɵHostDirectivesFeature'],
+  },
+
+  {
+    type: 'full-transform',
+    name: 'directive-host-directive-output-mapping',
+    category: 'host-directives',
+    description: 'Directive with host directive output mappings',
+    className: 'MyWrapperDirective',
+    sourceCode: `
+import { Directive, Output, EventEmitter } from '@angular/core';
+
+@Directive({ selector: '[trackable]', standalone: true })
+export class TrackableDirective {
+  @Output() trackClick = new EventEmitter<void>();
+}
+
+@Directive({
+  selector: '[myWrapper]',
+  standalone: true,
+  hostDirectives: [{
+    directive: TrackableDirective,
+    outputs: ['trackClick: clicked']
+  }]
+})
+export class MyWrapperDirective {}
+`.trim(),
+    expectedFeatures: ['ɵɵdefineDirective', 'ɵɵHostDirectivesFeature'],
+  },
+
+  {
+    type: 'full-transform',
+    name: 'directive-host-directive-input-output-mapping',
+    category: 'host-directives',
+    description: 'Directive with both input and output host directive mappings',
+    className: 'EnhancedDirective',
+    sourceCode: `
+import { Directive, Input, Output, EventEmitter } from '@angular/core';
+
+@Directive({ selector: '[base]', standalone: true })
+export class BaseDirective {
+  @Input() baseValue: string = '';
+  @Output() baseChange = new EventEmitter<string>();
+}
+
+@Directive({
+  selector: '[enhanced]',
+  standalone: true,
+  hostDirectives: [{
+    directive: BaseDirective,
+    inputs: ['baseValue: value'],
+    outputs: ['baseChange: valueChange']
+  }]
+})
+export class EnhancedDirective {}
+`.trim(),
+    expectedFeatures: ['ɵɵdefineDirective', 'ɵɵHostDirectivesFeature'],
+  },
 ]

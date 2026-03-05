@@ -883,20 +883,20 @@ fn create_host_directives_feature_arg<'a>(
 
         // inputs (if any)
         if !hd.inputs.is_empty() {
-            let inputs_map = create_string_map(allocator, &hd.inputs);
+            let inputs_array = create_host_directive_mappings_array(allocator, &hd.inputs);
             entries.push(LiteralMapEntry {
                 key: Atom::from("inputs"),
-                value: inputs_map,
+                value: inputs_array,
                 quoted: false,
             });
         }
 
         // outputs (if any)
         if !hd.outputs.is_empty() {
-            let outputs_map = create_string_map(allocator, &hd.outputs);
+            let outputs_array = create_host_directive_mappings_array(allocator, &hd.outputs);
             entries.push(LiteralMapEntry {
                 key: Atom::from("outputs"),
-                value: outputs_map,
+                value: outputs_array,
                 quoted: false,
             });
         }
@@ -913,26 +913,28 @@ fn create_host_directives_feature_arg<'a>(
     ))
 }
 
-/// Creates a string-to-string map expression.
-fn create_string_map<'a>(
+/// Creates a host directive mappings array.
+///
+/// Format: `['publicName', 'internalName', 'publicName2', 'internalName2']`
+fn create_host_directive_mappings_array<'a>(
     allocator: &'a Allocator,
-    pairs: &[(Atom<'a>, Atom<'a>)],
+    mappings: &[(Atom<'a>, Atom<'a>)],
 ) -> OutputExpression<'a> {
     let mut entries = Vec::new_in(allocator);
 
-    for (key, value) in pairs {
-        entries.push(LiteralMapEntry {
-            key: key.clone(),
-            value: OutputExpression::Literal(Box::new_in(
-                LiteralExpr { value: LiteralValue::String(value.clone()), source_span: None },
-                allocator,
-            )),
-            quoted: false,
-        });
+    for (public_name, internal_name) in mappings {
+        entries.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(public_name.clone()), source_span: None },
+            allocator,
+        )));
+        entries.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(internal_name.clone()), source_span: None },
+            allocator,
+        )));
     }
 
-    OutputExpression::LiteralMap(Box::new_in(
-        LiteralMapExpr { entries, source_span: None },
+    OutputExpression::LiteralArray(Box::new_in(
+        LiteralArrayExpr { entries, source_span: None },
         allocator,
     ))
 }
@@ -1416,6 +1418,129 @@ mod tests {
         assert!(
             normalized.contains(r#""button",8,"primary""#),
             "Expected selector with CLASS flag (8). Got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_host_directives_input_output_mappings_use_flat_array() {
+        // Issue #67: hostDirectives input/output mappings must be flat arrays
+        // ["publicName", "internalName"], NOT objects {publicName: "internalName"}
+        let allocator = Allocator::default();
+        let type_expr = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("TooltipTrigger"), source_span: None },
+            &allocator,
+        ));
+
+        let directive_expr = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("BrnTooltipTrigger"), source_span: None },
+            &allocator,
+        ));
+
+        let mut host_directive_inputs = Vec::new_in(&allocator);
+        host_directive_inputs.push((Atom::from("uTooltip"), Atom::from("brnTooltipTrigger")));
+
+        let mut host_directives = Vec::new_in(&allocator);
+        host_directives.push(R3HostDirectiveMetadata {
+            directive: directive_expr,
+            is_forward_reference: false,
+            inputs: host_directive_inputs,
+            outputs: Vec::new_in(&allocator),
+        });
+
+        let metadata = R3DirectiveMetadata {
+            name: Atom::from("TooltipTrigger"),
+            r#type: type_expr,
+            type_argument_count: 0,
+            deps: None,
+            selector: Some(Atom::from("[uTooltip]")),
+            queries: Vec::new_in(&allocator),
+            view_queries: Vec::new_in(&allocator),
+            host: R3HostMetadata::new(&allocator),
+            uses_on_changes: false,
+            inputs: Vec::new_in(&allocator),
+            outputs: Vec::new_in(&allocator),
+            uses_inheritance: false,
+            export_as: Vec::new_in(&allocator),
+            providers: None,
+            is_standalone: true,
+            is_signal: false,
+            host_directives,
+        };
+
+        let result = compile_directive(&allocator, &metadata, 0);
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result.expression);
+        let normalized = output.replace([' ', '\n', '\t'], "");
+
+        // Must contain flat array format: inputs:["uTooltip","brnTooltipTrigger"]
+        assert!(
+            normalized.contains(r#"inputs:["uTooltip","brnTooltipTrigger"]"#),
+            "Host directive inputs should be flat array [\"publicName\",\"internalName\"], not object. Got:\n{}",
+            output
+        );
+        // Must NOT contain object format: inputs:{uTooltip:"brnTooltipTrigger"}
+        assert!(
+            !normalized.contains(r#"inputs:{uTooltip:"brnTooltipTrigger"}"#),
+            "Host directive inputs should NOT be object format. Got:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn test_host_directives_output_mappings_use_flat_array() {
+        // Issue #67: output mappings must also be flat arrays
+        let allocator = Allocator::default();
+        let type_expr = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("MyDirective"), source_span: None },
+            &allocator,
+        ));
+
+        let directive_expr = OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: Atom::from("ClickTracker"), source_span: None },
+            &allocator,
+        ));
+
+        let mut host_directive_outputs = Vec::new_in(&allocator);
+        host_directive_outputs.push((Atom::from("clicked"), Atom::from("trackClick")));
+
+        let mut host_directives = Vec::new_in(&allocator);
+        host_directives.push(R3HostDirectiveMetadata {
+            directive: directive_expr,
+            is_forward_reference: false,
+            inputs: Vec::new_in(&allocator),
+            outputs: host_directive_outputs,
+        });
+
+        let metadata = R3DirectiveMetadata {
+            name: Atom::from("MyDirective"),
+            r#type: type_expr,
+            type_argument_count: 0,
+            deps: None,
+            selector: Some(Atom::from("[myDir]")),
+            queries: Vec::new_in(&allocator),
+            view_queries: Vec::new_in(&allocator),
+            host: R3HostMetadata::new(&allocator),
+            uses_on_changes: false,
+            inputs: Vec::new_in(&allocator),
+            outputs: Vec::new_in(&allocator),
+            uses_inheritance: false,
+            export_as: Vec::new_in(&allocator),
+            providers: None,
+            is_standalone: true,
+            is_signal: false,
+            host_directives,
+        };
+
+        let result = compile_directive(&allocator, &metadata, 0);
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&result.expression);
+        let normalized = output.replace([' ', '\n', '\t'], "");
+
+        // Must contain flat array format: outputs:["clicked","trackClick"]
+        assert!(
+            normalized.contains(r#"outputs:["clicked","trackClick"]"#),
+            "Host directive outputs should be flat array. Got:\n{}",
             output
         );
     }
