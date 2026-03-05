@@ -196,11 +196,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             include: ['rxjs/operators', 'rxjs'],
             exclude: ['@angular/platform-server'],
           },
-          build: {
-            rolldownOptions: {
-              tsconfig: options.tsconfig,
+          ...(options.tsconfig && {
+            build: {
+              rolldownOptions: {
+                tsconfig: options.tsconfig,
+              },
             },
-          },
+          }),
         }
       },
       configResolved(config) {
