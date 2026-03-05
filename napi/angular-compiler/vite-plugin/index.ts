@@ -196,13 +196,15 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             include: ['rxjs/operators', 'rxjs'],
             exclude: ['@angular/platform-server'],
           },
-          // Note: We dynamically unwatch template/style files when discovered during transform
-          // using server.watcher.unwatch(). This is more precise than static glob patterns.
+          build: {
+            rolldownOptions: {
+              tsconfig: options.tsconfig,
+            },
+          },
         }
       },
       configResolved(config) {
         resolvedConfig = config
-        resolvedConfig.build.rolldownOptions.tsconfig = options.tsconfig
       },
       configureServer(server) {
         viteServer = server
