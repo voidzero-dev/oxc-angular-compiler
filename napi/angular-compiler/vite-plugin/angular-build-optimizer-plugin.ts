@@ -30,6 +30,8 @@ export function buildOptimizerPlugin({
     apply: 'build',
     config(userConfig) {
       isProd = userConfig.mode === 'production' || process.env['NODE_ENV'] === 'production'
+      const isSSR = !!userConfig.build?.ssr
+      const ngServerMode = `${isSSR}`
 
       if (isProd) {
         return {
@@ -37,18 +39,30 @@ export function buildOptimizerPlugin({
             ngJitMode: jit ? 'true' : 'false',
             ngI18nClosureMode: 'false',
             ngDevMode: 'false',
-            ngServerMode: `${!!userConfig.build?.ssr}`,
+            ngServerMode,
           },
           oxc: {
             define: {
               ngDevMode: 'false',
               ngJitMode: jit ? 'true' : 'false',
               ngI18nClosureMode: 'false',
-              ngServerMode: `${!!userConfig.build?.ssr}`,
+              ngServerMode,
             },
           },
         }
       }
+
+      // In dev SSR mode, set ngServerMode even without the full production defines
+      if (isSSR) {
+        const defines: Record<string, string> = { ngServerMode }
+        return {
+          define: defines,
+          oxc: {
+            define: defines,
+          },
+        }
+      }
+
       return undefined
     },
     transform: {

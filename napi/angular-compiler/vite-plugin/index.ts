@@ -33,6 +33,7 @@ import {
 import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
 import { jitPlugin } from './angular-jit-plugin.js'
 import { angularLinkerPlugin } from './angular-linker-plugin.js'
+import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -61,6 +62,9 @@ export interface PluginOptions {
 
   /** File replacements (for environment files). */
   fileReplacements?: Array<{ replace: string; with: string }>
+
+  /** Path to main.server.ts for SSR manifest generation. Auto-detected from src/main.server.ts if not specified. */
+  ssrEntry?: string
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -588,6 +592,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       jit: pluginOptions.jit,
       sourcemap: pluginOptions.sourceMap,
       thirdPartySourcemaps: false,
+    }),
+    ssrManifestPlugin({
+      ssrEntry: options.ssrEntry,
     }),
   ].filter(Boolean) as Plugin[]
 }
