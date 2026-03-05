@@ -1050,7 +1050,7 @@ fn link_directive(
     if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
         parts.push(format!("hostDirectives: {host_directives}"));
     }
-    if let Some(features) = get_property_source(meta, "features", source) {
+    if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
     }
 
@@ -2087,6 +2087,93 @@ class EmptyOutletComponent {
         assert!(
             result.code.contains("dependencies: [RouterOutlet]"),
             "Should extract dependency types, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_with_providers() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class BrnTooltipTrigger {
+}
+BrnTooltipTrigger.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: BrnTooltipTrigger, selector: "[brnTooltipTrigger]", isStandalone: true, providers: [BRN_TOOLTIP_SCROLL_STRATEGY_FACTORY_PROVIDER] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("ProvidersFeature"),
+            "Should have ProvidersFeature for directive providers, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("BRN_TOOLTIP_SCROLL_STRATEGY_FACTORY_PROVIDER"),
+            "Should preserve provider reference, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_with_uses_inheritance() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, usesInheritance: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("InheritDefinitionFeature"),
+            "Should have InheritDefinitionFeature, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_with_uses_on_changes() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, usesOnChanges: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("NgOnChangesFeature"),
+            "Should have NgOnChangesFeature, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_with_all_features() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, providers: [SomeService], usesInheritance: true, usesOnChanges: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("ProvidersFeature"),
+            "Should have ProvidersFeature, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("InheritDefinitionFeature"),
+            "Should have InheritDefinitionFeature, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("NgOnChangesFeature"),
+            "Should have NgOnChangesFeature, got:\n{}",
             result.code
         );
     }
