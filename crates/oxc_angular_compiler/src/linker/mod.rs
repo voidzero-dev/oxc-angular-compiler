@@ -992,6 +992,21 @@ fn link_directive(
     if let Some(selector) = get_string_property(meta, "selector") {
         parts.push(format!("selectors: {}", parse_selector(selector)));
     }
+
+    // Content queries — convert queries array to contentQueries function
+    if let Some(queries_arr) = get_array_property(meta, "queries") {
+        if let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true) {
+            parts.push(format!("contentQueries: {cq_fn}"));
+        }
+    }
+
+    // View queries — convert viewQueries array to viewQuery function
+    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries") {
+        if let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false) {
+            parts.push(format!("viewQuery: {vq_fn}"));
+        }
+    }
+
     if let Some(inputs_obj) = get_object_property(meta, "inputs") {
         let converted = convert_inputs_to_definition_format(inputs_obj, source);
         parts.push(format!("inputs: {converted}"));
@@ -2276,6 +2291,74 @@ BrnMenu.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0
             "Should NOT have hostDirectives as a direct property, got:\n{}",
             result.code
         );
+    }
+
+    /// Issue #70: Directive with contentQueries (queries) should produce contentQueries function
+    #[test]
+    fn test_link_directive_with_content_queries() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, queries: [{ propertyName: "items", predicate: SomeComponent, descendants: true }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("contentQueries:"),
+            "Should have contentQueries for directive with queries, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("contentQuery"),
+            "Should call ɵɵcontentQuery, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #70: Directive with viewQueries should produce viewQuery function
+    #[test]
+    fn test_link_directive_with_view_queries() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, viewQueries: [{ propertyName: "myRef", predicate: ["myRef"], first: true }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("viewQuery:"),
+            "Should have viewQuery for directive with viewQueries, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("\u{0275}\u{0275}viewQuery"),
+            "Should call ɵɵviewQuery, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #70: Directive with both queries and viewQueries
+    #[test]
+    fn test_link_directive_with_both_queries() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, queries: [{ propertyName: "items", predicate: SomeComponent, descendants: true }], viewQueries: [{ propertyName: "myRef", predicate: ["myRef"], first: true }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("contentQueries:"),
+            "Should have contentQueries, got:\n{}",
+            result.code
+        );
+        assert!(result.code.contains("viewQuery:"), "Should have viewQuery, got:\n{}", result.code);
     }
 
     /// Issue #71: Feature ordering — HostDirectivesFeature must come after ProvidersFeature
