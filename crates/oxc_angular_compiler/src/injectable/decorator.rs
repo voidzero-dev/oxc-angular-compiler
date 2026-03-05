@@ -218,7 +218,7 @@ pub fn extract_injectable_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Option<InjectableMetadata<'a>> {
-    let class_name = class.id.as_ref()?.name.clone();
+    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Injectable decorator
@@ -293,7 +293,7 @@ fn is_injectable_decorator(decorator: &Decorator<'_>) -> bool {
 
 fn get_property_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.clone()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(s) => Some(s.value.clone()),
         _ => None,
     }
@@ -603,11 +603,11 @@ fn extract_param_dependency<'a>(
 fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
     match expr {
         // @Optional
-        Expression::Identifier(id) => Some(id.name.clone()),
+        Expression::Identifier(id) => Some(id.name.clone().into()),
         // @Optional()
         Expression::CallExpression(call) => {
             if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone())
+                Some(id.name.clone().into())
             } else {
                 None
             }
@@ -628,8 +628,8 @@ fn extract_param_token<'a>(
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
-        let type_name = match &type_ref.type_name {
-            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone(),
+        let type_name: Atom<'a> = match &type_ref.type_name {
+            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
                 // Qualified names like Namespace.Type or 'this' type - not valid injection tokens

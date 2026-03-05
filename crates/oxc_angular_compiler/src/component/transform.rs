@@ -450,7 +450,7 @@ pub fn build_import_map<'a>(
                     // or aliased: `import { AuthService as Auth } from "module"`
                     // We use the local name as the key
                     // Named imports CAN be reused with bare name
-                    let local_name = spec.local.name.clone();
+                    let local_name: Atom<'a> = spec.local.name.clone().into();
 
                     // Type-only if the declaration is `import type { ... }` or the specifier
                     // is `import { type X }` (inline type specifier)
@@ -471,7 +471,7 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                     // Default import: `import DefaultService from "module"`
                     // Default imports CAN be reused with bare name
-                    let local_name = spec.local.name.clone();
+                    let local_name: Atom<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
@@ -491,7 +491,7 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
                     // Namespace import: `import * as core from "module"`
                     // Namespace imports CANNOT be reused with bare name for individual symbols
-                    let local_name = spec.local.name.clone();
+                    let local_name: Atom<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports

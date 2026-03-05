@@ -70,7 +70,7 @@ pub fn convert_oxc_expression<'a>(
 
         // Identifiers
         Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: id.name.clone(), source_span: None },
+            ReadVarExpr { name: id.name.clone().into(), source_span: None },
             allocator,
         ))),
 
@@ -97,7 +97,7 @@ pub fn convert_oxc_expression<'a>(
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, allocator),
-                    name: member.property.name.clone(),
+                    name: member.property.name.clone().into(),
                     optional: member.optional,
                     source_span: None,
                 },
@@ -287,7 +287,7 @@ fn convert_object_expression<'a>(
             ObjectPropertyKind::ObjectProperty(p) => {
                 // Get the property key
                 let (key, quoted) = match &p.key {
-                    PropertyKey::StaticIdentifier(id) => (id.name.clone(), false),
+                    PropertyKey::StaticIdentifier(id) => (id.name.clone().into(), false),
                     PropertyKey::StringLiteral(lit) => (lit.value.clone(), true),
                     PropertyKey::NumericLiteral(lit) => {
                         (Atom::from(allocator.alloc_str(&lit.value.to_string())), true)
@@ -405,7 +405,7 @@ fn convert_arrow_function_expression<'a>(
     for param in &arrow.params.items {
         // For simplicity, only handle identifier patterns
         if let BindingPattern::BindingIdentifier(id) = &param.pattern {
-            params.push(FnParam { name: id.name.clone() });
+            params.push(FnParam { name: id.name.clone().into() });
         } else {
             // Complex patterns not supported
             return None;
@@ -584,7 +584,7 @@ fn convert_chain_element<'a>(
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, allocator),
-                    name: member.property.name.clone(),
+                    name: member.property.name.clone().into(),
                     optional: member.optional,
                     source_span: None,
                 },

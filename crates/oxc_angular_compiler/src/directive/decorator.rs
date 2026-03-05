@@ -79,7 +79,7 @@ pub fn extract_directive_metadata<'a>(
     implicit_standalone: bool,
 ) -> Option<R3DirectiveMetadata<'a>> {
     // Get the class name
-    let class_name = class.id.as_ref()?.name.clone();
+    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
 
     // Find the @Directive decorator
     let directive_decorator = find_directive_decorator(&class.decorators)?;
@@ -357,11 +357,11 @@ fn extract_param_dependency<'a>(
 fn get_decorator_name_from_expr<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
     match expr {
         // @Optional
-        Expression::Identifier(id) => Some(id.name.clone()),
+        Expression::Identifier(id) => Some(id.name.clone().into()),
         // @Optional()
         Expression::CallExpression(call) => {
             if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone())
+                Some(id.name.clone().into())
             } else {
                 None
             }
@@ -388,7 +388,7 @@ fn extract_param_token<'a>(
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
         let type_name = match &type_ref.type_name {
-            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone(),
+            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
                 // Qualified names like Namespace.Type or 'this' type - not valid injection tokens
@@ -435,7 +435,7 @@ fn has_ng_on_changes_method(class: &Class<'_>) -> bool {
 /// Get the name of a property key as a string.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.clone()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
         _ => None,
     }
@@ -549,7 +549,7 @@ fn extract_single_host_directive<'a>(
     match element {
         // Simple identifier: TooltipDirective
         ArrayExpressionElement::Identifier(id) => Some(R3HostDirectiveMetadata {
-            directive: OutputAstBuilder::variable(allocator, id.name.clone()),
+            directive: OutputAstBuilder::variable(allocator, id.name.clone().into()),
             is_forward_reference: false,
             inputs: Vec::new_in(allocator),
             outputs: Vec::new_in(allocator),
@@ -623,7 +623,7 @@ fn extract_directive_reference<'a>(
     match expr {
         // Simple identifier: ColorDirective
         Expression::Identifier(id) => {
-            (Some(OutputAstBuilder::variable(allocator, id.name.clone())), false)
+            (Some(OutputAstBuilder::variable(allocator, id.name.clone().into())), false)
         }
 
         // ForwardRef call: forwardRef(() => ColorDirective)
@@ -663,7 +663,7 @@ fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<
                 body.statements.first()
             {
                 if let Expression::Identifier(id) = &stmt.expression {
-                    return Some(id.name.clone());
+                    return Some(id.name.clone().into());
                 }
             }
             None

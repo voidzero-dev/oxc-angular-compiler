@@ -52,7 +52,7 @@ pub fn extract_component_metadata<'a>(
     import_map: &ImportMap<'a>,
 ) -> Option<ComponentMetadata<'a>> {
     // Get the class name
-    let class_name = class.id.as_ref()?.name.clone();
+    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Component decorator
@@ -336,7 +336,7 @@ fn is_component_call(callee: &Expression<'_>) -> bool {
 /// Get the name of a property key as a string.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.clone()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
         _ => None,
     }
@@ -405,7 +405,7 @@ fn extract_identifier_array<'a>(
     for element in &arr.elements {
         match element {
             ArrayExpressionElement::Identifier(id) => {
-                result.push(id.name.clone());
+                result.push(id.name.clone().into());
             }
             // Handle spread elements, etc. - for now just collect identifiers
             _ => {}
@@ -562,9 +562,10 @@ fn extract_single_host_directive<'a>(
     match element {
         // Simple identifier: TooltipDirective
         ArrayExpressionElement::Identifier(id) => {
-            let mut meta = HostDirectiveMetadata::new(allocator, id.name.clone());
+            let name: Atom<'a> = id.name.clone().into();
+            let mut meta = HostDirectiveMetadata::new(allocator, name.clone());
             // Look up the source module from the import map
-            if let Some(import_info) = import_map.get(&id.name) {
+            if let Some(import_info) = import_map.get(&name) {
                 meta.source_module = Some(import_info.source_module.clone());
             }
             Some(meta)
@@ -645,7 +646,7 @@ fn extract_single_host_directive<'a>(
 fn extract_directive_reference<'a>(expr: &Expression<'a>) -> (Option<Atom<'a>>, bool) {
     match expr {
         // Simple identifier: ColorDirective
-        Expression::Identifier(id) => (Some(id.name.clone()), false),
+        Expression::Identifier(id) => (Some(id.name.clone().into()), false),
 
         // ForwardRef call: forwardRef(() => ColorDirective)
         Expression::CallExpression(call) => {
@@ -692,7 +693,7 @@ fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<
                 body.statements.first()
             {
                 if let Expression::Identifier(id) = &stmt.expression {
-                    return Some(id.name.clone());
+                    return Some(id.name.clone().into());
                 }
             }
             None
@@ -967,11 +968,11 @@ fn extract_param_dependency<'a>(
 fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
     match expr {
         // @Optional
-        Expression::Identifier(id) => Some(id.name.clone()),
+        Expression::Identifier(id) => Some(id.name.clone().into()),
         // @Optional()
         Expression::CallExpression(call) => {
             if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone())
+                Some(id.name.clone().into())
             } else {
                 None
             }
@@ -983,12 +984,12 @@ fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
 /// Extract the injection token from an @Inject decorator argument.
 fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Atom<'a>> {
     match arg {
-        Argument::Identifier(id) => Some(id.name.clone()),
+        Argument::Identifier(id) => Some(id.name.clone().into()),
         _ => {
             // For other expressions, try to get the expression form
             let expr = arg.to_expression();
             match expr {
-                Expression::Identifier(id) => Some(id.name.clone()),
+                Expression::Identifier(id) => Some(id.name.clone().into()),
                 _ => None,
             }
         }
@@ -1005,7 +1006,7 @@ fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Opti
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
         let type_name = match &type_ref.type_name {
-            oxc_ast::ast::TSTypeName::IdentifierReference(id) => Some(id.name.clone()),
+            oxc_ast::ast::TSTypeName::IdentifierReference(id) => Some(id.name.clone().into()),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
                 // Qualified names like Namespace.Type or 'this' type - not valid injection tokens

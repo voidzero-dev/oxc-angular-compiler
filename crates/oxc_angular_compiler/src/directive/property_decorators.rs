@@ -52,7 +52,7 @@ fn find_decorator_by_name<'a>(
 /// Handles both identifier keys and string literal keys.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.clone()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
         _ => None,
     }

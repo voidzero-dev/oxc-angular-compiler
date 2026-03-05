@@ -2346,7 +2346,7 @@ pub fn extract_angular_component_by_ast(
                     if let AssignmentTarget::StaticMemberExpression(member) = &assign.left {
                         // Check if the object is the class name
                         let is_target_class = match &member.object {
-                            Expression::Identifier(id) => id.name == class_name,
+                            Expression::Identifier(id) => id.name.as_str() == class_name,
                             _ => false,
                         };
 
@@ -2373,7 +2373,8 @@ pub fn extract_angular_component_by_ast(
             // Handle class declarations for static properties
             Statement::ClassDeclaration(class) => {
                 // Check if this is the target class
-                let is_target_class = class.id.as_ref().is_some_and(|id| id.name == class_name);
+                let is_target_class =
+                    class.id.as_ref().is_some_and(|id| id.name.as_str() == class_name);
 
                 if is_target_class {
                     for element in &class.body.body {
@@ -2417,7 +2418,8 @@ pub fn extract_angular_component_by_ast(
                 if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
                     &export.declaration
                 {
-                    let is_target_class = class.id.as_ref().is_some_and(|id| id.name == class_name);
+                    let is_target_class =
+                        class.id.as_ref().is_some_and(|id| id.name.as_str() == class_name);
 
                     if is_target_class {
                         for element in &class.body.body {

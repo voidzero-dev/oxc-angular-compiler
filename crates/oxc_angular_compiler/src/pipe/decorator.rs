@@ -109,7 +109,7 @@ pub fn extract_pipe_metadata<'a>(
     implicit_standalone: bool,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
-    let class_name = class.id.as_ref()?.name.clone();
+    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Pipe decorator
@@ -202,7 +202,7 @@ fn is_pipe_call(callee: &Expression<'_>) -> bool {
 /// Get the name of a property key as a string.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name.clone()),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
         _ => None,
     }
@@ -317,11 +317,11 @@ fn extract_param_dependency<'a>(
 fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
     match expr {
         // @Optional
-        Expression::Identifier(id) => Some(id.name.clone()),
+        Expression::Identifier(id) => Some(id.name.clone().into()),
         // @Optional()
         Expression::CallExpression(call) => {
             if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone())
+                Some(id.name.clone().into())
             } else {
                 None
             }
@@ -342,8 +342,8 @@ fn extract_param_token<'a>(
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
-        let type_name = match &type_ref.type_name {
-            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone(),
+        let type_name: Atom<'a> = match &type_ref.type_name {
+            oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
                 // Qualified names like Namespace.Type or 'this' type - not valid injection tokens

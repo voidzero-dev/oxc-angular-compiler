@@ -92,11 +92,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     ImportDeclarationSpecifier::ImportSpecifier(spec) => {
                         // Explicit type-only specifiers (import { type X }) are always elided
                         if spec.import_kind.is_type() {
-                            type_only_specifiers.insert(spec.local.name.clone());
+                            type_only_specifiers.insert(spec.local.name.clone().into());
                             continue;
                         }
 
-                        let name = &spec.local.name;
+                        let name: Atom<'a> = spec.local.name.clone().into();
 
                         // Check if this import has only type references
                         if Self::is_type_only_import(&spec.local, semantic) {
@@ -108,7 +108,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         }
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                        let name = &spec.local.name;
+                        let name: Atom<'a> = spec.local.name.clone().into();
 
                         if Self::is_type_only_import(&spec.local, semantic) {
                             type_only_specifiers.insert(name.clone());
@@ -119,7 +119,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         // e.g., `import * as moment from 'moment'` where `moment` is only
                         // used in type annotations like `moment.Moment`.
                         if Self::is_type_only_import(&spec.local, semantic) {
-                            type_only_specifiers.insert(spec.local.name.clone());
+                            type_only_specifiers.insert(spec.local.name.clone().into());
                         }
                     }
                 }
@@ -273,12 +273,12 @@ impl<'a> ImportElisionAnalyzer<'a> {
     fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Atom<'a>>) {
         match expr {
             Expression::Identifier(id) => {
-                result.insert(id.name.clone());
+                result.insert(id.name.clone().into());
             }
             Expression::StaticMemberExpression(member) => {
                 // For `RecipientType.To`, collect `RecipientType`
                 if let Expression::Identifier(id) = &member.object {
-                    result.insert(id.name.clone());
+                    result.insert(id.name.clone().into());
                 }
             }
             _ => {}
@@ -638,7 +638,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     }
 
     /// Check if a specifier name should be elided (removed).
-    pub fn should_elide(&self, name: &Atom<'a>) -> bool {
+    pub fn should_elide(&self, name: &str) -> bool {
         self.type_only_specifiers.contains(name)
     }
 
@@ -702,14 +702,14 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     let local_name = &spec.local.name;
 
                     // Skip if already marked as type-only by semantic analysis
-                    if analyzer.type_only_specifiers.contains(local_name) {
+                    if analyzer.type_only_specifiers.contains(local_name.as_str()) {
                         continue;
                     }
 
                     // Check cross-file: is the export type-only in the source file?
                     let imported_name = spec.imported.name().as_str();
                     if cross_file_analyzer.is_type_only_import(source, imported_name, file_path) {
-                        analyzer.type_only_specifiers.insert(local_name.clone());
+                        analyzer.type_only_specifiers.insert(local_name.clone().into());
                     }
                 }
             }
@@ -769,7 +769,7 @@ pub fn filter_imports<'a>(
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => &s.local.name,
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => &s.local.name,
             };
-            !analyzer.should_elide(name)
+            !analyzer.should_elide(name.as_str())
         });
 
         if removed.is_empty() && !kept.is_empty() {

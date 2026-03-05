@@ -33,7 +33,7 @@ pub fn build_decorator_metadata_array<'a>(
         let type_expr = match &decorator.expression {
             Expression::CallExpression(call) => match &call.callee {
                 Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: id.name, source_span: None },
+                    ReadVarExpr { name: id.name.into(), source_span: None },
                     allocator,
                 ))),
                 Expression::StaticMemberExpression(member) => {
@@ -42,7 +42,7 @@ pub fn build_decorator_metadata_array<'a>(
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(receiver, allocator),
-                                name: member.property.name,
+                                name: member.property.name.into(),
                                 optional: false,
                                 source_span: None,
                             },
@@ -53,7 +53,7 @@ pub fn build_decorator_metadata_array<'a>(
                 _ => None,
             },
             Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: id.name, source_span: None },
+                ReadVarExpr { name: id.name.into(), source_span: None },
                 allocator,
             ))),
             _ => None,
@@ -370,8 +370,8 @@ fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Atom<'a>> 
     let type_annotation = param.type_annotation.as_ref()?;
     match &type_annotation.type_annotation {
         TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-            TSTypeName::IdentifierReference(id) => Some(id.name),
-            TSTypeName::QualifiedName(qualified) => Some(qualified.right.name),
+            TSTypeName::IdentifierReference(id) => Some(id.name.into()),
+            TSTypeName::QualifiedName(qualified) => Some(qualified.right.name.into()),
             TSTypeName::ThisExpression(_) => None,
         },
         _ => None,
@@ -394,12 +394,12 @@ fn extract_param_type_expression<'a>(
             // Handle simple type references like SomeService
             match &type_ref.type_name {
                 TSTypeName::IdentifierReference(id) => Some(OutputExpression::ReadVar(
-                    Box::new_in(ReadVarExpr { name: id.name, source_span: None }, allocator),
+                    Box::new_in(ReadVarExpr { name: id.name.into(), source_span: None }, allocator),
                 )),
                 TSTypeName::QualifiedName(qualified) => {
                     // Handle qualified names like ns.SomeType
                     Some(OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: qualified.right.name, source_span: None },
+                        ReadVarExpr { name: qualified.right.name.into(), source_span: None },
                         allocator,
                     )))
                 }
@@ -446,7 +446,7 @@ fn get_decorator_name<'a>(decorator: &Decorator<'a>) -> Option<&'a str> {
 /// Get property key name as an Atom.
 fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
     match key {
-        PropertyKey::StaticIdentifier(id) => Some(id.name),
+        PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value),
         _ => None,
     }
