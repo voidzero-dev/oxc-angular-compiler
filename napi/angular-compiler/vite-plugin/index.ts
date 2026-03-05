@@ -202,6 +202,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       },
       configResolved(config) {
         resolvedConfig = config
+        resolvedConfig.build.rolldownOptions.tsconfig = options.tsconfig
       },
       configureServer(server) {
         viteServer = server
