@@ -222,21 +222,21 @@ fn walk_class_body(
     edits: &mut Vec<Edit>,
 ) {
     for element in &body.body {
-        if let oxc_ast::ast::ClassElement::PropertyDefinition(prop) = element {
-            if let Some(ref value) = prop.value {
-                walk_expression(value, source, filename, edits);
-            }
+        if let oxc_ast::ast::ClassElement::PropertyDefinition(prop) = element
+            && let Some(ref value) = prop.value
+        {
+            walk_expression(value, source, filename, edits);
         }
         if let oxc_ast::ast::ClassElement::StaticBlock(block) = element {
             for stmt in &block.body {
                 walk_statement(stmt, source, filename, edits);
             }
         }
-        if let oxc_ast::ast::ClassElement::MethodDefinition(method) = element {
-            if let Some(ref body) = method.value.body {
-                for stmt in &body.statements {
-                    walk_statement(stmt, source, filename, edits);
-                }
+        if let oxc_ast::ast::ClassElement::MethodDefinition(method) = element
+            && let Some(ref body) = method.value.body
+        {
+            for stmt in &body.statements {
+                walk_statement(stmt, source, filename, edits);
             }
         }
     }
@@ -275,11 +275,11 @@ fn walk_declaration(
 fn walk_expression(expr: &Expression<'_>, source: &str, filename: &str, edits: &mut Vec<Edit>) {
     match expr {
         Expression::CallExpression(call) => {
-            if let Some(name) = get_declare_name(call) {
-                if let Some(edit) = link_declaration(name, call, source, filename) {
-                    edits.push(edit);
-                    return;
-                }
+            if let Some(name) = get_declare_name(call)
+                && let Some(edit) = link_declaration(name, call, source, filename)
+            {
+                edits.push(edit);
+                return;
             }
             // Walk arguments recursively
             for arg in &call.arguments {
@@ -373,21 +373,21 @@ fn get_metadata_object<'a>(call: &'a CallExpression<'a>) -> Option<&'a ObjectExp
 /// Handles both regular string literals (`"..."`) and template literals with no expressions (`` `...` ``).
 fn get_string_property<'a>(obj: &'a ObjectExpression<'a>, name: &str) -> Option<&'a str> {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                match &prop.value {
-                    Expression::StringLiteral(lit) => {
-                        return Some(lit.value.as_str());
-                    }
-                    Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
-                        if let Some(quasi) = tl.quasis.first() {
-                            if let Some(cooked) = &quasi.value.cooked {
-                                return Some(cooked.as_str());
-                            }
-                        }
-                    }
-                    _ => {}
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+        {
+            match &prop.value {
+                Expression::StringLiteral(lit) => {
+                    return Some(lit.value.as_str());
                 }
+                Expression::TemplateLiteral(tl) if tl.expressions.is_empty() => {
+                    if let Some(quasi) = tl.quasis.first()
+                        && let Some(cooked) = &quasi.value.cooked
+                    {
+                        return Some(cooked.as_str());
+                    }
+                }
+                _ => {}
             }
         }
     }
@@ -401,11 +401,11 @@ fn get_property_source<'a>(
     source: &'a str,
 ) -> Option<&'a str> {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                let span = prop.value.span();
-                return Some(&source[span.start as usize..span.end as usize]);
-            }
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+        {
+            let span = prop.value.span();
+            return Some(&source[span.start as usize..span.end as usize]);
         }
     }
     None
@@ -427,12 +427,11 @@ fn get_object_property<'a>(
     name: &str,
 ) -> Option<&'a ObjectExpression<'a>> {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                if let Expression::ObjectExpression(inner) = &prop.value {
-                    return Some(inner.as_ref());
-                }
-            }
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+            && let Expression::ObjectExpression(inner) = &prop.value
+        {
+            return Some(inner.as_ref());
         }
     }
     None
@@ -441,12 +440,11 @@ fn get_object_property<'a>(
 /// Extract boolean property value.
 fn get_bool_property(obj: &ObjectExpression<'_>, name: &str) -> Option<bool> {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                if let Expression::BooleanLiteral(lit) = &prop.value {
-                    return Some(lit.value);
-                }
-            }
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+            && let Expression::BooleanLiteral(lit) = &prop.value
+        {
+            return Some(lit.value);
         }
     }
     None
@@ -455,71 +453,67 @@ fn get_bool_property(obj: &ObjectExpression<'_>, name: &str) -> Option<bool> {
 /// Extract the `deps` array from a factory metadata object and generate inject calls.
 fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> String {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == "deps") {
-                if let Expression::ArrayExpression(arr) = &prop.value {
-                    if arr.elements.is_empty() {
-                        return String::new();
-                    }
-                    // Generate inject calls for each dependency
-                    let deps: Vec<String> = arr
-                        .elements
-                        .iter()
-                        .filter_map(|el| {
-                            use oxc_ast::ast::ArrayExpressionElement;
-                            let expr = match el {
-                                ArrayExpressionElement::SpreadElement(_) => return None,
-                                _ => el.to_expression(),
-                            };
-                            let span = expr.span();
-                            let dep_source = &source[span.start as usize..span.end as usize];
-
-                            // Check if it's an object with token/attribute/flags
-                            if let Expression::ObjectExpression(dep_obj) = expr {
-                                let token = get_property_source(dep_obj.as_ref(), "token", source);
-                                let optional = get_bool_property(dep_obj.as_ref(), "optional");
-                                let self_flag = get_bool_property(dep_obj.as_ref(), "self");
-                                let skip_self = get_bool_property(dep_obj.as_ref(), "skipSelf");
-                                let host = get_bool_property(dep_obj.as_ref(), "host");
-                                let attribute =
-                                    get_property_source(dep_obj.as_ref(), "attribute", source);
-
-                                if let Some(attr) = attribute {
-                                    return Some(format!(
-                                        "{ns}.\u{0275}\u{0275}injectAttribute({attr})"
-                                    ));
-                                }
-
-                                if let Some(token) = token {
-                                    let mut flags = 0u32;
-                                    if optional == Some(true) {
-                                        flags |= 8;
-                                    }
-                                    if self_flag == Some(true) {
-                                        flags |= 2;
-                                    }
-                                    if skip_self == Some(true) {
-                                        flags |= 4;
-                                    }
-                                    if host == Some(true) {
-                                        flags |= 1;
-                                    }
-                                    if flags != 0 {
-                                        return Some(format!(
-                                            "{ns}.\u{0275}\u{0275}inject({token}, {flags})"
-                                        ));
-                                    }
-                                    return Some(format!("{ns}.\u{0275}\u{0275}inject({token})"));
-                                }
-                                Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
-                            } else {
-                                Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
-                            }
-                        })
-                        .collect();
-                    return deps.join(", ");
-                }
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == "deps")
+            && let Expression::ArrayExpression(arr) = &prop.value
+        {
+            if arr.elements.is_empty() {
+                return String::new();
             }
+            // Generate inject calls for each dependency
+            let deps: Vec<String> = arr
+                .elements
+                .iter()
+                .filter_map(|el| {
+                    use oxc_ast::ast::ArrayExpressionElement;
+                    let expr = match el {
+                        ArrayExpressionElement::SpreadElement(_) => return None,
+                        _ => el.to_expression(),
+                    };
+                    let span = expr.span();
+                    let dep_source = &source[span.start as usize..span.end as usize];
+
+                    // Check if it's an object with token/attribute/flags
+                    if let Expression::ObjectExpression(dep_obj) = expr {
+                        let token = get_property_source(dep_obj.as_ref(), "token", source);
+                        let optional = get_bool_property(dep_obj.as_ref(), "optional");
+                        let self_flag = get_bool_property(dep_obj.as_ref(), "self");
+                        let skip_self = get_bool_property(dep_obj.as_ref(), "skipSelf");
+                        let host = get_bool_property(dep_obj.as_ref(), "host");
+                        let attribute = get_property_source(dep_obj.as_ref(), "attribute", source);
+
+                        if let Some(attr) = attribute {
+                            return Some(format!("{ns}.\u{0275}\u{0275}injectAttribute({attr})"));
+                        }
+
+                        if let Some(token) = token {
+                            let mut flags = 0u32;
+                            if optional == Some(true) {
+                                flags |= 8;
+                            }
+                            if self_flag == Some(true) {
+                                flags |= 2;
+                            }
+                            if skip_self == Some(true) {
+                                flags |= 4;
+                            }
+                            if host == Some(true) {
+                                flags |= 1;
+                            }
+                            if flags != 0 {
+                                return Some(format!(
+                                    "{ns}.\u{0275}\u{0275}inject({token}, {flags})"
+                                ));
+                            }
+                            return Some(format!("{ns}.\u{0275}\u{0275}inject({token})"));
+                        }
+                        Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
+                    } else {
+                        Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
+                    }
+                })
+                .collect();
+            return deps.join(", ");
         }
     }
     String::new()
@@ -543,7 +537,7 @@ fn parse_selector(selector: &str) -> String {
             let parts: Vec<String> = elements
                 .iter()
                 .map(|el| match el {
-                    R3SelectorElement::String(s) => format!("\"{}\"", s),
+                    R3SelectorElement::String(s) => format!("\"{s}\""),
                     R3SelectorElement::Flag(f) => f.to_string(),
                 })
                 .collect();
@@ -669,17 +663,7 @@ fn link_factory(
     // Check if deps are specified
     let has_deps = has_property(meta, "deps");
 
-    if !has_deps {
-        // Inherited factory (no constructor) - use getInheritedFactory
-        Some(format!(
-            "/*@__PURE__*/ (() => {{\n\
-            let \u{0275}{type_name}_BaseFactory;\n\
-            return function {type_name}_Factory(__ngFactoryType__) {{\n\
-              return (\u{0275}{type_name}_BaseFactory || (\u{0275}{type_name}_BaseFactory = {ns}.\u{0275}\u{0275}getInheritedFactory({type_name})))(__ngFactoryType__ || {type_name});\n\
-            }};\n\
-            }})()"
-        ))
-    } else {
+    if has_deps {
         let deps = extract_deps_source(meta, source, ns);
 
         if target == "Pipe" {
@@ -710,6 +694,16 @@ fn link_factory(
                 }}"
             ))
         }
+    } else {
+        // Inherited factory (no constructor) - use getInheritedFactory
+        Some(format!(
+            "/*@__PURE__*/ (() => {{\n\
+            let \u{0275}{type_name}_BaseFactory;\n\
+            return function {type_name}_Factory(__ngFactoryType__) {{\n\
+              return (\u{0275}{type_name}_BaseFactory || (\u{0275}{type_name}_BaseFactory = {ns}.\u{0275}\u{0275}getInheritedFactory({type_name})))(__ngFactoryType__ || {type_name});\n\
+            }};\n\
+            }})()"
+        ))
     }
 }
 
@@ -994,17 +988,17 @@ fn link_directive(
     }
 
     // Content queries — convert queries array to contentQueries function
-    if let Some(queries_arr) = get_array_property(meta, "queries") {
-        if let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true) {
-            parts.push(format!("contentQueries: {cq_fn}"));
-        }
+    if let Some(queries_arr) = get_array_property(meta, "queries")
+        && let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true)
+    {
+        parts.push(format!("contentQueries: {cq_fn}"));
     }
 
     // View queries — convert viewQueries array to viewQuery function
-    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries") {
-        if let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false) {
-            parts.push(format!("viewQuery: {vq_fn}"));
-        }
+    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries")
+        && let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false)
+    {
+        parts.push(format!("viewQuery: {vq_fn}"));
     }
 
     if let Some(inputs_obj) = get_object_property(meta, "inputs") {
@@ -1020,19 +1014,48 @@ fn link_directive(
     let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
     parts.push(format!("standalone: {standalone}"));
 
+    if get_bool_property(meta, "isSignal") == Some(true) {
+        parts.push("signals: true".to_string());
+    }
+
     if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
     }
 
-    // Host bindings - convert host object to hostAttrs array
+    // Host bindings (hostAttrs, hostVars, hostBindings)
+    let mut host_binding_declarations_js = String::new();
     if let Some(host_obj) = get_object_property(meta, "host") {
+        // Static attributes → hostAttrs
         let host_attrs = build_host_attrs(host_obj, source);
         if !host_attrs.is_empty() {
-            parts.push(format!("hostAttrs: [{}]", host_attrs));
+            parts.push(format!("hostAttrs: [{host_attrs}]"));
+        }
+
+        // Dynamic bindings → hostVars + hostBindings function
+        let host_input = extract_host_metadata_input(host_obj);
+        let selector = get_string_property(meta, "selector");
+        if let Some(host_output) = crate::component::compile_host_bindings_for_linker(
+            &host_input,
+            type_name,
+            selector,
+            0, // directives have no template, so pool starts at 0
+        ) {
+            if host_output.host_vars > 0 {
+                parts.push(format!("hostVars: {}", host_output.host_vars));
+            }
+            parts.push(format!("hostBindings: {}", host_output.fn_js));
+            if !host_output.declarations_js.is_empty() {
+                host_binding_declarations_js = host_output.declarations_js;
+            }
         }
     }
 
-    Some(format!("{ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", ")))
+    let define_call = format!("{ns}.\u{0275}\u{0275}defineDirective({{ {} }})", parts.join(", "));
+    if host_binding_declarations_js.is_empty() {
+        Some(define_call)
+    } else {
+        Some(format!("(() => {{\n{host_binding_declarations_js}\nreturn {define_call};\n}})()"))
+    }
 }
 
 /// Extract an array expression property value from an object expression.
@@ -1041,12 +1064,11 @@ fn get_array_property<'a>(
     name: &str,
 ) -> Option<&'a oxc_ast::ast::ArrayExpression<'a>> {
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            if matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) {
-                if let Expression::ArrayExpression(arr) = &prop.value {
-                    return Some(arr.as_ref());
-                }
-            }
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+            && let Expression::ArrayExpression(arr) = &prop.value
+        {
+            return Some(arr.as_ref());
         }
     }
     None
@@ -1125,10 +1147,10 @@ fn extract_dependency_types(
             ArrayExpressionElement::SpreadElement(_) => continue,
             _ => el.to_expression(),
         };
-        if let Expression::ObjectExpression(obj) = expr {
-            if let Some(type_src) = get_property_source(obj.as_ref(), "type", source) {
-                types.push(type_src.to_string());
-            }
+        if let Expression::ObjectExpression(obj) = expr
+            && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
+        {
+            types.push(type_src.to_string());
         }
     }
     if types.is_empty() { None } else { Some(format!("[{}]", types.join(", "))) }
@@ -1223,11 +1245,11 @@ fn build_queries(
         if is_signal {
             update_stmts.push(format!("{ns}.\u{0275}\u{0275}queryAdvance()"));
         } else {
-            let t_var = if !t_declared {
+            let t_var = if t_declared {
+                ""
+            } else {
                 t_declared = true;
                 "let _t;\n"
-            } else {
-                ""
             };
             let access = if first { ".first" } else { "" };
             update_stmts.push(format!(
@@ -1349,17 +1371,17 @@ fn link_component(
     }
 
     // 3. contentQueries
-    if let Some(queries_arr) = get_array_property(meta, "queries") {
-        if let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true) {
-            parts.push(format!("contentQueries: {cq_fn}"));
-        }
+    if let Some(queries_arr) = get_array_property(meta, "queries")
+        && let Some(cq_fn) = build_queries(queries_arr, source, ns, type_name, true)
+    {
+        parts.push(format!("contentQueries: {cq_fn}"));
     }
 
     // 4. viewQuery
-    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries") {
-        if let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false) {
-            parts.push(format!("viewQuery: {vq_fn}"));
-        }
+    if let Some(view_queries_arr) = get_array_property(meta, "viewQueries")
+        && let Some(vq_fn) = build_queries(view_queries_arr, source, ns, type_name, false)
+    {
+        parts.push(format!("viewQuery: {vq_fn}"));
     }
 
     // 5-7. Host bindings (hostAttrs, hostVars, hostBindings)
@@ -1411,6 +1433,11 @@ fn link_component(
     let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
     parts.push(format!("standalone: {standalone}"));
 
+    // 11b. signals
+    if get_bool_property(meta, "isSignal") == Some(true) {
+        parts.push("signals: true".to_string());
+    }
+
     // 12. features
     if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
@@ -1436,10 +1463,10 @@ fn link_component(
     parts.push(format!("template: {}", template_output.template_fn_name));
 
     // 18. dependencies (extract type references from dependency objects)
-    if let Some(deps_arr) = get_array_property(meta, "dependencies") {
-        if let Some(deps_str) = extract_dependency_types(deps_arr, source) {
-            parts.push(format!("dependencies: {deps_str}"));
-        }
+    if let Some(deps_arr) = get_array_property(meta, "dependencies")
+        && let Some(deps_str) = extract_dependency_types(deps_arr, source)
+    {
+        parts.push(format!("dependencies: {deps_str}"));
     }
 
     // 19-20. styles + encapsulation (interdependent)
@@ -1501,12 +1528,12 @@ fn link_component(
     }
 
     // 22. changeDetection
-    if let Some(cd) = get_property_source(meta, "changeDetection", source) {
-        if cd.contains("OnPush") {
-            parts.push("changeDetection: 0".to_string());
-        }
-        // Default (1) is the default, no need to emit
+    if let Some(cd) = get_property_source(meta, "changeDetection", source)
+        && cd.contains("OnPush")
+    {
+        parts.push("changeDetection: 0".to_string());
     }
+    // Default (1) is the default, no need to emit
 
     let define_component =
         format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
@@ -2359,6 +2386,144 @@ MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "
             result.code
         );
         assert!(result.code.contains("viewQuery:"), "Should have viewQuery, got:\n{}", result.code);
+    }
+
+    /// Issue #72: Directive host bindings (properties + listeners) must produce hostVars + hostBindings
+    /// Same as components, directives like RouterLink need host bindings compiled.
+    #[test]
+    fn test_link_directive_with_host_bindings() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class RouterLink {
+}
+RouterLink.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: RouterLink, selector: "a[routerLink],area[routerLink]", isStandalone: true, inputs: { routerLink: "routerLink", target: "target" }, host: { properties: { "attr.target": "this.target", "attr.href": "this.href" }, listeners: { "click": "onClick($event)" } } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        // Should have hostVars for the 2 property bindings
+        assert!(
+            result.code.contains("hostVars:"),
+            "Should contain hostVars for directive host property bindings, got:\n{}",
+            result.code
+        );
+        // Should have hostBindings function
+        assert!(
+            result.code.contains("hostBindings:"),
+            "Should contain hostBindings function for directive, got:\n{}",
+            result.code
+        );
+        // Should have proper context property access
+        assert!(
+            result.code.contains("ctx.target"),
+            "Should contain properly compiled ctx.target, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ctx.href"),
+            "Should contain properly compiled ctx.href, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #72: Directive with host listeners should compile event handlers
+    #[test]
+    fn test_link_directive_with_host_listeners() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, host: { listeners: { "click": "handleClick($event)" } } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("hostBindings:"),
+            "Should contain hostBindings for directive listener, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #72: Directive with only host attributes (no properties/listeners) should still work
+    #[test]
+    fn test_link_directive_with_host_attrs_only() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, host: { attributes: { "role": "button" } } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("hostAttrs:"),
+            "Should contain hostAttrs for directive, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("\"role\""),
+            "Should contain role attribute, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #72: Signal-based directive should emit signals: true
+    #[test]
+    fn test_link_directive_with_signals() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "17.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true, isSignal: true, inputs: { value: { classPropertyName: "value", publicName: "value", isSignal: true, isRequired: true, transformFunction: null } } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("signals: true"),
+            "Signal directive should have signals: true, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #72: Signal-based component should emit signals: true
+    #[test]
+    fn test_link_component_with_signals() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "17.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", isStandalone: true, isSignal: true, inputs: { value: { classPropertyName: "value", publicName: "value", isSignal: true, isRequired: true, transformFunction: null } }, template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("signals: true"),
+            "Signal component should have signals: true, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Non-signal directive should NOT emit signals: true
+    #[test]
+    fn test_link_directive_without_signals() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", isStandalone: true });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("signals:"),
+            "Non-signal directive should not have signals property, got:\n{}",
+            result.code
+        );
     }
 
     /// Issue #71: Feature ordering — HostDirectivesFeature must come after ProvidersFeature
