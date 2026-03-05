@@ -1047,9 +1047,6 @@ fn link_directive(
     let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
     parts.push(format!("standalone: {standalone}"));
 
-    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
-        parts.push(format!("hostDirectives: {host_directives}"));
-    }
     if let Some(features) = build_features(meta, source, ns) {
         parts.push(format!("features: {features}"));
     }
@@ -1283,11 +1280,12 @@ fn build_queries(
 /// Build the features array from component metadata.
 ///
 /// Examines boolean flags and providers to build the features array:
+/// - `providers: [...]` → `ns.ɵɵProvidersFeature([...])`
+/// - `hostDirectives: [...]` → `ns.ɵɵHostDirectivesFeature([...])`
 /// - `usesInheritance: true` → `ns.ɵɵInheritDefinitionFeature`
 /// - `usesOnChanges: true` → `ns.ɵɵNgOnChangesFeature`
-/// - `providers: [...]` → `ns.ɵɵProvidersFeature([...])`
-/// Order is important: ProvidersFeature → InheritDefinitionFeature → NgOnChangesFeature
-/// (see definition.rs line 990 and packages/compiler/src/render3/view/compiler.ts:119-161)
+/// Order is important: ProvidersFeature → HostDirectivesFeature → InheritDefinitionFeature → NgOnChangesFeature
+/// (see packages/compiler/src/render3/view/compiler.ts:119-161)
 fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
 
@@ -1307,12 +1305,17 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
         (None, None) => {}
     }
 
-    // 2. InheritDefinitionFeature
+    // 2. HostDirectivesFeature — must come before InheritDefinitionFeature
+    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
+        features.push(format!("{ns}.\u{0275}\u{0275}HostDirectivesFeature({host_directives})"));
+    }
+
+    // 3. InheritDefinitionFeature
     if get_bool_property(meta, "usesInheritance") == Some(true) {
         features.push(format!("{ns}.\u{0275}\u{0275}InheritDefinitionFeature"));
     }
 
-    // 3. NgOnChangesFeature
+    // 4. NgOnChangesFeature
     if get_bool_property(meta, "usesOnChanges") == Some(true) {
         features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
     }
@@ -1434,11 +1437,6 @@ fn link_component(
     // 11. standalone
     let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
     parts.push(format!("standalone: {standalone}"));
-
-    // 11b. hostDirectives (Directive Composition API)
-    if let Some(host_directives) = get_property_source(meta, "hostDirectives", source) {
-        parts.push(format!("hostDirectives: {host_directives}"));
-    }
 
     // 12. features
     if let Some(features) = build_features(meta, source, ns) {
@@ -2175,6 +2173,116 @@ MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "
             result.code.contains("NgOnChangesFeature"),
             "Should have NgOnChangesFeature, got:\n{}",
             result.code
+        );
+    }
+
+    /// Issue #71: hostDirectives must be converted to ɵɵHostDirectivesFeature in features array
+    /// instead of being emitted as a direct property.
+    #[test]
+    fn test_link_directive_with_host_directives() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class BrnContextMenuTrigger {
+}
+BrnContextMenuTrigger.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: BrnContextMenuTrigger, selector: "[brnCtxMenuTriggerFor]", isStandalone: true, hostDirectives: [{ directive: CdkContextMenuTrigger }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        // Must have HostDirectivesFeature in the features array
+        assert!(
+            result.code.contains("HostDirectivesFeature"),
+            "Should have HostDirectivesFeature in features array, got:\n{}",
+            result.code
+        );
+        // Must NOT have hostDirectives as a direct property
+        assert!(
+            !result.code.contains("hostDirectives:"),
+            "Should NOT have hostDirectives as a direct property, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #71: hostDirectives with input/output mappings on a directive
+    #[test]
+    fn test_link_directive_with_host_directives_mappings() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class UnityTooltipTrigger {
+}
+UnityTooltipTrigger.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: UnityTooltipTrigger, selector: "[uTooltip]", isStandalone: true, hostDirectives: [{ directive: BrnTooltipTrigger, inputs: ["brnTooltipTrigger", "uTooltip"], outputs: ["onHide", "tooltipHidden"] }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("HostDirectivesFeature"),
+            "Should have HostDirectivesFeature, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("hostDirectives:"),
+            "Should NOT have hostDirectives as a direct property, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #71: hostDirectives on a component must go to HostDirectivesFeature
+    #[test]
+    fn test_link_component_with_host_directives() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class BrnMenu {
+}
+BrnMenu.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: BrnMenu, selector: "[brnMenu]", isStandalone: true, hostDirectives: [{ directive: CdkMenu }], template: "<ng-content></ng-content>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("HostDirectivesFeature"),
+            "Should have HostDirectivesFeature in features array, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("hostDirectives:"),
+            "Should NOT have hostDirectives as a direct property, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #71: Feature ordering — HostDirectivesFeature must come after ProvidersFeature
+    /// and before InheritDefinitionFeature
+    #[test]
+    fn test_features_order_with_host_directives() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {
+}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", providers: [SomeProvider], hostDirectives: [{ directive: SomeDirective }], usesInheritance: true, usesOnChanges: true, template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        let code = &result.code;
+        let providers_pos = code.find("ProvidersFeature").expect("should have ProvidersFeature");
+        let host_dir_pos =
+            code.find("HostDirectivesFeature").expect("should have HostDirectivesFeature");
+        let inherit_pos =
+            code.find("InheritDefinitionFeature").expect("should have InheritDefinitionFeature");
+        let on_changes_pos =
+            code.find("NgOnChangesFeature").expect("should have NgOnChangesFeature");
+        assert!(
+            providers_pos < host_dir_pos,
+            "ProvidersFeature must come before HostDirectivesFeature"
+        );
+        assert!(
+            host_dir_pos < inherit_pos,
+            "HostDirectivesFeature must come before InheritDefinitionFeature"
+        );
+        assert!(
+            inherit_pos < on_changes_pos,
+            "InheritDefinitionFeature must come before NgOnChangesFeature"
         );
     }
 }
