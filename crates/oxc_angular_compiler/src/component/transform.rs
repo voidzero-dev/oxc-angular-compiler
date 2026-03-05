@@ -807,10 +807,30 @@ pub fn transform_angular_file(
                             // External declarations (child view functions, constants) go BEFORE the class.
                             // Note: The /*@__PURE__*/ annotation is already included in cmp_js by the emitter.
                             // ES2022 style: static fields INSIDE the class body
-                            let property_assignments = format!(
+                            let mut property_assignments = format!(
                                 "static ɵfac = {};\nstatic ɵcmp = {};",
                                 compilation_result.fac_js, compilation_result.cmp_js
                             );
+
+                            // Check if the class also has an @Injectable decorator.
+                            // @Injectable is SHARED precedence and can coexist with @Component.
+                            if let Some(injectable_metadata) =
+                                extract_injectable_metadata(allocator, class)
+                            {
+                                if let Some(span) = find_injectable_decorator_span(class) {
+                                    decorator_spans_to_remove.push(span);
+                                }
+                                if let Some(inj_def) = generate_injectable_definition_from_decorator(
+                                    allocator,
+                                    &injectable_metadata,
+                                ) {
+                                    let emitter = JsEmitter::new();
+                                    property_assignments.push_str(&format!(
+                                        "\nstatic ɵprov = {};",
+                                        emitter.emit_expression(&inj_def.prov_definition)
+                                    ));
+                                }
+                            }
 
                             // Split declarations into two groups:
                             // 1. decls_before_class: child view functions, constants (needed BEFORE class)
@@ -964,73 +984,37 @@ pub fn transform_angular_file(
                     let class_name = directive_metadata.name.to_string();
                     // Order: ɵfac BEFORE ɵdir (Angular convention)
                     // ES2022 style: static fields INSIDE the class body
-                    let property_assignments = format!(
+                    let mut property_assignments = format!(
                         "static ɵfac = {};\nstatic ɵdir = {};",
                         emitter.emit_expression(&definitions.fac_definition),
                         emitter.emit_expression(&definitions.dir_definition)
                     );
 
+                    // Check if the class also has an @Injectable decorator.
+                    // @Injectable is SHARED precedence and can coexist with @Directive.
+                    if let Some(injectable_metadata) = extract_injectable_metadata(allocator, class)
+                    {
+                        if let Some(span) = find_injectable_decorator_span(class) {
+                            decorator_spans_to_remove.push(span);
+                        }
+                        if let Some(inj_def) = generate_injectable_definition_from_decorator(
+                            allocator,
+                            &injectable_metadata,
+                        ) {
+                            property_assignments.push_str(&format!(
+                                "\nstatic ɵprov = {};",
+                                emitter.emit_expression(&inj_def.prov_definition)
+                            ));
+                        }
+                    }
+
                     // Track definitions by class name (position is recalculated later)
                     class_definitions
                         .insert(class_name, (property_assignments, String::new(), String::new()));
-                } else if let Some(mut injectable_metadata) =
-                    extract_injectable_metadata(allocator, class)
-                {
-                    // Not a @Component or @Directive - check if it's an @Injectable
-                    // We need to compile @Injectable classes to generate ɵprov and ɵfac definitions.
-                    // - ɵprov: Provider metadata for Angular's DI system
-                    // - ɵfac: Factory function to instantiate the class
-
-                    // Track decorator span for removal
-                    if let Some(span) = find_injectable_decorator_span(class) {
-                        decorator_spans_to_remove.push(span);
-                    }
-                    // Collect constructor parameter decorators (@Optional, @Inject, etc.)
-                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
-
-                    // Resolve namespace imports for constructor deps.
-                    // The import elision removes type-only imports (e.g., `import { Store } from '@ngrx/store'`),
-                    // so factory deps must use namespace-prefixed references (e.g., `i1.Store`)
-                    // instead of bare identifiers.
-                    if let Some(ref mut deps) = injectable_metadata.deps {
-                        resolve_factory_dep_namespaces(
-                            allocator,
-                            deps,
-                            &import_map,
-                            &mut file_namespace_registry,
-                        );
-                    }
-
-                    // Compile injectable and generate definitions
-                    if let Some(definition) = generate_injectable_definition_from_decorator(
-                        allocator,
-                        &injectable_metadata,
-                    ) {
-                        // Use JsEmitter to emit the expressions
-                        let emitter = JsEmitter::new();
-                        let class_name = injectable_metadata.class_name.to_string();
-
-                        // Emit both ɵfac and ɵprov definitions.
-                        // IMPORTANT: ɵfac must come BEFORE ɵprov because ɵprov's factory
-                        // property references MyClass.ɵfac, which must already be defined.
-                        // ES2022 style: static fields INSIDE the class body
-                        let property_assignments = format!(
-                            "static ɵfac = {};\nstatic ɵprov = {};",
-                            emitter.emit_expression(&definition.fac_definition),
-                            emitter.emit_expression(&definition.prov_definition)
-                        );
-
-                        // Track definitions by class name (position is recalculated later)
-                        class_definitions.insert(
-                            class_name,
-                            (property_assignments, String::new(), String::new()),
-                        );
-                        // Injectable only needs @angular/core, which is already pre-registered
-                    }
                 } else if let Some(mut pipe_metadata) =
                     extract_pipe_metadata(allocator, class, implicit_standalone)
                 {
-                    // Not a @Component, @Directive, or @Injectable - check if it's a @Pipe
+                    // Not a @Component or @Directive - check if it's a @Pipe (PRIMARY)
                     // We need to compile @Pipe classes to generate ɵpipe and ɵfac definitions.
                     // - ɵpipe: Pipe definition for Angular's pipe system
                     // - ɵfac: Factory function for dependency injection (when pipe has constructor deps)
@@ -1061,11 +1045,30 @@ pub fn transform_angular_file(
                         let class_name = pipe_metadata.class_name.to_string();
                         // Order: ɵfac BEFORE ɵpipe (Angular convention)
                         // ES2022 style: static fields INSIDE the class body
-                        let property_assignments = format!(
+                        let mut property_assignments = format!(
                             "static ɵfac = {};\nstatic ɵpipe = {};",
                             emitter.emit_expression(&definition.fac_definition),
                             emitter.emit_expression(&definition.pipe_definition)
                         );
+
+                        // Check if the class also has an @Injectable decorator (issue #65).
+                        // @Injectable is SHARED precedence and can coexist with @Pipe.
+                        if let Some(injectable_metadata) =
+                            extract_injectable_metadata(allocator, class)
+                        {
+                            if let Some(span) = find_injectable_decorator_span(class) {
+                                decorator_spans_to_remove.push(span);
+                            }
+                            if let Some(inj_def) = generate_injectable_definition_from_decorator(
+                                allocator,
+                                &injectable_metadata,
+                            ) {
+                                property_assignments.push_str(&format!(
+                                    "\nstatic ɵprov = {};",
+                                    emitter.emit_expression(&inj_def.prov_definition)
+                                ));
+                            }
+                        }
 
                         // Track definitions by class name (position is recalculated later)
                         class_definitions.insert(
@@ -1110,12 +1113,31 @@ pub fn transform_angular_file(
                         // Generate static field definitions
                         // Order: ɵfac BEFORE ɵmod BEFORE ɵinj (Angular convention)
                         // ES2022 style: static fields INSIDE the class body
-                        let property_assignments = format!(
+                        let mut property_assignments = format!(
                             "static ɵfac = {};\nstatic ɵmod = {};\nstatic ɵinj = {};",
                             emitter.emit_expression(&definition.fac_definition),
                             emitter.emit_expression(&definition.mod_definition),
                             emitter.emit_expression(&definition.inj_definition)
                         );
+
+                        // Check if the class also has an @Injectable decorator.
+                        // @Injectable is SHARED precedence and can coexist with @NgModule.
+                        if let Some(injectable_metadata) =
+                            extract_injectable_metadata(allocator, class)
+                        {
+                            if let Some(span) = find_injectable_decorator_span(class) {
+                                decorator_spans_to_remove.push(span);
+                            }
+                            if let Some(inj_def) = generate_injectable_definition_from_decorator(
+                                allocator,
+                                &injectable_metadata,
+                            ) {
+                                property_assignments.push_str(&format!(
+                                    "\nstatic ɵprov = {};",
+                                    emitter.emit_expression(&inj_def.prov_definition)
+                                ));
+                            }
+                        }
 
                         // Collect any side-effect statements as external declarations
                         let mut external_decls = String::new();
@@ -1133,6 +1155,51 @@ pub fn transform_angular_file(
                             (property_assignments, String::new(), external_decls),
                         );
                         // NgModule only needs @angular/core, which is already pre-registered
+                    }
+                } else if let Some(mut injectable_metadata) =
+                    extract_injectable_metadata(allocator, class)
+                {
+                    // Standalone @Injectable (no PRIMARY decorator on the class)
+                    // We need to compile @Injectable classes to generate ɵprov and ɵfac definitions.
+                    // - ɵprov: Provider metadata for Angular's DI system
+                    // - ɵfac: Factory function to instantiate the class
+
+                    // Track decorator span for removal
+                    if let Some(span) = find_injectable_decorator_span(class) {
+                        decorator_spans_to_remove.push(span);
+                    }
+                    // Collect constructor parameter decorators (@Optional, @Inject, etc.)
+                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                    // Resolve namespace imports for constructor deps.
+                    if let Some(ref mut deps) = injectable_metadata.deps {
+                        resolve_factory_dep_namespaces(
+                            allocator,
+                            deps,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                    }
+
+                    // Compile injectable and generate definitions
+                    if let Some(definition) = generate_injectable_definition_from_decorator(
+                        allocator,
+                        &injectable_metadata,
+                    ) {
+                        let emitter = JsEmitter::new();
+                        let class_name = injectable_metadata.class_name.to_string();
+
+                        // ES2022 style: static fields INSIDE the class body
+                        let property_assignments = format!(
+                            "static ɵfac = {};\nstatic ɵprov = {};",
+                            emitter.emit_expression(&definition.fac_definition),
+                            emitter.emit_expression(&definition.prov_definition)
+                        );
+
+                        class_definitions.insert(
+                            class_name,
+                            (property_assignments, String::new(), String::new()),
+                        );
                     }
                 }
             }
@@ -1175,17 +1242,34 @@ pub fn transform_angular_file(
                     new_decorator_spans.push(span);
                     collect_constructor_decorator_spans(class, &mut new_decorator_spans);
                     collect_member_decorator_spans(class, &mut new_decorator_spans);
+                    // Also check for @Injectable on the same class (SHARED precedence)
+                    if let Some(inj_span) = find_injectable_decorator_span(class) {
+                        new_decorator_spans.push(inj_span);
+                    }
                 } else if let Some(span) = find_directive_decorator_span(class) {
                     new_decorator_spans.push(span);
                     collect_constructor_decorator_spans(class, &mut new_decorator_spans);
                     collect_member_decorator_spans(class, &mut new_decorator_spans);
-                } else if let Some(span) = find_injectable_decorator_span(class) {
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                    // Also check for @Injectable on the same class (SHARED precedence)
+                    if let Some(inj_span) = find_injectable_decorator_span(class) {
+                        new_decorator_spans.push(inj_span);
+                    }
                 } else if let Some(span) = find_pipe_decorator_span(class) {
                     new_decorator_spans.push(span);
                     collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                    // Also check for @Injectable on the same class (SHARED precedence)
+                    if let Some(inj_span) = find_injectable_decorator_span(class) {
+                        new_decorator_spans.push(inj_span);
+                    }
                 } else if let Some(span) = find_ng_module_decorator_span(class) {
+                    new_decorator_spans.push(span);
+                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+                    // Also check for @Injectable on the same class (SHARED precedence)
+                    if let Some(inj_span) = find_injectable_decorator_span(class) {
+                        new_decorator_spans.push(inj_span);
+                    }
+                } else if let Some(span) = find_injectable_decorator_span(class) {
+                    // Standalone @Injectable (no PRIMARY decorator on the class)
                     new_decorator_spans.push(span);
                     collect_constructor_decorator_spans(class, &mut new_decorator_spans);
                 }
@@ -4686,6 +4770,269 @@ export class MyDirective {
         assert!(
             !result.code.contains("i0.SomeService"),
             "Factory should NOT reference SomeService as i0.SomeService (that's @angular/core), but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_pipe_and_injectable_on_same_class() {
+        // Test that @Pipe + @Injectable on the same class both get compiled.
+        // Issue: https://github.com/voidzero-dev/oxc-angular-compiler/issues/65
+        let allocator = Allocator::default();
+        let source = r#"
+import { Pipe, Injectable, PipeTransform } from '@angular/core';
+
+@Pipe({ name: 'osTypeIcon' })
+@Injectable({ providedIn: 'root' })
+export class OSTypeIconPipe implements PipeTransform {
+  transform(os: string): string {
+    return os;
+  }
+}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "os-type-icon.pipe.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        // Both decorators should be removed
+        assert!(
+            !result.code.contains("@Pipe"),
+            "Code should NOT contain @Pipe decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("@Injectable"),
+            "Code should NOT contain @Injectable decorator, but got:\n{}",
+            result.code
+        );
+
+        // Both definitions should be generated
+        assert!(
+            result.code.contains("static ɵpipe = "),
+            "Code should contain ɵpipe definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵprov = "),
+            "Code should contain ɵprov definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵfac = "),
+            "Code should contain ɵfac definition, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_injectable_and_pipe_reversed_order() {
+        // Test that @Injectable + @Pipe (reversed order) on the same class both get compiled.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Pipe, Injectable, PipeTransform } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+@Pipe({ name: 'osTypeIcon' })
+export class OSTypeIconPipe implements PipeTransform {
+  transform(os: string): string {
+    return os;
+  }
+}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "os-type-icon.pipe.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        // Both decorators should be removed
+        assert!(
+            !result.code.contains("@Pipe"),
+            "Code should NOT contain @Pipe decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("@Injectable"),
+            "Code should NOT contain @Injectable decorator, but got:\n{}",
+            result.code
+        );
+
+        // Both definitions should be generated
+        assert!(
+            result.code.contains("static ɵpipe = "),
+            "Code should contain ɵpipe definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵprov = "),
+            "Code should contain ɵprov definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵfac = "),
+            "Code should contain ɵfac definition, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_component_and_injectable_on_same_class() {
+        // Test that @Component + @Injectable on the same class both get compiled.
+        // Angular allows this: @Component is PRIMARY, @Injectable is SHARED.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component, Injectable } from '@angular/core';
+
+@Component({
+  selector: 'test-cmp',
+  template: '<div>test</div>'
+})
+@Injectable()
+export class TestCmp {}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "test.component.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        assert!(
+            !result.code.contains("@Component"),
+            "Code should NOT contain @Component decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("@Injectable"),
+            "Code should NOT contain @Injectable decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵcmp = "),
+            "Code should contain ɵcmp definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵprov = "),
+            "Code should contain ɵprov definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵfac = "),
+            "Code should contain ɵfac definition, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_directive_and_injectable_on_same_class() {
+        // Test that @Directive + @Injectable on the same class both get compiled.
+        // Angular allows this: @Directive is PRIMARY, @Injectable is SHARED.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Directive, Injectable } from '@angular/core';
+
+@Directive({
+  selector: '[testDir]'
+})
+@Injectable()
+export class TestDir {}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "test.directive.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        assert!(
+            !result.code.contains("@Directive"),
+            "Code should NOT contain @Directive decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("@Injectable"),
+            "Code should NOT contain @Injectable decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵdir = "),
+            "Code should contain ɵdir definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵprov = "),
+            "Code should contain ɵprov definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵfac = "),
+            "Code should contain ɵfac definition, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_ng_module_and_injectable_on_same_class() {
+        // Test that @NgModule + @Injectable on the same class both get compiled.
+        // Angular allows this: @NgModule is PRIMARY, @Injectable is SHARED.
+        let allocator = Allocator::default();
+        let source = r#"
+import { NgModule, Injectable } from '@angular/core';
+
+@NgModule({})
+@Injectable()
+export class TestNgModule {}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "test.module.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        assert!(
+            !result.code.contains("@NgModule"),
+            "Code should NOT contain @NgModule decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("@Injectable"),
+            "Code should NOT contain @Injectable decorator, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵmod = "),
+            "Code should contain ɵmod definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵprov = "),
+            "Code should contain ɵprov definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵfac = "),
+            "Code should contain ɵfac definition, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("static ɵinj = "),
+            "Code should contain ɵinj definition, but got:\n{}",
             result.code
         );
     }
