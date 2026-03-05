@@ -916,11 +916,14 @@ fn create_host_directives_feature_arg<'a>(
 /// Creates a host directive mappings array.
 ///
 /// Format: `['publicName', 'internalName', 'publicName2', 'internalName2']`
-fn create_host_directive_mappings_array<'a>(
+///
+/// Shared between directive and component compilers, mirroring Angular's
+/// `createHostDirectivesMappingArray` in `view/compiler.ts`.
+pub(crate) fn create_host_directive_mappings_array<'a>(
     allocator: &'a Allocator,
     mappings: &[(Atom<'a>, Atom<'a>)],
 ) -> OutputExpression<'a> {
-    let mut entries = Vec::new_in(allocator);
+    let mut entries = Vec::with_capacity_in(mappings.len() * 2, allocator);
 
     for (public_name, internal_name) in mappings {
         entries.push(OutputExpression::Literal(Box::new_in(

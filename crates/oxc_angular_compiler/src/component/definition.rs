@@ -23,7 +23,9 @@ use super::metadata::{
     ViewEncapsulation,
 };
 use super::namespace_registry::NamespaceRegistry;
-use crate::directive::{create_inputs_literal, create_outputs_literal};
+use crate::directive::{
+    create_host_directive_mappings_array, create_inputs_literal, create_outputs_literal,
+};
 use crate::output::ast::{
     FnParam, FunctionExpr, InstantiateExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
     LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
@@ -1254,33 +1256,6 @@ fn create_host_directives_arg<'a>(
     } else {
         array_expr
     }
-}
-
-/// Create a host directive mappings array.
-///
-/// Format: ['publicName', 'internalName', 'publicName2', 'internalName2']
-fn create_host_directive_mappings_array<'a>(
-    allocator: &'a Allocator,
-    mappings: &[(Atom<'a>, Atom<'a>)],
-) -> OutputExpression<'a> {
-    let mut entries: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(mappings.len() * 2, allocator);
-
-    for (public_name, internal_name) in mappings {
-        entries.push(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(public_name.clone()), source_span: None },
-            allocator,
-        )));
-        entries.push(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(internal_name.clone()), source_span: None },
-            allocator,
-        )));
-    }
-
-    OutputExpression::LiteralArray(Box::new_in(
-        LiteralArrayExpr { entries, source_span: None },
-        allocator,
-    ))
 }
 
 /// Generate `ɵɵExternalStylesFeature(['style.css', ...])` expression.

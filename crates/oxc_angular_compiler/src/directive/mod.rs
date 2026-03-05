@@ -19,6 +19,7 @@ mod metadata;
 mod property_decorators;
 mod query;
 
+pub(crate) use compiler::create_host_directive_mappings_array;
 pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
