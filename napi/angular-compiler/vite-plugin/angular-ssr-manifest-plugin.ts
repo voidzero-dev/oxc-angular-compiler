@@ -17,6 +17,7 @@ import { readFile } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
 
 import type { Plugin, ResolvedConfig } from 'vite'
+import { normalizePath } from 'vite'
 
 /**
  * Unsafe characters that need escaping in template literals.
@@ -165,7 +166,7 @@ export function ssrManifestPlugin(options: SsrManifestPluginOptions): Plugin {
 
         // Compute the import path for main.server.ts relative to the current file
         const fileDir = dirname(id)
-        let ssrEntryImport = relative(fileDir, ssrEntryPath).replace(/\.ts$/, '')
+        let ssrEntryImport = normalizePath(relative(fileDir, ssrEntryPath)).replace(/\.ts$/, '')
         if (!ssrEntryImport.startsWith('.')) {
           ssrEntryImport = './' + ssrEntryImport
         }
