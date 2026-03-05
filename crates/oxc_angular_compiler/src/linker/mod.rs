@@ -41,6 +41,7 @@ use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 
 use crate::optimizer::Edit;
+use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
 /// Partial declaration function names to link.
 const DECLARE_FACTORY: &str = "\u{0275}\u{0275}ngDeclareFactory";
@@ -532,67 +533,24 @@ fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> St
 /// - `"[attr=value]"` → `[["", "attr", "value"]]`
 /// - `"div[ngClass]"` → `[["div", "ngClass", ""]]`
 /// - `"[a],[b]"` → `[["", "a", ""], ["", "b", ""]]`
-/// - `".cls"` → `[["", "class", "cls"]]`
+/// - `".cls"` → `[["", 8, "cls"]]`
+/// - `"ng-scrollbar:not([externalViewport])"` → `[["ng-scrollbar", 3, "externalViewport", ""]]`
 fn parse_selector(selector: &str) -> String {
-    let selectors: Vec<String> =
-        selector.split(',').map(|s| parse_single_selector(s.trim())).collect();
-    format!("[{}]", selectors.join(", "))
-}
-
-/// Parse a single selector (no commas) into Angular's array format.
-fn parse_single_selector(selector: &str) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    let mut remaining = selector;
-
-    // Extract tag name (everything before first [ or . or :)
-    let tag_end = remaining
-        .find(|c: char| c == '[' || c == '.' || c == ':' || c == '#')
-        .unwrap_or(remaining.len());
-    let tag = &remaining[..tag_end];
-    remaining = &remaining[tag_end..];
-
-    if !tag.is_empty() {
-        parts.push(format!("\"{}\"", tag));
-    } else {
-        parts.push("\"\"".to_string());
-    }
-
-    // Extract attribute selectors [attr] or [attr=value]
-    while let Some(bracket_start) = remaining.find('[') {
-        let bracket_end = remaining[bracket_start..].find(']').map(|i| bracket_start + i);
-        if let Some(end) = bracket_end {
-            let attr_content = &remaining[bracket_start + 1..end];
-            if let Some(eq_pos) = attr_content.find('=') {
-                let attr_name = &attr_content[..eq_pos];
-                let attr_value = attr_content[eq_pos + 1..].trim_matches('"').trim_matches('\'');
-                parts.push(format!("\"{}\"", attr_name));
-                parts.push(format!("\"{}\"", attr_value));
-            } else {
-                parts.push(format!("\"{}\"", attr_content));
-                parts.push("\"\"".to_string());
-            }
-            remaining = &remaining[end + 1..];
-        } else {
-            break;
-        }
-    }
-
-    // Extract class selectors .className
-    let mut class_remaining = remaining;
-    while let Some(dot_pos) = class_remaining.find('.') {
-        let class_end = class_remaining[dot_pos + 1..]
-            .find(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-            .map(|i| dot_pos + 1 + i)
-            .unwrap_or(class_remaining.len());
-        let class_name = &class_remaining[dot_pos + 1..class_end];
-        if !class_name.is_empty() {
-            parts.push("\"class\"".to_string());
-            parts.push(format!("\"{}\"", class_name));
-        }
-        class_remaining = &class_remaining[class_end..];
-    }
-
-    format!("[{}]", parts.join(", "))
+    let r3_selectors = parse_selector_to_r3_selector(selector);
+    let selector_strs: Vec<String> = r3_selectors
+        .iter()
+        .map(|elements| {
+            let parts: Vec<String> = elements
+                .iter()
+                .map(|el| match el {
+                    R3SelectorElement::String(s) => format!("\"{}\"", s),
+                    R3SelectorElement::Flag(f) => f.to_string(),
+                })
+                .collect();
+            format!("[{}]", parts.join(", "))
+        })
+        .collect();
+    format!("[{}]", selector_strs.join(", "))
 }
 
 /// Build the `hostAttrs` flat array from the partial declaration's `host` object.
@@ -1635,12 +1593,81 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.0.0", ngImpor
 
     #[test]
     fn test_parse_selector_class() {
-        assert_eq!(parse_selector(".my-class"), r#"[["", "class", "my-class"]]"#);
+        // Classes use SelectorFlags.CLASS (8) instead of "class" string
+        assert_eq!(parse_selector(".my-class"), r#"[["", 8, "my-class"]]"#);
     }
 
     #[test]
     fn test_parse_selector_multiple() {
         assert_eq!(parse_selector("[a],[b]"), r#"[["", "a", ""], ["", "b", ""]]"#);
+    }
+
+    #[test]
+    fn test_parse_selector_not_attribute() {
+        // :not() with attribute - SelectorFlags.NOT | SelectorFlags.ATTRIBUTE = 3
+        assert_eq!(
+            parse_selector("ng-scrollbar:not([externalViewport])"),
+            r#"[["ng-scrollbar", 3, "externalViewport", ""]]"#
+        );
+    }
+
+    #[test]
+    fn test_parse_selector_not_attribute_with_value() {
+        assert_eq!(
+            parse_selector("input:not([type=checkbox])"),
+            r#"[["input", 3, "type", "checkbox"]]"#
+        );
+    }
+
+    #[test]
+    fn test_parse_selector_multiple_not() {
+        // Multiple :not() clauses
+        assert_eq!(
+            parse_selector("[ngModel]:not([formControlName]):not([formControl])"),
+            r#"[["", "ngModel", "", 3, "formControlName", "", 3, "formControl", ""]]"#
+        );
+    }
+
+    #[test]
+    fn test_parse_selector_not_element() {
+        // :not() with element - SelectorFlags.NOT | SelectorFlags.ELEMENT = 5
+        assert_eq!(parse_selector(":not(span)"), r#"[["", 5, "span"]]"#);
+    }
+
+    #[test]
+    fn test_parse_selector_not_class() {
+        // :not() with class - SelectorFlags.NOT | SelectorFlags.CLASS = 9
+        assert_eq!(parse_selector(":not(.hidden)"), r#"[["", 9, "hidden"]]"#);
+    }
+
+    #[test]
+    fn test_parse_selector_complex_not() {
+        // Complex: element + class + attribute + multiple :not()
+        assert_eq!(
+            parse_selector("div.foo[some-directive]:not([title]):not(.baz)"),
+            r#"[["div", "some-directive", "", 8, "foo", 3, "title", "", 9, "baz"]]"#
+        );
+    }
+
+    #[test]
+    fn test_parse_selector_element_with_class_and_attribute() {
+        // Class should come after attributes with CLASS flag
+        assert_eq!(parse_selector("div.active[role]"), r#"[["div", "role", "", 8, "active"]]"#);
+    }
+
+    #[test]
+    fn test_parse_selector_not_only() {
+        // Only :not() selectors - element becomes "*" but emitted as ""
+        assert_eq!(parse_selector(":not(.hidden)"), r#"[["", 9, "hidden"]]"#);
+    }
+
+    #[test]
+    fn test_parse_selector_comma_with_not() {
+        // Comma-separated selectors with :not()
+        assert_eq!(
+            parse_selector("form:not([ngNoForm]):not([formGroup]),ng-form,[ngForm]"),
+            r#"[["form", 3, "ngNoForm", "", 3, "formGroup", ""], ["ng-form"], ["", "ngForm", ""]]"#
+        );
     }
 
     #[test]
