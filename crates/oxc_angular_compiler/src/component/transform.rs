@@ -559,6 +559,43 @@ fn resolve_factory_dep_namespaces<'a>(
     }
 }
 
+/// Resolves namespace imports for host directive references in `R3HostDirectiveMetadata`.
+///
+/// Replaces bare `ReadVar("X")` references with namespace-prefixed `ReadProp(ReadVar("i1"), "X")`
+/// for any host directive that has a corresponding import in the import map.
+/// This ensures the compiled output works correctly even after import elision.
+fn resolve_host_directive_namespaces<'a>(
+    allocator: &'a Allocator,
+    host_directives: &mut oxc_allocator::Vec<'a, crate::R3HostDirectiveMetadata<'a>>,
+    import_map: &ImportMap<'a>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+) {
+    for hd in host_directives.iter_mut() {
+        // Only process bare variable references (ReadVar)
+        let OutputExpression::ReadVar(ref var) = hd.directive else { continue };
+        let name = &var.name;
+        // Look up this identifier in the import map
+        let Some(import_info) = import_map.get(name) else { continue };
+        // Replace with namespace-prefixed reference: i1.BrnTooltipTrigger instead of BrnTooltipTrigger
+        let namespace = namespace_registry.get_or_assign(&import_info.source_module);
+        hd.directive = OutputExpression::ReadProp(oxc_allocator::Box::new_in(
+            ReadPropExpr {
+                receiver: oxc_allocator::Box::new_in(
+                    OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                        ReadVarExpr { name: namespace, source_span: None },
+                        allocator,
+                    )),
+                    allocator,
+                ),
+                name: name.clone(),
+                optional: false,
+                source_span: None,
+            },
+            allocator,
+        ));
+    }
+}
+
 /// This is used to determine where to insert namespace imports so they appear
 /// AFTER existing imports but BEFORE other code (like class declarations).
 ///
@@ -967,6 +1004,17 @@ pub fn transform_angular_file(
                             &mut file_namespace_registry,
                         );
                     }
+
+                    // Resolve namespace imports for hostDirectives references.
+                    // Host directive references (e.g., BrnTooltipTrigger from '@spartan-ng/brain/tooltip')
+                    // must use namespace-prefixed references (e.g., i1.BrnTooltipTrigger) because the
+                    // original named import may be elided and replaced by a namespace import.
+                    resolve_host_directive_namespaces(
+                        allocator,
+                        &mut directive_metadata.host_directives,
+                        &import_map,
+                        &mut file_namespace_registry,
+                    );
 
                     // Compile directive and generate definitions
                     // Pass shared_pool_index to ensure unique constant names across the file
@@ -5035,5 +5083,60 @@ export class TestNgModule {}
             "Code should contain ɵinj definition, but got:\n{}",
             result.code
         );
+    }
+
+    #[test]
+    fn test_directive_host_directives_get_namespace_resolution() {
+        // Regression test for https://github.com/voidzero-dev/oxc-angular-compiler/issues/68
+        // hostDirectives references must use namespace-prefixed references (e.g., i1.BrnTooltipTrigger)
+        // instead of bare variable references (e.g., BrnTooltipTrigger), because the original
+        // named import may be elided and replaced by a namespace import.
+        let allocator = Allocator::default();
+        let source = r#"
+import { Directive } from '@angular/core';
+import { BrnTooltipTrigger } from '@spartan-ng/brain/tooltip';
+
+@Directive({
+    selector: '[uTooltip]',
+    hostDirectives: [{ directive: BrnTooltipTrigger }]
+})
+export class UnityTooltipTrigger {}
+"#;
+
+        let result = transform_angular_file(
+            &allocator,
+            "tooltip.directive.ts",
+            source,
+            &TransformOptions::default(),
+            None,
+        );
+
+        assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
+
+        // Verify namespace import is generated for the external module
+        assert!(
+            result.code.contains("import * as i1 from '@spartan-ng/brain/tooltip'"),
+            "Should generate namespace import for @spartan-ng/brain/tooltip, but got:\n{}",
+            result.code
+        );
+
+        // Verify the host directive uses the namespace-prefixed reference
+        assert!(
+            result.code.contains("i1.BrnTooltipTrigger"),
+            "Host directive should reference BrnTooltipTrigger as i1.BrnTooltipTrigger, but got:\n{}",
+            result.code
+        );
+
+        // Verify there's no bare BrnTooltipTrigger reference in the features array
+        // (it should only appear in the import statement and as i1.BrnTooltipTrigger)
+        let features_section = result.code.split("features:").nth(1);
+        if let Some(features) = features_section {
+            assert!(
+                !features.contains("BrnTooltipTrigger")
+                    || features.contains("i1.BrnTooltipTrigger"),
+                "Features should NOT contain bare BrnTooltipTrigger reference, but got:\n{}",
+                result.code
+            );
+        }
     }
 }
