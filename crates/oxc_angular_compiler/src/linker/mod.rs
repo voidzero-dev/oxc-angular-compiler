@@ -34,7 +34,7 @@
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, CallExpression, Expression, ObjectExpression,
+    Argument, ArrayExpressionElement, BindingPattern, CallExpression, Expression, ObjectExpression,
     ObjectPropertyKind, Program, PropertyKey, Statement,
 };
 use oxc_parser::Parser;
@@ -411,12 +411,49 @@ fn get_property_source<'a>(
     None
 }
 
+/// Extract the Expression value of a named property from an object expression.
+fn get_property_expression<'a>(
+    obj: &'a ObjectExpression<'a>,
+    name: &str,
+) -> Option<&'a Expression<'a>> {
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+        {
+            return Some(&prop.value);
+        }
+    }
+    None
+}
+
 /// Check if a property exists in an object expression.
 fn has_property(obj: &ObjectExpression<'_>, name: &str) -> bool {
     obj.properties.iter().any(|prop| {
         matches!(prop,
             ObjectPropertyKind::ObjectProperty(p)
             if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+        )
+    })
+}
+
+/// Check if a property exists and its value is `null`.
+fn is_property_null(obj: &ObjectExpression<'_>, name: &str) -> bool {
+    obj.properties.iter().any(|prop| {
+        matches!(prop,
+            ObjectPropertyKind::ObjectProperty(p)
+            if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+                && matches!(&p.value, Expression::NullLiteral(_))
+        )
+    })
+}
+
+/// Check if a property exists and its value is a specific string literal.
+fn is_property_string(obj: &ObjectExpression<'_>, name: &str, value: &str) -> bool {
+    obj.properties.iter().any(|prop| {
+        matches!(prop,
+            ObjectPropertyKind::ObjectProperty(p)
+            if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+                && matches!(&p.value, Expression::StringLiteral(s) if s.value == value)
         )
     })
 }
@@ -466,7 +503,18 @@ fn get_default_standalone_value(meta: &ObjectExpression<'_>) -> bool {
 }
 
 /// Extract the `deps` array from a factory metadata object and generate inject calls.
-fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> String {
+///
+/// The `target` parameter determines the inject function and flags:
+/// - Directive/Component/Pipe → `ɵɵdirectiveInject` (Pipe also adds ForPipe flag = 16)
+/// - Injectable/NgModule → `ɵɵinject`
+fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str, target: &str) -> String {
+    // Determine inject function based on target
+    let inject_fn = match target {
+        "Directive" | "Pipe" => format!("{ns}.\u{0275}\u{0275}directiveInject"),
+        _ => format!("{ns}.\u{0275}\u{0275}inject"),
+    };
+    let is_pipe = target == "Pipe";
+
     for prop in &obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
             && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == "deps")
@@ -479,7 +527,8 @@ fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> St
             let deps: Vec<String> = arr
                 .elements
                 .iter()
-                .filter_map(|el| {
+                .enumerate()
+                .filter_map(|(index, el)| {
                     use oxc_ast::ast::ArrayExpressionElement;
                     let expr = match el {
                         ArrayExpressionElement::SpreadElement(_) => return None,
@@ -495,36 +544,57 @@ fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> St
                         let self_flag = get_bool_property(dep_obj.as_ref(), "self");
                         let skip_self = get_bool_property(dep_obj.as_ref(), "skipSelf");
                         let host = get_bool_property(dep_obj.as_ref(), "host");
-                        let attribute = get_property_source(dep_obj.as_ref(), "attribute", source);
+                        let is_attribute =
+                            get_bool_property(dep_obj.as_ref(), "attribute") == Some(true);
 
-                        if let Some(attr) = attribute {
-                            return Some(format!("{ns}.\u{0275}\u{0275}injectAttribute({attr})"));
+                        // @Attribute() injection: use token as the attribute name
+                        if is_attribute {
+                            if let Some(token) = token {
+                                return Some(format!(
+                                    "{ns}.\u{0275}\u{0275}injectAttribute({token})"
+                                ));
+                            }
                         }
 
                         if let Some(token) = token {
-                            let mut flags = 0u32;
-                            if optional == Some(true) {
-                                flags |= 8;
-                            }
-                            if self_flag == Some(true) {
-                                flags |= 2;
-                            }
-                            if skip_self == Some(true) {
-                                flags |= 4;
-                            }
-                            if host == Some(true) {
-                                flags |= 1;
-                            }
-                            if flags != 0 {
+                            // token: null → unresolvable dependency
+                            if is_property_null(dep_obj.as_ref(), "token") {
                                 return Some(format!(
-                                    "{ns}.\u{0275}\u{0275}inject({token}, {flags})"
+                                    "{ns}.\u{0275}\u{0275}invalidFactoryDep({index})"
                                 ));
                             }
-                            return Some(format!("{ns}.\u{0275}\u{0275}inject({token})"));
+
+                            // Build inject flags
+                            let mut flags = 0u32;
+                            if optional == Some(true) {
+                                flags |= 8; // InjectFlags.Optional
+                            }
+                            if self_flag == Some(true) {
+                                flags |= 2; // InjectFlags.Self
+                            }
+                            if skip_self == Some(true) {
+                                flags |= 4; // InjectFlags.SkipSelf
+                            }
+                            if host == Some(true) {
+                                flags |= 1; // InjectFlags.Host
+                            }
+                            if is_pipe {
+                                flags |= 16; // InjectFlags.ForPipe
+                            }
+                            if flags != 0 {
+                                return Some(format!("{inject_fn}({token}, {flags})"));
+                            }
+                            return Some(format!("{inject_fn}({token})"));
                         }
-                        Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
+                        if is_pipe {
+                            Some(format!("{inject_fn}({dep_source}, 16)"))
+                        } else {
+                            Some(format!("{inject_fn}({dep_source})"))
+                        }
+                    } else if is_pipe {
+                        Some(format!("{inject_fn}({dep_source}, 16)"))
                     } else {
-                        Some(format!("{ns}.\u{0275}\u{0275}inject({dep_source})"))
+                        Some(format!("{inject_fn}({dep_source})"))
                     }
                 })
                 .collect();
@@ -675,40 +745,28 @@ fn link_factory(
 ) -> Option<String> {
     let target = get_factory_target(meta, source);
 
-    // Check if deps are specified
-    let has_deps = has_property(meta, "deps");
+    // Check if deps are specified and not null.
+    // `deps: null` means "inherit from parent" → use ɵɵgetInheritedFactory
+    // `deps: 'invalid'` means unresolvable params → use ɵɵinvalidFactory
+    // `deps: [...]` means explicit dependencies → generate inject calls
+    let has_deps = has_property(meta, "deps")
+        && !is_property_null(meta, "deps")
+        && !is_property_string(meta, "deps", "invalid");
+    let is_invalid_deps = is_property_string(meta, "deps", "invalid");
 
-    if has_deps {
-        let deps = extract_deps_source(meta, source, ns);
-
-        if target == "Pipe" {
-            // Pipes use ɵɵdirectiveInject instead of ɵɵinject
-            let deps_pipe = deps.replace(
-                &format!("{ns}.\u{0275}\u{0275}inject("),
-                &format!("{ns}.\u{0275}\u{0275}directiveInject("),
-            );
-            Some(format!(
-                "function {type_name}_Factory(__ngFactoryType__) {{\n\
-                return new (__ngFactoryType__ || {type_name})({deps_pipe});\n\
-                }}"
-            ))
-        } else if target == "Directive" {
-            let deps_dir = deps.replace(
-                &format!("{ns}.\u{0275}\u{0275}inject("),
-                &format!("{ns}.\u{0275}\u{0275}directiveInject("),
-            );
-            Some(format!(
-                "function {type_name}_Factory(__ngFactoryType__) {{\n\
-                return new (__ngFactoryType__ || {type_name})({deps_dir});\n\
-                }}"
-            ))
-        } else {
-            Some(format!(
-                "function {type_name}_Factory(__ngFactoryType__) {{\n\
-                return new (__ngFactoryType__ || {type_name})({deps});\n\
-                }}"
-            ))
-        }
+    if is_invalid_deps {
+        return Some(format!(
+            "function {type_name}_Factory(__ngFactoryType__) {{\n\
+            {ns}.\u{0275}\u{0275}invalidFactory();\n\
+            }}"
+        ));
+    } else if has_deps {
+        let deps = extract_deps_source(meta, source, ns, target);
+        Some(format!(
+            "function {type_name}_Factory(__ngFactoryType__) {{\n\
+            return new (__ngFactoryType__ || {type_name})({deps});\n\
+            }}"
+        ))
     } else {
         // Inherited factory (no constructor) - use getInheritedFactory
         Some(format!(
@@ -722,6 +780,15 @@ fn link_factory(
     }
 }
 
+/// Generate the conditional factory pattern used by Angular for injectable linking.
+/// `ctor_type` is used in the if-branch: `new (ctor_type)()`.
+/// `non_ctor_expr` is used in the else-branch.
+fn format_conditional_factory(type_name: &str, ctor_type: &str, non_ctor_expr: &str) -> String {
+    format!(
+        "function {type_name}_Factory(__ngFactoryType__) {{ let __ngConditionalFactory__ = null; if (__ngFactoryType__) {{ __ngConditionalFactory__ = new ({ctor_type})(); }} else {{ __ngConditionalFactory__ = {non_ctor_expr}; }} return __ngConditionalFactory__; }}"
+    )
+}
+
 /// Link ɵɵngDeclareInjectable → ɵɵdefineInjectable.
 ///
 /// For `useClass` and `useFactory` with deps, we generate a wrapper factory that calls
@@ -733,49 +800,77 @@ fn link_injectable(
     ns: &str,
     type_name: &str,
 ) -> Option<String> {
-    let provided_in = get_property_source(meta, "providedIn", source).unwrap_or("null");
+    let provided_in = get_property_source(meta, "providedIn", source);
+    // Angular omits providedIn when null; only include when explicitly set to a non-null value
+    let provided_in_suffix = match provided_in {
+        Some("null") | None => String::new(),
+        Some(val) => format!(", providedIn: {val}"),
+    };
 
     // Check for useClass, useFactory, useExisting, useValue
     if let Some(use_class) = get_property_source(meta, "useClass", source) {
         if has_property(meta, "deps") {
-            let deps = extract_deps_source(meta, source, ns);
+            // Case 5: useClass with deps — delegated conditional factory
+            let deps = extract_deps_source(meta, source, ns, "Injectable");
+            let non_ctor_expr = format!("new ({use_class})({deps})");
+            let factory =
+                format_conditional_factory(type_name, "__ngFactoryType__", &non_ctor_expr);
             return Some(format!(
-                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory() {{ return new ({use_class})({deps}); }}, providedIn: {provided_in} }})"
+                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
             ));
         }
+        // useClass without deps: delegate to useClass's own factory
+        if use_class != type_name {
+            // Case 7: useClass !== type without deps — already correct
+            return Some(format!(
+                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return {use_class}.\u{0275}fac(__ngFactoryType__); }}{provided_in_suffix} }})"
+            ));
+        }
+        // Case 6: useClass === type without deps — simple factory with __ngFactoryType__ fallback
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory() {{ return new ({use_class})(); }}, providedIn: {provided_in} }})"
+            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory(__ngFactoryType__) {{ return new (__ngFactoryType__ || {type_name})(); }}{provided_in_suffix} }})"
         ));
     }
 
     if let Some(use_factory) = get_property_source(meta, "useFactory", source) {
         if has_property(meta, "deps") {
-            let deps = extract_deps_source(meta, source, ns);
-            // Wrap the user factory: call inject() inside the wrapper, pass results as args
+            // Case 4: useFactory with deps — delegated conditional factory
+            let deps = extract_deps_source(meta, source, ns, "Injectable");
+            let non_ctor_expr = format!("({use_factory})({deps})");
+            let factory =
+                format_conditional_factory(type_name, "__ngFactoryType__", &non_ctor_expr);
             return Some(format!(
-                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory() {{ return ({use_factory})({deps}); }}, providedIn: {provided_in} }})"
+                "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
             ));
         }
+        // Case 3: useFactory without deps — wrap in arrow function
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {use_factory}, providedIn: {provided_in} }})"
+            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: () => ({use_factory})(){provided_in_suffix} }})"
         ));
     }
 
     if let Some(use_existing) = get_property_source(meta, "useExisting", source) {
+        // Case 2: useExisting — expression conditional factory
+        let non_ctor_expr = format!("{ns}.\u{0275}\u{0275}inject({use_existing})");
+        let ctor_type = format!("__ngFactoryType__ || {type_name}");
+        let factory = format_conditional_factory(type_name, &ctor_type, &non_ctor_expr);
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory() {{ return {ns}.\u{0275}\u{0275}inject({use_existing}); }}, providedIn: {provided_in} }})"
+            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
         ));
     }
 
     if let Some(use_value) = get_property_source(meta, "useValue", source) {
+        // Case 1: useValue — expression conditional factory
+        let ctor_type = format!("__ngFactoryType__ || {type_name}");
+        let factory = format_conditional_factory(type_name, &ctor_type, use_value);
         return Some(format!(
-            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: function {type_name}_Factory() {{ return {use_value}; }}, providedIn: {provided_in} }})"
+            "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {factory}{provided_in_suffix} }})"
         ));
     }
 
     // Default: use the class factory
     Some(format!(
-        "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {type_name}.\u{0275}fac, providedIn: {provided_in} }})"
+        "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {type_name}.\u{0275}fac{provided_in_suffix} }})"
     ))
 }
 
@@ -784,10 +879,9 @@ fn link_injector(
     meta: &ObjectExpression<'_>,
     source: &str,
     ns: &str,
-    type_name: &str,
+    _type_name: &str,
 ) -> Option<String> {
-    // The injector definition uses type for consistency with other declarations
-    let mut parts = vec![format!("type: {type_name}")];
+    let mut parts = vec![];
 
     if let Some(providers) = get_property_source(meta, "providers", source) {
         parts.push(format!("providers: {providers}"));
@@ -808,23 +902,27 @@ fn link_ng_module(
 ) -> Option<String> {
     let mut parts = vec![format!("type: {type_name}")];
 
-    if let Some(declarations) = get_property_source(meta, "declarations", source) {
-        parts.push(format!("declarations: {declarations}"));
-    }
-    if let Some(imports) = get_property_source(meta, "imports", source) {
-        parts.push(format!("imports: {imports}"));
-    }
-    if let Some(exports) = get_property_source(meta, "exports", source) {
-        parts.push(format!("exports: {exports}"));
-    }
+    // In AOT mode (selectorScopeMode: Omit), declarations/imports/exports are never emitted.
+    // Only type, bootstrap, schemas, and id are included.
     if let Some(bootstrap) = get_property_source(meta, "bootstrap", source) {
         parts.push(format!("bootstrap: {bootstrap}"));
     }
     if let Some(schemas) = get_property_source(meta, "schemas", source) {
         parts.push(format!("schemas: {schemas}"));
     }
+    let id_source = get_property_source(meta, "id", source);
+    if let Some(id) = id_source {
+        parts.push(format!("id: {id}"));
+    }
 
-    Some(format!("{ns}.\u{0275}\u{0275}defineNgModule({{ {} }})", parts.join(", ")))
+    let define_call = format!("{ns}.\u{0275}\u{0275}defineNgModule({{ {} }})", parts.join(", "));
+    if let Some(id) = id_source {
+        Some(format!(
+            "(() => {{ {ns}.\u{0275}\u{0275}registerNgModuleType({type_name}, {id}); return {define_call}; }})()"
+        ))
+    } else {
+        Some(define_call)
+    }
 }
 
 /// Link ɵɵngDeclarePipe → ɵɵdefinePipe.
@@ -836,11 +934,14 @@ fn link_pipe(
 ) -> Option<String> {
     let pipe_name = get_string_property(meta, "name")?;
     let pure = get_property_source(meta, "pure", source).unwrap_or("true");
-    let standalone = get_property_source(meta, "isStandalone", source)
-        .unwrap_or_else(|| if get_default_standalone_value(meta) { "true" } else { "false" });
+    let standalone = get_bool_property(meta, "isStandalone")
+        .unwrap_or_else(|| get_default_standalone_value(meta));
+
+    let standalone_part =
+        if standalone { String::new() } else { ", standalone: false".to_string() };
 
     Some(format!(
-        "{ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}, standalone: {standalone} }})"
+        "{ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}{standalone_part} }})"
     ))
 }
 
@@ -871,15 +972,64 @@ fn link_class_metadata_async(
     type_name: &str,
 ) -> Option<String> {
     let resolver_fn = get_property_source(meta, "resolveDeferredDeps", source)?;
-    let decorators = get_property_source(meta, "decorators", source).unwrap_or("[]");
-    let ctor_params = get_property_source(meta, "ctorParameters", source);
-    let prop_decorators = get_property_source(meta, "propDecorators", source);
+
+    // Extract the resolveMetadata arrow function to get:
+    // 1. Parameter names for the inner callback
+    // 2. The inner object expression containing decorators/ctorParameters/propDecorators
+    let resolve_metadata_arrow =
+        get_property_expression(meta, "resolveMetadata").and_then(|expr| match expr {
+            Expression::ArrowFunctionExpression(arrow) => Some(arrow.as_ref()),
+            _ => None,
+        });
+
+    // Extract parameter names from the arrow function
+    let param_names: Vec<&str> = resolve_metadata_arrow
+        .map(|arrow| {
+            arrow
+                .params
+                .items
+                .iter()
+                .filter_map(|param| match &param.pattern {
+                    BindingPattern::BindingIdentifier(ident) => Some(ident.name.as_str()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Extract the inner object expression from the arrow body.
+    // The arrow has an expression body: (params) => ({...})
+    // In the AST, body.statements has a single ExpressionStatement,
+    // and the expression may be wrapped in a ParenthesizedExpression.
+    let inner_obj: Option<&ObjectExpression<'_>> = resolve_metadata_arrow.and_then(|arrow| {
+        let stmt = arrow.body.statements.first()?;
+        if let Statement::ExpressionStatement(expr_stmt) = stmt {
+            let mut expr = &expr_stmt.expression;
+            // Unwrap parenthesized expression if present: ({...})
+            while let Expression::ParenthesizedExpression(paren) = expr {
+                expr = &paren.expression;
+            }
+            if let Expression::ObjectExpression(obj) = expr {
+                return Some(obj.as_ref());
+            }
+        }
+        None
+    });
+
+    // Read decorators/ctorParameters/propDecorators from the inner object if available,
+    // otherwise fall back to top-level (for backwards compatibility)
+    let source_obj = inner_obj.unwrap_or(meta);
+    let decorators = get_property_source(source_obj, "decorators", source).unwrap_or("[]");
+    let ctor_params = get_property_source(source_obj, "ctorParameters", source);
+    let prop_decorators = get_property_source(source_obj, "propDecorators", source);
 
     let ctor_str = ctor_params.unwrap_or("null");
     let prop_str = prop_decorators.unwrap_or("null");
 
+    let params_str = param_names.join(", ");
+
     Some(format!(
-        "(() => {{ (typeof ngDevMode === \"undefined\" || ngDevMode) && {ns}.\u{0275}setClassMetadataAsync({type_name}, {resolver_fn}, () => {{ {ns}.\u{0275}setClassMetadata({type_name}, {decorators}, {ctor_str}, {prop_str}); }}); }})()"
+        "(() => {{ (typeof ngDevMode === \"undefined\" || ngDevMode) && {ns}.\u{0275}setClassMetadataAsync({type_name}, {resolver_fn}, ({params_str}) => {{ {ns}.\u{0275}setClassMetadata({type_name}, {decorators}, {ctor_str}, {prop_str}); }}); }})()"
     ))
 }
 
@@ -1029,7 +1179,9 @@ fn link_directive(
     }
     let standalone = get_bool_property(meta, "isStandalone")
         .unwrap_or_else(|| get_default_standalone_value(meta));
-    parts.push(format!("standalone: {standalone}"));
+    if !standalone {
+        parts.push("standalone: false".to_string());
+    }
 
     if get_bool_property(meta, "isSignal") == Some(true) {
         parts.push("signals: true".to_string());
@@ -1449,7 +1601,9 @@ fn link_component(
     // 11. standalone
     let standalone = get_bool_property(meta, "isStandalone")
         .unwrap_or_else(|| get_default_standalone_value(meta));
-    parts.push(format!("standalone: {standalone}"));
+    if !standalone {
+        parts.push("standalone: false".to_string());
+    }
 
     // 11b. signals
     if get_bool_property(meta, "isSignal") == Some(true) {
@@ -1603,6 +1757,218 @@ MyService.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0
     }
 
     #[test]
+    fn test_link_factory_deps_null_uses_inherited_factory() {
+        // When deps: null, the class inherits its constructor dependencies from a parent.
+        // The linker must generate a factory using ɵɵgetInheritedFactory instead of
+        // a simple `new Class()` with no arguments.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class ChildDirective {
+}
+ChildDirective.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: ChildDirective, deps: null, target: i0.ɵɵFactoryTarget.Directive });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            result.code.contains("getInheritedFactory"),
+            "deps: null should generate getInheritedFactory, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ChildDirective_BaseFactory"),
+            "Should have memoized base factory variable, got: {}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("new (__ngFactoryType__ || ChildDirective)()"),
+            "Should NOT generate a no-args constructor call, got: {}",
+            result.code
+        );
+        assert!(!result.code.contains("ɵɵngDeclareFactory"));
+    }
+
+    #[test]
+    fn test_link_factory_deps_invalid_uses_invalid_factory() {
+        // When deps: 'invalid', parameters couldn't be resolved.
+        // The linker must generate ɵɵinvalidFactory() call.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class BrokenService {
+}
+BrokenService.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: BrokenService, deps: 'invalid', target: i0.ɵɵFactoryTarget.Injectable });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            result.code.contains("invalidFactory"),
+            "deps: 'invalid' should generate invalidFactory, got: {}",
+            result.code
+        );
+        assert!(!result.code.contains("ɵɵngDeclareFactory"));
+    }
+
+    #[test]
+    fn test_link_factory_pipe_deps_has_for_pipe_flag() {
+        // Pipe deps must include the ForPipe flag (16) in ɵɵdirectiveInject calls.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyPipe {
+}
+MyPipe.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyPipe, deps: [{ token: i0.ChangeDetectorRef }], target: i0.ɵɵFactoryTarget.Pipe });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("directiveInject(i0.ChangeDetectorRef, 16)"),
+            "Pipe deps should have ForPipe flag (16), got: {}",
+            result.code
+        );
+        assert!(!result.code.contains("ɵɵngDeclareFactory"));
+    }
+
+    #[test]
+    fn test_link_factory_pipe_deps_optional_has_for_pipe_flag() {
+        // Pipe optional deps should have Optional|ForPipe = 8|16 = 24.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyPipe {
+}
+MyPipe.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyPipe, deps: [{ token: i0.ChangeDetectorRef, optional: true }], target: i0.ɵɵFactoryTarget.Pipe });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("directiveInject(i0.ChangeDetectorRef, 24)"),
+            "Pipe optional deps should have flags 24 (Optional|ForPipe), got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_factory_pipe_plain_dep_has_for_pipe_flag() {
+        // Pipe with a plain identifier dep (not an object with token) should still get ForPipe flag 16.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyPipe {
+}
+MyPipe.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyPipe, deps: [SomeService], target: i0.ɵɵFactoryTarget.Pipe });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("directiveInject(SomeService, 16)"),
+            "Pipe plain deps should have ForPipe flag (16), got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_factory_pipe_object_dep_without_token_has_for_pipe_flag() {
+        // Pipe with an object dep that has no explicit token property should still get ForPipe flag 16.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyPipe {
+}
+MyPipe.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyPipe, deps: [{ optional: true }], target: i0.ɵɵFactoryTarget.Pipe });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("directiveInject({ optional: true }, 16)"),
+            "Pipe object dep without token should have ForPipe flag (16), got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_factory_attribute_dep() {
+        // When attribute: true, should use token as arg to ɵɵinjectAttribute.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyDirective, deps: [{ token: 'type', attribute: true }], target: i0.ɵɵFactoryTarget.Directive });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("injectAttribute('type')"),
+            "attribute: true should use token as arg to injectAttribute, got: {}",
+            result.code
+        );
+        // Should NOT contain injectAttribute(true)
+        assert!(
+            !result.code.contains("injectAttribute(true)"),
+            "Should NOT use the boolean 'true' as the attribute arg, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_factory_token_null_dep() {
+        // When token is null in a dep, should generate ɵɵinvalidFactoryDep(index).
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵfac = i0.ɵɵngDeclareFactory({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, deps: [{ token: i0.Renderer2 }, { token: null }], target: i0.ɵɵFactoryTarget.Injectable });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("invalidFactoryDep(1)"),
+            "token: null should generate invalidFactoryDep with correct index, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_class_different_type_no_deps() {
+        // When useClass differs from type and no deps, should delegate to useClass.ɵfac.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: OtherService, providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("OtherService.\u{0275}fac"),
+            "useClass != type without deps should delegate to useClass.ɵfac, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_provided_in_null_omitted() {
+        // When providedIn is absent, it should be omitted from output (not "providedIn: null").
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("providedIn"),
+            "When providedIn is absent, it should be omitted entirely, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
     fn test_link_injectable() {
         let allocator = Allocator::default();
         let code = r#"
@@ -1629,6 +1995,41 @@ i0.ɵɵngDeclareClassMetadata({ minVersion: "12.0.0", version: "20.0.0", ngImpor
         assert!(result.linked);
         assert!(result.code.contains("setClassMetadata"));
         assert!(!result.code.contains("ɵɵngDeclareClassMetadata"));
+    }
+
+    #[test]
+    fn test_link_class_metadata_async_params_and_inner_source() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+i0.ɵɵngDeclareClassMetadataAsync({ minVersion: "18.0.0", version: "0.0.0-PLACEHOLDER", ngImport: i0, type: MyApp, resolveDeferredDeps: () => [import("./lazy").then(m => m.LazyDep), import("./other").then(m => m.OtherDep)], resolveMetadata: (LazyDep, OtherDep) => ({ decorators: [{ type: Component, args: [{ template: 'hello', imports: [LazyDep, OtherDep] }] }], ctorParameters: null, propDecorators: null }) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "should be linked");
+        // Should contain the async setter
+        assert!(
+            result.code.contains("\u{0275}setClassMetadataAsync"),
+            "should contain setClassMetadataAsync, got: {}",
+            result.code
+        );
+        // The inner callback should have parameter names from resolveMetadata
+        assert!(
+            result.code.contains("(LazyDep, OtherDep) => {"),
+            "inner callback should have parameter names, got: {}",
+            result.code
+        );
+        // The decorators should come from the inner resolveMetadata return value
+        assert!(
+            result.code.contains("imports: [LazyDep, OtherDep]"),
+            "decorators should come from resolveMetadata body, got: {}",
+            result.code
+        );
+        // Should not contain the declare call anymore
+        assert!(
+            !result.code.contains("ɵɵngDeclareClassMetadataAsync"),
+            "should not contain declare call, got: {}",
+            result.code
+        );
     }
 
     #[test]
@@ -2626,8 +3027,8 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "v19 component without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "v19 component without isStandalone should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2643,8 +3044,8 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "v20 component without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "v20 component without isStandalone should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2660,8 +3061,8 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "0.0.0-PLACEHOLDER component without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "0.0.0-PLACEHOLDER component without isStandalone should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2678,8 +3079,8 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "Explicit isStandalone: true should override version default, got:\n{}",
+            !result.code.contains("standalone"),
+            "Explicit isStandalone: true should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2712,8 +3113,8 @@ MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "19.0.0
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "v19 directive without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "v19 directive without isStandalone should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2746,8 +3147,8 @@ AsyncPipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "19.0.0
         let result = link(&allocator, code, "common.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "v19 pipe without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "v19 pipe without isStandalone should omit standalone (true is default), got:\n{}",
             result.code
         );
     }
@@ -2763,8 +3164,375 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
         assert!(
-            result.code.contains("standalone: true"),
-            "v19.0.0-rc.1 component without isStandalone should default to true, got:\n{}",
+            !result.code.contains("standalone"),
+            "v19.0.0-rc.1 component without isStandalone should omit standalone (true is default), got:\n{}",
+            result.code
+        );
+    }
+
+    // === standalone: true should be omitted (true is runtime default) ===
+
+    #[test]
+    fn test_link_pipe_standalone_true_omitted() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AsyncPipe {}
+AsyncPipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AsyncPipe, name: "async" });
+"#;
+        let result = link(&allocator, code, "common.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("standalone"),
+            "v20 pipe defaulting to standalone true should NOT emit standalone at all, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_standalone_true_omitted() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDir {}
+MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDir, selector: "[myDir]" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("standalone"),
+            "v20 directive defaulting to standalone true should NOT emit standalone at all, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_pipe_standalone_false_emitted() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AsyncPipe {}
+AsyncPipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AsyncPipe, isStandalone: false, name: "async" });
+"#;
+        let result = link(&allocator, code, "common.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: false"),
+            "Pipe with explicit isStandalone: false should emit standalone: false, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injector_no_type_property() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AppModule {}
+AppModule.ɵinj = i0.ɵɵngDeclareInjector({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: AppModule, providers: [SomeService], imports: [CommonModule] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("type:"),
+            "defineInjector output should NOT contain type property, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("providers:"),
+            "defineInjector output should contain providers, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("imports:"),
+            "defineInjector output should contain imports, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_omits_declarations_imports_exports() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyModule {
+}
+MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyModule, declarations: [FooComponent], imports: [CommonModule], exports: [FooComponent] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            result.code.contains("defineNgModule"),
+            "Should contain defineNgModule, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("type: MyModule"),
+            "Should contain type, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("declarations:"),
+            "Should NOT contain declarations in AOT mode, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("imports:"),
+            "Should NOT contain imports in AOT mode, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("exports:"),
+            "Should NOT contain exports in AOT mode, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_includes_bootstrap() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AppModule {
+}
+AppModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AppModule, bootstrap: [AppComponent] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            result.code.contains("bootstrap:"),
+            "Should contain bootstrap, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_includes_id() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyModule {
+}
+MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyModule, id: 'my-mod' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            result.code.contains("id:"),
+            "Should contain id when present, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("'my-mod'"),
+            "Should contain the id value, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("registerNgModuleType(MyModule, 'my-mod')"),
+            "Should call registerNgModuleType with type and id, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("(() => {") && result.code.contains("})()"),
+            "Should be wrapped in an IIFE when id is present, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_no_iife_without_id() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AppModule {
+}
+AppModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: AppModule });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        assert!(
+            !result.code.contains("registerNgModuleType"),
+            "Should NOT call registerNgModuleType without id, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("(() =>"),
+            "Should NOT be wrapped in an IIFE without id, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_value_conditional_factory() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useValue: 'hello', providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("__ngFactoryType__"),
+            "useValue should use conditional factory with __ngFactoryType__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngConditionalFactory__"),
+            "useValue should use __ngConditionalFactory__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngFactoryType__ || MyService"),
+            "useValue expression case should use __ngFactoryType__ || TypeName, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("'hello'"),
+            "useValue should contain the value in else branch, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_existing_conditional_factory() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useExisting: OtherToken, providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("__ngFactoryType__"),
+            "useExisting should use conditional factory with __ngFactoryType__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngConditionalFactory__"),
+            "useExisting should use __ngConditionalFactory__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngFactoryType__ || MyService"),
+            "useExisting expression case should use __ngFactoryType__ || TypeName, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("\u{0275}\u{0275}inject(OtherToken)"),
+            "useExisting should contain inject call in else branch, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_factory_no_deps_wrapped() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useFactory: myFactory, providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("() => (myFactory)()"),
+            "useFactory without deps should be wrapped in arrow function with protective parens, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_factory_with_deps_conditional() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useFactory: myFactory, deps: [{ token: i0.Injector }], providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("__ngFactoryType__"),
+            "useFactory with deps should use conditional factory with __ngFactoryType__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngConditionalFactory__"),
+            "useFactory with deps should use __ngConditionalFactory__, got: {}",
+            result.code
+        );
+        // Delegated mode: just __ngFactoryType__, NOT __ngFactoryType__ || TypeName
+        assert!(
+            result.code.contains("new (__ngFactoryType__)()"),
+            "useFactory with deps (delegated) should use new (__ngFactoryType__)(), got: {}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("__ngFactoryType__ || MyService"),
+            "useFactory with deps (delegated) should NOT use || TypeName fallback, got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_class_with_deps_conditional() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: OtherClass, deps: [{ token: i0.Injector }], providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("__ngFactoryType__"),
+            "useClass with deps should use conditional factory with __ngFactoryType__, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngConditionalFactory__"),
+            "useClass with deps should use __ngConditionalFactory__, got: {}",
+            result.code
+        );
+        // Delegated mode: just __ngFactoryType__, NOT __ngFactoryType__ || TypeName
+        assert!(
+            result.code.contains("new (__ngFactoryType__)()"),
+            "useClass with deps (delegated) should use new (__ngFactoryType__)(), got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("new (OtherClass)"),
+            "useClass with deps else branch should use new (OtherClass)(deps), got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_class_same_type_no_deps_ngfactory_type() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: MyService, providedIn: 'root' });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("__ngFactoryType__"),
+            "useClass===type without deps should have __ngFactoryType__ param, got: {}",
+            result.code
+        );
+        assert!(
+            result.code.contains("__ngFactoryType__ || MyService"),
+            "useClass===type without deps should use __ngFactoryType__ || TypeName, got: {}",
             result.code
         );
     }
