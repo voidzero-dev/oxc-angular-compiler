@@ -44,6 +44,8 @@ use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
 use oxc_span::Atom;
 use rustc_hash::FxHashSet;
 
+use crate::optimizer::Edit;
+
 /// Angular constructor parameter decorators that are removed during compilation.
 /// These decorators are downleveled to factory metadata and their imports can be elided.
 ///
@@ -719,16 +721,16 @@ impl<'a> ImportElisionAnalyzer<'a> {
     }
 }
 
-/// Filter import declarations to remove type-only specifiers.
+/// Compute import elision edits as `Vec<Edit>` objects.
 ///
-/// Returns a new source string with type-only import specifiers removed.
+/// Returns edits that remove type-only import specifiers from the source.
 /// Entire import declarations are removed if all their specifiers are type-only,
 /// or if the import has no specifiers at all (`import {} from 'module'`).
-pub fn filter_imports<'a>(
+pub fn import_elision_edits<'a>(
     source: &str,
     program: &Program<'a>,
     analyzer: &ImportElisionAnalyzer<'a>,
-) -> String {
+) -> Vec<Edit> {
     // Check if there are empty imports that need removal (import {} from '...')
     let has_empty_imports = program.body.iter().any(|stmt| {
         if let Statement::ImportDeclaration(import_decl) = stmt {
@@ -740,13 +742,10 @@ pub fn filter_imports<'a>(
     });
 
     if !analyzer.has_type_only_imports() && !has_empty_imports {
-        return source.to_string();
+        return Vec::new();
     }
 
-    // Collect spans to remove (in reverse order for safe removal)
-    let mut removals: Vec<(usize, usize)> = Vec::new();
-    // Collect partial replacements (start, end, replacement_string)
-    let mut partial_replacements: Vec<(usize, usize, String)> = Vec::new();
+    let mut edits: Vec<Edit> = Vec::new();
 
     for stmt in &program.body {
         let oxc_ast::ast::Statement::ImportDeclaration(import_decl) = stmt else {
@@ -788,12 +787,10 @@ pub fn filter_imports<'a>(
                 end += 1;
             }
 
-            removals.push((start, end));
+            edits.push(Edit::delete(start as u32, end as u32));
         } else {
             // Partial removal - reconstruct import with only kept specifiers
-            // We need to rebuild the import statement preserving the original structure
 
-            // Find default import and named specifiers among kept
             let mut default_import: Option<&str> = None;
             let mut named_specifiers: Vec<String> = Vec::new();
 
@@ -812,7 +809,6 @@ pub fn filter_imports<'a>(
                         }
                     }
                     ImportDeclarationSpecifier::ImportNamespaceSpecifier(s) => {
-                        // Namespace import: import * as foo
                         named_specifiers.push(format!("* as {}", s.local.name));
                     }
                 }
@@ -830,7 +826,6 @@ pub fn filter_imports<'a>(
             }
 
             if !named_specifiers.is_empty() {
-                // Check if any is a namespace import
                 if named_specifiers.len() == 1 && named_specifiers[0].starts_with("* as ") {
                     new_import.push_str(&named_specifiers[0]);
                 } else {
@@ -852,44 +847,37 @@ pub fn filter_imports<'a>(
             let bytes = source.as_bytes();
             while end < bytes.len() && (bytes[end] == b'\n' || bytes[end] == b'\r') {
                 end += 1;
-                // Add newline to replacement
                 if !new_import.ends_with('\n') {
                     new_import.push('\n');
                 }
             }
 
-            // Store as replacement (start, end, replacement)
-            // We'll handle this differently - store removals with replacement
-            partial_replacements.push((start, end, new_import));
+            edits.push(Edit::replace(start as u32, end as u32, new_import));
         }
     }
 
-    // Combine full removals (replacement = empty string) with partial replacements
-    // and sort in reverse order for safe string manipulation
-    let mut all_operations: Vec<(usize, usize, String)> = Vec::new();
-
-    for (start, end) in removals {
-        all_operations.push((start, end, String::new()));
-    }
-    all_operations.extend(partial_replacements);
-
-    // Sort by start position in reverse order
-    all_operations.sort_by(|a, b| b.0.cmp(&a.0));
-
-    let mut result = source.to_string();
-    for (start, end, replacement) in all_operations {
-        result.replace_range(start..end, &replacement);
-    }
-
-    result
+    edits
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::optimizer::apply_edits;
     use oxc_allocator::Allocator;
     use oxc_parser::Parser;
     use oxc_span::SourceType;
+
+    fn filter_imports<'a>(
+        source: &str,
+        program: &Program<'a>,
+        analyzer: &ImportElisionAnalyzer<'a>,
+    ) -> String {
+        let edits = import_elision_edits(source, program, analyzer);
+        if edits.is_empty() {
+            return source.to_string();
+        }
+        apply_edits(source, edits)
+    }
 
     fn analyze_source(source: &str) -> FxHashSet<String> {
         let allocator = Allocator::default();

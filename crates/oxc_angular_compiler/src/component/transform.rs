@@ -15,6 +15,8 @@ use oxc_parser::Parser;
 use oxc_span::{Atom, SourceType, Span};
 use rustc_hash::FxHashMap;
 
+use crate::optimizer::{Edit, apply_edits};
+
 #[cfg(feature = "cross_file_elision")]
 use super::cross_file_elision::CrossFileAnalyzer;
 use super::decorator::{
@@ -22,7 +24,7 @@ use super::decorator::{
     extract_component_metadata, find_component_decorator, find_component_decorator_span,
 };
 use super::definition::{const_value_to_expression, generate_component_definitions};
-use super::import_elision::{ImportElisionAnalyzer, filter_imports};
+use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
 use crate::ast::expression::{BindingType, ParsedEventType};
@@ -596,6 +598,25 @@ fn resolve_host_directive_namespaces<'a>(
     }
 }
 
+/// Compute the effective start position for a class statement in the original source.
+///
+/// This accounts for non-Angular decorators that remain on the class after Angular
+/// decorator removal. The effective start is the minimum of `stmt_start` and the
+/// earliest remaining (non-removed) decorator's start position.
+fn compute_effective_start(
+    class: &oxc_ast::ast::Class,
+    decorator_spans_to_remove: &[Span],
+    stmt_start: u32,
+) -> u32 {
+    class
+        .decorators
+        .iter()
+        .filter(|d| !decorator_spans_to_remove.contains(&d.span))
+        .map(|d| d.span.start)
+        .min()
+        .map_or(stmt_start, |dec_start| dec_start.min(stmt_start))
+}
+
 /// This is used to determine where to insert namespace imports so they appear
 /// AFTER existing imports but BEFORE other code (like class declarations).
 ///
@@ -676,6 +697,9 @@ pub fn transform_angular_file(
     // (property_assignments, decls_before_class, decls_after_class)
     let mut class_definitions: HashMap<String, (String, String, String)> = HashMap::new();
     let mut decorator_spans_to_remove: Vec<Span> = Vec::new();
+    // Collect class positions from original AST for edit-based output.
+    // (class_name, effective_start, class_body_end)
+    let mut class_positions: Vec<(String, u32, u32)> = Vec::new();
 
     // File-level namespace registry to collect all module imports
     let mut file_namespace_registry = NamespaceRegistry::new(allocator);
@@ -760,17 +784,21 @@ pub fn transform_angular_file(
 
     // 2. Walk AST to find @Component decorated classes and extract metadata
     for stmt in &parser_ret.program.body {
-        let class = match stmt {
-            Statement::ClassDeclaration(class) => Some(class.as_ref()),
+        let (class, stmt_start) = match stmt {
+            Statement::ClassDeclaration(class) => (Some(class.as_ref()), class.span.start),
             Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
-                _ => None,
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                    (Some(class.as_ref()), export.span.start)
+                }
+                _ => (None, 0),
             },
             Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
-                _ => None,
+                Some(Declaration::ClassDeclaration(class)) => {
+                    (Some(class.as_ref()), export.span.start)
+                }
+                _ => (None, 0),
             },
-            _ => None,
+            _ => (None, 0),
         };
 
         if let Some(class) = class {
@@ -948,11 +976,19 @@ pub fn transform_angular_file(
                                 decls_after_class.push(';');
                             }
 
-                            // Track definitions by class name (position is recalculated later)
                             class_definitions.insert(
                                 class_name.clone(),
                                 (property_assignments, decls_before_class, decls_after_class),
                             );
+                            class_positions.push((
+                                class_name,
+                                compute_effective_start(
+                                    class,
+                                    &decorator_spans_to_remove,
+                                    stmt_start,
+                                ),
+                                class.body.span.end,
+                            ));
 
                             // Track external dependencies
                             if let Some(template_url) = &metadata.template_url {
@@ -1056,7 +1092,11 @@ pub fn transform_angular_file(
                         }
                     }
 
-                    // Track definitions by class name (position is recalculated later)
+                    class_positions.push((
+                        class_name.clone(),
+                        compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                        class.body.span.end,
+                    ));
                     class_definitions
                         .insert(class_name, (property_assignments, String::new(), String::new()));
                 } else if let Some(mut pipe_metadata) =
@@ -1118,12 +1158,15 @@ pub fn transform_angular_file(
                             }
                         }
 
-                        // Track definitions by class name (position is recalculated later)
+                        class_positions.push((
+                            class_name.clone(),
+                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                            class.body.span.end,
+                        ));
                         class_definitions.insert(
                             class_name,
                             (property_assignments, String::new(), String::new()),
                         );
-                        // Pipe only needs @angular/core, which is already pre-registered
                     }
                 } else if let Some(mut ng_module_metadata) =
                     extract_ng_module_metadata(allocator, class)
@@ -1196,13 +1239,16 @@ pub fn transform_angular_file(
                             external_decls.push_str(&emitter.emit_statement(stmt));
                         }
 
-                        // Track definitions by class name (position is recalculated later)
                         // NgModule: external_decls go AFTER the class (they reference the class name)
+                        class_positions.push((
+                            class_name.clone(),
+                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                            class.body.span.end,
+                        ));
                         class_definitions.insert(
                             class_name,
                             (property_assignments, String::new(), external_decls),
                         );
-                        // NgModule only needs @angular/core, which is already pre-registered
                     }
                 } else if let Some(mut injectable_metadata) =
                     extract_injectable_metadata(allocator, class)
@@ -1244,6 +1290,11 @@ pub fn transform_angular_file(
                             emitter.emit_expression(&definition.prov_definition)
                         );
 
+                        class_positions.push((
+                            class_name.clone(),
+                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                            class.body.span.end,
+                        ));
                         class_definitions.insert(
                             class_name,
                             (property_assignments, String::new(), String::new()),
@@ -1254,255 +1305,101 @@ pub fn transform_angular_file(
         }
     }
 
-    // 5. Generate output code by modifying the original source
-    // We use string manipulation instead of oxc_codegen to preserve
-    // the original code structure and avoid decorator placement issues.
+    // 5. Generate output code using span-based edits from the original AST.
+    // All edits reference positions in the original source and are applied in one pass.
 
-    // First, filter out type-only imports to match Angular's import elision.
-    // This must happen BEFORE decorator removal since we use the original AST spans.
-    let filtered_source = filter_imports(source, &parser_ret.program, &import_elision);
+    // 5a. Import elision edits (collected first for namespace insert position check)
+    let elision_edits = import_elision_edits(source, &parser_ret.program, &import_elision);
 
-    // Re-parse if imports were filtered to get updated spans for decorator removal.
-    // This is necessary because removing imports changes all subsequent byte offsets.
-    let (working_source, decorator_spans) = if filtered_source.len() != source.len() {
-        // Imports were removed, need to re-parse to get correct spans
-        let filtered_ret = Parser::new(allocator, &filtered_source, source_type).parse();
-
-        // Re-collect decorator spans from the filtered AST
-        let mut new_decorator_spans = Vec::new();
-        for stmt in &filtered_ret.program.body {
-            let class = match stmt {
-                Statement::ClassDeclaration(class) => Some(class.as_ref()),
-                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                    ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
-                    _ => None,
-                },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
-                    _ => None,
-                },
-                _ => None,
-            };
-            if let Some(class) = class {
-                // Check for component, directive, injectable, pipe, or ngmodule decorators
-                // and collect associated parameter/member decorator spans
-                if let Some(span) = find_component_decorator_span(class) {
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
-                    collect_member_decorator_spans(class, &mut new_decorator_spans);
-                    // Also check for @Injectable on the same class (SHARED precedence)
-                    if let Some(inj_span) = find_injectable_decorator_span(class) {
-                        new_decorator_spans.push(inj_span);
-                    }
-                } else if let Some(span) = find_directive_decorator_span(class) {
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
-                    collect_member_decorator_spans(class, &mut new_decorator_spans);
-                    // Also check for @Injectable on the same class (SHARED precedence)
-                    if let Some(inj_span) = find_injectable_decorator_span(class) {
-                        new_decorator_spans.push(inj_span);
-                    }
-                } else if let Some(span) = find_pipe_decorator_span(class) {
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
-                    // Also check for @Injectable on the same class (SHARED precedence)
-                    if let Some(inj_span) = find_injectable_decorator_span(class) {
-                        new_decorator_spans.push(inj_span);
-                    }
-                } else if let Some(span) = find_ng_module_decorator_span(class) {
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
-                    // Also check for @Injectable on the same class (SHARED precedence)
-                    if let Some(inj_span) = find_injectable_decorator_span(class) {
-                        new_decorator_spans.push(inj_span);
-                    }
-                } else if let Some(span) = find_injectable_decorator_span(class) {
-                    // Standalone @Injectable (no PRIMARY decorator on the class)
-                    new_decorator_spans.push(span);
-                    collect_constructor_decorator_spans(class, &mut new_decorator_spans);
+    // 5b. Namespace import insertion
+    // Must be computed before merging other edits, since we need to check if the
+    // insert position falls inside an import elision edit span.
+    let namespace_imports = file_namespace_registry.generate_import_statements();
+    let ns_edit = if !namespace_imports.is_empty() && !class_definitions.is_empty() {
+        let ns_insert_pos = find_last_import_end(&parser_ret.program.body);
+        if let Some(insert_pos) = ns_insert_pos {
+            let bytes = source.as_bytes();
+            let mut actual_pos = insert_pos;
+            // Skip past trailing whitespace/newline after the last import semicolon
+            while actual_pos < bytes.len() {
+                let c = bytes[actual_pos];
+                if c == b'\n' {
+                    actual_pos += 1;
+                    break;
+                } else if c == b' ' || c == b'\t' || c == b'\r' {
+                    actual_pos += 1;
+                } else {
+                    break;
                 }
             }
+            // Ensure the insert position doesn't fall inside any import elision
+            // edit span. Import elision edits extend past trailing newlines, which
+            // may cover the position we computed above.
+            // Note: elision edits are in ascending source order and non-overlapping
+            // (one per import declaration), so a single forward pass is sufficient —
+            // adjusting actual_pos forward can never land inside an earlier edit.
+            for edit in &elision_edits {
+                if (edit.start as usize) < actual_pos && (edit.end as usize) > actual_pos {
+                    actual_pos = edit.end as usize;
+                }
+            }
+            Some(Edit::insert(actual_pos as u32, namespace_imports).with_priority(10))
+        } else {
+            Some(Edit::insert(0, namespace_imports).with_priority(10))
         }
-        (filtered_source, new_decorator_spans)
     } else {
-        // No imports were filtered, use original spans
-        (filtered_source, decorator_spans_to_remove)
+        None
     };
 
-    // Sort decorator spans in reverse order so we can remove them from back to front
-    let mut sorted_decorator_spans = decorator_spans;
-    sorted_decorator_spans.sort_by(|a, b| b.start.cmp(&a.start));
+    // 5c. Merge all edits
+    let mut edits: Vec<Edit> = elision_edits;
 
-    // Start with the (possibly filtered) source
-    let mut modified_source = working_source;
-
-    // Remove each decorator span from the source
-    for span in sorted_decorator_spans {
-        let start = span.start as usize;
-        let end = span.end as usize;
-
-        // Find any trailing whitespace/newline after the decorator to also remove
-        let mut actual_end = end;
-        let bytes = modified_source.as_bytes();
-        while actual_end < bytes.len() {
-            let c = bytes[actual_end];
+    // Decorator removal edits
+    for span in &decorator_spans_to_remove {
+        let mut end = span.end as usize;
+        let bytes = source.as_bytes();
+        while end < bytes.len() {
+            let c = bytes[end];
             if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
-                actual_end += 1;
+                end += 1;
             } else {
                 break;
             }
         }
-
-        // Remove the decorator and trailing whitespace
-        modified_source.replace_range(start..actual_end, "");
+        edits.push(Edit::delete(span.start, end as u32));
     }
 
-    // Build final code with imports and definitions.
-    // Angular places namespace imports AFTER existing imports but BEFORE other code.
-    // See: packages/compiler-cli/src/ngtsc/translator/src/import_manager/import_typescript_transform.ts
-    //   ...existingImports,
-    //   ...(newImports.get(sourceFile.fileName) ?? []),  // namespace imports go here
-    //   ...extraStatements,
-    //   ...body,
+    if let Some(edit) = ns_edit {
+        edits.push(edit);
+    }
 
-    let namespace_imports = file_namespace_registry.generate_import_statements();
-    let code = if !namespace_imports.is_empty() && !class_definitions.is_empty() {
-        // Find the end position of the last import statement in the modified source.
-        // We need to parse the modified source to find where imports end.
-        let modified_ret = Parser::new(allocator, &modified_source, source_type).parse();
-        let last_import_end = find_last_import_end(&modified_ret.program.body);
-
-        if let Some(insert_pos) = last_import_end {
-            // Insert namespace imports after the last import.
-            // We need to handle the newline properly - if there's already a newline
-            // after the last import, we insert after it; otherwise we add one.
-            let bytes = modified_source.as_bytes();
-            let mut actual_insert_pos = insert_pos;
-
-            // Skip past any trailing whitespace/newlines that are part of the import statement
-            // The span end is right after the semicolon, we want to insert on a new line
-            while actual_insert_pos < bytes.len() {
-                let c = bytes[actual_insert_pos];
-                if c == b'\n' {
-                    actual_insert_pos += 1;
-                    break;
-                } else if c == b' ' || c == b'\t' || c == b'\r' {
-                    actual_insert_pos += 1;
-                } else {
-                    // Non-whitespace character - this shouldn't happen normally
-                    // but if it does, we'll insert with a newline prefix
-                    break;
-                }
+    // 5d. Class definition insertion edits
+    for (class_name, effective_start, class_body_end) in &class_positions {
+        if let Some((property_assignments, decls_before_class, decls_after_class)) =
+            class_definitions.get(class_name)
+        {
+            // Static fields inside class body (before closing `}`)
+            if !property_assignments.is_empty() {
+                edits.push(Edit::insert(
+                    class_body_end - 1,
+                    format!("\n{}\n", property_assignments),
+                ));
             }
 
-            let mut code = String::new();
-            code.push_str(&modified_source[..actual_insert_pos]);
-            code.push_str(&namespace_imports);
-            code.push_str(&modified_source[actual_insert_pos..]);
-            code
-        } else {
-            // No imports found - prepend namespace imports at the start
-            let mut code = String::new();
-            code.push_str(&namespace_imports);
-            code.push_str(&modified_source);
-            code
-        }
-    } else {
-        // No namespace imports needed - use modified source as-is
-        modified_source
-    };
-
-    // Append property assignments after each class body.
-    // We need to re-parse the code to find the current class positions after all modifications.
-    // Then process from end of file to start so position offsets remain valid.
-    let mut final_code = code.clone();
-
-    if !class_definitions.is_empty() {
-        // Re-parse to get current class positions
-        let final_ret = Parser::new(allocator, &code, source_type).parse();
-
-        // Collect class positions: (class_name, stmt_start, class_body_end)
-        // We need both start (for external_decls) and body_end (for property assignments)
-        let mut class_positions: Vec<(String, u32, u32)> = Vec::new();
-        for stmt in &final_ret.program.body {
-            let (class, stmt_start) = match stmt {
-                Statement::ClassDeclaration(class) => (Some(class.as_ref()), class.span.start),
-                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                    ExportDefaultDeclarationKind::ClassDeclaration(class) => {
-                        (Some(class.as_ref()), export.span.start)
-                    }
-                    _ => (None, 0),
-                },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => {
-                        (Some(class.as_ref()), export.span.start)
-                    }
-                    _ => (None, 0),
-                },
-                _ => (None, 0),
-            };
-            if let Some(class) = class {
-                if let Some(id) = &class.id {
-                    let name = id.name.to_string();
-                    if class_definitions.contains_key(&name) {
-                        // Account for non-Angular decorators that precede the class.
-                        // Decorators like @Log(...) appear before `export class` in source,
-                        // so we must insert decls_before_class before those decorators.
-                        let effective_start = class
-                            .decorators
-                            .iter()
-                            .map(|d| d.span.start)
-                            .min()
-                            .map_or(stmt_start, |dec_start| dec_start.min(stmt_start));
-                        class_positions.push((name, effective_start, class.body.span.end));
-                    }
-                }
+            // Constants/child views before the class
+            if !decls_before_class.is_empty() {
+                edits.push(Edit::insert(*effective_start, format!("{}\n", decls_before_class)));
             }
-        }
 
-        // Sort by position in descending order so we can insert from end to start
-        class_positions.sort_by(|a, b| b.2.cmp(&a.2));
-
-        for (class_name, class_start, class_body_end) in class_positions {
-            if let Some((property_assignments, decls_before_class, decls_after_class)) =
-                class_definitions.get(&class_name)
-            {
-                // 1. First, insert decls_after_class AFTER the class (at class_body_end)
-                // These are debug info, class metadata, and HMR code that reference the class.
-                // We insert this first because we're processing from end to start.
-                if !decls_after_class.is_empty() {
-                    let after_pos = class_body_end as usize;
-                    if after_pos <= final_code.len() {
-                        final_code.insert_str(after_pos, &format!("\n{}", decls_after_class));
-                    }
-                }
-
-                // 2. ES2022 style: Property assignments go INSIDE the class body as static fields
-                // class_body_end points right after the `}`, so we insert at position - 1 (before the `}`)
-                let insert_pos = (class_body_end - 1) as usize;
-
-                // Build the insertion string: static fields go inside the class body
-                let insertion = format!("\n{}\n", property_assignments);
-
-                // Insert static fields before the closing brace
-                if insert_pos <= final_code.len() {
-                    final_code.insert_str(insert_pos, &insertion);
-                }
-
-                // 3. decls_before_class (constants, child views) go BEFORE the class
-                // These are referenced in the template/property assignments.
-                if !decls_before_class.is_empty() {
-                    let before_pos = class_start as usize;
-                    if before_pos <= final_code.len() {
-                        final_code.insert_str(before_pos, &format!("{}\n", decls_before_class));
-                    }
-                }
+            // Debug info/class metadata/HMR after the class
+            if !decls_after_class.is_empty() {
+                edits.push(Edit::insert(*class_body_end, format!("\n{}", decls_after_class)));
             }
         }
     }
 
-    result.code = final_code;
-    // Note: source maps not supported with string manipulation approach
+    // Apply all edits in one pass
+    result.code = apply_edits(source, edits);
     result.map = None;
 
     result
@@ -2695,9 +2592,12 @@ fn compile_host_bindings_from_input<'a>(
     use oxc_allocator::FromIn;
 
     // Check if there are any host bindings at all
+    // Include class_attr and style_attr as they become static attributes
     if host_input.properties.is_empty()
         && host_input.attributes.is_empty()
         && host_input.listeners.is_empty()
+        && host_input.class_attr.is_none()
+        && host_input.style_attr.is_none()
     {
         return None;
     }
