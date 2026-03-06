@@ -450,6 +450,21 @@ fn get_bool_property(obj: &ObjectExpression<'_>, name: &str) -> Option<bool> {
     None
 }
 
+/// Determine the default value for `standalone` based on the declaration's `version` field.
+/// Angular v19+ defaults to `true`; earlier versions default to `false`.
+/// The special placeholder version `"0.0.0-PLACEHOLDER"` (used in dev builds) defaults to `true`.
+fn get_default_standalone_value(meta: &ObjectExpression<'_>) -> bool {
+    if let Some(version_str) = get_string_property(meta, "version") {
+        if version_str == "0.0.0-PLACEHOLDER" {
+            return true;
+        }
+        if let Ok(version) = semver::Version::parse(version_str) {
+            return version.major >= 19;
+        }
+    }
+    true // If we can't determine the version, default to true (latest behavior)
+}
+
 /// Extract the `deps` array from a factory metadata object and generate inject calls.
 fn extract_deps_source(obj: &ObjectExpression<'_>, source: &str, ns: &str) -> String {
     for prop in &obj.properties {
@@ -821,7 +836,8 @@ fn link_pipe(
 ) -> Option<String> {
     let pipe_name = get_string_property(meta, "name")?;
     let pure = get_property_source(meta, "pure", source).unwrap_or("true");
-    let standalone = get_property_source(meta, "isStandalone", source).unwrap_or("true");
+    let standalone = get_property_source(meta, "isStandalone", source)
+        .unwrap_or_else(|| if get_default_standalone_value(meta) { "true" } else { "false" });
 
     Some(format!(
         "{ns}.\u{0275}\u{0275}definePipe({{ name: \"{pipe_name}\", type: {type_name}, pure: {pure}, standalone: {standalone} }})"
@@ -1011,7 +1027,8 @@ fn link_directive(
     if let Some(export_as) = get_property_source(meta, "exportAs", source) {
         parts.push(format!("exportAs: {export_as}"));
     }
-    let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
+    let standalone = get_bool_property(meta, "isStandalone")
+        .unwrap_or_else(|| get_default_standalone_value(meta));
     parts.push(format!("standalone: {standalone}"));
 
     if get_bool_property(meta, "isSignal") == Some(true) {
@@ -1430,7 +1447,8 @@ fn link_component(
     }
 
     // 11. standalone
-    let standalone = get_bool_property(meta, "isStandalone").unwrap_or(true);
+    let standalone = get_bool_property(meta, "isStandalone")
+        .unwrap_or_else(|| get_default_standalone_value(meta));
     parts.push(format!("standalone: {standalone}"));
 
     // 11b. signals
@@ -2558,6 +2576,196 @@ MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.
         assert!(
             inherit_pos < on_changes_pos,
             "InheritDefinitionFeature must come before NgOnChangesFeature"
+        );
+    }
+
+    // === Issue #87: Version-aware standalone defaulting ===
+
+    #[test]
+    fn test_link_component_v12_defaults_standalone_false() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: false"),
+            "v12 component without isStandalone should default to false, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v18_defaults_standalone_false() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "18.2.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: false"),
+            "v18 component without isStandalone should default to false, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v19_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "19.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "v19 component without isStandalone should default to true, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v20_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "v20 component without isStandalone should default to true, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_placeholder_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "0.0.0-PLACEHOLDER", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "0.0.0-PLACEHOLDER component without isStandalone should default to true, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_explicit_standalone_overrides_version() {
+        let allocator = Allocator::default();
+        // v12 but explicitly standalone: true
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: MyComponent, selector: "my-comp", isStandalone: true, template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "Explicit isStandalone: true should override version default, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_v12_defaults_standalone_false() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class NgIf {}
+NgIf.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: NgIf, selector: "[ngIf]" });
+"#;
+        let result = link(&allocator, code, "common.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: false"),
+            "v12 directive without isStandalone should default to false, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_v19_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDir {}
+MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "19.0.0", ngImport: i0, type: MyDir, selector: "[myDir]" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "v19 directive without isStandalone should default to true, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_pipe_v12_defaults_standalone_false() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AsyncPipe {}
+AsyncPipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: AsyncPipe, name: "async" });
+"#;
+        let result = link(&allocator, code, "common.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: false"),
+            "v12 pipe without isStandalone should default to false, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_pipe_v19_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class AsyncPipe {}
+AsyncPipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "19.0.0", ngImport: i0, type: AsyncPipe, name: "async" });
+"#;
+        let result = link(&allocator, code, "common.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "v19 pipe without isStandalone should default to true, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v19_prerelease_defaults_standalone_true() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "19.0.0-rc.1", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>Hello</div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("standalone: true"),
+            "v19.0.0-rc.1 component without isStandalone should default to true, got:\n{}",
+            result.code
         );
     }
 }

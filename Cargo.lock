@@ -825,6 +825,7 @@ dependencies = [
  "oxc_span",
  "pathdiff",
  "rustc-hash",
+ "semver",
  "tempfile",
 ]
 

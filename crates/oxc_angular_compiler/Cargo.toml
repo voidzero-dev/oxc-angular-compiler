@@ -28,6 +28,7 @@ rustc-hash = { workspace = true }
 indexmap = { workspace = true }
 oxc_resolver = { version = "11", optional = true }
 pathdiff = { version = "0.2", optional = true }
+semver = "1.0.27"
 
 [features]
 default = []
