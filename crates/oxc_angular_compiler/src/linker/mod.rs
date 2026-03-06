@@ -1302,29 +1302,6 @@ fn extract_host_metadata_input(
     input
 }
 
-/// In the defineComponent output, we just need the type references:
-/// ```javascript
-/// dependencies: [RouterOutlet]
-/// ```
-fn extract_dependency_types(
-    arr: &oxc_ast::ast::ArrayExpression<'_>,
-    source: &str,
-) -> Option<String> {
-    let mut types: Vec<String> = Vec::new();
-    for el in &arr.elements {
-        let expr = match el {
-            ArrayExpressionElement::SpreadElement(_) => continue,
-            _ => el.to_expression(),
-        };
-        if let Expression::ObjectExpression(obj) = expr
-            && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
-        {
-            types.push(type_src.to_string());
-        }
-    }
-    if types.is_empty() { None } else { Some(format!("[{}]", types.join(", "))) }
-}
-
 /// Build a query function (contentQueries or viewQuery) from query metadata.
 ///
 /// Content query metadata format:
@@ -1634,11 +1611,73 @@ fn link_component(
     // 17. template (reference to the compiled function)
     parts.push(format!("template: {}", template_output.template_fn_name));
 
-    // 18. dependencies (extract type references from dependency objects)
-    if let Some(deps_arr) = get_array_property(meta, "dependencies")
-        && let Some(deps_str) = extract_dependency_types(deps_arr, source)
+    // 18. dependencies — support both new-style (v14+) and old-style (v12-v13) fields
     {
-        parts.push(format!("dependencies: {deps_str}"));
+        let capacity = get_array_property(meta, "dependencies").map_or(0, |a| a.elements.len())
+            + get_array_property(meta, "directives").map_or(0, |a| a.elements.len())
+            + get_array_property(meta, "components").map_or(0, |a| a.elements.len())
+            + get_object_property(meta, "pipes").map_or(0, |o| o.properties.len());
+        let mut dep_types: Vec<String> = Vec::with_capacity(capacity);
+
+        // New style: unified `dependencies` array (v14+)
+        if let Some(deps_arr) = get_array_property(meta, "dependencies") {
+            for el in &deps_arr.elements {
+                let expr = match el {
+                    ArrayExpressionElement::SpreadElement(_) => continue,
+                    _ => el.to_expression(),
+                };
+                if let Expression::ObjectExpression(obj) = expr
+                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
+                {
+                    dep_types.push(type_src.to_string());
+                }
+            }
+        }
+
+        // Old style: separate `directives` array (v12-v13)
+        if let Some(dirs_arr) = get_array_property(meta, "directives") {
+            for el in &dirs_arr.elements {
+                let expr = match el {
+                    ArrayExpressionElement::SpreadElement(_) => continue,
+                    _ => el.to_expression(),
+                };
+                if let Expression::ObjectExpression(obj) = expr
+                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
+                {
+                    dep_types.push(type_src.to_string());
+                }
+            }
+        }
+
+        // Old style: separate `components` array (v12-v13)
+        if let Some(comps_arr) = get_array_property(meta, "components") {
+            for el in &comps_arr.elements {
+                let expr = match el {
+                    ArrayExpressionElement::SpreadElement(_) => continue,
+                    _ => el.to_expression(),
+                };
+                if let Expression::ObjectExpression(obj) = expr
+                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
+                {
+                    dep_types.push(type_src.to_string());
+                }
+            }
+        }
+
+        // Old style: `pipes` object { pipeName: PipeType, ... } (v12-v13)
+        if let Some(pipes_obj) = get_object_property(meta, "pipes") {
+            for prop in &pipes_obj.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                    let span = p.value.span();
+                    let type_src = &source[span.start as usize..span.end as usize];
+                    dep_types.push(type_src.to_string());
+                }
+            }
+        }
+
+        if !dep_types.is_empty() {
+            parts.push(format!("dependencies: [{}]", dep_types.join(", ")));
+        }
     }
 
     // 19-20. styles + encapsulation (interdependent)
@@ -3533,6 +3572,87 @@ MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "
         assert!(
             result.code.contains("__ngFactoryType__ || MyService"),
             "useClass===type without deps should use __ngFactoryType__ || TypeName, got: {}",
+            result.code
+        );
+    }
+
+    /// Issue #88: Old-style `directives` field (v12-v13) should be extracted into `dependencies`
+    #[test]
+    fn test_link_component_v12_with_old_style_directives() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+import * as i1 from "@angular/common";
+class OverlayPanel {
+}
+OverlayPanel.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: OverlayPanel, selector: "p-overlayPanel", template: "<div *ngIf=\"render\">Hello</div>", directives: [{ type: i1.NgIf, selector: "[ngIf]", inputs: ["ngIf", "ngIfThen", "ngIfElse"] }, { type: i1.NgClass, selector: "[ngClass]", inputs: ["class", "ngClass"] }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should be linked");
+        assert!(
+            result.code.contains("dependencies: [i1.NgIf, i1.NgClass]"),
+            "Should extract directive types into dependencies array, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #88: Old-style `components` field (v12-v13) should be extracted into `dependencies`
+    #[test]
+    fn test_link_component_v12_with_old_style_components() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+import * as i1 from "./child";
+class ParentComponent {
+}
+ParentComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: ParentComponent, selector: "app-parent", template: "<my-child></my-child>", components: [{ type: i1.ChildComponent, selector: "my-child" }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should be linked");
+        assert!(
+            result.code.contains("dependencies: [i1.ChildComponent]"),
+            "Should extract component types into dependencies array, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #88: Old-style `pipes` object (v12-v13) should be extracted into `dependencies`
+    #[test]
+    fn test_link_component_v12_with_old_style_pipes() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+import * as i1 from "@angular/common";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div>{{ value | async }}</div>", pipes: { async: i1.AsyncPipe } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should be linked");
+        assert!(
+            result.code.contains("dependencies: [i1.AsyncPipe]"),
+            "Should extract pipe types into dependencies array, got:\n{}",
+            result.code
+        );
+    }
+
+    /// Issue #88: Mixed old-style fields — directives + components + pipes combined
+    #[test]
+    fn test_link_component_v12_with_mixed_old_style_deps() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+import * as i1 from "@angular/common";
+import * as i2 from "./child";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.5", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div *ngIf=\"x\"><my-child></my-child>{{ val | async }}</div>", directives: [{ type: i1.NgIf, selector: "[ngIf]" }], components: [{ type: i2.ChildComponent, selector: "my-child" }], pipes: { async: i1.AsyncPipe } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should be linked");
+        assert!(
+            result.code.contains("dependencies: [i1.NgIf, i2.ChildComponent, i1.AsyncPipe]"),
+            "Should extract all dependency types into dependencies array, got:\n{}",
             result.code
         );
     }
