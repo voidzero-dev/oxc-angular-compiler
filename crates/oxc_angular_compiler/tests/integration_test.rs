@@ -6293,10 +6293,7 @@ export class HighlightDirective {
     );
 
     // The original decorators must be removed from the class body
-    assert!(
-        !result.code.contains("@Input()"),
-        "@Input decorator must be removed from class body"
-    );
+    assert!(!result.code.contains("@Input()"), "@Input decorator must be removed from class body");
     assert!(
         !result.code.contains("@Output()"),
         "@Output decorator must be removed from class body"
@@ -6307,20 +6304,28 @@ export class HighlightDirective {
 
 #[test]
 fn test_jit_union_type_ctor_params() {
-    // Bug fix: union types like `undefined | SomeService` or `null | undefined | T`
-    // must correctly extract the type name for ctorParameters.
-    // Previously only TSNullKeyword was skipped, causing TSUndefinedKeyword to short-circuit.
+    // Angular-aligned union type behavior for ctorParameters.
+    // Angular's typeReferenceToExpression filters ONLY `null` literal types.
+    // If exactly one non-null type remains, it resolves; otherwise unresolvable.
+    //
+    // `T | null`                  → resolves to T   (1 non-null type)
+    // `undefined | T`             → unresolvable     (2 non-null types: undefined + T)
+    // `null | undefined | T`      → unresolvable     (2 non-null types: undefined + T)
+    //
+    // See: angular/packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
     let allocator = Allocator::default();
     let source = r#"
 import { Component } from '@angular/core';
 import { ServiceA } from './a.service';
 import { ServiceB } from './b.service';
+import { ServiceC } from './c.service';
 
 @Component({ selector: 'test', template: '' })
 export class TestComponent {
     constructor(
         svcA: undefined | ServiceA,
         svcB: null | undefined | ServiceB,
+        svcC: ServiceC | null,
     ) {}
 }
 "#;
@@ -6329,22 +6334,23 @@ export class TestComponent {
     let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
-    // Both types must be correctly extracted despite union with undefined/null
+    // `ServiceC | null` resolves correctly (1 non-null type)
     assert!(
-        result.code.contains("type: ServiceA"),
-        "ctorParameters should resolve 'undefined | ServiceA' to ServiceA. Got:\n{}",
-        result.code
-    );
-    assert!(
-        result.code.contains("type: ServiceB"),
-        "ctorParameters should resolve 'null | undefined | ServiceB' to ServiceB. Got:\n{}",
+        result.code.contains("type: ServiceC"),
+        "ctorParameters should resolve 'ServiceC | null' to ServiceC. Got:\n{}",
         result.code
     );
 
-    // Should NOT emit 'type: undefined' for either
+    // `undefined | ServiceA` and `null | undefined | ServiceB` are unresolvable per Angular spec
+    // (2 non-null types remain after filtering null)
     assert!(
-        !result.code.contains("type: undefined"),
-        "ctorParameters must not emit 'type: undefined' for resolvable union types. Got:\n{}",
+        !result.code.contains("type: ServiceA"),
+        "ctorParameters must not resolve 'undefined | ServiceA' (2 non-null types). Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("type: ServiceB"),
+        "ctorParameters must not resolve 'null | undefined | ServiceB' (2 non-null types). Got:\n{}",
         result.code
     );
 

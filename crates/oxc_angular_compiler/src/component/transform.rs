@@ -929,16 +929,16 @@ fn extract_type_name_from_annotation(type_annotation: &oxc_ast::ast::TSType<'_>)
             }
         }
         oxc_ast::ast::TSType::TSUnionType(union) => {
-            // For union types like `T | null`, `undefined | T`, `null | undefined | T`,
-            // iterate all members and return the first that resolves to a name.
-            // Using try-each-and-continue handles TSNullKeyword, TSUndefinedKeyword,
-            // and any other non-reference type gracefully.
-            for t in &union.types {
-                if let Some(name) = extract_type_name_from_annotation(t) {
-                    return Some(name);
-                }
-            }
-            None
+            // Match Angular's typeReferenceToExpression behavior:
+            // filter out only `null` literal types, and if exactly one type remains,
+            // resolve that type. Otherwise, return None (unresolvable).
+            // See: angular/packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
+            let non_null: std::vec::Vec<_> = union
+                .types
+                .iter()
+                .filter(|t| !matches!(t, oxc_ast::ast::TSType::TSNullKeyword(_)))
+                .collect();
+            if non_null.len() == 1 { extract_type_name_from_annotation(non_null[0]) } else { None }
         }
         _ => None,
     }
