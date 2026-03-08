@@ -426,6 +426,124 @@ fn get_property_expression<'a>(
     None
 }
 
+/// Extract the return value source from a function expression body.
+///
+/// Handles both `function() { return expr; }` and `() => expr` forms.
+fn extract_function_return_source<'a>(expr: &Expression<'a>, source: &'a str) -> Option<&'a str> {
+    match expr {
+        Expression::FunctionExpression(func) => {
+            if let Some(body) = &func.body {
+                for stmt in &body.statements {
+                    if let Statement::ReturnStatement(ret) = stmt {
+                        if let Some(arg) = &ret.argument {
+                            let span = arg.span();
+                            return Some(&source[span.start as usize..span.end as usize]);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        Expression::ArrowFunctionExpression(arrow) => {
+            if arrow.expression {
+                // Expression body: () => expr
+                if let Some(stmt) = arrow.body.statements.first() {
+                    if let Statement::ExpressionStatement(expr_stmt) = stmt {
+                        let span = expr_stmt.expression.span();
+                        return Some(&source[span.start as usize..span.end as usize]);
+                    }
+                }
+            } else {
+                // Block body: () => { return expr; }
+                for stmt in &arrow.body.statements {
+                    if let Statement::ReturnStatement(ret) = stmt {
+                        if let Some(arg) = &ret.argument {
+                            let span = arg.span();
+                            return Some(&source[span.start as usize..span.end as usize]);
+                        }
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Unwrap a `forwardRef(function() { return X; })` or `forwardRef(() => X)` call expression.
+///
+/// Returns `(unwrapped_source, was_forward_ref)`.
+/// If the expression is not a forwardRef call, returns the raw source text.
+/// Aligns with Angular TS linker's `extractForwardRef()` in `util.ts`.
+fn extract_forward_ref<'a>(expr: &Expression<'a>, source: &'a str) -> (&'a str, bool) {
+    if let Expression::CallExpression(call) = expr {
+        let is_forward_ref = match &call.callee {
+            Expression::Identifier(ident) => ident.name == "forwardRef",
+            _ => false,
+        };
+        if is_forward_ref {
+            if let Some(arg) = call.arguments.first() {
+                let arg_expr = match arg {
+                    Argument::SpreadElement(_) => {
+                        let span = expr.span();
+                        return (&source[span.start as usize..span.end as usize], false);
+                    }
+                    _ => arg.to_expression(),
+                };
+                if let Some(return_source) = extract_function_return_source(arg_expr, source) {
+                    return (return_source, true);
+                }
+            }
+        }
+    }
+    let span = expr.span();
+    (&source[span.start as usize..span.end as usize], false)
+}
+
+/// Get a property's source text, unwrapping any `forwardRef()` wrapper.
+///
+/// Returns `Some((source_text, was_forward_ref))` if the property exists.
+fn get_property_source_unwrapping_forward_ref<'a>(
+    obj: &'a ObjectExpression<'a>,
+    name: &str,
+    source: &'a str,
+) -> Option<(&'a str, bool)> {
+    let expr = get_property_expression(obj, name)?;
+    Some(extract_forward_ref(expr, source))
+}
+
+/// Check if a property value is a function expression (forward declaration wrapper).
+///
+/// In NgModule partial declarations, forward declarations are wrapped as:
+/// `declarations: function() { return [Foo, Bar]; }`
+fn is_function_wrapped_property(obj: &ObjectExpression<'_>, name: &str) -> bool {
+    if let Some(expr) = get_property_expression(obj, name) {
+        return matches!(
+            expr,
+            Expression::FunctionExpression(_) | Expression::ArrowFunctionExpression(_)
+        );
+    }
+    false
+}
+
+/// Get a property's source, unwrapping function wrappers for NgModule forward declarations.
+///
+/// If the property value is `function() { return [Foo]; }`, returns the source of `[Foo]`.
+/// Otherwise returns the raw property source.
+fn get_property_source_unwrapping_function<'a>(
+    obj: &'a ObjectExpression<'a>,
+    name: &str,
+    source: &'a str,
+) -> Option<&'a str> {
+    let expr = get_property_expression(obj, name)?;
+    if let Some(return_source) = extract_function_return_source(expr, source) {
+        Some(return_source)
+    } else {
+        let span = expr.span();
+        Some(&source[span.start as usize..span.end as usize])
+    }
+}
+
 /// Check if a property exists in an object expression.
 fn has_property(obj: &ObjectExpression<'_>, name: &str) -> bool {
     obj.properties.iter().any(|prop| {
@@ -794,21 +912,28 @@ fn format_conditional_factory(type_name: &str, ctor_type: &str, non_ctor_expr: &
 /// For `useClass` and `useFactory` with deps, we generate a wrapper factory that calls
 /// `ɵɵinject()` inside the factory body (deferred), not in a `deps` array (eager).
 /// Eager inject calls would fail with NG0203 during static class initialization.
+///
+/// Aligns with TS linker's `PartialInjectableLinkerVersion1`: unwraps `forwardRef()` on
+/// `providedIn`, `useClass`, `useExisting`, and `useValue` (but NOT `useFactory`).
 fn link_injectable(
     meta: &ObjectExpression<'_>,
     source: &str,
     ns: &str,
     type_name: &str,
 ) -> Option<String> {
-    let provided_in = get_property_source(meta, "providedIn", source);
+    // Unwrap forwardRef on providedIn (TS linker: extractForwardRef(metaObj.getValue('providedIn')))
+    let provided_in = get_property_source_unwrapping_forward_ref(meta, "providedIn", source);
     // Angular omits providedIn when null; only include when explicitly set to a non-null value
     let provided_in_suffix = match provided_in {
-        Some("null") | None => String::new(),
-        Some(val) => format!(", providedIn: {val}"),
+        Some(("null", _)) | None => String::new(),
+        Some((val, _)) => format!(", providedIn: {val}"),
     };
 
     // Check for useClass, useFactory, useExisting, useValue
-    if let Some(use_class) = get_property_source(meta, "useClass", source) {
+    // Unwrap forwardRef on useClass (TS linker: extractForwardRef(metaObj.getValue('useClass')))
+    if let Some((use_class, _)) =
+        get_property_source_unwrapping_forward_ref(meta, "useClass", source)
+    {
         if has_property(meta, "deps") {
             // Case 5: useClass with deps — delegated conditional factory
             let deps = extract_deps_source(meta, source, ns, "Injectable");
@@ -832,6 +957,7 @@ fn link_injectable(
         ));
     }
 
+    // useFactory: NOT unwrapped (TS linker: metaObj.getOpaque('useFactory'))
     if let Some(use_factory) = get_property_source(meta, "useFactory", source) {
         if has_property(meta, "deps") {
             // Case 4: useFactory with deps — delegated conditional factory
@@ -849,7 +975,10 @@ fn link_injectable(
         ));
     }
 
-    if let Some(use_existing) = get_property_source(meta, "useExisting", source) {
+    // Unwrap forwardRef on useExisting (TS linker: extractForwardRef(metaObj.getValue('useExisting')))
+    if let Some((use_existing, _)) =
+        get_property_source_unwrapping_forward_ref(meta, "useExisting", source)
+    {
         // Case 2: useExisting — expression conditional factory
         let non_ctor_expr = format!("{ns}.\u{0275}\u{0275}inject({use_existing})");
         let ctor_type = format!("__ngFactoryType__ || {type_name}");
@@ -859,7 +988,10 @@ fn link_injectable(
         ));
     }
 
-    if let Some(use_value) = get_property_source(meta, "useValue", source) {
+    // Unwrap forwardRef on useValue (TS linker: extractForwardRef(metaObj.getValue('useValue')))
+    if let Some((use_value, _)) =
+        get_property_source_unwrapping_forward_ref(meta, "useValue", source)
+    {
         // Case 1: useValue — expression conditional factory
         let ctor_type = format!("__ngFactoryType__ || {type_name}");
         let factory = format_conditional_factory(type_name, &ctor_type, use_value);
@@ -894,6 +1026,14 @@ fn link_injector(
 }
 
 /// Link ɵɵngDeclareNgModule → ɵɵdefineNgModule.
+///
+/// Aligns with Angular TS linker's `PartialNgModuleLinkerVersion1` and `compileNgModule`.
+/// The OXC linker always emits inline scope (equivalent to `selectorScopeMode: Inline`)
+/// since it operates on FESM bundles without full AOT scope resolution context.
+///
+/// Forward declaration handling: if any of bootstrap/declarations/imports/exports is
+/// wrapped in a function (forward declaration), ALL arrays are wrapped consistently,
+/// matching the TS compiler's `containsForwardDecls` behavior.
 fn link_ng_module(
     meta: &ObjectExpression<'_>,
     source: &str,
@@ -902,10 +1042,41 @@ fn link_ng_module(
 ) -> Option<String> {
     let mut parts = vec![format!("type: {type_name}")];
 
-    // In AOT mode (selectorScopeMode: Omit), declarations/imports/exports are never emitted.
-    // Only type, bootstrap, schemas, and id are included.
-    if let Some(bootstrap) = get_property_source(meta, "bootstrap", source) {
-        parts.push(format!("bootstrap: {bootstrap}"));
+    // Check if any array property uses a function wrapper (forward declaration).
+    // Per TS linker: if ANY uses forward declarations, ALL arrays must be wrapped.
+    let contains_forward_decls = is_function_wrapped_property(meta, "bootstrap")
+        || is_function_wrapped_property(meta, "declarations")
+        || is_function_wrapped_property(meta, "imports")
+        || is_function_wrapped_property(meta, "exports");
+
+    // Helper closure: wrap array source in function() { return ...; } if forward decls exist
+    let wrap_array = |array_source: &str| -> String {
+        if contains_forward_decls {
+            format!("function() {{ return {array_source}; }}")
+        } else {
+            array_source.to_string()
+        }
+    };
+
+    // Bootstrap is always emitted inline (not affected by selectorScopeMode).
+    // Unwrap function wrappers to get the inner array source.
+    if let Some(bootstrap) = get_property_source_unwrapping_function(meta, "bootstrap", source) {
+        parts.push(format!("bootstrap: {}", wrap_array(bootstrap)));
+    }
+
+    // declarations, imports, and exports must be included so Angular's runtime DepsTracker
+    // can resolve which pipes/directives an NgModule provides to standalone components.
+    // Without these, getNgModuleDef(type).exports is empty → NG0302/NG0303 errors.
+    if let Some(declarations) =
+        get_property_source_unwrapping_function(meta, "declarations", source)
+    {
+        parts.push(format!("declarations: {}", wrap_array(declarations)));
+    }
+    if let Some(imports) = get_property_source_unwrapping_function(meta, "imports", source) {
+        parts.push(format!("imports: {}", wrap_array(imports)));
+    }
+    if let Some(exports) = get_property_source_unwrapping_function(meta, "exports", source) {
+        parts.push(format!("exports: {}", wrap_array(exports)));
     }
     if let Some(schemas) = get_property_source(meta, "schemas", source) {
         parts.push(format!("schemas: {schemas}"));
@@ -1343,19 +1514,38 @@ fn build_queries(
         let is_signal = get_bool_property(query_obj.as_ref(), "isSignal").unwrap_or(false);
         let read = get_property_source(query_obj.as_ref(), "read", source);
 
-        // Build predicate - can be a type reference or string array
-        let predicate =
-            get_property_source(query_obj.as_ref(), "predicate", source).unwrap_or("null");
+        // Build predicate — can be a type reference or string array.
+        // For type references, unwrap forwardRef() (TS linker: extractForwardRef(predicateExpr)).
+        let predicate = if let Some(expr) = get_property_expression(query_obj.as_ref(), "predicate")
+        {
+            if matches!(expr, Expression::ArrayExpression(_)) {
+                // String array predicate — pass through as-is
+                let span = expr.span();
+                &source[span.start as usize..span.end as usize]
+            } else {
+                // Type reference — unwrap forwardRef if present
+                let (src, _) = extract_forward_ref(expr, source);
+                src
+            }
+        } else {
+            "null"
+        };
 
         // Calculate flags: DESCENDANTS=1, IS_STATIC=2, EMIT_DISTINCT_CHANGES_ONLY=4
         // View queries always have descendants=true; content queries read it from metadata.
+        // emitDistinctChangesOnly: read from metadata (default true), aligned with TS linker.
+        let emit_distinct =
+            get_bool_property(query_obj.as_ref(), "emitDistinctChangesOnly").unwrap_or(true);
         let has_descendants = if is_content_query { descendants } else { true };
-        let mut flags = 4u32; // EMIT_DISTINCT_CHANGES_ONLY (always on)
+        let mut flags = 0u32;
         if has_descendants {
             flags |= 1; // DESCENDANTS
         }
         if is_static {
             flags |= 2; // IS_STATIC
+        }
+        if emit_distinct {
+            flags |= 4; // EMIT_DISTINCT_CHANGES_ONLY
         }
 
         // Create block — signal queries use different instructions with ctx.propertyName
@@ -1612,12 +1802,29 @@ fn link_component(
     parts.push(format!("template: {}", template_output.template_fn_name));
 
     // 18. dependencies — support both new-style (v14+) and old-style (v12-v13) fields
+    // Aligns with TS linker's `extractDeclarationTypeExpr` which calls `extractForwardRef`
+    // on each dependency type. If any uses `forwardRef`, the entire array is wrapped in
+    // `() => [...]` (DeclarationListEmitMode.Closure).
     {
         let capacity = get_array_property(meta, "dependencies").map_or(0, |a| a.elements.len())
             + get_array_property(meta, "directives").map_or(0, |a| a.elements.len())
             + get_array_property(meta, "components").map_or(0, |a| a.elements.len())
             + get_object_property(meta, "pipes").map_or(0, |o| o.properties.len());
         let mut dep_types: Vec<String> = Vec::with_capacity(capacity);
+        let mut has_forward_ref = false;
+
+        // Helper: extract type source from a dependency object, unwrapping forwardRef
+        let mut extract_dep_type = |obj: &ObjectExpression<'_>| -> Option<String> {
+            if let Some(type_expr) = get_property_expression(obj, "type") {
+                let (type_src, is_fwd) = extract_forward_ref(type_expr, source);
+                if is_fwd {
+                    has_forward_ref = true;
+                }
+                Some(type_src.to_string())
+            } else {
+                None
+            }
+        };
 
         // New style: unified `dependencies` array (v14+)
         if let Some(deps_arr) = get_array_property(meta, "dependencies") {
@@ -1626,10 +1833,10 @@ fn link_component(
                     ArrayExpressionElement::SpreadElement(_) => continue,
                     _ => el.to_expression(),
                 };
-                if let Expression::ObjectExpression(obj) = expr
-                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
-                {
-                    dep_types.push(type_src.to_string());
+                if let Expression::ObjectExpression(obj) = expr {
+                    if let Some(type_src) = extract_dep_type(obj.as_ref()) {
+                        dep_types.push(type_src);
+                    }
                 }
             }
         }
@@ -1641,10 +1848,10 @@ fn link_component(
                     ArrayExpressionElement::SpreadElement(_) => continue,
                     _ => el.to_expression(),
                 };
-                if let Expression::ObjectExpression(obj) = expr
-                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
-                {
-                    dep_types.push(type_src.to_string());
+                if let Expression::ObjectExpression(obj) = expr {
+                    if let Some(type_src) = extract_dep_type(obj.as_ref()) {
+                        dep_types.push(type_src);
+                    }
                 }
             }
         }
@@ -1656,10 +1863,10 @@ fn link_component(
                     ArrayExpressionElement::SpreadElement(_) => continue,
                     _ => el.to_expression(),
                 };
-                if let Expression::ObjectExpression(obj) = expr
-                    && let Some(type_src) = get_property_source(obj.as_ref(), "type", source)
-                {
-                    dep_types.push(type_src.to_string());
+                if let Expression::ObjectExpression(obj) = expr {
+                    if let Some(type_src) = extract_dep_type(obj.as_ref()) {
+                        dep_types.push(type_src);
+                    }
                 }
             }
         }
@@ -1668,15 +1875,24 @@ fn link_component(
         if let Some(pipes_obj) = get_object_property(meta, "pipes") {
             for prop in &pipes_obj.properties {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                    let span = p.value.span();
-                    let type_src = &source[span.start as usize..span.end as usize];
+                    let type_expr = &p.value;
+                    let (type_src, is_fwd) = extract_forward_ref(type_expr, source);
+                    if is_fwd {
+                        has_forward_ref = true;
+                    }
                     dep_types.push(type_src.to_string());
                 }
             }
         }
 
         if !dep_types.is_empty() {
-            parts.push(format!("dependencies: [{}]", dep_types.join(", ")));
+            let deps_array = format!("[{}]", dep_types.join(", "));
+            if has_forward_ref {
+                // DeclarationListEmitMode.Closure: wrap in arrow function
+                parts.push(format!("dependencies: () => {deps_array}"));
+            } else {
+                parts.push(format!("dependencies: {deps_array}"));
+            }
         }
     }
 
@@ -3290,7 +3506,7 @@ AppModule.ɵinj = i0.ɵɵngDeclareInjector({ minVersion: "12.0.0", version: "20.
     }
 
     #[test]
-    fn test_link_ng_module_omits_declarations_imports_exports() {
+    fn test_link_ng_module_includes_declarations_imports_exports() {
         let allocator = Allocator::default();
         let code = r#"
 import * as i0 from "@angular/core";
@@ -3311,18 +3527,47 @@ MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0
             result.code
         );
         assert!(
-            !result.code.contains("declarations:"),
-            "Should NOT contain declarations in AOT mode, got:\n{}",
+            result.code.contains("declarations: [FooComponent]"),
+            "Should contain declarations for runtime scope resolution, got:\n{}",
             result.code
         );
         assert!(
-            !result.code.contains("imports:"),
-            "Should NOT contain imports in AOT mode, got:\n{}",
+            result.code.contains("imports: [CommonModule]"),
+            "Should contain imports, got:\n{}",
             result.code
         );
         assert!(
-            !result.code.contains("exports:"),
-            "Should NOT contain exports in AOT mode, got:\n{}",
+            result.code.contains("exports: [FooComponent]"),
+            "Should contain exports for standalone component pipe/directive scope, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_translate_module_regression() {
+        // Regression test for issue #94: NG0302 TranslatePipe not found.
+        // The linker must include declarations and exports so that standalone components
+        // importing TranslateModule can resolve the 'translate' pipe at runtime.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class TranslatePipe {}
+TranslatePipe.ɵpipe = i0.ɵɵngDeclarePipe({ minVersion: "14.0.0", version: "16.0.0", ngImport: i0, type: TranslatePipe, name: "translate", pure: false });
+class TranslateDirective {}
+TranslateDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "16.0.0", type: TranslateDirective, selector: "[translate],[ngx-translate]", ngImport: i0 });
+class TranslateModule {}
+TranslateModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "16.0.0", ngImport: i0, type: TranslateModule, declarations: [TranslatePipe, TranslateDirective], exports: [TranslatePipe, TranslateDirective] });
+"#;
+        let result = link(&allocator, code, "ngx-translate-core.mjs");
+        assert!(result.linked, "Should have linked the declarations");
+        assert!(
+            result.code.contains("declarations: [TranslatePipe, TranslateDirective]"),
+            "ɵɵdefineNgModule must include declarations, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("exports: [TranslatePipe, TranslateDirective]"),
+            "ɵɵdefineNgModule must include exports so standalone components can resolve TranslatePipe, got:\n{}",
             result.code
         );
     }
@@ -3653,6 +3898,123 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "
         assert!(
             result.code.contains("dependencies: [i1.NgIf, i2.ChildComponent, i1.AsyncPipe]"),
             "Should extract all dependency types into dependencies array, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_ng_module_forward_declarations() {
+        // When any of bootstrap/declarations/imports/exports is function-wrapped,
+        // ALL arrays should be wrapped in function() { return ...; }.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyModule {}
+MyModule.ɵmod = i0.ɵɵngDeclareNgModule({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyModule, declarations: function() { return [FooComponent]; }, imports: [CommonModule], exports: [FooComponent] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked the declaration");
+        // declarations was function-wrapped, so ALL arrays should be wrapped
+        assert!(
+            result.code.contains("declarations: function() { return [FooComponent]; }"),
+            "declarations should be wrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("imports: function() { return [CommonModule]; }"),
+            "imports should also be wrapped when containsForwardDecls, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("exports: function() { return [FooComponent]; }"),
+            "exports should also be wrapped when containsForwardDecls, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_forward_ref_use_class() {
+        // forwardRef in useClass should be unwrapped
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: forwardRef(function() { return OtherService; }) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        // forwardRef should be unwrapped — useClass should reference OtherService directly
+        assert!(
+            result.code.contains("OtherService"),
+            "Should contain unwrapped OtherService, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_forward_ref_provided_in() {
+        // forwardRef in providedIn should be unwrapped
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, providedIn: forwardRef(function() { return SomeModule; }) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("providedIn: SomeModule"),
+            "providedIn should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_dependency_forward_ref() {
+        // forwardRef in dependency type should be unwrapped, and deps wrapped in closure
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", isStandalone: true, dependencies: [{ kind: "directive", type: forwardRef(function() { return FooDir; }), selector: "foo" }, { kind: "directive", type: BarDir, selector: "bar" }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        // forwardRef should be unwrapped
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef, got:\n{}",
+            result.code
+        );
+        // When any dep uses forwardRef, entire array should use closure emit mode
+        assert!(
+            result.code.contains("dependencies: () => [FooDir, BarDir]"),
+            "Should wrap deps in closure when forwardRef detected, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_query_emit_distinct_changes_only() {
+        // emitDistinctChangesOnly should be read from metadata (default: true)
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDir {}
+MyDir.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyDir, selector: "[myDir]", queries: [{ propertyName: "items", predicate: FooComponent, first: false, descendants: true, emitDistinctChangesOnly: false }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        // emitDistinctChangesOnly=false means flags should NOT have bit 4 set
+        // DESCENDANTS=1 is set, so flags should be 1
+        assert!(
+            result.code.contains("contentQuery(dirIndex, FooComponent, 1)"),
+            "Flags should be 1 (DESCENDANTS only, no EMIT_DISTINCT_CHANGES_ONLY), got:\n{}",
             result.code
         );
     }
