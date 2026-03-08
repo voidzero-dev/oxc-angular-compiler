@@ -5857,3 +5857,391 @@ fn test_host_binding_pure_function_declarations_emitted() {
         }
     }
 }
+
+// ============================================================================
+// Standalone Emission Tests (Issue #95)
+// ============================================================================
+
+/// Test that a standalone component does NOT emit `standalone:true` in ɵɵdefineComponent.
+///
+/// Angular's TS compiler (compiler.ts:96-98) only emits `standalone: false` when
+/// isStandalone === false. When standalone is true, it's omitted because the Angular
+/// runtime (definition.ts:637) defaults `standalone` to `true` via `?? true`.
+///
+/// OXC matches this behavior exactly.
+#[test]
+fn test_standalone_component_omits_standalone_field() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<div>test</div>'
+})
+export class TestComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    // Angular TS compiler omits standalone when true (runtime defaults to true via ?? true)
+    assert!(
+        !normalized.contains("standalone:true"),
+        "Standalone component should NOT emit `standalone:true` (runtime defaults to true). Output:\n{}",
+        result.code
+    );
+}
+
+/// Test that a non-standalone component emits `standalone:false` in ɵɵdefineComponent.
+#[test]
+fn test_non_standalone_component_emits_standalone_false() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-legacy',
+  standalone: false,
+  template: '<div>legacy</div>'
+})
+export class LegacyComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains("standalone:false"),
+        "Non-standalone component MUST emit `standalone:false` in ɵɵdefineComponent. Output:\n{}",
+        result.code
+    );
+}
+
+/// Test that an implicit standalone component (Angular 19+ default) omits `standalone` field.
+///
+/// Angular 19+ defaults `standalone` to `true`. The Angular TS compiler omits the field
+/// when true, and the runtime defaults it via `?? true`. OXC matches this behavior.
+#[test]
+fn test_implicit_standalone_with_imports_omits_standalone_field() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { NgIf } from '@angular/common';
+
+@Component({
+  selector: 'app-implicit',
+  imports: [NgIf],
+  template: '<div *ngIf="true">implicit standalone</div>'
+})
+export class ImplicitStandaloneComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    // Angular TS compiler omits standalone when true (runtime defaults to true via ?? true)
+    assert!(
+        !normalized.contains("standalone:true"),
+        "Implicit standalone component should NOT emit `standalone:true` (runtime defaults to true). Output:\n{}",
+        result.code
+    );
+}
+
+// ============================================================================
+// JIT Compilation Tests
+// ============================================================================
+
+#[test]
+fn test_jit_component_with_inline_template() {
+    // When jit: true, the compiler should NOT compile templates.
+    // Instead, it should keep the decorator and downlevel it using __decorate.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>Hello</h1>',
+    standalone: true,
+})
+export class AppComponent {}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have __decorate import from tslib
+    assert!(
+        result.code.contains("import { __decorate } from \"tslib\""),
+        "JIT output should import __decorate from tslib. Got:\n{}",
+        result.code
+    );
+
+    // Should NOT have ɵcmp or ɵfac (AOT-style definitions)
+    assert!(
+        !result.code.contains("ɵcmp") && !result.code.contains("ɵfac"),
+        "JIT output should NOT contain AOT definitions (ɵcmp/ɵfac). Got:\n{}",
+        result.code
+    );
+
+    // Should have __decorate call with Component
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT output should use __decorate. Got:\n{}",
+        result.code
+    );
+
+    // Should keep the template property as-is (inline template)
+    assert!(
+        result.code.contains("template:"),
+        "JIT output should preserve inline template. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_inline_template", result.code);
+}
+
+#[test]
+fn test_jit_component_with_template_url() {
+    // When jit: true and templateUrl is used, it should be replaced with
+    // an import from angular:jit:template:file;./path
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-root',
+    templateUrl: './app.html',
+    standalone: true,
+})
+export class AppComponent {}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have resource import for template
+    assert!(
+        result.code.contains("angular:jit:template:file;./app.html"),
+        "JIT output should import template via angular:jit:template:file. Got:\n{}",
+        result.code
+    );
+
+    // Should replace templateUrl with template referencing the import
+    assert!(
+        !result.code.contains("templateUrl"),
+        "JIT output should replace templateUrl with template. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_template_url", result.code);
+}
+
+#[test]
+fn test_jit_component_with_style_url() {
+    // When jit: true and styleUrl/styleUrls is used, it should be replaced with
+    // imports from angular:jit:style:file;./path
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>Hello</h1>',
+    styleUrl: './app.css',
+})
+export class AppComponent {}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have resource import for style
+    assert!(
+        result.code.contains("angular:jit:style:file;./app.css"),
+        "JIT output should import style via angular:jit:style:file. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_style_url", result.code);
+}
+
+#[test]
+fn test_jit_component_with_constructor_deps() {
+    // JIT compilation should generate ctorParameters for constructor dependencies
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { TitleService } from './title.service';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>Hello</h1>',
+})
+export class AppComponent {
+    constructor(private titleService: TitleService) {}
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have ctorParameters static property
+    assert!(
+        result.code.contains("ctorParameters"),
+        "JIT output should contain ctorParameters. Got:\n{}",
+        result.code
+    );
+
+    // Should reference TitleService type
+    assert!(
+        result.code.contains("TitleService"),
+        "JIT ctorParameters should reference dependency type. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_constructor_deps", result.code);
+}
+
+#[test]
+fn test_jit_component_class_restructuring() {
+    // JIT should restructure: export class X {} → let X = class X {}; X = __decorate([...], X); export { X };
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>Hello</h1>',
+})
+export class AppComponent {
+    title = 'app';
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have let declaration
+    assert!(
+        result.code.contains("let AppComponent = class AppComponent"),
+        "JIT output should use 'let X = class X' pattern. Got:\n{}",
+        result.code
+    );
+
+    // Should have export statement
+    assert!(
+        result.code.contains("export { AppComponent }"),
+        "JIT output should have named export. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_class_restructuring", result.code);
+}
+
+#[test]
+fn test_jit_directive() {
+    // @Directive should also be JIT-transformed with __decorate
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Input } from '@angular/core';
+
+@Directive({
+    selector: '[appHighlight]',
+    standalone: true,
+})
+export class HighlightDirective {
+    @Input() color: string = 'yellow';
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have __decorate with Directive
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT directive output should use __decorate. Got:\n{}",
+        result.code
+    );
+
+    // Should NOT have ɵdir or ɵfac
+    assert!(
+        !result.code.contains("ɵdir") && !result.code.contains("ɵfac"),
+        "JIT directive output should NOT contain AOT definitions. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_directive", result.code);
+}
+
+#[test]
+fn test_jit_full_component_example() {
+    // Full example matching the issue #97 scenario
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, signal } from '@angular/core';
+import { RouterOutlet } from '@angular/router';
+import { Lib1 } from 'lib1';
+import { TitleService } from './title.service';
+
+@Component({
+    selector: 'app-root',
+    imports: [RouterOutlet, Lib1],
+    templateUrl: './app.html',
+    styleUrl: './app.css',
+})
+export class App {
+    titleService;
+    title = signal('app');
+    constructor(titleService: TitleService) {
+        this.titleService = titleService;
+        this.title.set(this.titleService.getTitle());
+    }
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should have all JIT characteristics
+    assert!(
+        result.code.contains("import { __decorate } from \"tslib\""),
+        "Missing __decorate import"
+    );
+    assert!(
+        result.code.contains("angular:jit:template:file;./app.html"),
+        "Missing template resource import"
+    );
+    assert!(
+        result.code.contains("angular:jit:style:file;./app.css"),
+        "Missing style resource import"
+    );
+    assert!(result.code.contains("let App = class App"), "Missing class restructuring");
+    assert!(result.code.contains("ctorParameters"), "Missing ctorParameters");
+    assert!(result.code.contains("__decorate("), "Missing __decorate call");
+    assert!(result.code.contains("export { App }"), "Missing named export");
+
+    // Should NOT have AOT output
+    assert!(!result.code.contains("ɵcmp"), "Should not contain ɵcmp");
+    assert!(!result.code.contains("ɵfac"), "Should not contain ɵfac");
+    assert!(!result.code.contains("defineComponent"), "Should not contain defineComponent");
+
+    insta::assert_snapshot!("jit_full_component", result.code);
+}

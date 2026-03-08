@@ -7,12 +7,12 @@ use std::collections::HashMap;
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
-    Declaration, ExportDefaultDeclarationKind, ImportDeclarationSpecifier, ImportOrExportKind,
-    Statement,
+    Argument, ArrayExpressionElement, Declaration, ExportDefaultDeclarationKind, Expression,
+    ImportDeclarationSpecifier, ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
-use oxc_span::{Atom, SourceType, Span};
+use oxc_span::{Atom, GetSpan, SourceType, Span};
 use rustc_hash::FxHashMap;
 
 use crate::optimizer::{Edit, apply_edits};
@@ -643,6 +643,584 @@ fn find_last_import_end(program_body: &[Statement<'_>]) -> Option<usize> {
     last_import_end.map(|pos| pos as usize)
 }
 
+// ============================================================================
+// JIT Compilation Transform
+// ============================================================================
+
+/// Identifies which Angular decorator type a class has.
+#[derive(Debug, Clone, Copy)]
+enum AngularDecoratorKind {
+    Component,
+    Directive,
+    Pipe,
+    Injectable,
+    NgModule,
+}
+
+/// Information about an Angular-decorated class for JIT transformation.
+struct JitClassInfo {
+    /// The class name.
+    class_name: String,
+    /// Span of the decorator (including @).
+    decorator_span: Span,
+    /// Start of the statement (includes export keyword if present).
+    stmt_start: u32,
+    /// Start of the class keyword.
+    class_start: u32,
+    /// End of the class body (the closing `}`).
+    class_body_end: u32,
+    /// Whether the class is exported (not default).
+    is_exported: bool,
+    /// Whether the class is export default.
+    is_default_export: bool,
+    /// Constructor parameter info for ctorParameters.
+    ctor_params: std::vec::Vec<JitCtorParam>,
+    /// The modified decorator expression text for __decorate call.
+    decorator_text: String,
+}
+
+/// Constructor parameter info for JIT ctorParameters generation.
+struct JitCtorParam {
+    /// The type name (if resolvable to a runtime value).
+    type_name: Option<String>,
+    /// Angular decorators on the parameter, as source text spans.
+    decorators: std::vec::Vec<JitParamDecorator>,
+}
+
+/// A single decorator on a constructor parameter.
+struct JitParamDecorator {
+    /// The decorator name (e.g., "Optional", "Inject").
+    name: String,
+    /// The decorator arguments as source text (e.g., "TOKEN" for @Inject(TOKEN)).
+    args: Option<String>,
+}
+
+/// Find any Angular decorator on a class and return its kind and the decorator reference.
+fn find_angular_decorator<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+) -> Option<(AngularDecoratorKind, &'a oxc_ast::ast::Decorator<'a>)> {
+    for decorator in &class.decorators {
+        if let Expression::CallExpression(call) = &decorator.expression {
+            let name = match &call.callee {
+                Expression::Identifier(id) => Some(id.name.as_str()),
+                Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
+                _ => None,
+            };
+            match name {
+                Some("Component") => return Some((AngularDecoratorKind::Component, decorator)),
+                Some("Directive") => return Some((AngularDecoratorKind::Directive, decorator)),
+                Some("Pipe") => return Some((AngularDecoratorKind::Pipe, decorator)),
+                Some("Injectable") => return Some((AngularDecoratorKind::Injectable, decorator)),
+                Some("NgModule") => return Some((AngularDecoratorKind::NgModule, decorator)),
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
+/// Extract constructor parameter info for JIT ctorParameters generation.
+fn extract_jit_ctor_params(
+    source: &str,
+    class: &oxc_ast::ast::Class<'_>,
+) -> std::vec::Vec<JitCtorParam> {
+    use oxc_ast::ast::{ClassElement, MethodDefinitionKind};
+
+    let constructor = class.body.body.iter().find_map(|element| {
+        if let ClassElement::MethodDefinition(method) = element {
+            if method.kind == MethodDefinitionKind::Constructor {
+                return Some(method);
+            }
+        }
+        None
+    });
+
+    let Some(ctor) = constructor else {
+        return std::vec::Vec::new();
+    };
+
+    let mut params = std::vec::Vec::new();
+    for param in &ctor.value.params.items {
+        // Extract type name from type annotation (directly on FormalParameter)
+        let type_name = param
+            .type_annotation
+            .as_ref()
+            .and_then(|ann| extract_type_name_from_annotation(&ann.type_annotation));
+
+        // Extract Angular decorators
+        let mut decorators = std::vec::Vec::new();
+        for decorator in &param.decorators {
+            if let Expression::CallExpression(call) = &decorator.expression {
+                let dec_name = match &call.callee {
+                    Expression::Identifier(id) => Some(id.name.to_string()),
+                    _ => None,
+                };
+                if let Some(name) = dec_name {
+                    match name.as_str() {
+                        "Inject" | "Optional" | "SkipSelf" | "Self" | "Host" | "Attribute" => {
+                            let args = if call.arguments.is_empty() {
+                                None
+                            } else {
+                                // Extract args from source
+                                let args_start = call.arguments.first().unwrap().span().start;
+                                let args_end = call.arguments.last().unwrap().span().end;
+                                Some(source[args_start as usize..args_end as usize].to_string())
+                            };
+                            decorators.push(JitParamDecorator { name, args });
+                        }
+                        _ => {}
+                    }
+                }
+            } else if let Expression::Identifier(id) = &decorator.expression {
+                let name = id.name.to_string();
+                match name.as_str() {
+                    "Optional" | "SkipSelf" | "Self" | "Host" => {
+                        decorators.push(JitParamDecorator { name, args: None });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        params.push(JitCtorParam { type_name, decorators });
+    }
+
+    params
+}
+
+/// Extract a type name from a TypeScript type annotation for JIT ctorParameters.
+fn extract_type_name_from_annotation(type_annotation: &oxc_ast::ast::TSType<'_>) -> Option<String> {
+    match type_annotation {
+        oxc_ast::ast::TSType::TSTypeReference(type_ref) => {
+            // Simple type reference: `SomeClass`
+            match &type_ref.type_name {
+                oxc_ast::ast::TSTypeName::IdentifierReference(id) => Some(id.name.to_string()),
+                oxc_ast::ast::TSTypeName::QualifiedName(qn) => {
+                    // Qualified name: `ns.SomeClass`
+                    Some(format!("{}.{}", extract_ts_type_name_left(&qn.left), qn.right.name))
+                }
+                _ => None,
+            }
+        }
+        oxc_ast::ast::TSType::TSUnionType(union) => {
+            // For union types like `T | null`, try to find the non-null type
+            for t in &union.types {
+                if !matches!(t, oxc_ast::ast::TSType::TSNullKeyword(_)) {
+                    return extract_type_name_from_annotation(t);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Helper to extract the string from a TSTypeName (left side of qualified name).
+fn extract_ts_type_name_left(name: &oxc_ast::ast::TSTypeName<'_>) -> String {
+    match name {
+        oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.to_string(),
+        oxc_ast::ast::TSTypeName::QualifiedName(qn) => {
+            format!("{}.{}", extract_ts_type_name_left(&qn.left), qn.right.name)
+        }
+        _ => String::new(),
+    }
+}
+
+/// Build the ctorParameters static property text.
+fn build_ctor_parameters_text(params: &[JitCtorParam]) -> Option<String> {
+    if params.is_empty() {
+        return None;
+    }
+
+    let mut entries = std::vec::Vec::new();
+    for param in params {
+        let mut parts = std::vec::Vec::new();
+
+        // type
+        if let Some(ref type_name) = param.type_name {
+            parts.push(format!("type: {}", type_name));
+        } else {
+            parts.push("type: undefined".to_string());
+        }
+
+        // decorators
+        if !param.decorators.is_empty() {
+            let dec_strs: std::vec::Vec<String> = param
+                .decorators
+                .iter()
+                .map(|d| {
+                    if let Some(ref args) = d.args {
+                        format!("{{ type: {}, args: [{}] }}", d.name, args)
+                    } else {
+                        format!("{{ type: {} }}", d.name)
+                    }
+                })
+                .collect();
+            parts.push(format!("decorators: [{}]", dec_strs.join(", ")));
+        }
+
+        entries.push(format!("{{ {} }}", parts.join(", ")));
+    }
+
+    Some(format!("static ctorParameters = () => [\n    {}\n]", entries.join(",\n    ")))
+}
+
+/// Build the modified decorator expression text for JIT __decorate call.
+///
+/// For @Component decorators, replaces:
+/// - `templateUrl: './path'` → `template: __NG_CLI_RESOURCE__N`
+/// - `styleUrl: './path'` → `styles: [__NG_CLI_RESOURCE__N]`
+/// - `styleUrls: ['./a', './b']` → `styles: [__NG_CLI_RESOURCE__N, __NG_CLI_RESOURCE__M]`
+fn build_jit_decorator_text(
+    source: &str,
+    decorator: &oxc_ast::ast::Decorator<'_>,
+    decorator_kind: AngularDecoratorKind,
+    resource_counter: &mut u32,
+    resource_imports: &mut std::vec::Vec<(String, String)>, // (import_name, specifier)
+) -> String {
+    let expr_start = decorator.expression.span().start as usize;
+    let expr_end = decorator.expression.span().end as usize;
+    let expr_text = &source[expr_start..expr_end];
+
+    // For non-Component decorators, just return the expression text as-is
+    if !matches!(decorator_kind, AngularDecoratorKind::Component) {
+        return expr_text.to_string();
+    }
+
+    // For Component decorators, check for resource properties to replace
+    let Expression::CallExpression(call) = &decorator.expression else {
+        return expr_text.to_string();
+    };
+
+    let Some(config_arg) = call.arguments.first() else {
+        return expr_text.to_string();
+    };
+
+    let Argument::ObjectExpression(config_obj) = config_arg else {
+        return expr_text.to_string();
+    };
+
+    // Collect edits within the expression text
+    let mut edits: std::vec::Vec<(usize, usize, String)> = std::vec::Vec::new();
+
+    for prop in &config_obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            let key_name = match &prop.key {
+                PropertyKey::StaticIdentifier(id) => Some(id.name.as_str()),
+                PropertyKey::StringLiteral(s) => Some(s.value.as_str()),
+                _ => None,
+            };
+
+            match key_name {
+                Some("templateUrl") => {
+                    // Extract the URL string value
+                    if let Expression::StringLiteral(s) = &prop.value {
+                        let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
+                        let specifier = format!("angular:jit:template:file;{}", s.value.as_str());
+                        resource_imports.push((import_name.clone(), specifier));
+
+                        // Replace the entire property: `templateUrl: './app.html'` → `template: __NG_CLI_RESOURCE__0`
+                        let prop_start = prop.span.start as usize - expr_start;
+                        let prop_end = prop.span.end as usize - expr_start;
+                        edits.push((prop_start, prop_end, format!("template: {}", import_name)));
+
+                        *resource_counter += 1;
+                    }
+                }
+                Some("styleUrl") => {
+                    // Single style URL
+                    if let Expression::StringLiteral(s) = &prop.value {
+                        let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
+                        let specifier = format!("angular:jit:style:file;{}", s.value.as_str());
+                        resource_imports.push((import_name.clone(), specifier));
+
+                        let prop_start = prop.span.start as usize - expr_start;
+                        let prop_end = prop.span.end as usize - expr_start;
+                        edits.push((prop_start, prop_end, format!("styles: [{}]", import_name)));
+
+                        *resource_counter += 1;
+                    }
+                }
+                Some("styleUrls") => {
+                    // Array of style URLs
+                    if let Expression::ArrayExpression(arr) = &prop.value {
+                        let mut style_refs = std::vec::Vec::new();
+                        for elem in &arr.elements {
+                            if let ArrayExpressionElement::StringLiteral(s) = elem {
+                                let import_name =
+                                    format!("__NG_CLI_RESOURCE__{}", *resource_counter);
+                                let specifier =
+                                    format!("angular:jit:style:file;{}", s.value.as_str());
+                                resource_imports.push((import_name.clone(), specifier));
+                                style_refs.push(import_name);
+                                *resource_counter += 1;
+                            }
+                        }
+
+                        let prop_start = prop.span.start as usize - expr_start;
+                        let prop_end = prop.span.end as usize - expr_start;
+                        edits.push((
+                            prop_start,
+                            prop_end,
+                            format!("styles: [{}]", style_refs.join(", ")),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if edits.is_empty() {
+        return expr_text.to_string();
+    }
+
+    // Apply edits in reverse order to preserve positions
+    let mut result = expr_text.to_string();
+    edits.sort_by(|a, b| b.0.cmp(&a.0));
+    for (start, end, replacement) in edits {
+        result.replace_range(start..end, &replacement);
+    }
+
+    result
+}
+
+/// Transform an Angular TypeScript file in JIT (Just-In-Time) compilation mode.
+///
+/// JIT mode produces output compatible with Angular's JIT runtime compiler:
+/// - Decorators are downleveled using `__decorate` from tslib
+/// - `templateUrl` is replaced with `angular:jit:template:file;` imports
+/// - `styleUrl`/`styleUrls` are replaced with `angular:jit:style:file;` imports
+/// - Constructor parameters are emitted as `ctorParameters` static property
+/// - Templates are NOT compiled (the runtime JIT compiler handles that)
+fn transform_angular_file_jit(
+    allocator: &Allocator,
+    path: &str,
+    source: &str,
+    _options: &TransformOptions,
+) -> TransformResult {
+    let mut result = TransformResult::new();
+
+    // 1. Parse the TypeScript file
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, source, source_type).parse();
+
+    if !parser_ret.errors.is_empty() {
+        for error in parser_ret.errors {
+            result.diagnostics.push(OxcDiagnostic::error(error.to_string()));
+        }
+    }
+
+    // 2. Import elision is DISABLED in JIT mode.
+    // JIT mode needs all imports preserved because constructor parameter types
+    // are referenced at runtime in ctorParameters. Angular's TS JIT transform
+    // patches TypeScript's import elision for the same reason.
+
+    // 3. Walk AST to find Angular-decorated classes
+    let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
+    let mut resource_counter: u32 = 0;
+    let mut resource_imports: std::vec::Vec<(String, String)> = std::vec::Vec::new();
+
+    for stmt in &parser_ret.program.body {
+        let (class, stmt_start, is_exported, is_default_export) = match stmt {
+            Statement::ClassDeclaration(class) => {
+                (Some(class.as_ref()), class.span.start, false, false)
+            }
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                    (Some(class.as_ref()), export.span.start, false, true)
+                }
+                _ => (None, 0, false, false),
+            },
+            Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                Some(Declaration::ClassDeclaration(class)) => {
+                    (Some(class.as_ref()), export.span.start, true, false)
+                }
+                _ => (None, 0, false, false),
+            },
+            _ => (None, 0, false, false),
+        };
+
+        let Some(class) = class else { continue };
+        let Some(class_name) = class.id.as_ref().map(|id| id.name.to_string()) else {
+            continue;
+        };
+
+        let Some((decorator_kind, decorator)) = find_angular_decorator(class) else {
+            continue;
+        };
+
+        // Build modified decorator text (replaces templateUrl/styleUrl with resource imports)
+        let decorator_text = build_jit_decorator_text(
+            source,
+            decorator,
+            decorator_kind,
+            &mut resource_counter,
+            &mut resource_imports,
+        );
+
+        // Extract constructor parameters for ctorParameters
+        let ctor_params = extract_jit_ctor_params(source, class);
+
+        jit_classes.push(JitClassInfo {
+            class_name,
+            decorator_span: decorator.span,
+            stmt_start,
+            class_start: class.span.start,
+            class_body_end: class.body.span.end,
+            is_exported,
+            is_default_export,
+            ctor_params,
+            decorator_text,
+        });
+
+        result.component_count +=
+            if matches!(decorator_kind, AngularDecoratorKind::Component) { 1 } else { 0 };
+    }
+
+    if jit_classes.is_empty() {
+        // No Angular classes found, return source as-is
+        result.code = source.to_string();
+        return result;
+    }
+
+    // 4. Build edits
+    let mut edits: std::vec::Vec<Edit> = std::vec::Vec::new();
+
+    // Build the additional imports text (tslib + resource imports)
+    let mut additional_imports = String::new();
+    additional_imports.push_str("import { __decorate } from \"tslib\";\n");
+    for (import_name, specifier) in &resource_imports {
+        additional_imports.push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
+    }
+
+    // Insert additional imports after the last existing import
+    let ns_insert_pos = find_last_import_end(&parser_ret.program.body);
+    if let Some(insert_pos) = ns_insert_pos {
+        let bytes = source.as_bytes();
+        let mut actual_pos = insert_pos;
+        while actual_pos < bytes.len() {
+            let c = bytes[actual_pos];
+            if c == b'\n' {
+                actual_pos += 1;
+                break;
+            } else if c == b' ' || c == b'\t' || c == b'\r' {
+                actual_pos += 1;
+            } else {
+                break;
+            }
+        }
+        // Ensure insert position doesn't fall inside an import elision edit
+        for edit in &edits {
+            if (edit.start as usize) < actual_pos && (edit.end as usize) > actual_pos {
+                actual_pos = edit.end as usize;
+            }
+        }
+        edits.push(Edit::insert(actual_pos as u32, additional_imports).with_priority(10));
+    } else {
+        edits.push(Edit::insert(0, additional_imports).with_priority(10));
+    }
+
+    // Process each Angular class - generate edits for class restructuring
+    // Also need to collect member/constructor decorator spans from the AST
+    // Build a lookup of class positions to match against JitClassInfo
+    for stmt in parser_ret.program.body.iter() {
+        let class = match stmt {
+            Statement::ClassDeclaration(class) => Some(class.as_ref()),
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
+                _ => None,
+            },
+            Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        };
+
+        let Some(class) = class else { continue };
+
+        // Find the matching JitClassInfo by class start position
+        let Some(jit_info) = jit_classes.iter().find(|info| info.class_start == class.span.start)
+        else {
+            continue;
+        };
+
+        // 4a. Remove the Angular decorator (including @ and trailing whitespace)
+        {
+            let mut end = jit_info.decorator_span.end as usize;
+            let bytes = source.as_bytes();
+            while end < bytes.len() {
+                let c = bytes[end];
+                if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                    end += 1;
+                } else {
+                    break;
+                }
+            }
+            edits.push(Edit::delete(jit_info.decorator_span.start, end as u32));
+        }
+
+        // 4b. Remove member decorators (@Input, @Output, etc.) and constructor param decorators
+        {
+            let mut decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
+            super::decorator::collect_constructor_decorator_spans(class, &mut decorator_spans);
+            super::decorator::collect_member_decorator_spans(class, &mut decorator_spans);
+            for span in &decorator_spans {
+                let mut end = span.end as usize;
+                let bytes = source.as_bytes();
+                while end < bytes.len() {
+                    let c = bytes[end];
+                    if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                        end += 1;
+                    } else {
+                        break;
+                    }
+                }
+                edits.push(Edit::delete(span.start, end as u32));
+            }
+        }
+
+        // 4c. Class restructuring: `export class X` → `let X = class X`
+        if jit_info.is_exported || jit_info.is_default_export {
+            edits.push(Edit::replace(
+                jit_info.stmt_start,
+                jit_info.class_start,
+                format!("let {} = ", jit_info.class_name),
+            ));
+        } else {
+            edits.push(Edit::insert(
+                jit_info.class_start,
+                format!("let {} = ", jit_info.class_name),
+            ));
+        }
+
+        // 4d. Add ctorParameters inside class body (before closing `}`)
+        if let Some(ctor_text) = build_ctor_parameters_text(&jit_info.ctor_params) {
+            edits.push(Edit::insert(jit_info.class_body_end - 1, format!("\n{};\n", ctor_text)));
+        }
+
+        // 4e. After class body, add __decorate call and export
+        let mut after_class = format!(
+            ";\n{} = __decorate([\n    {}\n], {});\n",
+            jit_info.class_name, jit_info.decorator_text, jit_info.class_name
+        );
+
+        if jit_info.is_exported {
+            after_class.push_str(&format!("export {{ {} }};\n", jit_info.class_name));
+        } else if jit_info.is_default_export {
+            after_class.push_str(&format!("export default {};\n", jit_info.class_name));
+        }
+
+        edits.push(Edit::insert(jit_info.class_body_end, after_class));
+    }
+
+    // Apply all edits
+    result.code = apply_edits(source, edits);
+
+    result
+}
+
 /// Transform an Angular TypeScript file.
 ///
 /// This function:
@@ -670,6 +1248,11 @@ pub fn transform_angular_file(
     options: &TransformOptions,
     resolved_resources: Option<&ResolvedResources>,
 ) -> TransformResult {
+    // JIT mode uses a completely different code path
+    if options.jit {
+        return transform_angular_file_jit(allocator, path, source, options);
+    }
+
     let mut result = TransformResult::new();
 
     // 1. Parse the TypeScript file

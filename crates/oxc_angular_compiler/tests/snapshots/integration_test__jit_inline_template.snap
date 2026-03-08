@@ -1,0 +1,16 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Component } from '@angular/core';
+import { __decorate } from "tslib";
+
+let AppComponent = class AppComponent {};
+AppComponent = __decorate([
+    Component({
+    selector: 'app-root',
+    template: '<h1>Hello</h1>',
+    standalone: true,
+})
+], AppComponent);
+export { AppComponent };
