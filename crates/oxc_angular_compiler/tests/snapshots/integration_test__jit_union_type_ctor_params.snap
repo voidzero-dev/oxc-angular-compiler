@@ -1,0 +1,24 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Component } from '@angular/core';
+import { ServiceA } from './a.service';
+import { ServiceB } from './b.service';
+import { __decorate } from "tslib";
+
+let TestComponent = class TestComponent {
+    constructor(
+        svcA: undefined | ServiceA,
+        svcB: null | undefined | ServiceB,
+    ) {}
+
+static ctorParameters = () => [
+    { type: ServiceA },
+    { type: ServiceB }
+];
+};
+TestComponent = __decorate([
+    Component({ selector: 'test', template: '' })
+], TestComponent);
+export { TestComponent };

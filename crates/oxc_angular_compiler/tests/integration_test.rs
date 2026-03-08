@@ -6245,3 +6245,108 @@ export class App {
 
     insta::assert_snapshot!("jit_full_component", result.code);
 }
+
+#[test]
+fn test_jit_prop_decorators_emitted() {
+    // Bug fix: member decorators (@Input, @Output, etc.) must be downleveled
+    // to static propDecorators so Angular's JIT runtime can discover inputs/outputs.
+    // Without this, @Input/@Output decorators are silently lost, breaking data binding.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Input, Output, HostBinding, EventEmitter } from '@angular/core';
+
+@Directive({
+    selector: '[appHighlight]',
+})
+export class HighlightDirective {
+    @Input() color: string = 'yellow';
+    @Input('aliasName') title: string = '';
+    @Output() colorChange = new EventEmitter<string>();
+    @HostBinding('class.active') isActive = false;
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // propDecorators must be present — Angular's JIT runtime reads this
+    assert!(
+        result.code.contains("propDecorators"),
+        "JIT output must emit static propDecorators. Got:\n{}",
+        result.code
+    );
+
+    // Each decorated member should appear in propDecorators
+    assert!(result.code.contains("color:"), "propDecorators should list 'color'");
+    assert!(result.code.contains("title:"), "propDecorators should list 'title'");
+    assert!(result.code.contains("colorChange:"), "propDecorators should list 'colorChange'");
+    assert!(result.code.contains("isActive:"), "propDecorators should list 'isActive'");
+
+    // The decorator type references should be present
+    assert!(result.code.contains("type: Input"), "propDecorators should reference Input");
+    assert!(result.code.contains("type: Output"), "propDecorators should reference Output");
+    assert!(
+        result.code.contains("type: HostBinding"),
+        "propDecorators should reference HostBinding"
+    );
+
+    // The original decorators must be removed from the class body
+    assert!(
+        !result.code.contains("@Input()"),
+        "@Input decorator must be removed from class body"
+    );
+    assert!(
+        !result.code.contains("@Output()"),
+        "@Output decorator must be removed from class body"
+    );
+
+    insta::assert_snapshot!("jit_prop_decorators", result.code);
+}
+
+#[test]
+fn test_jit_union_type_ctor_params() {
+    // Bug fix: union types like `undefined | SomeService` or `null | undefined | T`
+    // must correctly extract the type name for ctorParameters.
+    // Previously only TSNullKeyword was skipped, causing TSUndefinedKeyword to short-circuit.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { ServiceA } from './a.service';
+import { ServiceB } from './b.service';
+
+@Component({ selector: 'test', template: '' })
+export class TestComponent {
+    constructor(
+        svcA: undefined | ServiceA,
+        svcB: null | undefined | ServiceB,
+    ) {}
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Both types must be correctly extracted despite union with undefined/null
+    assert!(
+        result.code.contains("type: ServiceA"),
+        "ctorParameters should resolve 'undefined | ServiceA' to ServiceA. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: ServiceB"),
+        "ctorParameters should resolve 'null | undefined | ServiceB' to ServiceB. Got:\n{}",
+        result.code
+    );
+
+    // Should NOT emit 'type: undefined' for either
+    assert!(
+        !result.code.contains("type: undefined"),
+        "ctorParameters must not emit 'type: undefined' for resolvable union types. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_union_type_ctor_params", result.code);
+}

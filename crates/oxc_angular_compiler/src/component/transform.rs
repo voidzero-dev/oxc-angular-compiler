@@ -675,6 +675,8 @@ struct JitClassInfo {
     is_default_export: bool,
     /// Constructor parameter info for ctorParameters.
     ctor_params: std::vec::Vec<JitCtorParam>,
+    /// Member decorator info for propDecorators.
+    member_decorators: std::vec::Vec<JitMemberDecorator>,
     /// The modified decorator expression text for __decorate call.
     decorator_text: String,
 }
@@ -693,6 +695,14 @@ struct JitParamDecorator {
     name: String,
     /// The decorator arguments as source text (e.g., "TOKEN" for @Inject(TOKEN)).
     args: Option<String>,
+}
+
+/// A member (property/method) with its Angular decorators for propDecorators.
+struct JitMemberDecorator {
+    /// The property/member name.
+    member_name: String,
+    /// The Angular decorators on this member.
+    decorators: std::vec::Vec<JitParamDecorator>,
 }
 
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
@@ -788,6 +798,122 @@ fn extract_jit_ctor_params(
     params
 }
 
+/// Extract Angular member decorators for JIT propDecorators generation.
+///
+/// Collects all Angular-relevant decorators from class properties/methods
+/// (excluding constructor) so they can be emitted as a `static propDecorators` property.
+fn extract_jit_member_decorators(
+    source: &str,
+    class: &oxc_ast::ast::Class<'_>,
+) -> std::vec::Vec<JitMemberDecorator> {
+    use oxc_ast::ast::{ClassElement, MethodDefinitionKind, PropertyKey};
+
+    const ANGULAR_MEMBER_DECORATORS: &[&str] = &[
+        "Input",
+        "Output",
+        "HostBinding",
+        "HostListener",
+        "ViewChild",
+        "ViewChildren",
+        "ContentChild",
+        "ContentChildren",
+    ];
+
+    let mut result: std::vec::Vec<JitMemberDecorator> = std::vec::Vec::new();
+
+    for element in &class.body.body {
+        let (member_name, decorators) = match element {
+            ClassElement::PropertyDefinition(prop) => {
+                let name = match &prop.key {
+                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+                    PropertyKey::StringLiteral(s) => s.value.to_string(),
+                    _ => continue,
+                };
+                (name, &prop.decorators)
+            }
+            ClassElement::MethodDefinition(method) => {
+                if method.kind == MethodDefinitionKind::Constructor {
+                    continue;
+                }
+                let name = match &method.key {
+                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+                    PropertyKey::StringLiteral(s) => s.value.to_string(),
+                    _ => continue,
+                };
+                (name, &method.decorators)
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                let name = match &accessor.key {
+                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+                    PropertyKey::StringLiteral(s) => s.value.to_string(),
+                    _ => continue,
+                };
+                (name, &accessor.decorators)
+            }
+            _ => continue,
+        };
+
+        let mut angular_decs: std::vec::Vec<JitParamDecorator> = std::vec::Vec::new();
+
+        for decorator in decorators {
+            let (dec_name, call_args) = match &decorator.expression {
+                Expression::CallExpression(call) => {
+                    let name = match &call.callee {
+                        Expression::Identifier(id) => id.name.to_string(),
+                        Expression::StaticMemberExpression(m) => m.property.name.to_string(),
+                        _ => continue,
+                    };
+                    let args = if call.arguments.is_empty() {
+                        None
+                    } else {
+                        let start = call.arguments.first().unwrap().span().start;
+                        let end = call.arguments.last().unwrap().span().end;
+                        Some(source[start as usize..end as usize].to_string())
+                    };
+                    (name, args)
+                }
+                Expression::Identifier(id) => (id.name.to_string(), None),
+                _ => continue,
+            };
+
+            if ANGULAR_MEMBER_DECORATORS.contains(&dec_name.as_str()) {
+                angular_decs.push(JitParamDecorator { name: dec_name, args: call_args });
+            }
+        }
+
+        if !angular_decs.is_empty() {
+            result.push(JitMemberDecorator { member_name, decorators: angular_decs });
+        }
+    }
+
+    result
+}
+
+/// Build the propDecorators static property text for JIT member decorator metadata.
+fn build_prop_decorators_text(members: &[JitMemberDecorator]) -> Option<String> {
+    if members.is_empty() {
+        return None;
+    }
+
+    let mut entries: std::vec::Vec<String> = std::vec::Vec::new();
+    for member in members {
+        let dec_strs: std::vec::Vec<String> = member
+            .decorators
+            .iter()
+            .map(|d| {
+                if let Some(ref args) = d.args {
+                    format!("{{ type: {}, args: [{}] }}", d.name, args)
+                } else {
+                    format!("{{ type: {} }}", d.name)
+                }
+            })
+            .collect();
+        entries.push(format!("    {}: [{}]", member.member_name, dec_strs.join(", ")));
+    }
+
+    Some(format!("static propDecorators = {{\n{}\n}}", entries.join(",\n")))
+}
+
 /// Extract a type name from a TypeScript type annotation for JIT ctorParameters.
 fn extract_type_name_from_annotation(type_annotation: &oxc_ast::ast::TSType<'_>) -> Option<String> {
     match type_annotation {
@@ -803,10 +929,13 @@ fn extract_type_name_from_annotation(type_annotation: &oxc_ast::ast::TSType<'_>)
             }
         }
         oxc_ast::ast::TSType::TSUnionType(union) => {
-            // For union types like `T | null`, try to find the non-null type
+            // For union types like `T | null`, `undefined | T`, `null | undefined | T`,
+            // iterate all members and return the first that resolves to a name.
+            // Using try-each-and-continue handles TSNullKeyword, TSUndefinedKeyword,
+            // and any other non-reference type gracefully.
             for t in &union.types {
-                if !matches!(t, oxc_ast::ast::TSType::TSNullKeyword(_)) {
-                    return extract_type_name_from_annotation(t);
+                if let Some(name) = extract_type_name_from_annotation(t) {
+                    return Some(name);
                 }
             }
             None
@@ -1062,6 +1191,9 @@ fn transform_angular_file_jit(
         // Extract constructor parameters for ctorParameters
         let ctor_params = extract_jit_ctor_params(source, class);
 
+        // Extract member decorators for propDecorators
+        let member_decorators = extract_jit_member_decorators(source, class);
+
         jit_classes.push(JitClassInfo {
             class_name,
             decorator_span: decorator.span,
@@ -1071,6 +1203,7 @@ fn transform_angular_file_jit(
             is_exported,
             is_default_export,
             ctor_params,
+            member_decorators,
             decorator_text,
         });
 
@@ -1195,9 +1328,19 @@ fn transform_angular_file_jit(
             ));
         }
 
-        // 4d. Add ctorParameters inside class body (before closing `}`)
-        if let Some(ctor_text) = build_ctor_parameters_text(&jit_info.ctor_params) {
-            edits.push(Edit::insert(jit_info.class_body_end - 1, format!("\n{};\n", ctor_text)));
+        // 4d. Add ctorParameters and propDecorators inside class body (before closing `}`)
+        {
+            let mut class_statics = String::new();
+            if let Some(ctor_text) = build_ctor_parameters_text(&jit_info.ctor_params) {
+                class_statics.push_str(&format!("\n{};", ctor_text));
+            }
+            if let Some(prop_text) = build_prop_decorators_text(&jit_info.member_decorators) {
+                class_statics.push_str(&format!("\n{};", prop_text));
+            }
+            if !class_statics.is_empty() {
+                class_statics.push('\n');
+                edits.push(Edit::insert(jit_info.class_body_end - 1, class_statics));
+            }
         }
 
         // 4e. After class body, add __decorate call and export
