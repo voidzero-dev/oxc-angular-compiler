@@ -15,7 +15,7 @@ use oxc_parser::Parser;
 use oxc_span::{Atom, GetSpan, SourceType, Span};
 use rustc_hash::FxHashMap;
 
-use crate::optimizer::{Edit, apply_edits};
+use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};
 
 #[cfg(feature = "cross_file_elision")]
 use super::cross_file_elision::CrossFileAnalyzer;
@@ -1126,7 +1126,7 @@ fn transform_angular_file_jit(
     allocator: &Allocator,
     path: &str,
     source: &str,
-    _options: &TransformOptions,
+    options: &TransformOptions,
 ) -> TransformResult {
     let mut result = TransformResult::new();
 
@@ -1213,7 +1213,13 @@ fn transform_angular_file_jit(
 
     if jit_classes.is_empty() {
         // No Angular classes found, return source as-is
-        result.code = source.to_string();
+        if options.sourcemap {
+            let (code, map) = apply_edits_with_sourcemap(source, vec![], path);
+            result.code = code;
+            result.map = map;
+        } else {
+            result.code = source.to_string();
+        }
         return result;
     }
 
@@ -1359,7 +1365,13 @@ fn transform_angular_file_jit(
     }
 
     // Apply all edits
-    result.code = apply_edits(source, edits);
+    if options.sourcemap {
+        let (code, map) = apply_edits_with_sourcemap(source, edits, path);
+        result.code = code;
+        result.map = map;
+    } else {
+        result.code = apply_edits(source, edits);
+    }
 
     result
 }
@@ -2125,8 +2137,13 @@ pub fn transform_angular_file(
     }
 
     // Apply all edits in one pass
-    result.code = apply_edits(source, edits);
-    result.map = None;
+    if options.sourcemap {
+        let (code, map) = apply_edits_with_sourcemap(source, edits, path);
+        result.code = code;
+        result.map = map;
+    } else {
+        result.code = apply_edits(source, edits);
+    }
 
     result
 }

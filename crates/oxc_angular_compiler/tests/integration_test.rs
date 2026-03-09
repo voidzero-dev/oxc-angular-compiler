@@ -6356,3 +6356,150 @@ export class TestComponent {
 
     insta::assert_snapshot!("jit_union_type_ctor_params", result.code);
 }
+
+// =========================================================================
+// Source map tests
+// =========================================================================
+
+#[test]
+fn test_sourcemap_aot_mode() {
+    // Issue #99: transformAngularFile should return a source map when sourcemap: true
+    let allocator = Allocator::default();
+    let source = r#"import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    template: '<h1>Hello World</h1>',
+    standalone: true,
+})
+export class TestComponent {
+}
+"#;
+
+    let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
+
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+
+    assert!(
+        result.map.is_some(),
+        "AOT mode should return a source map when sourcemap: true, but map was None"
+    );
+
+    let map = result.map.unwrap();
+    // Verify it's valid JSON
+    assert!(
+        map.starts_with('{'),
+        "Source map should be valid JSON, got: {}",
+        &map[..50.min(map.len())]
+    );
+    // Verify it contains expected sourcemap fields
+    assert!(map.contains("\"version\":3"), "Source map should have version 3");
+    assert!(map.contains("\"mappings\""), "Source map should have mappings");
+    assert!(map.contains("app.component.ts"), "Source map should reference the source file");
+}
+
+#[test]
+fn test_sourcemap_jit_mode() {
+    // Issue #99: JIT mode should also return a source map when sourcemap: true
+    let allocator = Allocator::default();
+    let source = r#"import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    template: '<h1>Hello World</h1>',
+    standalone: true,
+})
+export class TestComponent {
+}
+"#;
+
+    let options = ComponentTransformOptions { sourcemap: true, jit: true, ..Default::default() };
+
+    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+
+    assert!(
+        result.map.is_some(),
+        "JIT mode should return a source map when sourcemap: true, but map was None"
+    );
+
+    let map = result.map.unwrap();
+    assert!(map.starts_with('{'), "Source map should be valid JSON");
+    assert!(map.contains("\"version\":3"), "Source map should have version 3");
+}
+
+#[test]
+fn test_sourcemap_disabled_by_default() {
+    // When sourcemap is false (default), map should be None
+    let allocator = Allocator::default();
+    let source = r#"import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    template: '<h1>Hello</h1>',
+    standalone: true,
+})
+export class TestComponent {
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "app.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(result.map.is_none(), "Source map should be None when sourcemap option is false");
+}
+
+#[test]
+fn test_sourcemap_with_external_template() {
+    // Source map should work with resolved external templates
+    let allocator = Allocator::default();
+    let source = r#"import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-test',
+    templateUrl: './app.html',
+    standalone: true,
+})
+export class TestComponent {
+}
+"#;
+
+    let mut templates = std::collections::HashMap::new();
+    templates.insert("./app.html".to_string(), "<h1>Hello World</h1>".to_string());
+    let resolved = ResolvedResources { templates, styles: std::collections::HashMap::new() };
+
+    let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
+
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, &options, Some(&resolved));
+
+    assert!(
+        result.map.is_some(),
+        "AOT with external template should return a source map when sourcemap: true"
+    );
+}
+
+#[test]
+fn test_sourcemap_no_angular_classes() {
+    // A file with no Angular classes should still return a source map if requested
+    let allocator = Allocator::default();
+    let source = r#"export class PlainService {
+    getData() { return 42; }
+}
+"#;
+
+    let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
+
+    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+
+    // Even for files with no Angular components, if sourcemap is requested,
+    // a trivial identity source map should be returned
+    assert!(
+        result.map.is_some(),
+        "Should return a source map even for files with no Angular classes when sourcemap: true"
+    );
+}
