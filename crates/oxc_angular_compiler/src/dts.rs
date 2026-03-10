@@ -438,6 +438,49 @@ fn type_with_parameters(class_name: &str, count: u32) -> String {
     }
 }
 
+/// Shared helper: given an iterator of per-dependency info tuples, produce the
+/// constructor deps type string (`never` or a tuple type like
+/// `[null, {attribute: "title", optional: true}, null]`).
+///
+/// Each tuple element is `(attribute_entry, optional, host, self_, skip_self)`.
+/// `attribute_entry` is the pre-formatted `attribute: …` string fragment when
+/// the dependency has an attribute flag (e.g. `attribute: "title"` or
+/// `attribute: string`), or `None` otherwise.
+fn generate_ctor_deps_type(
+    deps: impl Iterator<Item = (Option<String>, bool, bool, bool, bool)>,
+) -> String {
+    let dep_types: Vec<Option<String>> = deps
+        .map(|(attribute_entry, optional, host, self_, skip_self)| {
+            let mut entries: Vec<String> = Vec::new();
+            if let Some(attr) = attribute_entry {
+                entries.push(attr);
+            }
+            if optional {
+                entries.push("optional: true".to_string());
+            }
+            if host {
+                entries.push("host: true".to_string());
+            }
+            if self_ {
+                entries.push("self: true".to_string());
+            }
+            if skip_self {
+                entries.push("skipSelf: true".to_string());
+            }
+            if entries.is_empty() { None } else { Some(format!("{{ {} }}", entries.join(", "))) }
+        })
+        .collect();
+
+    let has_types = dep_types.iter().any(|t| t.is_some());
+    if !has_types {
+        "never".to_string()
+    } else {
+        let entries: Vec<String> =
+            dep_types.into_iter().map(|t| t.unwrap_or_else(|| "null".to_string())).collect();
+        format!("[{}]", entries.join(", "))
+    }
+}
+
 /// Generate the constructor deps type parameter for `ɵɵFactoryDeclaration`.
 ///
 /// Returns `never` if no dependency has any special flags (attribute, optional, host, self, skipSelf).
@@ -445,46 +488,13 @@ fn type_with_parameters(class_name: &str, count: u32) -> String {
 fn generate_ctor_deps_type_from_component_deps(deps: Option<&[R3DependencyMetadata]>) -> String {
     match deps {
         None => "never".to_string(),
-        Some(deps) => {
-            let dep_types: Vec<Option<String>> = deps
-                .iter()
-                .map(|d| {
-                    let mut entries: Vec<String> = Vec::new();
-                    if let Some(name) = &d.attribute_name {
-                        entries
-                            .push(format!("attribute: \"{}\"", escape_dts_string(name.as_str())));
-                    }
-                    if d.optional {
-                        entries.push("optional: true".to_string());
-                    }
-                    if d.host {
-                        entries.push("host: true".to_string());
-                    }
-                    if d.self_ {
-                        entries.push("self: true".to_string());
-                    }
-                    if d.skip_self {
-                        entries.push("skipSelf: true".to_string());
-                    }
-                    if entries.is_empty() {
-                        None
-                    } else {
-                        Some(format!("{{ {} }}", entries.join(", ")))
-                    }
-                })
-                .collect();
-
-            let has_types = dep_types.iter().any(|t| t.is_some());
-            if !has_types {
-                "never".to_string()
-            } else {
-                let entries: Vec<String> = dep_types
-                    .into_iter()
-                    .map(|t| t.unwrap_or_else(|| "null".to_string()))
-                    .collect();
-                format!("[{}]", entries.join(", "))
-            }
-        }
+        Some(deps) => generate_ctor_deps_type(deps.iter().map(|d| {
+            let attribute_entry = d
+                .attribute_name
+                .as_ref()
+                .map(|name| format!("attribute: \"{}\"", escape_dts_string(name.as_str())));
+            (attribute_entry, d.optional, d.host, d.self_, d.skip_self)
+        })),
     }
 }
 
@@ -500,45 +510,14 @@ fn generate_ctor_deps_type_from_factory_deps(
 ) -> String {
     match deps {
         None => "never".to_string(),
-        Some(deps) => {
-            let dep_types: Vec<Option<String>> = deps
-                .iter()
-                .map(|d| {
-                    let mut entries: Vec<String> = Vec::new();
-                    if d.attribute_name_type.is_some() {
-                        entries.push("attribute: string".to_string());
-                    }
-                    if d.optional {
-                        entries.push("optional: true".to_string());
-                    }
-                    if d.host {
-                        entries.push("host: true".to_string());
-                    }
-                    if d.self_ {
-                        entries.push("self: true".to_string());
-                    }
-                    if d.skip_self {
-                        entries.push("skipSelf: true".to_string());
-                    }
-                    if entries.is_empty() {
-                        None
-                    } else {
-                        Some(format!("{{ {} }}", entries.join(", ")))
-                    }
-                })
-                .collect();
-
-            let has_types = dep_types.iter().any(|t| t.is_some());
-            if !has_types {
-                "never".to_string()
+        Some(deps) => generate_ctor_deps_type(deps.iter().map(|d| {
+            let attribute_entry = if d.attribute_name_type.is_some() {
+                Some("attribute: string".to_string())
             } else {
-                let entries: Vec<String> = dep_types
-                    .into_iter()
-                    .map(|t| t.unwrap_or_else(|| "null".to_string()))
-                    .collect();
-                format!("[{}]", entries.join(", "))
-            }
-        }
+                None
+            };
+            (attribute_entry, d.optional, d.host, d.self_, d.skip_self)
+        })),
     }
 }
 
@@ -715,12 +694,30 @@ fn generate_host_directives_type_from_directive(
 }
 
 /// Extract a directive name from an `OutputExpression`.
+///
+/// Handles:
+/// - `ReadVar`: simple variable name (e.g. `SomeDirective`)
+/// - `ReadProp`: namespace-qualified reference (e.g. `i1.SomeDirective`)
+/// - `External`: external module reference, using the export name
 fn extract_directive_name_from_expr(expr: &crate::output::ast::OutputExpression) -> String {
     match expr {
         crate::output::ast::OutputExpression::ReadVar(read_var) => {
             read_var.name.as_str().to_string()
         }
-        _ => "unknown".to_string(),
+        crate::output::ast::OutputExpression::ReadProp(read_prop) => {
+            let receiver = extract_directive_name_from_expr(&read_prop.receiver);
+            format!("{}.{}", receiver, read_prop.name.as_str())
+        }
+        crate::output::ast::OutputExpression::External(external) => match &external.value.name {
+            Some(name) => name.as_str().to_string(),
+            None => panic!("ExternalExpr in host directive has no export name"),
+        },
+        other => {
+            panic!(
+                "Unexpected OutputExpression variant in host directive type: {:?}",
+                std::mem::discriminant(other)
+            )
+        }
     }
 }
 
