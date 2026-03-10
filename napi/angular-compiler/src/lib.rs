@@ -272,6 +272,20 @@ pub struct TemplateCompileResult {
     pub errors: Vec<OxcError>,
 }
 
+/// A `.d.ts` type declaration for an Angular class.
+///
+/// Contains the class name and the static member declarations
+/// that should be injected into the corresponding `.d.ts` class body.
+#[derive(Default)]
+#[napi(object)]
+pub struct DtsDeclaration {
+    /// The name of the class.
+    pub class_name: String,
+    /// The static member declarations to add to the class body in `.d.ts`.
+    /// Newline-separated `static` property declarations.
+    pub members: String,
+}
+
 /// Result of transforming an Angular file.
 #[derive(Default)]
 #[napi(object)]
@@ -298,6 +312,18 @@ pub struct TransformResult {
 
     /// Compilation warnings.
     pub warnings: Vec<OxcError>,
+
+    /// `.d.ts` type declarations for Angular classes.
+    ///
+    /// Each entry contains the class name and the static member declarations
+    /// that should be injected into the corresponding `.d.ts` class body.
+    /// This enables library builds to include proper Ivy type declarations
+    /// for template type-checking by consumers.
+    ///
+    /// The declarations use `i0` as the namespace alias for `@angular/core`.
+    /// Consumers must ensure their `.d.ts` files include:
+    /// `import * as i0 from "@angular/core";`
+    pub dts_declarations: Vec<DtsDeclaration>,
 }
 
 /// Compile an Angular template to JavaScript.
@@ -1042,6 +1068,11 @@ impl Task for TransformAngularFileTask {
             style_updates: result.style_updates,
             errors,
             warnings: vec![],
+            dts_declarations: result
+                .dts_declarations
+                .into_iter()
+                .map(|d| DtsDeclaration { class_name: d.class_name, members: d.members })
+                .collect(),
         })
     }
 

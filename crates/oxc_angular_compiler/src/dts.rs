@@ -1,0 +1,666 @@
+//! Angular `.d.ts` type declaration generation.
+//!
+//! This module generates the static type declarations that should be added
+//! to `.d.ts` files for Angular library builds. These declarations enable
+//! Angular's template type-checking system to work with pre-compiled libraries.
+//!
+//! The generated declarations use `i0` as the namespace alias for `@angular/core`,
+//! matching Angular's convention. Consumers must ensure their `.d.ts` files include:
+//! ```typescript
+//! import * as i0 from "@angular/core";
+//! ```
+//!
+//! Reference: Angular's `IvyDeclarationDtsTransform` in
+//! `packages/compiler-cli/src/ngtsc/transform/src/declaration.ts`
+
+use crate::component::{ComponentMetadata, HostDirectiveMetadata, R3DependencyMetadata};
+use crate::directive::{R3DirectiveMetadata, R3InputMetadata};
+use crate::injectable::InjectableMetadata;
+use crate::ng_module::NgModuleMetadata;
+use crate::pipe::PipeMetadata;
+
+/// A `.d.ts` type declaration for an Angular class.
+///
+/// Contains the class name and the static member declarations
+/// that should be injected into the corresponding `.d.ts` class.
+#[derive(Debug, Clone, Default)]
+pub struct DtsDeclaration {
+    /// The name of the class.
+    pub class_name: String,
+    /// The static member declarations to add to the class body in `.d.ts`.
+    /// This is a newline-separated string of `static` property declarations.
+    ///
+    /// Example:
+    /// ```text
+    /// static ɵfac: i0.ɵɵFactoryDeclaration<MyComponent, never>;
+    /// static ɵcmp: i0.ɵɵComponentDeclaration<MyComponent, "app-my", never, {}, {}, never, never, true, never>;
+    /// ```
+    pub members: String,
+}
+
+// =============================================================================
+// Component Declarations
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a `@Component` class.
+///
+/// Produces:
+/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵcmp: i0.ɵɵComponentDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, NgContentSelectors, IsStandalone, HostDirectives, IsSignal>;`
+pub fn generate_component_dts(
+    metadata: &ComponentMetadata,
+    type_argument_count: u32,
+    content_query_names: &[String],
+    has_injectable: bool,
+) -> DtsDeclaration {
+    let class_name = metadata.class_name.as_str();
+    let type_with_params = type_with_parameters(class_name, type_argument_count);
+
+    // ɵfac declaration
+    let ctor_deps_type = generate_ctor_deps_type_from_component_deps(
+        metadata.constructor_deps.as_ref().map(|v| v.as_slice() as &[R3DependencyMetadata]),
+    );
+    let fac =
+        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+
+    // ɵcmp declaration
+    let selector = match &metadata.selector {
+        Some(s) => {
+            // Remove newlines from selector (matching Angular TS behavior)
+            let cleaned = s.as_str().replace('\n', "");
+            format!("\"{}\"", escape_dts_string(&cleaned))
+        }
+        None => "never".to_string(),
+    };
+
+    let export_as = if metadata.export_as.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .export_as
+                .iter()
+                .map(|e| format!("\"{}\"", escape_dts_string(e.as_str())))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let input_map = generate_input_map_type(&metadata.inputs);
+    let output_map = generate_output_map_type(&metadata.outputs);
+
+    let query_fields = if content_query_names.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            content_query_names
+                .iter()
+                .map(|name| format!("\"{}\"", escape_dts_string(name)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    // NgContentSelectors: would require template analysis; use never for now
+    let ng_content_selectors = "never".to_string();
+
+    let is_standalone = if metadata.standalone { "true" } else { "false" };
+
+    let host_directives = if metadata.host_directives.is_empty() {
+        "never".to_string()
+    } else {
+        generate_host_directives_type_from_component(&metadata.host_directives)
+    };
+
+    let mut type_params = vec![
+        type_with_params.clone(),
+        selector,
+        export_as,
+        input_map,
+        output_map,
+        query_fields,
+        ng_content_selectors,
+        is_standalone.to_string(),
+        host_directives,
+    ];
+
+    if metadata.is_signal {
+        type_params.push("true".to_string());
+    }
+
+    let cmp = format!("static ɵcmp: i0.ɵɵComponentDeclaration<{}>;", type_params.join(", "));
+
+    let mut members = format!("{fac}\n{cmp}");
+
+    // Add ɵprov if @Injectable is also present
+    if has_injectable {
+        members
+            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+    }
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// Directive Declarations
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a `@Directive` class.
+///
+/// Produces:
+/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵdir: i0.ɵɵDirectiveDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, never, IsStandalone, HostDirectives, IsSignal>;`
+pub fn generate_directive_dts(
+    metadata: &R3DirectiveMetadata,
+    has_injectable: bool,
+) -> DtsDeclaration {
+    let class_name = metadata.name.as_str();
+    let type_with_params = type_with_parameters(class_name, metadata.type_argument_count);
+
+    // ɵfac declaration
+    let ctor_deps_type =
+        generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
+    let fac =
+        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+
+    // ɵdir declaration
+    let selector = match &metadata.selector {
+        Some(s) => {
+            let cleaned = s.as_str().replace('\n', "");
+            format!("\"{}\"", escape_dts_string(&cleaned))
+        }
+        None => "never".to_string(),
+    };
+
+    let export_as = if metadata.export_as.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .export_as
+                .iter()
+                .map(|e| format!("\"{}\"", escape_dts_string(e.as_str())))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let input_map = generate_input_map_type(&metadata.inputs);
+    let output_map = generate_output_map_type(&metadata.outputs);
+
+    let query_fields = if metadata.queries.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .queries
+                .iter()
+                .map(|q| format!("\"{}\"", escape_dts_string(q.property_name.as_str())))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    // NgContentSelectors is always `never` for directives
+    let ng_content_selectors = "never";
+
+    let is_standalone = if metadata.is_standalone { "true" } else { "false" };
+
+    let host_directives = if metadata.host_directives.is_empty() {
+        "never".to_string()
+    } else {
+        generate_host_directives_type_from_directive(&metadata.host_directives)
+    };
+
+    let mut type_params = vec![
+        type_with_params.clone(),
+        selector,
+        export_as,
+        input_map,
+        output_map,
+        query_fields,
+        ng_content_selectors.to_string(),
+        is_standalone.to_string(),
+        host_directives,
+    ];
+
+    if metadata.is_signal {
+        type_params.push("true".to_string());
+    }
+
+    let dir = format!("static ɵdir: i0.ɵɵDirectiveDeclaration<{}>;", type_params.join(", "));
+
+    let mut members = format!("{fac}\n{dir}");
+
+    if has_injectable {
+        members
+            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+    }
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// Pipe Declarations
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a `@Pipe` class.
+///
+/// Produces:
+/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵpipe: i0.ɵɵPipeDeclaration<T, Name, IsStandalone>;`
+pub fn generate_pipe_dts(metadata: &PipeMetadata, has_injectable: bool) -> DtsDeclaration {
+    let class_name = metadata.class_name.as_str();
+    // Pipes don't have type parameters in practice
+    let type_with_params = class_name.to_string();
+
+    // ɵfac declaration
+    let ctor_deps_type =
+        generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
+    let fac =
+        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+
+    // ɵpipe declaration
+    let pipe_name = match &metadata.pipe_name {
+        Some(name) => format!("\"{}\"", escape_dts_string(name.as_str())),
+        None => "\"\"".to_string(),
+    };
+
+    let is_standalone = if metadata.standalone { "true" } else { "false" };
+
+    let pipe = format!(
+        "static ɵpipe: i0.ɵɵPipeDeclaration<{type_with_params}, {pipe_name}, {is_standalone}>;"
+    );
+
+    let mut members = format!("{fac}\n{pipe}");
+
+    if has_injectable {
+        members
+            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+    }
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// NgModule Declarations
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a `@NgModule` class.
+///
+/// Produces:
+/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵmod: i0.ɵɵNgModuleDeclaration<T, Declarations, Imports, Exports>;`
+/// - `static ɵinj: i0.ɵɵInjectorDeclaration<T>;`
+pub fn generate_ng_module_dts(metadata: &NgModuleMetadata, has_injectable: bool) -> DtsDeclaration {
+    let class_name = metadata.class_name.as_str();
+    let type_with_params = class_name.to_string();
+
+    // ɵfac declaration
+    let ctor_deps_type =
+        generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
+    let fac =
+        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+
+    // ɵmod declaration - uses typeof references for declarations/imports/exports
+    let declarations_type = if metadata.declarations.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .declarations
+                .iter()
+                .map(|d| format!("typeof {}", d.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let imports_type = if metadata.imports.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .imports
+                .iter()
+                .map(|i| format!("typeof {}", i.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let exports_type = if metadata.exports.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            metadata
+                .exports
+                .iter()
+                .map(|e| format!("typeof {}", e.as_str()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    let mod_decl = format!(
+        "static ɵmod: i0.ɵɵNgModuleDeclaration<{type_with_params}, {declarations_type}, {imports_type}, {exports_type}>;"
+    );
+
+    // ɵinj declaration
+    let inj = format!("static ɵinj: i0.ɵɵInjectorDeclaration<{type_with_params}>;");
+
+    let mut members = format!("{fac}\n{mod_decl}\n{inj}");
+
+    if has_injectable {
+        members
+            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+    }
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// Injectable Declarations
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a standalone `@Injectable` class.
+///
+/// Produces:
+/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵprov: i0.ɵɵInjectableDeclaration<T>;`
+pub fn generate_injectable_dts(metadata: &InjectableMetadata) -> DtsDeclaration {
+    let class_name = metadata.class_name.as_str();
+    let type_with_params = class_name.to_string();
+
+    // ɵfac declaration
+    let ctor_deps_type =
+        generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
+    let fac =
+        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+
+    // ɵprov declaration
+    let prov = format!("static ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;");
+
+    let members = format!("{fac}\n{prov}");
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// Helper Functions
+// =============================================================================
+
+/// Generate the type parameter `T` with any generic params filled as `any`.
+///
+/// For `class Foo<A, B>`, produces `Foo<any, any>`.
+/// For `class Foo`, produces `Foo`.
+fn type_with_parameters(class_name: &str, count: u32) -> String {
+    if count == 0 {
+        class_name.to_string()
+    } else {
+        let params: Vec<&str> = (0..count).map(|_| "any").collect();
+        format!("{}<{}>", class_name, params.join(", "))
+    }
+}
+
+/// Generate the constructor deps type parameter for `ɵɵFactoryDeclaration`.
+///
+/// Returns `never` if there are no `@Attribute()` dependencies.
+/// Returns a tuple type like `[null, "attrName", null]` if there are attribute deps.
+fn generate_ctor_deps_type_from_component_deps(deps: Option<&[R3DependencyMetadata]>) -> String {
+    match deps {
+        None => "never".to_string(),
+        Some(deps) => {
+            let has_attributes = deps.iter().any(|d| d.attribute_name.is_some());
+            if !has_attributes {
+                "never".to_string()
+            } else {
+                let entries: Vec<String> = deps
+                    .iter()
+                    .map(|d| match &d.attribute_name {
+                        Some(name) => format!("\"{}\"", escape_dts_string(name.as_str())),
+                        None => "null".to_string(),
+                    })
+                    .collect();
+                format!("[{}]", entries.join(", "))
+            }
+        }
+    }
+}
+
+/// Generate the constructor deps type from directive/pipe/ngmodule/injectable deps.
+///
+/// Uses the factory module's `R3DependencyMetadata` which is used by directives,
+/// pipes, NgModules, and injectables.
+fn generate_ctor_deps_type_from_factory_deps(
+    deps: Option<&[crate::factory::R3DependencyMetadata]>,
+) -> String {
+    match deps {
+        None => "never".to_string(),
+        Some(deps) => {
+            // The factory R3DependencyMetadata uses `attribute_name_type` (an OutputExpression)
+            // for @Attribute() dependencies. If any dep has it set, we emit a tuple type.
+            let has_attributes = deps.iter().any(|d| d.attribute_name_type.is_some());
+            if !has_attributes {
+                "never".to_string()
+            } else {
+                let entries: Vec<String> = deps
+                    .iter()
+                    .map(|d| {
+                        if d.attribute_name_type.is_some() {
+                            // @Attribute deps get a string type in the tuple
+                            "string".to_string()
+                        } else {
+                            "null".to_string()
+                        }
+                    })
+                    .collect();
+                format!("[{}]", entries.join(", "))
+            }
+        }
+    }
+}
+
+/// Generate the input map type for `ɵɵComponentDeclaration` / `ɵɵDirectiveDeclaration`.
+///
+/// Produces a TypeScript object literal type like:
+/// ```text
+/// { "name": { "alias": "name"; "required": false; }; "value": { "alias": "aliasedValue"; "required": true; "isSignal": true; }; }
+/// ```
+fn generate_input_map_type(inputs: &[R3InputMetadata]) -> String {
+    if inputs.is_empty() {
+        return "{}".to_string();
+    }
+
+    let entries: Vec<String> = inputs
+        .iter()
+        .map(|input| {
+            let key = escape_dts_string(input.class_property_name.as_str());
+            let alias = escape_dts_string(input.binding_property_name.as_str());
+            let required = if input.required { "true" } else { "false" };
+
+            let mut props = format!("\"alias\": \"{alias}\"; \"required\": {required};");
+            if input.is_signal {
+                props.push_str(" \"isSignal\": true;");
+            }
+
+            format!("\"{key}\": {{ {props} }};")
+        })
+        .collect();
+
+    format!("{{ {} }}", entries.join(" "))
+}
+
+/// Generate the output map type.
+///
+/// Produces: `{ "clicked": "clicked"; "valueChanged": "onChange"; }`
+fn generate_output_map_type(outputs: &[(oxc_span::Atom, oxc_span::Atom)]) -> String {
+    if outputs.is_empty() {
+        return "{}".to_string();
+    }
+
+    let entries: Vec<String> = outputs
+        .iter()
+        .map(|(class_name, binding_name)| {
+            format!(
+                "\"{}\": \"{}\";",
+                escape_dts_string(class_name.as_str()),
+                escape_dts_string(binding_name.as_str())
+            )
+        })
+        .collect();
+
+    format!("{{ {} }}", entries.join(" "))
+}
+
+/// Generate the host directives type from component host directives.
+fn generate_host_directives_type_from_component(
+    host_directives: &[HostDirectiveMetadata],
+) -> String {
+    let entries: Vec<String> = host_directives
+        .iter()
+        .map(|hd| {
+            let directive = format!("typeof {}", hd.directive.as_str());
+            let inputs = if hd.inputs.is_empty() {
+                "{}".to_string()
+            } else {
+                let input_entries: Vec<String> = hd
+                    .inputs
+                    .iter()
+                    .map(|(public, internal)| {
+                        format!(
+                            "\"{}\": \"{}\"",
+                            escape_dts_string(public.as_str()),
+                            escape_dts_string(internal.as_str())
+                        )
+                    })
+                    .collect();
+                format!("{{ {} }}", input_entries.join("; "))
+            };
+            let outputs = if hd.outputs.is_empty() {
+                "{}".to_string()
+            } else {
+                let output_entries: Vec<String> = hd
+                    .outputs
+                    .iter()
+                    .map(|(public, internal)| {
+                        format!(
+                            "\"{}\": \"{}\"",
+                            escape_dts_string(public.as_str()),
+                            escape_dts_string(internal.as_str())
+                        )
+                    })
+                    .collect();
+                format!("{{ {} }}", output_entries.join("; "))
+            };
+            format!("{{ directive: {directive}; inputs: {inputs}; outputs: {outputs}; }}")
+        })
+        .collect();
+
+    format!("[{}]", entries.join(", "))
+}
+
+/// Generate the host directives type from directive host directives.
+fn generate_host_directives_type_from_directive(
+    host_directives: &[crate::directive::R3HostDirectiveMetadata],
+) -> String {
+    let entries: Vec<String> = host_directives
+        .iter()
+        .map(|hd| {
+            // Extract the directive name from the OutputExpression
+            let directive_name = extract_directive_name_from_expr(&hd.directive);
+            let directive = format!("typeof {directive_name}");
+            let inputs = if hd.inputs.is_empty() {
+                "{}".to_string()
+            } else {
+                let input_entries: Vec<String> = hd
+                    .inputs
+                    .iter()
+                    .map(|(public, internal)| {
+                        format!(
+                            "\"{}\": \"{}\"",
+                            escape_dts_string(public.as_str()),
+                            escape_dts_string(internal.as_str())
+                        )
+                    })
+                    .collect();
+                format!("{{ {} }}", input_entries.join("; "))
+            };
+            let outputs = if hd.outputs.is_empty() {
+                "{}".to_string()
+            } else {
+                let output_entries: Vec<String> = hd
+                    .outputs
+                    .iter()
+                    .map(|(public, internal)| {
+                        format!(
+                            "\"{}\": \"{}\"",
+                            escape_dts_string(public.as_str()),
+                            escape_dts_string(internal.as_str())
+                        )
+                    })
+                    .collect();
+                format!("{{ {} }}", output_entries.join("; "))
+            };
+            format!("{{ directive: {directive}; inputs: {inputs}; outputs: {outputs}; }}")
+        })
+        .collect();
+
+    format!("[{}]", entries.join(", "))
+}
+
+/// Extract a directive name from an `OutputExpression`.
+fn extract_directive_name_from_expr(expr: &crate::output::ast::OutputExpression) -> String {
+    match expr {
+        crate::output::ast::OutputExpression::ReadVar(read_var) => {
+            read_var.name.as_str().to_string()
+        }
+        _ => "unknown".to_string(),
+    }
+}
+
+/// Escape a string for use in a TypeScript `.d.ts` string literal type.
+fn escape_dts_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_type_with_parameters_no_params() {
+        assert_eq!(type_with_parameters("MyComponent", 0), "MyComponent");
+    }
+
+    #[test]
+    fn test_type_with_parameters_with_params() {
+        assert_eq!(type_with_parameters("MyComponent", 2), "MyComponent<any, any>");
+    }
+
+    #[test]
+    fn test_escape_dts_string() {
+        assert_eq!(escape_dts_string("hello"), "hello");
+        assert_eq!(escape_dts_string(r#"he"llo"#), r#"he\"llo"#);
+        assert_eq!(escape_dts_string(r"he\llo"), r"he\\llo");
+    }
+
+    #[test]
+    fn test_generate_input_map_type_empty() {
+        let inputs: Vec<R3InputMetadata> = vec![];
+        assert_eq!(generate_input_map_type(&inputs), "{}");
+    }
+
+    #[test]
+    fn test_generate_output_map_type_empty() {
+        let outputs: Vec<(oxc_span::Atom, oxc_span::Atom)> = vec![];
+        assert_eq!(generate_output_map_type(&outputs), "{}");
+    }
+}

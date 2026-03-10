@@ -186,6 +186,22 @@ export interface DependencyMetadata {
 }
 
 /**
+ * A `.d.ts` type declaration for an Angular class.
+ *
+ * Contains the class name and the static member declarations
+ * that should be injected into the corresponding `.d.ts` class body.
+ */
+export interface DtsDeclaration {
+  /** The name of the class. */
+  className: string
+  /**
+   * The static member declarations to add to the class body in `.d.ts`.
+   * Newline-separated `static` property declarations.
+   */
+  members: string
+}
+
+/**
  * Encapsulate CSS styles for a component using attribute selectors.
  *
  * This implements Angular's ViewEncapsulation.Emulated behavior,
@@ -839,6 +855,19 @@ export interface TransformResult {
   errors: Array<OxcError>
   /** Compilation warnings. */
   warnings: Array<OxcError>
+  /**
+   * `.d.ts` type declarations for Angular classes.
+   *
+   * Each entry contains the class name and the static member declarations
+   * that should be injected into the corresponding `.d.ts` class body.
+   * This enables library builds to include proper Ivy type declarations
+   * for template type-checking by consumers.
+   *
+   * The declarations use `i0` as the namespace alias for `@angular/core`.
+   * Consumers must ensure their `.d.ts` files include:
+   * `import * as i0 from "@angular/core";`
+   */
+  dtsDeclarations: Array<DtsDeclaration>
 }
 export interface Comment {
   type: 'Line' | 'Block'

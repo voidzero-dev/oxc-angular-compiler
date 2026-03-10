@@ -6503,3 +6503,435 @@ fn test_sourcemap_no_angular_classes() {
         "Should return a source map even for files with no Angular classes when sourcemap: true"
     );
 }
+
+// =============================================================================
+// .d.ts Declaration Generation Tests (Issue #86)
+// =============================================================================
+
+#[test]
+fn test_dts_component_basic() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-hello',
+  standalone: true,
+  template: '<p>Hello</p>'
+})
+export class HelloComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "hello.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    // Should have exactly one dts declaration
+    assert_eq!(result.dts_declarations.len(), 1, "Should have one dts declaration");
+
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "HelloComponent");
+
+    // Should contain ɵfac declaration
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<HelloComponent, never>;"),
+        "Should contain ɵfac declaration. Got:\n{}",
+        decl.members
+    );
+
+    // Should contain ɵcmp declaration with correct selector
+    assert!(
+        decl.members
+            .contains("static ɵcmp: i0.ɵɵComponentDeclaration<HelloComponent, \"app-hello\""),
+        "Should contain ɵcmp declaration with selector. Got:\n{}",
+        decl.members
+    );
+
+    // Should include standalone: true
+    assert!(
+        decl.members.contains("true, never>;"),
+        "Should include standalone=true. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_with_inputs_outputs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Input, Output, EventEmitter } from '@angular/core';
+
+@Component({
+  selector: 'app-user',
+  standalone: true,
+  template: '<p>{{name}}</p>'
+})
+export class UserComponent {
+  @Input() name: string = '';
+  @Input({ required: true, alias: 'userId' }) id!: number;
+  @Output() clicked = new EventEmitter<void>();
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "user.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "UserComponent");
+
+    // Should contain input map with proper metadata
+    assert!(
+        decl.members.contains(r#""name": { "alias": "name"; "required": false; }"#),
+        "Should contain name input metadata. Got:\n{}",
+        decl.members
+    );
+    assert!(
+        decl.members.contains(r#""id": { "alias": "userId"; "required": true; }"#),
+        "Should contain id input metadata with alias. Got:\n{}",
+        decl.members
+    );
+
+    // Should contain output map
+    assert!(
+        decl.members.contains(r#""clicked": "clicked""#),
+        "Should contain output metadata. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_non_standalone() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-legacy',
+  standalone: false,
+  template: '<p>Legacy</p>'
+})
+export class LegacyComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "legacy.component.ts", source, &options, None);
+    assert!(!result.has_errors());
+
+    let decl = &result.dts_declarations[0];
+    // Should include standalone: false
+    assert!(
+        decl.members.contains("false, never>;"),
+        "Should include standalone=false. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_with_export_as() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-tooltip',
+  standalone: true,
+  exportAs: 'tooltip',
+  template: '<ng-content></ng-content>'
+})
+export class TooltipComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "tooltip.component.ts", source, &options, None);
+    assert!(!result.has_errors());
+
+    let decl = &result.dts_declarations[0];
+    assert!(
+        decl.members.contains(r#"["tooltip"]"#),
+        "Should contain exportAs array. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_directive() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Input, Output, EventEmitter } from '@angular/core';
+
+@Directive({
+  selector: '[appHighlight]',
+  standalone: true,
+  exportAs: 'highlight'
+})
+export class HighlightDirective {
+  @Input() color: string = 'yellow';
+  @Output() highlighted = new EventEmitter<boolean>();
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result =
+        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "HighlightDirective");
+
+    // Should have ɵfac
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<HighlightDirective, never>;"),
+        "Should contain ɵfac. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵdir (not ɵcmp)
+    assert!(
+        decl.members.contains(
+            "static ɵdir: i0.ɵɵDirectiveDeclaration<HighlightDirective, \"[appHighlight]\""
+        ),
+        "Should contain ɵdir with selector. Got:\n{}",
+        decl.members
+    );
+
+    // Should contain exportAs
+    assert!(
+        decl.members.contains(r#"["highlight"]"#),
+        "Should contain exportAs. Got:\n{}",
+        decl.members
+    );
+
+    // Should contain input metadata
+    assert!(
+        decl.members.contains(r#""color": { "alias": "color"; "required": false; }"#),
+        "Should contain input metadata. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_pipe() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({
+  name: 'capitalize',
+  standalone: true
+})
+export class CapitalizePipe implements PipeTransform {
+  transform(value: string): string {
+    return value.charAt(0).toUpperCase() + value.slice(1);
+  }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "capitalize.pipe.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "CapitalizePipe");
+
+    // Should have ɵfac
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<CapitalizePipe, never>;"),
+        "Should contain ɵfac. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵpipe with correct name and standalone
+    assert!(
+        decl.members
+            .contains(r#"static ɵpipe: i0.ɵɵPipeDeclaration<CapitalizePipe, "capitalize", true>;"#),
+        "Should contain ɵpipe declaration. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_ng_module() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { NgModule } from '@angular/core';
+import { CommonModule } from '@angular/common';
+
+@NgModule({
+  declarations: [MyComponent],
+  imports: [CommonModule],
+  exports: [MyComponent]
+})
+export class MyModule {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "my.module.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "MyModule");
+
+    // Should have ɵfac
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<MyModule, never>;"),
+        "Should contain ɵfac. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵmod with declarations, imports, exports
+    assert!(
+        decl.members.contains("static ɵmod: i0.ɵɵNgModuleDeclaration<MyModule,"),
+        "Should contain ɵmod. Got:\n{}",
+        decl.members
+    );
+    assert!(
+        decl.members.contains("typeof MyComponent"),
+        "Should reference MyComponent with typeof. Got:\n{}",
+        decl.members
+    );
+    assert!(
+        decl.members.contains("typeof CommonModule"),
+        "Should reference CommonModule with typeof. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵinj
+    assert!(
+        decl.members.contains("static ɵinj: i0.ɵɵInjectorDeclaration<MyModule>;"),
+        "Should contain ɵinj. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_injectable() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class DataService {
+  getData() { return []; }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "data.service.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "DataService");
+
+    // Should have ɵfac
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<DataService, never>;"),
+        "Should contain ɵfac. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵprov
+    assert!(
+        decl.members.contains("static ɵprov: i0.ɵɵInjectableDeclaration<DataService>;"),
+        "Should contain ɵprov. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_multiple_classes_in_file() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Injectable, Pipe, PipeTransform } from '@angular/core';
+
+@Injectable({ providedIn: 'root' })
+export class MyService {}
+
+@Pipe({ name: 'myPipe', standalone: true })
+export class MyPipe implements PipeTransform {
+  transform(v: any) { return v; }
+}
+
+@Component({
+  selector: 'app-multi',
+  standalone: true,
+  template: '<p>{{value | myPipe}}</p>'
+})
+export class MultiComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "multi.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    // Should have declarations for all 3 classes
+    assert_eq!(
+        result.dts_declarations.len(),
+        3,
+        "Should have 3 dts declarations. Got: {:?}",
+        result.dts_declarations.iter().map(|d| &d.class_name).collect::<Vec<_>>()
+    );
+
+    let class_names: Vec<&str> =
+        result.dts_declarations.iter().map(|d| d.class_name.as_str()).collect();
+    assert!(class_names.contains(&"MyService"), "Should have MyService");
+    assert!(class_names.contains(&"MyPipe"), "Should have MyPipe");
+    assert!(class_names.contains(&"MultiComponent"), "Should have MultiComponent");
+}
+
+#[test]
+fn test_dts_no_declarations_for_plain_class() {
+    let allocator = Allocator::default();
+    let source = r#"
+export class PlainClass {
+  doStuff() { return 42; }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+
+    // Should have no dts declarations for plain classes
+    assert!(
+        result.dts_declarations.is_empty(),
+        "Should have no dts declarations for plain classes"
+    );
+}
+
+#[test]
+fn test_dts_component_with_signal_input() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, input } from '@angular/core';
+
+@Component({
+  selector: 'app-signal',
+  standalone: true,
+  template: '<p>{{name()}}</p>'
+})
+export class SignalComponent {
+  name = input<string>('default');
+  required = input.required<number>();
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "signal.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+
+    // Signal inputs should have isSignal: true in the input map
+    assert!(
+        decl.members.contains(r#""isSignal": true"#),
+        "Signal inputs should have isSignal: true. Got:\n{}",
+        decl.members
+    );
+}

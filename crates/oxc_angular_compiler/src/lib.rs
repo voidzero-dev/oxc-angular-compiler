@@ -31,6 +31,7 @@ pub mod class_debug_info;
 pub mod class_metadata;
 pub mod component;
 pub mod directive;
+pub mod dts;
 pub mod factory;
 pub mod hmr;
 pub mod i18n;
@@ -133,6 +134,12 @@ pub use class_metadata::{
     build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
     compile_component_class_metadata, compile_component_metadata_async_resolver,
     compile_opaque_async_class_metadata,
+};
+
+// Re-export dts types
+pub use dts::{
+    DtsDeclaration, generate_component_dts, generate_directive_dts, generate_injectable_dts,
+    generate_ng_module_dts, generate_pipe_dts,
 };
 
 // Re-export linker types

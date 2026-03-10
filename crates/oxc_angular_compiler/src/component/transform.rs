@@ -38,6 +38,7 @@ use crate::directive::{
     extract_content_queries, extract_directive_metadata, extract_view_queries,
     find_directive_decorator_span, generate_directive_definitions,
 };
+use crate::dts;
 use crate::injectable::{
     extract_injectable_metadata, find_injectable_decorator_span,
     generate_injectable_definition_from_decorator,
@@ -276,6 +277,20 @@ pub struct TransformResult {
 
     /// Number of components found in the file.
     pub component_count: usize,
+
+    /// `.d.ts` type declarations for Angular classes.
+    ///
+    /// Each entry contains the class name and the static member declarations
+    /// that should be injected into the corresponding `.d.ts` class body.
+    /// This enables library builds to include proper Ivy type declarations
+    /// for template type-checking by consumers.
+    ///
+    /// The declarations use `i0` as the namespace alias for `@angular/core`.
+    /// Consumers must ensure their `.d.ts` files include:
+    /// ```typescript
+    /// import * as i0 from "@angular/core";
+    /// ```
+    pub dts_declarations: Vec<crate::dts::DtsDeclaration>,
 }
 
 impl TransformResult {
@@ -1565,6 +1580,11 @@ pub fn transform_angular_file(
                     // Signal-based queries (contentChild(), contentChildren()) are also detected here
                     let content_queries = extract_content_queries(allocator, class);
 
+                    // Collect content query property names for .d.ts generation
+                    // (before content_queries is moved into compile_component_full)
+                    let content_query_names: Vec<String> =
+                        content_queries.iter().map(|q| q.property_name.to_string()).collect();
+
                     // 4. Compile the template and generate ɵcmp/ɵfac
                     // Pass the shared pool index to ensure unique constant names
                     // Pass the file-level namespace registry to ensure consistent namespace assignments
@@ -1736,6 +1756,20 @@ pub fn transform_angular_file(
                                 result.dependencies.push(style_url.to_string());
                             }
 
+                            // Generate .d.ts type declaration for this component
+                            let type_argument_count = class
+                                .type_parameters
+                                .as_ref()
+                                .map_or(0, |tp| tp.params.len() as u32);
+                            let has_injectable =
+                                extract_injectable_metadata(allocator, class).is_some();
+                            result.dts_declarations.push(dts::generate_component_dts(
+                                &metadata,
+                                type_argument_count,
+                                &content_query_names,
+                                has_injectable,
+                            ));
+
                             result.component_count += 1;
                         }
                         Err(diags) => {
@@ -1830,6 +1864,12 @@ pub fn transform_angular_file(
                         }
                     }
 
+                    // Generate .d.ts type declaration for this directive
+                    let has_injectable = extract_injectable_metadata(allocator, class).is_some();
+                    result
+                        .dts_declarations
+                        .push(dts::generate_directive_dts(&directive_metadata, has_injectable));
+
                     class_positions.push((
                         class_name.clone(),
                         compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
@@ -1895,6 +1935,13 @@ pub fn transform_angular_file(
                                 ));
                             }
                         }
+
+                        // Generate .d.ts type declaration for this pipe
+                        let has_injectable =
+                            extract_injectable_metadata(allocator, class).is_some();
+                        result
+                            .dts_declarations
+                            .push(dts::generate_pipe_dts(&pipe_metadata, has_injectable));
 
                         class_positions.push((
                             class_name.clone(),
@@ -1977,6 +2024,13 @@ pub fn transform_angular_file(
                             external_decls.push_str(&emitter.emit_statement(stmt));
                         }
 
+                        // Generate .d.ts type declaration for this NgModule
+                        let has_injectable =
+                            extract_injectable_metadata(allocator, class).is_some();
+                        result
+                            .dts_declarations
+                            .push(dts::generate_ng_module_dts(&ng_module_metadata, has_injectable));
+
                         // NgModule: external_decls go AFTER the class (they reference the class name)
                         class_positions.push((
                             class_name.clone(),
@@ -2027,6 +2081,11 @@ pub fn transform_angular_file(
                             emitter.emit_expression(&definition.fac_definition),
                             emitter.emit_expression(&definition.prov_definition)
                         );
+
+                        // Generate .d.ts type declaration for this injectable
+                        result
+                            .dts_declarations
+                            .push(dts::generate_injectable_dts(&injectable_metadata));
 
                         class_positions.push((
                             class_name.clone(),
