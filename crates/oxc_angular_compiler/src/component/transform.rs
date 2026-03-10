@@ -1637,15 +1637,14 @@ pub fn transform_angular_file(
 
                             // Check if the class also has an @Injectable decorator.
                             // @Injectable is SHARED precedence and can coexist with @Component.
-                            if let Some(injectable_metadata) =
-                                extract_injectable_metadata(allocator, class)
-                            {
+                            let has_injectable = extract_injectable_metadata(allocator, class);
+                            if let Some(injectable_metadata) = &has_injectable {
                                 if let Some(span) = find_injectable_decorator_span(class) {
                                     decorator_spans_to_remove.push(span);
                                 }
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                     allocator,
-                                    &injectable_metadata,
+                                    injectable_metadata,
                                 ) {
                                     let emitter = JsEmitter::new();
                                     property_assignments.push_str(&format!(
@@ -1654,6 +1653,7 @@ pub fn transform_angular_file(
                                     ));
                                 }
                             }
+                            let has_injectable = has_injectable.is_some();
 
                             // Split declarations into two groups:
                             // 1. decls_before_class: child view functions, constants (needed BEFORE class)
@@ -1761,8 +1761,6 @@ pub fn transform_angular_file(
                                 .type_parameters
                                 .as_ref()
                                 .map_or(0, |tp| tp.params.len() as u32);
-                            let has_injectable =
-                                extract_injectable_metadata(allocator, class).is_some();
                             result.dts_declarations.push(dts::generate_component_dts(
                                 &metadata,
                                 type_argument_count,
@@ -1849,14 +1847,14 @@ pub fn transform_angular_file(
 
                     // Check if the class also has an @Injectable decorator.
                     // @Injectable is SHARED precedence and can coexist with @Directive.
-                    if let Some(injectable_metadata) = extract_injectable_metadata(allocator, class)
-                    {
+                    let has_injectable = extract_injectable_metadata(allocator, class);
+                    if let Some(injectable_metadata) = &has_injectable {
                         if let Some(span) = find_injectable_decorator_span(class) {
                             decorator_spans_to_remove.push(span);
                         }
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
                             allocator,
-                            &injectable_metadata,
+                            injectable_metadata,
                         ) {
                             property_assignments.push_str(&format!(
                                 "\nstatic ɵprov = {};",
@@ -1864,9 +1862,12 @@ pub fn transform_angular_file(
                             ));
                         }
                     }
+                    let has_injectable = has_injectable.is_some();
 
                     // Generate .d.ts type declaration for this directive
-                    let has_injectable = extract_injectable_metadata(allocator, class).is_some();
+                    let type_argument_count =
+                        class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
+                    directive_metadata.type_argument_count = type_argument_count;
                     result
                         .dts_declarations
                         .push(dts::generate_directive_dts(&directive_metadata, has_injectable));
@@ -1920,15 +1921,14 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator (issue #65).
                         // @Injectable is SHARED precedence and can coexist with @Pipe.
-                        if let Some(injectable_metadata) =
-                            extract_injectable_metadata(allocator, class)
-                        {
+                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
-                                &injectable_metadata,
+                                injectable_metadata,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -1936,12 +1936,11 @@ pub fn transform_angular_file(
                                 ));
                             }
                         }
+                        let has_injectable = has_injectable.is_some();
 
                         // Generate .d.ts type declaration for this pipe
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
-                        let has_injectable =
-                            extract_injectable_metadata(allocator, class).is_some();
                         result.dts_declarations.push(dts::generate_pipe_dts(
                             &pipe_metadata,
                             type_argument_count,
@@ -2003,15 +2002,14 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator.
                         // @Injectable is SHARED precedence and can coexist with @NgModule.
-                        if let Some(injectable_metadata) =
-                            extract_injectable_metadata(allocator, class)
-                        {
+                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
-                                &injectable_metadata,
+                                injectable_metadata,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -2019,6 +2017,7 @@ pub fn transform_angular_file(
                                 ));
                             }
                         }
+                        let has_injectable = has_injectable.is_some();
 
                         // Collect any side-effect statements as external declarations
                         let mut external_decls = String::new();
@@ -2032,8 +2031,6 @@ pub fn transform_angular_file(
                         // Generate .d.ts type declaration for this NgModule
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
-                        let has_injectable =
-                            extract_injectable_metadata(allocator, class).is_some();
                         result.dts_declarations.push(dts::generate_ng_module_dts(
                             &ng_module_metadata,
                             type_argument_count,

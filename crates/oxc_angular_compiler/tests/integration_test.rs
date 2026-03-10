@@ -6950,6 +6950,46 @@ export class GenericPipe<T> implements PipeTransform {
 }
 
 #[test]
+fn test_dts_generic_directive() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Input } from '@angular/core';
+
+@Directive({
+  selector: '[appGeneric]',
+  standalone: true
+})
+export class GenericDirective<T, U> {
+  @Input() value!: T;
+  @Input() extra!: U;
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "generic.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "GenericDirective");
+
+    // Should have ɵfac with type parameters filled as `any`
+    assert!(
+        decl.members
+            .contains("static ɵfac: i0.ɵɵFactoryDeclaration<GenericDirective<any, any>, never>;"),
+        "Should contain ɵfac with generic params. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵdir with type parameters filled as `any`
+    assert!(
+        decl.members.contains("i0.ɵɵDirectiveDeclaration<GenericDirective<any, any>,"),
+        "Should contain ɵdir with generic params. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
 fn test_dts_generic_ng_module() {
     let allocator = Allocator::default();
     let source = r#"
