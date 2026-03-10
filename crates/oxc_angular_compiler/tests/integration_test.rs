@@ -6753,6 +6753,37 @@ export class CapitalizePipe implements PipeTransform {
 }
 
 #[test]
+fn test_dts_pipe_no_name() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({
+  standalone: true
+})
+export class MyPipe implements PipeTransform {
+  transform(value: string): string {
+    return value;
+  }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "my.pipe.ts", source, &options, None);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "MyPipe");
+
+    // When pipe name is None, should emit `null` (not `""`)
+    assert!(
+        decl.members.contains("static ɵpipe: i0.ɵɵPipeDeclaration<MyPipe, null, true>;"),
+        "Should use null for missing pipe name. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
 fn test_dts_ng_module() {
     let allocator = Allocator::default();
     let source = r#"
@@ -6845,6 +6876,120 @@ export class DataService {
 }
 
 #[test]
+fn test_dts_generic_injectable() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Injectable } from '@angular/core';
+
+@Injectable({
+  providedIn: 'root'
+})
+export class GenericService<T, U> {
+  getData(): T | U { return null!; }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "generic.service.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "GenericService");
+
+    // Should have ɵfac with type parameters filled as `any`
+    assert!(
+        decl.members
+            .contains("static ɵfac: i0.ɵɵFactoryDeclaration<GenericService<any, any>, never>;"),
+        "Should contain ɵfac with generic params. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵprov with type parameters filled as `any`
+    assert!(
+        decl.members
+            .contains("static ɵprov: i0.ɵɵInjectableDeclaration<GenericService<any, any>>;"),
+        "Should contain ɵprov with generic params. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_generic_pipe() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Pipe, PipeTransform } from '@angular/core';
+
+@Pipe({ name: 'genericPipe', standalone: true })
+export class GenericPipe<T> implements PipeTransform {
+  transform(value: T): T { return value; }
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "generic.pipe.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "GenericPipe");
+
+    // Should have ɵfac with type parameter filled as `any`
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<GenericPipe<any>, never>;"),
+        "Should contain ɵfac with generic param. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵpipe with type parameter filled as `any`
+    assert!(
+        decl.members.contains("i0.ɵɵPipeDeclaration<GenericPipe<any>,"),
+        "Should contain ɵpipe with generic param. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_generic_ng_module() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { NgModule } from '@angular/core';
+
+@NgModule({})
+export class GenericModule<T> {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "generic.module.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "GenericModule");
+
+    // Should have ɵfac with type parameter filled as `any`
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<GenericModule<any>, never>;"),
+        "Should contain ɵfac with generic param. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵmod with type parameter filled as `any`
+    assert!(
+        decl.members.contains("i0.ɵɵNgModuleDeclaration<GenericModule<any>,"),
+        "Should contain ɵmod with generic param. Got:\n{}",
+        decl.members
+    );
+
+    // Should have ɵinj with type parameter filled as `any`
+    assert!(
+        decl.members.contains("static ɵinj: i0.ɵɵInjectorDeclaration<GenericModule<any>>;"),
+        "Should contain ɵinj with generic param. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
 fn test_dts_multiple_classes_in_file() {
     let allocator = Allocator::default();
     let source = r#"
@@ -6932,6 +7077,284 @@ export class SignalComponent {
     assert!(
         decl.members.contains(r#""isSignal": true"#),
         "Signal inputs should have isSignal: true. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_ctor_deps_with_attribute() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Attribute } from '@angular/core';
+import { MyService } from './my.service';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<p>Test</p>'
+})
+export class TestComponent {
+  constructor(
+    private svc: MyService,
+    @Attribute('title') title: string
+  ) {}
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    // When any dep has @Attribute, should emit a tuple with object types
+    // First dep has no flags -> null, second has attribute -> {attribute: "title"}
+    assert!(
+        decl.members.contains("[null, { attribute: \"title\" }]"),
+        "Should emit tuple with attribute object type. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_ctor_deps_with_optional() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Optional } from '@angular/core';
+import { MyService } from './my.service';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<p>Test</p>'
+})
+export class TestComponent {
+  constructor(
+    @Optional() private svc: MyService
+  ) {}
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    // @Optional without @Attribute -> dep has optional flag but no attribute
+    // Since optional is a flag, it should appear in the object type
+    assert!(
+        decl.members.contains("[{ optional: true }]"),
+        "Should emit tuple with optional object type. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_ctor_deps_no_flags() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { MyService } from './my.service';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<p>Test</p>'
+})
+export class TestComponent {
+  constructor(private svc: MyService) {}
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    // No special flags -> never
+    assert!(
+        decl.members.contains("ɵɵFactoryDeclaration<TestComponent, never>"),
+        "Should emit never for deps with no flags. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_directive_ctor_deps_with_optional_and_host() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Optional, Host } from '@angular/core';
+import { MyService } from './my.service';
+import { OtherService } from './other.service';
+
+@Directive({
+  selector: '[appTest]',
+  standalone: true,
+})
+export class TestDirective {
+  constructor(
+    @Optional() @Host() private svc: MyService,
+    private other: OtherService
+  ) {}
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    // First dep has optional + host, second has no flags -> null
+    assert!(
+        decl.members.contains("[{ optional: true, host: true }, null]"),
+        "Should emit tuple with optional+host object type and null. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_with_ng_content_selectors() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-layout',
+  standalone: true,
+  template: `
+    <ng-content select="header"></ng-content>
+    <ng-content></ng-content>
+    <ng-content select=".footer"></ng-content>
+  `
+})
+export class LayoutComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "layout.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+
+    // Should contain ng-content selectors as a tuple type in the ɵcmp declaration
+    assert!(
+        decl.members.contains(r#"["header", "*", ".footer"]"#),
+        "Should contain ng-content selectors tuple. Got:\n{}",
+        decl.members
+    );
+
+    // Verify the full ɵcmp declaration structure has selectors in the correct position
+    // (after QueryFields=never, before IsStandalone=true)
+    assert!(
+        decl.members.contains(r#"never, ["header", "*", ".footer"], true"#),
+        "NgContentSelectors should be in the correct position between QueryFields and IsStandalone. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_component_with_input_transform() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Input, booleanAttribute } from '@angular/core';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<p>test</p>'
+})
+export class TestComponent {
+  @Input({transform: booleanAttribute}) disabled: boolean = false;
+  @Input() name: string = '';
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "TestComponent");
+
+    // Input with transform should get ngAcceptInputType_* field
+    assert!(
+        decl.members.contains("static ngAcceptInputType_disabled: unknown;"),
+        "Should contain ngAcceptInputType_disabled for transformed input. Got:\n{}",
+        decl.members
+    );
+
+    // Input without transform should NOT get ngAcceptInputType_* field
+    assert!(
+        !decl.members.contains("ngAcceptInputType_name"),
+        "Should NOT contain ngAcceptInputType_name for non-transformed input. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_directive_with_input_transform() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive, Input, booleanAttribute } from '@angular/core';
+
+@Directive({
+  selector: '[appTest]',
+  standalone: true,
+})
+export class TestDirective {
+  @Input({transform: booleanAttribute}) disabled: boolean = false;
+  @Input() name: string = '';
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "TestDirective");
+
+    // Input with transform should get ngAcceptInputType_* field
+    assert!(
+        decl.members.contains("static ngAcceptInputType_disabled: unknown;"),
+        "Should contain ngAcceptInputType_disabled for transformed input. Got:\n{}",
+        decl.members
+    );
+
+    // Input without transform should NOT get ngAcceptInputType_* field
+    assert!(
+        !decl.members.contains("ngAcceptInputType_name"),
+        "Should NOT contain ngAcceptInputType_name for non-transformed input. Got:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_dts_signal_input_with_transform_no_accept_type() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, input, booleanAttribute } from '@angular/core';
+
+@Component({
+  selector: 'app-test',
+  standalone: true,
+  template: '<p>test</p>'
+})
+export class TestComponent {
+  disabled = input(false, {transform: booleanAttribute});
+}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "TestComponent");
+
+    // Signal inputs should NOT get ngAcceptInputType_* fields
+    assert!(
+        !decl.members.contains("ngAcceptInputType_"),
+        "Signal inputs should NOT get ngAcceptInputType_* fields. Got:\n{}",
         decl.members
     );
 }

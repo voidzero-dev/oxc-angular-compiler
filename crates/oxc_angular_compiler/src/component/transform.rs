@@ -1768,6 +1768,7 @@ pub fn transform_angular_file(
                                 type_argument_count,
                                 &content_query_names,
                                 has_injectable,
+                                &compilation_result.ng_content_selectors,
                             ));
 
                             result.component_count += 1;
@@ -1937,11 +1938,15 @@ pub fn transform_angular_file(
                         }
 
                         // Generate .d.ts type declaration for this pipe
+                        let type_argument_count =
+                            class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         let has_injectable =
                             extract_injectable_metadata(allocator, class).is_some();
-                        result
-                            .dts_declarations
-                            .push(dts::generate_pipe_dts(&pipe_metadata, has_injectable));
+                        result.dts_declarations.push(dts::generate_pipe_dts(
+                            &pipe_metadata,
+                            type_argument_count,
+                            has_injectable,
+                        ));
 
                         class_positions.push((
                             class_name.clone(),
@@ -2025,11 +2030,15 @@ pub fn transform_angular_file(
                         }
 
                         // Generate .d.ts type declaration for this NgModule
+                        let type_argument_count =
+                            class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         let has_injectable =
                             extract_injectable_metadata(allocator, class).is_some();
-                        result
-                            .dts_declarations
-                            .push(dts::generate_ng_module_dts(&ng_module_metadata, has_injectable));
+                        result.dts_declarations.push(dts::generate_ng_module_dts(
+                            &ng_module_metadata,
+                            type_argument_count,
+                            has_injectable,
+                        ));
 
                         // NgModule: external_decls go AFTER the class (they reference the class name)
                         class_positions.push((
@@ -2083,9 +2092,12 @@ pub fn transform_angular_file(
                         );
 
                         // Generate .d.ts type declaration for this injectable
-                        result
-                            .dts_declarations
-                            .push(dts::generate_injectable_dts(&injectable_metadata));
+                        let type_argument_count =
+                            class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
+                        result.dts_declarations.push(dts::generate_injectable_dts(
+                            &injectable_metadata,
+                            type_argument_count,
+                        ));
 
                         class_positions.push((
                             class_name.clone(),
@@ -2231,6 +2243,9 @@ struct FullCompilationResult {
     /// The next constant pool index to use for the next component.
     /// This is used to share pool state across multiple components in the same file.
     next_pool_index: u32,
+
+    /// The ng-content selectors found in the template (e.g., `["*", ".header"]`).
+    ng_content_selectors: Vec<String>,
 }
 
 /// Compile a component template and generate ɵcmp/ɵfac definitions.
@@ -2304,6 +2319,10 @@ fn compile_component_full<'a>(
         }
         return Err(diagnostics);
     }
+
+    // Capture ng-content selectors from the R3 AST for .d.ts generation
+    let ng_content_selectors: Vec<String> =
+        r3_result.ng_content_selectors.iter().map(|s| s.to_string()).collect();
 
     // Merge inline template styles into component metadata
     // These are styles from <style> tags directly in the template HTML
@@ -2545,6 +2564,7 @@ fn compile_component_full<'a>(
         hmr_initializer_js,
         class_debug_info_js,
         next_pool_index,
+        ng_content_selectors,
     })
 }
 

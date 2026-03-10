@@ -52,6 +52,7 @@ pub fn generate_component_dts(
     type_argument_count: u32,
     content_query_names: &[String],
     has_injectable: bool,
+    ng_content_selectors: &[String],
 ) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
     let type_with_params = type_with_parameters(class_name, type_argument_count);
@@ -103,8 +104,19 @@ pub fn generate_component_dts(
         )
     };
 
-    // NgContentSelectors: would require template analysis; use never for now
-    let ng_content_selectors = "never".to_string();
+    // NgContentSelectors: format as tuple type from template ng-content selectors
+    let ng_content_selectors = if ng_content_selectors.is_empty() {
+        "never".to_string()
+    } else {
+        format!(
+            "[{}]",
+            ng_content_selectors
+                .iter()
+                .map(|s| format!("\"{}\"", escape_dts_string(s)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
 
     let is_standalone = if metadata.standalone { "true" } else { "false" };
 
@@ -139,6 +151,9 @@ pub fn generate_component_dts(
         members
             .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
     }
+
+    // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
+    generate_input_transform_fields(&metadata.inputs, &mut members);
 
     DtsDeclaration { class_name: class_name.to_string(), members }
 }
@@ -241,6 +256,9 @@ pub fn generate_directive_dts(
             .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
     }
 
+    // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
+    generate_input_transform_fields(&metadata.inputs, &mut members);
+
     DtsDeclaration { class_name: class_name.to_string(), members }
 }
 
@@ -253,10 +271,13 @@ pub fn generate_directive_dts(
 /// Produces:
 /// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
 /// - `static ɵpipe: i0.ɵɵPipeDeclaration<T, Name, IsStandalone>;`
-pub fn generate_pipe_dts(metadata: &PipeMetadata, has_injectable: bool) -> DtsDeclaration {
+pub fn generate_pipe_dts(
+    metadata: &PipeMetadata,
+    type_argument_count: u32,
+    has_injectable: bool,
+) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
-    // Pipes don't have type parameters in practice
-    let type_with_params = class_name.to_string();
+    let type_with_params = type_with_parameters(class_name, type_argument_count);
 
     // ɵfac declaration
     let ctor_deps_type =
@@ -267,7 +288,7 @@ pub fn generate_pipe_dts(metadata: &PipeMetadata, has_injectable: bool) -> DtsDe
     // ɵpipe declaration
     let pipe_name = match &metadata.pipe_name {
         Some(name) => format!("\"{}\"", escape_dts_string(name.as_str())),
-        None => "\"\"".to_string(),
+        None => "null".to_string(),
     };
 
     let is_standalone = if metadata.standalone { "true" } else { "false" };
@@ -296,9 +317,13 @@ pub fn generate_pipe_dts(metadata: &PipeMetadata, has_injectable: bool) -> DtsDe
 /// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
 /// - `static ɵmod: i0.ɵɵNgModuleDeclaration<T, Declarations, Imports, Exports>;`
 /// - `static ɵinj: i0.ɵɵInjectorDeclaration<T>;`
-pub fn generate_ng_module_dts(metadata: &NgModuleMetadata, has_injectable: bool) -> DtsDeclaration {
+pub fn generate_ng_module_dts(
+    metadata: &NgModuleMetadata,
+    type_argument_count: u32,
+    has_injectable: bool,
+) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
-    let type_with_params = class_name.to_string();
+    let type_with_params = type_with_parameters(class_name, type_argument_count);
 
     // ɵfac declaration
     let ctor_deps_type =
@@ -375,9 +400,12 @@ pub fn generate_ng_module_dts(metadata: &NgModuleMetadata, has_injectable: bool)
 /// Produces:
 /// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
 /// - `static ɵprov: i0.ɵɵInjectableDeclaration<T>;`
-pub fn generate_injectable_dts(metadata: &InjectableMetadata) -> DtsDeclaration {
+pub fn generate_injectable_dts(
+    metadata: &InjectableMetadata,
+    type_argument_count: u32,
+) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
-    let type_with_params = class_name.to_string();
+    let type_with_params = type_with_parameters(class_name, type_argument_count);
 
     // ɵfac declaration
     let ctor_deps_type =
@@ -412,22 +440,47 @@ fn type_with_parameters(class_name: &str, count: u32) -> String {
 
 /// Generate the constructor deps type parameter for `ɵɵFactoryDeclaration`.
 ///
-/// Returns `never` if there are no `@Attribute()` dependencies.
-/// Returns a tuple type like `[null, "attrName", null]` if there are attribute deps.
+/// Returns `never` if no dependency has any special flags (attribute, optional, host, self, skipSelf).
+/// Otherwise returns a tuple type like `[null, {attribute: "title", optional: true}, null]`.
 fn generate_ctor_deps_type_from_component_deps(deps: Option<&[R3DependencyMetadata]>) -> String {
     match deps {
         None => "never".to_string(),
         Some(deps) => {
-            let has_attributes = deps.iter().any(|d| d.attribute_name.is_some());
-            if !has_attributes {
+            let dep_types: Vec<Option<String>> = deps
+                .iter()
+                .map(|d| {
+                    let mut entries: Vec<String> = Vec::new();
+                    if let Some(name) = &d.attribute_name {
+                        entries
+                            .push(format!("attribute: \"{}\"", escape_dts_string(name.as_str())));
+                    }
+                    if d.optional {
+                        entries.push("optional: true".to_string());
+                    }
+                    if d.host {
+                        entries.push("host: true".to_string());
+                    }
+                    if d.self_ {
+                        entries.push("self: true".to_string());
+                    }
+                    if d.skip_self {
+                        entries.push("skipSelf: true".to_string());
+                    }
+                    if entries.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{{ {} }}", entries.join(", ")))
+                    }
+                })
+                .collect();
+
+            let has_types = dep_types.iter().any(|t| t.is_some());
+            if !has_types {
                 "never".to_string()
             } else {
-                let entries: Vec<String> = deps
-                    .iter()
-                    .map(|d| match &d.attribute_name {
-                        Some(name) => format!("\"{}\"", escape_dts_string(name.as_str())),
-                        None => "null".to_string(),
-                    })
+                let entries: Vec<String> = dep_types
+                    .into_iter()
+                    .map(|t| t.unwrap_or_else(|| "null".to_string()))
                     .collect();
                 format!("[{}]", entries.join(", "))
             }
@@ -439,31 +492,76 @@ fn generate_ctor_deps_type_from_component_deps(deps: Option<&[R3DependencyMetada
 ///
 /// Uses the factory module's `R3DependencyMetadata` which is used by directives,
 /// pipes, NgModules, and injectables.
+///
+/// Returns `never` if no dependency has any special flags (attribute, optional, host, self, skipSelf).
+/// Otherwise returns a tuple type like `[null, {attribute: string, optional: true}, null]`.
 fn generate_ctor_deps_type_from_factory_deps(
     deps: Option<&[crate::factory::R3DependencyMetadata]>,
 ) -> String {
     match deps {
         None => "never".to_string(),
         Some(deps) => {
-            // The factory R3DependencyMetadata uses `attribute_name_type` (an OutputExpression)
-            // for @Attribute() dependencies. If any dep has it set, we emit a tuple type.
-            let has_attributes = deps.iter().any(|d| d.attribute_name_type.is_some());
-            if !has_attributes {
+            let dep_types: Vec<Option<String>> = deps
+                .iter()
+                .map(|d| {
+                    let mut entries: Vec<String> = Vec::new();
+                    if d.attribute_name_type.is_some() {
+                        entries.push("attribute: string".to_string());
+                    }
+                    if d.optional {
+                        entries.push("optional: true".to_string());
+                    }
+                    if d.host {
+                        entries.push("host: true".to_string());
+                    }
+                    if d.self_ {
+                        entries.push("self: true".to_string());
+                    }
+                    if d.skip_self {
+                        entries.push("skipSelf: true".to_string());
+                    }
+                    if entries.is_empty() {
+                        None
+                    } else {
+                        Some(format!("{{ {} }}", entries.join(", ")))
+                    }
+                })
+                .collect();
+
+            let has_types = dep_types.iter().any(|t| t.is_some());
+            if !has_types {
                 "never".to_string()
             } else {
-                let entries: Vec<String> = deps
-                    .iter()
-                    .map(|d| {
-                        if d.attribute_name_type.is_some() {
-                            // @Attribute deps get a string type in the tuple
-                            "string".to_string()
-                        } else {
-                            "null".to_string()
-                        }
-                    })
+                let entries: Vec<String> = dep_types
+                    .into_iter()
+                    .map(|t| t.unwrap_or_else(|| "null".to_string()))
                     .collect();
                 format!("[{}]", entries.join(", "))
             }
+        }
+    }
+}
+
+/// Generate `ngAcceptInputType_*` static fields for non-signal inputs with transform functions.
+///
+/// When an input has a `transform` function (e.g., `@Input({transform: booleanAttribute})`),
+/// Angular generates a static field like:
+/// ```text
+/// static ngAcceptInputType_disabled: unknown;
+/// ```
+/// This enables template type-checking to know that transformed inputs accept wider types.
+///
+/// Signal inputs do NOT generate these fields (they capture WriteT within the InputSignal type).
+///
+/// Note: We use `unknown` as the type because we don't have access to the TypeScript type checker
+/// to determine the actual write type of the transform function.
+fn generate_input_transform_fields(inputs: &[R3InputMetadata], members: &mut String) {
+    for input in inputs {
+        if !input.is_signal && input.transform_function.is_some() {
+            members.push_str(&format!(
+                "\nstatic ngAcceptInputType_{}: unknown;",
+                input.class_property_name.as_str()
+            ));
         }
     }
 }
@@ -628,7 +726,11 @@ fn extract_directive_name_from_expr(expr: &crate::output::ast::OutputExpression)
 
 /// Escape a string for use in a TypeScript `.d.ts` string literal type.
 fn escape_dts_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
 }
 
 #[cfg(test)]
@@ -650,6 +752,9 @@ mod tests {
         assert_eq!(escape_dts_string("hello"), "hello");
         assert_eq!(escape_dts_string(r#"he"llo"#), r#"he\"llo"#);
         assert_eq!(escape_dts_string(r"he\llo"), r"he\\llo");
+        assert_eq!(escape_dts_string("line1\nline2"), "line1\\nline2");
+        assert_eq!(escape_dts_string("col1\tcol2"), "col1\\tcol2");
+        assert_eq!(escape_dts_string("a\r\nb"), "a\\r\\nb");
     }
 
     #[test]
