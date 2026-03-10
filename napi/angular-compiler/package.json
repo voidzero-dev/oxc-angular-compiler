@@ -1,6 +1,6 @@
 {
   "name": "@oxc-angular/vite",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "description": "Oxc Angular Compiler Vite plugin",
   "keywords": [
     "angular",
