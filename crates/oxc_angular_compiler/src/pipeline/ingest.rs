@@ -115,6 +115,13 @@ pub struct IngestOptions<'a> {
     ///
     /// Default is 0 (start from _c0).
     pub pool_starting_index: u32,
+
+    /// Angular version for feature-gated instruction selection.
+    ///
+    /// When set to a version < 20, the compiler emits `ɵɵtemplate` instead of
+    /// `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` for `@if`/`@switch` blocks.
+    /// When `None`, assumes latest Angular version (v20+ behavior).
+    pub angular_version: Option<crate::AngularVersion>,
 }
 
 impl Default for IngestOptions<'_> {
@@ -129,6 +136,7 @@ impl Default for IngestOptions<'_> {
             template_source: None,
             all_deferrable_deps_fn: None,
             pool_starting_index: 0,
+            angular_version: None,
         }
     }
 }
@@ -731,6 +739,9 @@ pub fn ingest_component_with_options<'a>(
     // Store the all_deferrable_deps_fn reference for emit phase
     // This is used when DeferBlockDepsEmitMode::PerComponent to reference the shared deps function
     job.all_deferrable_deps_fn = options.all_deferrable_deps_fn;
+
+    // Set Angular version for feature-gated instruction selection
+    job.angular_version = options.angular_version;
 
     let root_xref = job.root.xref;
 

@@ -12,6 +12,7 @@ use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::{Atom, Span};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
+use crate::AngularVersion;
 use crate::ir::enums::CompatibilityMode;
 use crate::ir::list::{CreateOpList, UpdateOpList};
 use crate::ir::ops::XrefId;
@@ -183,6 +184,12 @@ pub struct ComponentCompilationJob<'a> {
     /// Causes `ngContentSelectors` to be emitted in the component definition.
     /// This is populated by the `generate_projection_def` phase.
     pub content_selectors: Option<crate::output::ast::OutputExpression<'a>>,
+    /// Angular version for feature-gated instruction selection.
+    ///
+    /// When set to a version < 20, the compiler emits `ɵɵtemplate` instead of
+    /// `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` for `@if`/`@switch` blocks.
+    /// When `None`, assumes latest Angular version (v20+ behavior).
+    pub angular_version: Option<AngularVersion>,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
 }
@@ -232,6 +239,7 @@ impl<'a> ComponentCompilationJob<'a> {
             defer_meta: DeferMetadata::PerBlock { blocks: FxHashMap::default() },
             all_deferrable_deps_fn: None,
             content_selectors: None,
+            angular_version: None,
             diagnostics: std::vec::Vec::new(),
         }
     }
@@ -243,6 +251,14 @@ impl<'a> ComponentCompilationJob<'a> {
     pub fn with_mode(mut self, mode: TemplateCompilationMode) -> Self {
         self.mode = mode;
         self
+    }
+
+    /// Check if `ɵɵconditionalCreate` is supported (Angular 20+).
+    ///
+    /// Returns `true` for Angular 20+ or when version is unknown (None = latest).
+    /// Returns `false` for Angular 19 and earlier, which use `ɵɵtemplate` instead.
+    pub fn supports_conditional_create(&self) -> bool {
+        self.angular_version.map_or(true, |v: AngularVersion| v.supports_conditional_create())
     }
 
     /// Allocates a new cross-reference ID.

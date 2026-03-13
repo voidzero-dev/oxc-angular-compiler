@@ -110,6 +110,8 @@ struct ReifyContext<'a> {
     view_vars: FxHashMap<XrefId, u32>,
     /// Template compilation mode (Full or DomOnly).
     mode: TemplateCompilationMode,
+    /// Whether to use `ɵɵconditionalCreate` (Angular 20+) or `ɵɵtemplate` (Angular 19-).
+    supports_conditional_create: bool,
 }
 
 /// Reifies IR expressions to Output AST.
@@ -138,7 +140,9 @@ pub fn reify(job: &mut ComponentCompilationJob<'_>) {
             view_vars.insert(view.xref, vars);
         }
     }
-    let ctx = ReifyContext { view_fn_names, view_decls, view_vars, mode };
+    let supports_conditional_create = job.supports_conditional_create();
+    let ctx =
+        ReifyContext { view_fn_names, view_decls, view_vars, mode, supports_conditional_create };
 
     // Collect xrefs of embedded views (excluding root) before splitting borrows
     let embedded_xrefs: std::vec::Vec<XrefId> =
@@ -447,20 +451,34 @@ fn reify_create_op<'a>(
             Some(create_declare_let_stmt(allocator, slot))
         }
         CreateOp::Conditional(cond) => {
-            // Emit ɵɵconditionalCreate instruction for the first branch in @if/@switch
             // Look up the function name for this branch's view
             let fn_name = ctx.view_fn_names.get(&cond.xref).cloned();
             let slot = cond.slot.map(|s| s.0).unwrap_or(0);
-            Some(create_conditional_create_stmt(
-                allocator,
-                slot,
-                fn_name,
-                cond.decls,
-                cond.vars,
-                cond.tag.as_ref(),
-                cond.attributes,
-                cond.local_refs_index,
-            ))
+            if ctx.supports_conditional_create {
+                // Angular 20+: Emit ɵɵconditionalCreate for the first branch in @if/@switch
+                Some(create_conditional_create_stmt(
+                    allocator,
+                    slot,
+                    fn_name,
+                    cond.decls,
+                    cond.vars,
+                    cond.tag.as_ref(),
+                    cond.attributes,
+                    cond.local_refs_index,
+                ))
+            } else {
+                // Angular 19: Emit ɵɵtemplate instead (conditionalCreate doesn't exist)
+                Some(create_template_stmt(
+                    allocator,
+                    slot,
+                    fn_name,
+                    cond.decls,
+                    cond.vars,
+                    cond.tag.as_ref(),
+                    cond.attributes,
+                    cond.local_refs_index,
+                ))
+            }
         }
         CreateOp::RepeaterCreate(repeater) => {
             // Emit repeaterCreate instruction for @for
@@ -708,20 +726,34 @@ fn reify_create_op<'a>(
             }
         }
         CreateOp::ConditionalBranch(branch) => {
-            // Emit ɵɵconditionalBranchCreate instruction for branches after the first in @if/@switch
             // Look up the function name for this branch's view
             let fn_name = ctx.view_fn_names.get(&branch.xref).cloned();
             let slot = branch.slot.map(|s| s.0).unwrap_or(0);
-            Some(create_conditional_branch_create_stmt(
-                allocator,
-                slot,
-                fn_name,
-                branch.decls,
-                branch.vars,
-                branch.tag.as_ref(),
-                branch.attributes,
-                branch.local_refs_index,
-            ))
+            if ctx.supports_conditional_create {
+                // Angular 20+: Emit ɵɵconditionalBranchCreate for branches after the first
+                Some(create_conditional_branch_create_stmt(
+                    allocator,
+                    slot,
+                    fn_name,
+                    branch.decls,
+                    branch.vars,
+                    branch.tag.as_ref(),
+                    branch.attributes,
+                    branch.local_refs_index,
+                ))
+            } else {
+                // Angular 19: Emit ɵɵtemplate instead (conditionalBranchCreate doesn't exist)
+                Some(create_template_stmt(
+                    allocator,
+                    slot,
+                    fn_name,
+                    branch.decls,
+                    branch.vars,
+                    branch.tag.as_ref(),
+                    branch.attributes,
+                    branch.local_refs_index,
+                ))
+            }
         }
         CreateOp::ControlCreate(_) => {
             // Emit ɵɵcontrolCreate instruction for control binding initialization

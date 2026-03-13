@@ -28,6 +28,7 @@ import {
   compileForHmrSync,
   type TransformOptions,
   type ResolvedResources,
+  type AngularVersion,
 } from '#binding'
 
 import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
@@ -65,6 +66,22 @@ export interface PluginOptions {
 
   /** Path to main.server.ts for SSR manifest generation. Auto-detected from src/main.server.ts if not specified. */
   ssrEntry?: string
+
+  /**
+   * Angular version to target.
+   *
+   * Controls which runtime instructions are emitted. For example, Angular 19
+   * uses `ɵɵtemplate` for `@if`/`@switch` blocks, while Angular 20+ uses
+   * `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate`.
+   *
+   * When not set, assumes latest Angular version (v20+ behavior).
+   *
+   * @example
+   * ```ts
+   * angular({ angularVersion: { major: 19, minor: 0, patch: 0 } })
+   * ```
+   */
+  angularVersion?: AngularVersion
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -100,6 +117,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         : (options.sourceMap?.scripts ?? true),
     zoneless: options.zoneless ?? false,
     fileReplacements,
+    angularVersion: options.angularVersion,
   }
 
   let resolvedConfig: ResolvedConfig
@@ -453,6 +471,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             sourcemap: pluginOptions.sourceMap,
             jit: pluginOptions.jit,
             hmr: pluginOptions.liveReload && watchMode,
+            angularVersion: pluginOptions.angularVersion,
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)

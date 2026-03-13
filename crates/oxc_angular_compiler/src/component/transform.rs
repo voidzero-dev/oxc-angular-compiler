@@ -2371,6 +2371,8 @@ fn compile_component_full<'a>(
         // Use the shared pool starting index to avoid duplicate constant names
         // when compiling multiple components in the same file
         pool_starting_index,
+        // Pass Angular version for feature-gated instruction selection
+        angular_version: options.angular_version,
     };
 
     let mut job = ingest_component_with_options(
@@ -2792,6 +2794,7 @@ pub fn compile_template_to_js_with_options<'a>(
         template_source: Some(template),
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // Standalone template compilation starts from 0
+        angular_version: options.angular_version,
     };
 
     // Stage 3-5: Ingest and compile
@@ -2963,6 +2966,7 @@ pub fn compile_template_for_hmr<'a>(
         template_source: Some(template),
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // HMR template compilation starts from 0
+        angular_version: options.angular_version,
     };
 
     // Stage 3-5: Ingest and compile
@@ -3585,6 +3589,7 @@ pub fn compile_template_for_linker<'a>(
         template_source: Some(template),
         all_deferrable_deps_fn: None,
         pool_starting_index: 0,
+        angular_version: None,
     };
 
     let component_name_atom = Atom::from_in(component_name, allocator);

@@ -17,6 +17,17 @@ use oxc_span::Atom;
 
 /// Compiles an Angular template to JavaScript.
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
+    compile_template_to_js_with_version(template, component_name, None)
+}
+
+/// Compiles an Angular template to JavaScript targeting a specific Angular version.
+fn compile_template_to_js_with_version(
+    template: &str,
+    component_name: &str,
+    angular_version: Option<AngularVersion>,
+) -> String {
+    use oxc_angular_compiler::pipeline::ingest::{IngestOptions, ingest_component_with_options};
+
     let allocator = Allocator::default();
 
     // Stage 1: Parse HTML (with expansion forms enabled for ICU/plural support)
@@ -40,7 +51,17 @@ fn compile_template_to_js(template: &str, component_name: &str) -> String {
     }
 
     // Stage 3: Ingest R3 AST into IR
-    let mut job = ingest_component(&allocator, Atom::from(component_name), r3_result.nodes);
+    let mut job = if let Some(version) = angular_version {
+        let options = IngestOptions { angular_version: Some(version), ..Default::default() };
+        ingest_component_with_options(
+            &allocator,
+            Atom::from(component_name),
+            r3_result.nodes,
+            options,
+        )
+    } else {
+        ingest_component(&allocator, Atom::from(component_name), r3_result.nodes)
+    };
 
     // Stage 4-5: Transform and emit
     let result = compile_template(&mut job);
@@ -7396,5 +7417,113 @@ export class TestComponent {
         !decl.members.contains("ngAcceptInputType_"),
         "Signal inputs should NOT get ngAcceptInputType_* fields. Got:\n{}",
         decl.members
+    );
+}
+
+// ============================================================================
+// Angular Version Gating Tests (Issue #105)
+// ============================================================================
+// These tests verify that when targeting Angular 19, the compiler emits
+// ɵɵtemplate instead of ɵɵconditionalCreate/ɵɵconditionalBranchCreate
+// for @if/@switch blocks, since those instructions don't exist in Angular 19.
+
+#[test]
+fn test_if_block_angular_v19() {
+    let v19 = AngularVersion::new(19, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r"@if (condition) { <div>Visible</div> }",
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use ɵɵtemplate, NOT ɵɵconditionalCreate
+    assert!(
+        js.contains("ɵɵtemplate("),
+        "Angular 19 should emit ɵɵtemplate for @if blocks. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵconditionalCreate("),
+        "Angular 19 should NOT emit ɵɵconditionalCreate. Got:\n{js}"
+    );
+    // Update instruction (ɵɵconditional) should still be emitted
+    assert!(
+        js.contains("ɵɵconditional("),
+        "Angular 19 should still emit ɵɵconditional for update. Got:\n{js}"
+    );
+    insta::assert_snapshot!("if_block_angular_v19", js);
+}
+
+#[test]
+fn test_if_else_block_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r"@if (condition) { <div>True</div> } @else { <div>False</div> }",
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use ɵɵtemplate for all branches, NOT conditionalCreate/conditionalBranchCreate
+    assert!(
+        js.contains("ɵɵtemplate("),
+        "Angular 19 should emit ɵɵtemplate for @if/@else blocks. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵconditionalCreate("),
+        "Angular 19 should NOT emit ɵɵconditionalCreate. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵconditionalBranchCreate("),
+        "Angular 19 should NOT emit ɵɵconditionalBranchCreate. Got:\n{js}"
+    );
+    insta::assert_snapshot!("if_else_block_angular_v19", js);
+}
+
+#[test]
+fn test_switch_block_angular_v19() {
+    let v19 = AngularVersion::new(19, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r"@switch (value) { @case (1) { <div>One</div> } @case (2) { <div>Two</div> } @default { <div>Other</div> } }",
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use ɵɵtemplate for all @switch cases
+    assert!(
+        js.contains("ɵɵtemplate("),
+        "Angular 19 should emit ɵɵtemplate for @switch blocks. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵconditionalCreate("),
+        "Angular 19 should NOT emit ɵɵconditionalCreate for @switch. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵconditionalBranchCreate("),
+        "Angular 19 should NOT emit ɵɵconditionalBranchCreate for @switch. Got:\n{js}"
+    );
+    insta::assert_snapshot!("switch_block_angular_v19", js);
+}
+
+#[test]
+fn test_if_block_angular_v20_default() {
+    // Default (no version set) should emit conditionalCreate (Angular 20+ behavior)
+    let js = compile_template_to_js_with_version(
+        r"@if (condition) { <div>Visible</div> }",
+        "TestComponent",
+        None,
+    );
+    assert!(
+        js.contains("ɵɵconditionalCreate("),
+        "Default (latest) should emit ɵɵconditionalCreate. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_if_block_angular_v20_explicit() {
+    let v20 = AngularVersion::new(20, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r"@if (condition) { <div>Visible</div> }",
+        "TestComponent",
+        Some(v20),
+    );
+    assert!(
+        js.contains("ɵɵconditionalCreate("),
+        "Angular 20 should emit ɵɵconditionalCreate. Got:\n{js}"
     );
 }

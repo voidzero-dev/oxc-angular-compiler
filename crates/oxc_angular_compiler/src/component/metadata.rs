@@ -37,6 +37,14 @@ impl AngularVersion {
         self.major >= 19
     }
 
+    /// Check if this version supports `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` (v20.0.0+).
+    ///
+    /// Angular v20 introduced `ɵɵconditionalCreate` and `ɵɵconditionalBranchCreate`
+    /// instructions for `@if`/`@switch` blocks. Earlier versions use `ɵɵtemplate` instead.
+    pub fn supports_conditional_create(&self) -> bool {
+        self.major >= 20
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// Returns `None` if the version string is invalid.

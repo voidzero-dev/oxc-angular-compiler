@@ -1,0 +1,27 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Conditional_0_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵelementStart(1,"div");
+    i0.ɵɵtext(2,"True");
+    i0.ɵɵelementEnd();
+    i0.ɵɵtext(3," ");
+  }
+}
+function TestComponent_Conditional_1_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵelementStart(1,"div");
+    i0.ɵɵtext(2,"False");
+    i0.ɵɵelementEnd();
+    i0.ɵɵtext(3," ");
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵtemplate(0,TestComponent_Conditional_0_Template,4,0)(1,TestComponent_Conditional_1_Template,
+      4,0); }
+  if ((rf & 2)) { i0.ɵɵconditional((ctx.condition? 0: 1)); }
+}
