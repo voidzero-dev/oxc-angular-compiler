@@ -1,0 +1,8 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵelement(0,"img",0); }
+  if ((rf & 2)) { i0.ɵɵpropertyInterpolate("src",ctx.url,i0.ɵɵsanitizeUrl); }
+}

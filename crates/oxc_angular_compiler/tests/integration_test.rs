@@ -7527,3 +7527,309 @@ fn test_if_block_angular_v20_explicit() {
         "Angular 20 should emit ɵɵconditionalCreate. Got:\n{js}"
     );
 }
+
+// ============================================================================
+// Angular 19 Property/Attribute Interpolation Version Gating (Issue #107)
+// ============================================================================
+// These tests verify that when targeting Angular 19, the compiler emits
+// ɵɵpropertyInterpolate*/ɵɵattributeInterpolate* instead of
+// ɵɵproperty + nested ɵɵinterpolate*, and ɵɵhostProperty instead of ɵɵdomProperty.
+
+#[test]
+fn test_property_interpolation_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="'Hello ' + name">static</div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Non-interpolation property bindings should still use ɵɵproperty
+    assert!(
+        js.contains("ɵɵproperty("),
+        "Angular 19 should use ɵɵproperty for non-interpolation bindings. Got:\n{js}"
+    );
+    // Should NOT emit ɵɵinterpolate for non-interpolation bindings
+    assert!(
+        !js.contains("ɵɵinterpolate"),
+        "Angular 19 should NOT emit ɵɵinterpolate for non-interpolation bindings. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_property_interpolation_angular_v19_with_interpolation() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div title="Hello {{name}}">static</div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵpropertyInterpolate1 instruction
+    assert!(
+        js.contains("ɵɵpropertyInterpolate1("),
+        "Angular 19 should emit ɵɵpropertyInterpolate1 for property interpolation. Got:\n{js}"
+    );
+    // Should NOT emit standalone ɵɵinterpolate
+    assert!(
+        !js.contains("ɵɵinterpolate1("),
+        "Angular 19 should NOT emit standalone ɵɵinterpolate1. Got:\n{js}"
+    );
+    insta::assert_snapshot!("property_interpolation_angular_v19", js);
+}
+
+#[test]
+fn test_property_interpolation_angular_v19_multiple() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div title="{{first}} and {{second}}">static</div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use ɵɵpropertyInterpolate2 for 2 expressions
+    assert!(
+        js.contains("ɵɵpropertyInterpolate2("),
+        "Angular 19 should emit ɵɵpropertyInterpolate2 for 2-expression interpolation. Got:\n{js}"
+    );
+    insta::assert_snapshot!("property_interpolation_angular_v19_multiple", js);
+}
+
+#[test]
+fn test_property_interpolation_angular_v19_simple() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div title="{{name}}">static</div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Single expression with empty strings → ɵɵpropertyInterpolate
+    assert!(
+        js.contains("ɵɵpropertyInterpolate("),
+        "Angular 19 should emit ɵɵpropertyInterpolate for simple interpolation. Got:\n{js}"
+    );
+    insta::assert_snapshot!("property_interpolation_angular_v19_simple", js);
+}
+
+#[test]
+fn test_attribute_interpolation_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<svg attr.viewBox="0 0 {{svgSize}} {{svgSize}}"></svg>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵattributeInterpolate2 instruction
+    assert!(
+        js.contains("ɵɵattributeInterpolate2("),
+        "Angular 19 should emit ɵɵattributeInterpolate2 for attribute interpolation. Got:\n{js}"
+    );
+    // Should NOT emit standalone ɵɵinterpolate
+    assert!(
+        !js.contains("ɵɵinterpolate2("),
+        "Angular 19 should NOT emit standalone ɵɵinterpolate2. Got:\n{js}"
+    );
+    insta::assert_snapshot!("attribute_interpolation_angular_v19", js);
+}
+
+#[test]
+fn test_property_interpolation_angular_v20_default() {
+    // Default (no version set) should use ɵɵproperty + ɵɵinterpolate1 (Angular 20+ behavior)
+    let js = compile_template_to_js_with_version(
+        r#"<div title="Hello {{name}}">static</div>"#,
+        "TestComponent",
+        None,
+    );
+    assert!(
+        js.contains("ɵɵinterpolate1("),
+        "Default (latest) should emit ɵɵinterpolate1. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵpropertyInterpolate"),
+        "Default (latest) should NOT emit ɵɵpropertyInterpolate. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_property_interpolation_angular_v20_explicit() {
+    let v20 = AngularVersion::new(20, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div title="Hello {{name}}">static</div>"#,
+        "TestComponent",
+        Some(v20),
+    );
+    assert!(js.contains("ɵɵinterpolate1("), "Angular 20 should emit ɵɵinterpolate1. Got:\n{js}");
+    assert!(
+        !js.contains("ɵɵpropertyInterpolate"),
+        "Angular 20 should NOT emit ɵɵpropertyInterpolate. Got:\n{js}"
+    );
+}
+
+// ========================================================================
+// Angular 19 version-gating: stylePropInterpolate, styleMapInterpolate, classMapInterpolate
+// ========================================================================
+
+#[test]
+fn test_style_prop_interpolation_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    // Use interpolation syntax (not binding syntax) for style prop
+    let js = compile_template_to_js_with_version(
+        r#"<div style.width="prefix{{expr}}suffix"></div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵstylePropInterpolate1 instruction
+    assert!(
+        js.contains("ɵɵstylePropInterpolate1("),
+        "Angular 19 should emit ɵɵstylePropInterpolate1 for style prop interpolation. Got:\n{js}"
+    );
+    // Should NOT use standalone interpolate nested in styleProp
+    assert!(
+        !js.contains("ɵɵinterpolate1("),
+        "Angular 19 should NOT emit standalone ɵɵinterpolate1 for style prop. Got:\n{js}"
+    );
+    insta::assert_snapshot!("style_prop_interpolation_angular_v19", js);
+}
+
+#[test]
+fn test_style_prop_interpolation_angular_v19_with_unit() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div style.width.px="prefix{{size}}suffix"></div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵstylePropInterpolate1 with unit
+    assert!(
+        js.contains("ɵɵstylePropInterpolate1("),
+        "Angular 19 should emit ɵɵstylePropInterpolate1 for style prop with unit. Got:\n{js}"
+    );
+    insta::assert_snapshot!("style_prop_interpolation_angular_v19_with_unit", js);
+}
+
+#[test]
+fn test_style_prop_interpolation_angular_v20() {
+    let v20 = AngularVersion::new(20, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div style.width="prefix{{expr}}suffix"></div>"#,
+        "TestComponent",
+        Some(v20),
+    );
+    // Angular 20+ should use styleProp + standalone interpolate
+    assert!(
+        !js.contains("ɵɵstylePropInterpolate"),
+        "Angular 20 should NOT emit ɵɵstylePropInterpolate. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_style_map_interpolation_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div style="width:{{expr}}px"></div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵstyleMapInterpolate1 instruction
+    assert!(
+        js.contains("ɵɵstyleMapInterpolate1("),
+        "Angular 19 should emit ɵɵstyleMapInterpolate1 for style map interpolation. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵinterpolate1("),
+        "Angular 19 should NOT emit standalone ɵɵinterpolate1 for style map. Got:\n{js}"
+    );
+    insta::assert_snapshot!("style_map_interpolation_angular_v19", js);
+}
+
+#[test]
+fn test_style_map_interpolation_angular_v20() {
+    let v20 = AngularVersion::new(20, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div style="width:{{expr}}px"></div>"#,
+        "TestComponent",
+        Some(v20),
+    );
+    // Angular 20+ should use styleMap + standalone interpolate
+    assert!(
+        !js.contains("ɵɵstyleMapInterpolate"),
+        "Angular 20 should NOT emit ɵɵstyleMapInterpolate. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_class_map_interpolation_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div class="prefix{{expr}}suffix"></div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    // Angular 19 should use combined ɵɵclassMapInterpolate1 instruction
+    assert!(
+        js.contains("ɵɵclassMapInterpolate1("),
+        "Angular 19 should emit ɵɵclassMapInterpolate1 for class map interpolation. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵinterpolate1("),
+        "Angular 19 should NOT emit standalone ɵɵinterpolate1 for class map. Got:\n{js}"
+    );
+    insta::assert_snapshot!("class_map_interpolation_angular_v19", js);
+}
+
+#[test]
+fn test_class_map_interpolation_angular_v20() {
+    let v20 = AngularVersion::new(20, 0, 0);
+    let js = compile_template_to_js_with_version(
+        r#"<div class="prefix{{expr}}suffix"></div>"#,
+        "TestComponent",
+        Some(v20),
+    );
+    // Angular 20+ should use classMap + standalone interpolate
+    assert!(
+        !js.contains("ɵɵclassMapInterpolate"),
+        "Angular 20 should NOT emit ɵɵclassMapInterpolate. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_style_prop_singleton_collapsed_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    // Singleton interpolation style.color="{{expr}}" is collapsed to plain styleProp
+    // for both v19 and v20+. Angular v19's collateInterpolationArgs maps singleton
+    // empty-string interpolations to the plain instruction (index 0).
+    let js = compile_template_to_js_with_version(
+        r#"<div style.color="{{color}}"></div>"#,
+        "TestComponent",
+        Some(v19),
+    );
+    assert!(
+        js.contains("ɵɵstyleProp("),
+        "Angular 19 singleton style interpolation should use plain ɵɵstyleProp. Got:\n{js}"
+    );
+    // Should NOT use standalone interpolate or combined interpolate
+    assert!(
+        !js.contains("ɵɵinterpolate1(") && !js.contains("ɵɵstylePropInterpolate"),
+        "Angular 19 singleton should NOT emit interpolate instructions. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_property_singleton_interpolation_with_sanitizer_angular_v19() {
+    let v19 = AngularVersion::new(19, 2, 0);
+    // Singleton property interpolation `src="{{url}}"` with sanitizer (img src → URL sanitizer).
+    // Must select ɵɵpropertyInterpolate (non-numbered), NOT ɵɵpropertyInterpolate1.
+    // propertyInterpolate(propName, value, sanitizer?) — takes value directly.
+    // propertyInterpolate1(propName, prefix, v0, suffix, sanitizer?) — expects prefix/suffix.
+    let js =
+        compile_template_to_js_with_version(r#"<img src="{{url}}">"#, "TestComponent", Some(v19));
+    // Must use ɵɵpropertyInterpolate (simple variant), not ɵɵpropertyInterpolate1
+    assert!(
+        js.contains("ɵɵpropertyInterpolate("),
+        "Singleton interpolation with sanitizer should use ɵɵpropertyInterpolate, not ɵɵpropertyInterpolate1. Got:\n{js}"
+    );
+    assert!(
+        !js.contains("ɵɵpropertyInterpolate1("),
+        "Should NOT emit ɵɵpropertyInterpolate1 for singleton. Got:\n{js}"
+    );
+    // Must include sanitizer function
+    assert!(js.contains("ɵɵsanitizeUrl"), "Should include ɵɵsanitizeUrl sanitizer. Got:\n{js}");
+    insta::assert_snapshot!("property_singleton_interpolation_with_sanitizer_v19", js);
+}

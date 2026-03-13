@@ -45,6 +45,23 @@ impl AngularVersion {
         self.major >= 20
     }
 
+    /// Check if this version supports standalone `ɵɵinterpolate*` instructions (v20.0.0+).
+    ///
+    /// Angular v20 introduced standalone `ɵɵinterpolate1`–`ɵɵinterpolateV` instructions
+    /// used as nested calls within `ɵɵproperty`/`ɵɵattribute`. Earlier versions use
+    /// combined `ɵɵpropertyInterpolate*`/`ɵɵattributeInterpolate*` instructions.
+    pub fn supports_value_interpolation(&self) -> bool {
+        self.major >= 20
+    }
+
+    /// Check if this version supports `ɵɵdomProperty` (v20.0.0+).
+    ///
+    /// Angular v20 introduced `ɵɵdomProperty` for host/DomOnly property bindings.
+    /// Earlier versions use `ɵɵhostProperty` instead.
+    pub fn supports_dom_property(&self) -> bool {
+        self.major >= 20
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// Returns `None` if the version string is invalid.

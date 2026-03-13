@@ -112,6 +112,11 @@ struct ReifyContext<'a> {
     mode: TemplateCompilationMode,
     /// Whether to use `ɵɵconditionalCreate` (Angular 20+) or `ɵɵtemplate` (Angular 19-).
     supports_conditional_create: bool,
+    /// Whether to use standalone `ɵɵinterpolate*` (Angular 20+) or combined
+    /// `ɵɵpropertyInterpolate*`/`ɵɵattributeInterpolate*` (Angular 19-).
+    supports_value_interpolation: bool,
+    /// Whether to use `ɵɵdomProperty` (Angular 20+) or `ɵɵhostProperty` (Angular 19-).
+    supports_dom_property: bool,
 }
 
 /// Reifies IR expressions to Output AST.
@@ -141,8 +146,17 @@ pub fn reify(job: &mut ComponentCompilationJob<'_>) {
         }
     }
     let supports_conditional_create = job.supports_conditional_create();
-    let ctx =
-        ReifyContext { view_fn_names, view_decls, view_vars, mode, supports_conditional_create };
+    let supports_value_interpolation = job.supports_value_interpolation();
+    let supports_dom_property = job.supports_dom_property();
+    let ctx = ReifyContext {
+        view_fn_names,
+        view_decls,
+        view_vars,
+        mode,
+        supports_conditional_create,
+        supports_value_interpolation,
+        supports_dom_property,
+    };
 
     // Collect xrefs of embedded views (excluding root) before splitting borrows
     let embedded_xrefs: std::vec::Vec<XrefId> =
@@ -210,7 +224,16 @@ fn reify_view_to_stmts<'a>(
 
     // Reify update operations
     for op in view.update.iter() {
-        let stmt = reify_update_op(allocator, op, expressions, root_xref, ctx.mode, diagnostics);
+        let stmt = reify_update_op(
+            allocator,
+            op,
+            expressions,
+            root_xref,
+            ctx.mode,
+            diagnostics,
+            ctx.supports_value_interpolation,
+            ctx.supports_dom_property,
+        );
         if let Some(s) = stmt {
             update_stmts.push(s);
         }
@@ -353,6 +376,8 @@ fn reify_create_op<'a>(
                     root_xref,
                     ctx.mode,
                     diagnostics,
+                    ctx.supports_value_interpolation,
+                    ctx.supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -632,6 +657,8 @@ fn reify_create_op<'a>(
                     root_xref,
                     ctx.mode,
                     diagnostics,
+                    ctx.supports_value_interpolation,
+                    ctx.supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -654,6 +681,8 @@ fn reify_create_op<'a>(
                     root_xref,
                     ctx.mode,
                     diagnostics,
+                    ctx.supports_value_interpolation,
+                    ctx.supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -684,6 +713,8 @@ fn reify_create_op<'a>(
                     root_xref,
                     ctx.mode,
                     diagnostics,
+                    ctx.supports_value_interpolation,
+                    ctx.supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -780,38 +811,77 @@ fn reify_update_op<'a>(
     root_xref: XrefId,
     mode: TemplateCompilationMode,
     diagnostics: &mut Vec<OxcDiagnostic>,
+    supports_value_interpolation: bool,
+    supports_dom_property: bool,
 ) -> Option<OutputStatement<'a>> {
     let is_dom_only = mode == TemplateCompilationMode::DomOnly;
 
     match op {
         UpdateOp::Property(prop) => {
-            // Angular uses property() with nested interpolate*() calls for interpolated properties.
-            // The interpolation is handled by convert_ir_expression which generates
-            // ɵɵinterpolate*() calls when the expression is an Interpolation.
-            // Example: [title]="Hello {{name}}" -> ɵɵproperty("title", ɵɵinterpolate1("Hello ", name, ""))
-            let expr = convert_ir_expression(allocator, &prop.expression, expressions, root_xref);
-            // In DomOnly mode, use domProperty unless it's an animation binding
-            // Matches Angular's reify.ts line 613-621
+            // Check if the expression is an interpolation AND we're targeting Angular 19
+            // (which uses combined ɵɵpropertyInterpolate* instructions).
+            let is_interpolation = matches!(*prop.expression, IrExpression::Interpolation(_));
             let is_animation =
                 matches!(prop.binding_kind, BindingKind::LegacyAnimation | BindingKind::Animation);
-            if is_dom_only && !is_animation {
-                Some(create_dom_property_stmt(allocator, &prop.name, expr, prop.sanitizer.as_ref()))
-            } else if is_aria_attribute(prop.name.as_str()) {
-                // Use ɵɵariaProperty for ARIA attributes (e.g., aria-label, aria-hidden)
-                Some(create_aria_property_stmt(allocator, &prop.name, expr))
-            } else {
-                Some(create_property_stmt_with_expr(
+
+            if is_interpolation && !supports_value_interpolation {
+                // Angular 19: Use ɵɵpropertyInterpolate*("name", s0, v0, s1, ..., [sanitizer])
+                let has_extra_args = prop.sanitizer.is_some();
+                let (interp_args, expr_count) = reify_interpolation(
+                    allocator,
+                    &prop.expression,
+                    expressions,
+                    root_xref,
+                    has_extra_args,
+                );
+                Some(create_property_interpolate_stmt(
                     allocator,
                     &prop.name,
-                    expr,
+                    interp_args,
+                    expr_count,
                     prop.sanitizer.as_ref(),
                 ))
+            } else {
+                // Angular 20+: Use ɵɵproperty("name", ɵɵinterpolate1(...)) or ɵɵproperty("name", expr)
+                let expr =
+                    convert_ir_expression(allocator, &prop.expression, expressions, root_xref);
+                if is_dom_only && !is_animation {
+                    if supports_dom_property {
+                        Some(create_dom_property_stmt(
+                            allocator,
+                            &prop.name,
+                            expr,
+                            prop.sanitizer.as_ref(),
+                        ))
+                    } else {
+                        Some(create_host_property_stmt(
+                            allocator,
+                            &prop.name,
+                            expr,
+                            prop.sanitizer.as_ref(),
+                        ))
+                    }
+                } else if is_aria_attribute(prop.name.as_str()) {
+                    Some(create_aria_property_stmt(allocator, &prop.name, expr))
+                } else {
+                    Some(create_property_stmt_with_expr(
+                        allocator,
+                        &prop.name,
+                        expr,
+                        prop.sanitizer.as_ref(),
+                    ))
+                }
             }
         }
         UpdateOp::InterpolateText(interp) => {
             // Handle multiple interpolations like "{{a}} and {{b}}"
-            let (args, expr_count) =
-                reify_interpolation(allocator, &interp.interpolation, expressions, root_xref);
+            let (args, expr_count) = reify_interpolation(
+                allocator,
+                &interp.interpolation,
+                expressions,
+                root_xref,
+                false,
+            );
             Some(create_text_interpolate_stmt_with_args(allocator, args, expr_count))
         }
         UpdateOp::Binding(binding) => {
@@ -820,10 +890,33 @@ fn reify_update_op<'a>(
             Some(create_binding_stmt_with_expr(allocator, &binding.name, expr))
         }
         UpdateOp::StyleProp(style) => {
-            let expr = convert_ir_expression(allocator, &style.expression, expressions, root_xref);
             // Strip "style." prefix if present
             let name = strip_prefix(&style.name, "style.");
-            Some(create_style_prop_stmt_with_expr(allocator, &name, expr, style.unit.as_ref()))
+            let is_interpolation = matches!(*style.expression, IrExpression::Interpolation(_));
+
+            if is_interpolation && !supports_value_interpolation {
+                // Angular 19: Use ɵɵstylePropInterpolate*("name", s0, v0, s1, ..., [unit])
+                let has_extra_args = style.unit.is_some();
+                let (interp_args, expr_count) = reify_interpolation(
+                    allocator,
+                    &style.expression,
+                    expressions,
+                    root_xref,
+                    has_extra_args,
+                );
+                Some(create_style_prop_interpolate_stmt(
+                    allocator,
+                    &name,
+                    interp_args,
+                    expr_count,
+                    style.unit.as_ref(),
+                ))
+            } else {
+                // Angular 20+: Use ɵɵstyleProp("name", ɵɵinterpolate1(...), [unit])
+                let expr =
+                    convert_ir_expression(allocator, &style.expression, expressions, root_xref);
+                Some(create_style_prop_stmt_with_expr(allocator, &name, expr, style.unit.as_ref()))
+            }
         }
         UpdateOp::ClassProp(class) => {
             let expr = convert_ir_expression(allocator, &class.expression, expressions, root_xref);
@@ -832,16 +925,40 @@ fn reify_update_op<'a>(
             Some(create_class_prop_stmt_with_expr(allocator, &name, expr))
         }
         UpdateOp::Attribute(attr) => {
-            let expr = convert_ir_expression(allocator, &attr.expression, expressions, root_xref);
             // Strip "attr." prefix if present
             let name = strip_prefix(&attr.name, "attr.");
-            Some(create_attribute_stmt_with_expr(
-                allocator,
-                &name,
-                expr,
-                attr.sanitizer.as_ref(),
-                attr.namespace.as_ref(),
-            ))
+            let is_interpolation = matches!(*attr.expression, IrExpression::Interpolation(_));
+
+            if is_interpolation && !supports_value_interpolation {
+                // Angular 19: Use ɵɵattributeInterpolate*("name", s0, v0, s1, ..., [sanitizer], [ns])
+                let has_extra_args = attr.sanitizer.is_some() || attr.namespace.is_some();
+                let (interp_args, expr_count) = reify_interpolation(
+                    allocator,
+                    &attr.expression,
+                    expressions,
+                    root_xref,
+                    has_extra_args,
+                );
+                Some(create_attribute_interpolate_stmt(
+                    allocator,
+                    &name,
+                    interp_args,
+                    expr_count,
+                    attr.sanitizer.as_ref(),
+                    attr.namespace.as_ref(),
+                ))
+            } else {
+                // Angular 20+: Use ɵɵattribute("name", ɵɵinterpolate1(...))
+                let expr =
+                    convert_ir_expression(allocator, &attr.expression, expressions, root_xref);
+                Some(create_attribute_stmt_with_expr(
+                    allocator,
+                    &name,
+                    expr,
+                    attr.sanitizer.as_ref(),
+                    attr.namespace.as_ref(),
+                ))
+            }
         }
         UpdateOp::Advance(adv) => Some(create_advance_stmt(allocator, adv.delta)),
         UpdateOp::StoreLet(store) => {
@@ -880,12 +997,44 @@ fn reify_update_op<'a>(
             Some(create_conditional_update_stmt(allocator, expr, context_value))
         }
         UpdateOp::StyleMap(style) => {
-            let expr = convert_ir_expression(allocator, &style.expression, expressions, root_xref);
-            Some(create_style_map_stmt(allocator, expr))
+            let is_interpolation = matches!(*style.expression, IrExpression::Interpolation(_));
+
+            if is_interpolation && !supports_value_interpolation {
+                // Angular 19: Use ɵɵstyleMapInterpolate*(s0, v0, s1, ...)
+                let (interp_args, expr_count) = reify_interpolation(
+                    allocator,
+                    &style.expression,
+                    expressions,
+                    root_xref,
+                    false,
+                );
+                Some(create_style_map_interpolate_stmt(allocator, interp_args, expr_count))
+            } else {
+                // Angular 20+: Use ɵɵstyleMap(ɵɵinterpolate1(...))
+                let expr =
+                    convert_ir_expression(allocator, &style.expression, expressions, root_xref);
+                Some(create_style_map_stmt(allocator, expr))
+            }
         }
         UpdateOp::ClassMap(class) => {
-            let expr = convert_ir_expression(allocator, &class.expression, expressions, root_xref);
-            Some(create_class_map_stmt(allocator, expr))
+            let is_interpolation = matches!(*class.expression, IrExpression::Interpolation(_));
+
+            if is_interpolation && !supports_value_interpolation {
+                // Angular 19: Use ɵɵclassMapInterpolate*(s0, v0, s1, ...)
+                let (interp_args, expr_count) = reify_interpolation(
+                    allocator,
+                    &class.expression,
+                    expressions,
+                    root_xref,
+                    false,
+                );
+                Some(create_class_map_interpolate_stmt(allocator, interp_args, expr_count))
+            } else {
+                // Angular 20+: Use ɵɵclassMap(ɵɵinterpolate1(...))
+                let expr =
+                    convert_ir_expression(allocator, &class.expression, expressions, root_xref);
+                Some(create_class_map_stmt(allocator, expr))
+            }
         }
         UpdateOp::DomProperty(prop) => {
             let expr = convert_ir_expression(allocator, &prop.expression, expressions, root_xref);
@@ -895,8 +1044,16 @@ fn reify_update_op<'a>(
                 matches!(prop.binding_kind, BindingKind::LegacyAnimation | BindingKind::Animation);
             if is_animation {
                 Some(create_animation_stmt(allocator, &prop.name, expr))
-            } else {
+            } else if supports_dom_property {
                 Some(create_dom_property_stmt(allocator, &prop.name, expr, prop.sanitizer.as_ref()))
+            } else {
+                // Angular 19: Use ɵɵhostProperty instead of ɵɵdomProperty
+                Some(create_host_property_stmt(
+                    allocator,
+                    &prop.name,
+                    expr,
+                    prop.sanitizer.as_ref(),
+                ))
             }
         }
         UpdateOp::I18nExpression(i18n) => {
@@ -948,11 +1105,17 @@ fn reify_update_op<'a>(
 }
 
 /// Reify an interpolation expression to arguments for textInterpolate.
+/// Converts an IR interpolation expression to a flat list of interleaved string/expression args.
+///
+/// When `has_extra_args` is true, trailing empty strings are preserved so that extra args
+/// (sanitizer, namespace, unit) occupy the correct positional slot. When false, trailing
+/// empty strings are dropped (the Angular runtime defaults them to "").
 fn reify_interpolation<'a>(
     allocator: &'a oxc_allocator::Allocator,
     interpolation: &IrExpression<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
+    has_extra_args: bool,
 ) -> (OxcVec<'a, OutputExpression<'a>>, usize) {
     match interpolation {
         IrExpression::Interpolation(ir_interp) => {
@@ -983,9 +1146,11 @@ fn reify_interpolation<'a>(
                 }
                 if ir_interp.strings.len() > ir_interp.expressions.len() {
                     if let Some(trailing) = ir_interp.strings.last() {
-                        // Only add trailing string if it's not empty
-                        // (Angular drops trailing empty strings and the runtime handles it)
-                        if !trailing.is_empty() {
+                        // Drop trailing empty strings only when no extra args follow.
+                        // When extra args (sanitizer, namespace, unit) are appended by the
+                        // caller, the trailing empty string must be kept as a positional
+                        // separator so the extra args occupy the correct slots.
+                        if !trailing.is_empty() || has_extra_args {
                             args.push(OutputExpression::Literal(Box::new_in(
                                 LiteralExpr {
                                     value: LiteralValue::String(trailing.clone()),
@@ -1029,9 +1194,7 @@ fn reify_interpolation<'a>(
                     }
                     if ang_interp.strings.len() > ang_interp.expressions.len() {
                         if let Some(trailing) = ang_interp.strings.last() {
-                            // Only add trailing string if it's not empty
-                            // (Angular drops trailing empty strings and the runtime handles it)
-                            if !trailing.is_empty() {
+                            if !trailing.is_empty() || has_extra_args {
                                 args.push(OutputExpression::Literal(Box::new_in(
                                     LiteralExpr {
                                         value: LiteralValue::String(trailing.clone()),
@@ -1068,12 +1231,21 @@ fn reify_interpolation<'a>(
 pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
     let root_xref = job.root.xref;
+    let supports_value_interpolation = job.supports_value_interpolation();
+    let supports_dom_property = job.supports_dom_property();
     let mut diagnostics = Vec::new();
 
     // Reify create operations (listeners)
     for op in job.root.create.iter() {
-        let stmt =
-            reify_host_create_op(allocator, op, &job.expressions, root_xref, &mut diagnostics);
+        let stmt = reify_host_create_op(
+            allocator,
+            op,
+            &job.expressions,
+            root_xref,
+            &mut diagnostics,
+            supports_value_interpolation,
+            supports_dom_property,
+        );
         if let Some(s) = stmt {
             job.root.create_statements.push(s);
         }
@@ -1089,6 +1261,8 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
             root_xref,
             TemplateCompilationMode::Full,
             &mut diagnostics,
+            supports_value_interpolation,
+            supports_dom_property,
         );
         if let Some(s) = stmt {
             job.root.update_statements.push(s);
@@ -1105,6 +1279,8 @@ fn reify_host_create_op<'a>(
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
     diagnostics: &mut Vec<OxcDiagnostic>,
+    supports_value_interpolation: bool,
+    supports_dom_property: bool,
 ) -> Option<OutputStatement<'a>> {
     match op {
         CreateOp::Listener(listener) => {
@@ -1129,6 +1305,8 @@ fn reify_host_create_op<'a>(
                     root_xref,
                     TemplateCompilationMode::Full,
                     diagnostics,
+                    supports_value_interpolation,
+                    supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -1178,6 +1356,8 @@ fn reify_host_create_op<'a>(
                     root_xref,
                     TemplateCompilationMode::Full,
                     diagnostics,
+                    supports_value_interpolation,
+                    supports_dom_property,
                 ) {
                     handler_stmts.push(stmt);
                 }
@@ -1341,6 +1521,8 @@ fn reify_track_by<'a>(
         // Reify each op in track_by_ops into output statements
         let mut statements = OxcVec::new_in(allocator);
         for track_op in track_ops.iter() {
+            // Track-by functions don't contain property/attribute interpolation,
+            // so version flags don't matter here.
             if let Some(stmt) = reify_update_op(
                 allocator,
                 track_op,
@@ -1348,6 +1530,8 @@ fn reify_track_by<'a>(
                 root_xref,
                 TemplateCompilationMode::Full,
                 diagnostics,
+                true, // supports_value_interpolation (not relevant for track-by)
+                true, // supports_dom_property (not relevant for track-by)
             ) {
                 statements.push(stmt);
             }

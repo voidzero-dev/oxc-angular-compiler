@@ -6,7 +6,11 @@ use oxc_span::Atom;
 use crate::output::ast::{
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
 };
-use crate::r3::{Identifiers, get_text_interpolate_instruction};
+use crate::r3::{
+    Identifiers, get_attribute_interpolate_instruction, get_class_map_interpolate_instruction,
+    get_property_interpolate_instruction, get_style_map_interpolate_instruction,
+    get_style_prop_interpolate_instruction, get_text_interpolate_instruction,
+};
 
 use super::super::utils::create_instruction_call_stmt;
 
@@ -269,4 +273,189 @@ pub fn create_text_interpolate_stmt_with_args<'a>(
         get_text_interpolate_instruction(expr_count)
     };
     create_instruction_call_stmt(allocator, instruction, args)
+}
+
+/// Creates an ɵɵpropertyInterpolate*() call statement (Angular 19).
+///
+/// For Angular 19, property bindings with interpolation use combined instructions:
+/// `ɵɵpropertyInterpolate1("title", "Hello ", name, "")` instead of
+/// `ɵɵproperty("title", ɵɵinterpolate1("Hello ", name, ""))`.
+///
+/// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer]
+pub fn create_property_interpolate_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    name: &Atom<'a>,
+    interp_args: OxcVec<'a, OutputExpression<'a>>,
+    expr_count: usize,
+    sanitizer: Option<&Atom<'a>>,
+) -> OutputStatement<'a> {
+    // Save length before consuming interp_args — the simple case check must use
+    // the interpolation args count, not the final args count (which includes name
+    // and sanitizer). Otherwise a singleton like `{{url}}` with a sanitizer would
+    // mis-select propertyInterpolate1 instead of propertyInterpolate.
+    let interp_args_len = interp_args.len();
+    let mut args = OxcVec::new_in(allocator);
+    // First arg: property name
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
+        allocator,
+    )));
+    // Then interleaved strings and expressions
+    for arg in interp_args {
+        args.push(arg);
+    }
+    // Optional sanitizer
+    if let Some(san) = sanitizer {
+        args.push(create_sanitizer_expr(allocator, san));
+    }
+    let instruction = if expr_count == 1 && interp_args_len == 1 {
+        // Simple case: just name + value (no surrounding strings)
+        // e.g. propertyInterpolate("src", url, sanitizerFn)
+        Identifiers::PROPERTY_INTERPOLATE
+    } else {
+        get_property_interpolate_instruction(expr_count)
+    };
+    create_instruction_call_stmt(allocator, instruction, args)
+}
+
+/// Creates an ɵɵattributeInterpolate*() call statement (Angular 19).
+///
+/// For Angular 19, attribute bindings with interpolation use combined instructions:
+/// `ɵɵattributeInterpolate1("title", "Hello ", name, "")` instead of
+/// `ɵɵattribute("title", ɵɵinterpolate1("Hello ", name, ""))`.
+///
+/// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer], [namespace]
+pub fn create_attribute_interpolate_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    name: &Atom<'a>,
+    interp_args: OxcVec<'a, OutputExpression<'a>>,
+    expr_count: usize,
+    sanitizer: Option<&Atom<'a>>,
+    namespace: Option<&Atom<'a>>,
+) -> OutputStatement<'a> {
+    // Save length before consuming — same reason as create_property_interpolate_stmt.
+    let interp_args_len = interp_args.len();
+    let mut args = OxcVec::new_in(allocator);
+    // First arg: attribute name
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
+        allocator,
+    )));
+    // Then interleaved strings and expressions
+    for arg in interp_args {
+        args.push(arg);
+    }
+    // Optional sanitizer, or null if namespace is present
+    if sanitizer.is_some() || namespace.is_some() {
+        if let Some(san) = sanitizer {
+            args.push(create_sanitizer_expr(allocator, san));
+        } else {
+            args.push(OutputExpression::Literal(Box::new_in(
+                LiteralExpr { value: LiteralValue::Null, source_span: None },
+                allocator,
+            )));
+        }
+    }
+    // Optional namespace
+    if let Some(ns) = namespace {
+        args.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(ns.clone()), source_span: None },
+            allocator,
+        )));
+    }
+    let instruction = if expr_count == 1 && interp_args_len == 1 {
+        Identifiers::ATTRIBUTE_INTERPOLATE
+    } else {
+        get_attribute_interpolate_instruction(expr_count)
+    };
+    create_instruction_call_stmt(allocator, instruction, args)
+}
+
+/// Creates an ɵɵhostProperty() call statement (Angular 19).
+///
+/// For Angular 19, host/DomOnly property bindings use `ɵɵhostProperty` instead of `ɵɵdomProperty`.
+pub fn create_host_property_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    name: &Atom<'a>,
+    value: OutputExpression<'a>,
+    sanitizer: Option<&Atom<'a>>,
+) -> OutputStatement<'a> {
+    let remapped_name = remap_dom_property(name);
+    let mut args = OxcVec::new_in(allocator);
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(remapped_name), source_span: None },
+        allocator,
+    )));
+    args.push(value);
+    if let Some(san) = sanitizer {
+        args.push(create_sanitizer_expr(allocator, san));
+    }
+    create_instruction_call_stmt(allocator, Identifiers::HOST_PROPERTY, args)
+}
+
+/// Creates an ɵɵstylePropInterpolate*() call statement (Angular 19).
+///
+/// For Angular 19, style prop bindings with interpolation use combined instructions:
+/// `ɵɵstylePropInterpolate1("width", "", expr, "px", "px")` instead of
+/// `ɵɵstyleProp("width", ɵɵinterpolate1("", expr, "px"), "px")`.
+///
+/// Signature: `ɵɵstylePropInterpolateN(prop, s0, v0, ..., [unit])`
+pub fn create_style_prop_interpolate_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    name: &Atom<'a>,
+    interp_args: OxcVec<'a, OutputExpression<'a>>,
+    expr_count: usize,
+    unit: Option<&Atom<'a>>,
+) -> OutputStatement<'a> {
+    let mut args = OxcVec::new_in(allocator);
+    // First arg: style property name
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
+        allocator,
+    )));
+    // Then interleaved strings and expressions
+    for arg in interp_args {
+        args.push(arg);
+    }
+    // Optional unit suffix (valueSuffix)
+    if let Some(unit_val) = unit {
+        args.push(OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(unit_val.clone()), source_span: None },
+            allocator,
+        )));
+    }
+    let instruction = get_style_prop_interpolate_instruction(expr_count);
+    create_instruction_call_stmt(allocator, instruction, args)
+}
+
+/// Creates an ɵɵstyleMapInterpolate*() call statement (Angular 19).
+///
+/// For Angular 19, style map bindings with interpolation use combined instructions:
+/// `ɵɵstyleMapInterpolate1("", expr, "")` instead of
+/// `ɵɵstyleMap(ɵɵinterpolate1("", expr, ""))`.
+///
+/// Signature: `ɵɵstyleMapInterpolateN(s0, v0, ...)`
+pub fn create_style_map_interpolate_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    interp_args: OxcVec<'a, OutputExpression<'a>>,
+    expr_count: usize,
+) -> OutputStatement<'a> {
+    let instruction = get_style_map_interpolate_instruction(expr_count);
+    create_instruction_call_stmt(allocator, instruction, interp_args)
+}
+
+/// Creates an ɵɵclassMapInterpolate*() call statement (Angular 19).
+///
+/// For Angular 19, class map bindings with interpolation use combined instructions:
+/// `ɵɵclassMapInterpolate1("", expr, "")` instead of
+/// `ɵɵclassMap(ɵɵinterpolate1("", expr, ""))`.
+///
+/// Signature: `ɵɵclassMapInterpolateN(s0, v0, ...)`
+pub fn create_class_map_interpolate_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    interp_args: OxcVec<'a, OutputExpression<'a>>,
+    expr_count: usize,
+) -> OutputStatement<'a> {
+    let instruction = get_class_map_interpolate_instruction(expr_count);
+    create_instruction_call_stmt(allocator, instruction, interp_args)
 }

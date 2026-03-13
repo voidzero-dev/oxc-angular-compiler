@@ -63,7 +63,7 @@ use crate::pipeline::emit::{
 };
 use crate::pipeline::ingest::{
     HostBindingInput, IngestOptions, ingest_component, ingest_component_with_options,
-    ingest_host_binding,
+    ingest_host_binding_with_version,
 };
 use crate::transform::HtmlToR3Transform;
 use crate::transform::html_to_r3::TransformOptions as R3TransformOptions;
@@ -2423,8 +2423,12 @@ fn compile_component_full<'a>(
     // Pass the template pool's current index to ensure host binding constants
     // continue from where template compilation left off (avoiding duplicate names)
     let template_pool_index = job.pool.next_name_index();
-    let host_binding_output =
-        compile_component_host_bindings(allocator, metadata, template_pool_index);
+    let host_binding_output = compile_component_host_bindings(
+        allocator,
+        metadata,
+        template_pool_index,
+        options.angular_version,
+    );
 
     // Extract the result and update pool index if host bindings were compiled
     let (host_binding_result, host_binding_next_pool_index, host_binding_declarations) =
@@ -2848,6 +2852,7 @@ pub fn compile_template_to_js_with_options<'a>(
             component_name,
             options.selector.as_deref(),
             host_pool_starting_index,
+            options.angular_version,
         ) {
             // Add host binding pool declarations (pure functions, etc.)
             for decl in host_result.declarations {
@@ -3111,6 +3116,7 @@ fn compile_component_host_bindings<'a>(
     allocator: &'a Allocator,
     metadata: &ComponentMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<AngularVersion>,
 ) -> Option<HostBindingCompilationOutput<'a>> {
     let host = metadata.host.as_ref()?;
 
@@ -3134,7 +3140,8 @@ fn compile_component_host_bindings<'a>(
 
     // Ingest and compile the host bindings with the pool starting index
     // This ensures constant names continue from where template compilation left off
-    let mut job = ingest_host_binding(allocator, input, pool_starting_index);
+    let mut job =
+        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation
@@ -3411,6 +3418,7 @@ fn compile_host_bindings_from_input<'a>(
     component_name: &str,
     selector: Option<&str>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> Option<HostBindingCompilationResult<'a>> {
     use oxc_allocator::FromIn;
 
@@ -3436,7 +3444,8 @@ fn compile_host_bindings_from_input<'a>(
     // Convert to HostBindingInput and compile
     let input =
         convert_host_metadata_to_input(allocator, &host, component_name_atom, component_selector);
-    let mut job = ingest_host_binding(allocator, input, pool_starting_index);
+    let mut job =
+        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
     let result = compile_host_bindings(&mut job);
 
     Some(result)
@@ -3471,6 +3480,7 @@ pub fn compile_host_bindings_for_linker(
         component_name,
         selector,
         pool_starting_index,
+        None, // Linker always targets latest Angular version
     )?;
 
     let emitter = JsEmitter::new();

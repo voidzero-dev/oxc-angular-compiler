@@ -3942,12 +3942,23 @@ pub fn ingest_host_binding<'a>(
     input: HostBindingInput<'a>,
     pool_starting_index: u32,
 ) -> HostBindingCompilationJob<'a> {
+    ingest_host_binding_with_version(allocator, input, pool_starting_index, None)
+}
+
+/// Ingest host bindings into a `HostBindingCompilationJob` with a specific Angular version.
+pub fn ingest_host_binding_with_version<'a>(
+    allocator: &'a Allocator,
+    input: HostBindingInput<'a>,
+    pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
+) -> HostBindingCompilationJob<'a> {
     let mut job = HostBindingCompilationJob::with_pool_starting_index(
         allocator,
         input.component_name,
         input.component_selector,
         pool_starting_index,
     );
+    job.angular_version = angular_version;
 
     // Ingest host properties
     for property in input.properties {

@@ -161,6 +161,174 @@ impl Identifiers {
     pub const INTERPOLATE_V: &'static str = "ɵɵinterpolateV";
 
     // ========================================================================
+    // Property Interpolation Instructions (Angular 19 — combined instructions)
+    // ========================================================================
+
+    /// Property interpolation (0 expressions, simple stringify).
+    pub const PROPERTY_INTERPOLATE: &'static str = "ɵɵpropertyInterpolate";
+
+    /// Property interpolation with 1 expression.
+    pub const PROPERTY_INTERPOLATE_1: &'static str = "ɵɵpropertyInterpolate1";
+
+    /// Property interpolation with 2 expressions.
+    pub const PROPERTY_INTERPOLATE_2: &'static str = "ɵɵpropertyInterpolate2";
+
+    /// Property interpolation with 3 expressions.
+    pub const PROPERTY_INTERPOLATE_3: &'static str = "ɵɵpropertyInterpolate3";
+
+    /// Property interpolation with 4 expressions.
+    pub const PROPERTY_INTERPOLATE_4: &'static str = "ɵɵpropertyInterpolate4";
+
+    /// Property interpolation with 5 expressions.
+    pub const PROPERTY_INTERPOLATE_5: &'static str = "ɵɵpropertyInterpolate5";
+
+    /// Property interpolation with 6 expressions.
+    pub const PROPERTY_INTERPOLATE_6: &'static str = "ɵɵpropertyInterpolate6";
+
+    /// Property interpolation with 7 expressions.
+    pub const PROPERTY_INTERPOLATE_7: &'static str = "ɵɵpropertyInterpolate7";
+
+    /// Property interpolation with 8 expressions.
+    pub const PROPERTY_INTERPOLATE_8: &'static str = "ɵɵpropertyInterpolate8";
+
+    /// Property interpolation with 9+ expressions (variadic).
+    pub const PROPERTY_INTERPOLATE_V: &'static str = "ɵɵpropertyInterpolateV";
+
+    // ========================================================================
+    // Attribute Interpolation Instructions (Angular 19 — combined instructions)
+    // ========================================================================
+
+    /// Attribute interpolation (0 expressions, simple stringify).
+    pub const ATTRIBUTE_INTERPOLATE: &'static str = "ɵɵattributeInterpolate";
+
+    /// Attribute interpolation with 1 expression.
+    pub const ATTRIBUTE_INTERPOLATE_1: &'static str = "ɵɵattributeInterpolate1";
+
+    /// Attribute interpolation with 2 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_2: &'static str = "ɵɵattributeInterpolate2";
+
+    /// Attribute interpolation with 3 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_3: &'static str = "ɵɵattributeInterpolate3";
+
+    /// Attribute interpolation with 4 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_4: &'static str = "ɵɵattributeInterpolate4";
+
+    /// Attribute interpolation with 5 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_5: &'static str = "ɵɵattributeInterpolate5";
+
+    /// Attribute interpolation with 6 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_6: &'static str = "ɵɵattributeInterpolate6";
+
+    /// Attribute interpolation with 7 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_7: &'static str = "ɵɵattributeInterpolate7";
+
+    /// Attribute interpolation with 8 expressions.
+    pub const ATTRIBUTE_INTERPOLATE_8: &'static str = "ɵɵattributeInterpolate8";
+
+    /// Attribute interpolation with 9+ expressions (variadic).
+    pub const ATTRIBUTE_INTERPOLATE_V: &'static str = "ɵɵattributeInterpolateV";
+
+    // ========================================================================
+    // Style Prop Interpolation Instructions (Angular 19 — combined instructions)
+    // ========================================================================
+
+    /// Style prop interpolation with 1 expression.
+    pub const STYLE_PROP_INTERPOLATE_1: &'static str = "ɵɵstylePropInterpolate1";
+
+    /// Style prop interpolation with 2 expressions.
+    pub const STYLE_PROP_INTERPOLATE_2: &'static str = "ɵɵstylePropInterpolate2";
+
+    /// Style prop interpolation with 3 expressions.
+    pub const STYLE_PROP_INTERPOLATE_3: &'static str = "ɵɵstylePropInterpolate3";
+
+    /// Style prop interpolation with 4 expressions.
+    pub const STYLE_PROP_INTERPOLATE_4: &'static str = "ɵɵstylePropInterpolate4";
+
+    /// Style prop interpolation with 5 expressions.
+    pub const STYLE_PROP_INTERPOLATE_5: &'static str = "ɵɵstylePropInterpolate5";
+
+    /// Style prop interpolation with 6 expressions.
+    pub const STYLE_PROP_INTERPOLATE_6: &'static str = "ɵɵstylePropInterpolate6";
+
+    /// Style prop interpolation with 7 expressions.
+    pub const STYLE_PROP_INTERPOLATE_7: &'static str = "ɵɵstylePropInterpolate7";
+
+    /// Style prop interpolation with 8 expressions.
+    pub const STYLE_PROP_INTERPOLATE_8: &'static str = "ɵɵstylePropInterpolate8";
+
+    /// Style prop interpolation with 9+ expressions (variadic).
+    pub const STYLE_PROP_INTERPOLATE_V: &'static str = "ɵɵstylePropInterpolateV";
+
+    // ========================================================================
+    // Style Map Interpolation Instructions (Angular 19 — combined instructions)
+    // ========================================================================
+
+    /// Style map interpolation with 1 expression.
+    pub const STYLE_MAP_INTERPOLATE_1: &'static str = "ɵɵstyleMapInterpolate1";
+
+    /// Style map interpolation with 2 expressions.
+    pub const STYLE_MAP_INTERPOLATE_2: &'static str = "ɵɵstyleMapInterpolate2";
+
+    /// Style map interpolation with 3 expressions.
+    pub const STYLE_MAP_INTERPOLATE_3: &'static str = "ɵɵstyleMapInterpolate3";
+
+    /// Style map interpolation with 4 expressions.
+    pub const STYLE_MAP_INTERPOLATE_4: &'static str = "ɵɵstyleMapInterpolate4";
+
+    /// Style map interpolation with 5 expressions.
+    pub const STYLE_MAP_INTERPOLATE_5: &'static str = "ɵɵstyleMapInterpolate5";
+
+    /// Style map interpolation with 6 expressions.
+    pub const STYLE_MAP_INTERPOLATE_6: &'static str = "ɵɵstyleMapInterpolate6";
+
+    /// Style map interpolation with 7 expressions.
+    pub const STYLE_MAP_INTERPOLATE_7: &'static str = "ɵɵstyleMapInterpolate7";
+
+    /// Style map interpolation with 8 expressions.
+    pub const STYLE_MAP_INTERPOLATE_8: &'static str = "ɵɵstyleMapInterpolate8";
+
+    /// Style map interpolation with 9+ expressions (variadic).
+    pub const STYLE_MAP_INTERPOLATE_V: &'static str = "ɵɵstyleMapInterpolateV";
+
+    // ========================================================================
+    // Class Map Interpolation Instructions (Angular 19 — combined instructions)
+    // ========================================================================
+
+    /// Class map interpolation with 1 expression.
+    pub const CLASS_MAP_INTERPOLATE_1: &'static str = "ɵɵclassMapInterpolate1";
+
+    /// Class map interpolation with 2 expressions.
+    pub const CLASS_MAP_INTERPOLATE_2: &'static str = "ɵɵclassMapInterpolate2";
+
+    /// Class map interpolation with 3 expressions.
+    pub const CLASS_MAP_INTERPOLATE_3: &'static str = "ɵɵclassMapInterpolate3";
+
+    /// Class map interpolation with 4 expressions.
+    pub const CLASS_MAP_INTERPOLATE_4: &'static str = "ɵɵclassMapInterpolate4";
+
+    /// Class map interpolation with 5 expressions.
+    pub const CLASS_MAP_INTERPOLATE_5: &'static str = "ɵɵclassMapInterpolate5";
+
+    /// Class map interpolation with 6 expressions.
+    pub const CLASS_MAP_INTERPOLATE_6: &'static str = "ɵɵclassMapInterpolate6";
+
+    /// Class map interpolation with 7 expressions.
+    pub const CLASS_MAP_INTERPOLATE_7: &'static str = "ɵɵclassMapInterpolate7";
+
+    /// Class map interpolation with 8 expressions.
+    pub const CLASS_MAP_INTERPOLATE_8: &'static str = "ɵɵclassMapInterpolate8";
+
+    /// Class map interpolation with 9+ expressions (variadic).
+    pub const CLASS_MAP_INTERPOLATE_V: &'static str = "ɵɵclassMapInterpolateV";
+
+    // ========================================================================
+    // Host Property Instruction (Angular 19 — replaces domProperty)
+    // ========================================================================
+
+    /// Host property binding (Angular 19). Angular 20+ uses `ɵɵdomProperty`.
+    pub const HOST_PROPERTY: &'static str = "ɵɵhostProperty";
+
+    // ========================================================================
     // Text Instructions
     // ========================================================================
 
@@ -854,5 +1022,82 @@ pub fn get_pipe_bind_instruction(arg_count: usize) -> &'static str {
         3 => Identifiers::PIPE_BIND_3,
         4 => Identifiers::PIPE_BIND_4,
         _ => Identifiers::PIPE_BIND_V,
+    }
+}
+
+/// Returns the property interpolation instruction name for the given expression count (Angular 19).
+pub fn get_property_interpolate_instruction(expr_count: usize) -> &'static str {
+    match expr_count {
+        0 => Identifiers::PROPERTY_INTERPOLATE,
+        1 => Identifiers::PROPERTY_INTERPOLATE_1,
+        2 => Identifiers::PROPERTY_INTERPOLATE_2,
+        3 => Identifiers::PROPERTY_INTERPOLATE_3,
+        4 => Identifiers::PROPERTY_INTERPOLATE_4,
+        5 => Identifiers::PROPERTY_INTERPOLATE_5,
+        6 => Identifiers::PROPERTY_INTERPOLATE_6,
+        7 => Identifiers::PROPERTY_INTERPOLATE_7,
+        8 => Identifiers::PROPERTY_INTERPOLATE_8,
+        _ => Identifiers::PROPERTY_INTERPOLATE_V,
+    }
+}
+
+/// Returns the attribute interpolation instruction name for the given expression count (Angular 19).
+pub fn get_attribute_interpolate_instruction(expr_count: usize) -> &'static str {
+    match expr_count {
+        0 => Identifiers::ATTRIBUTE_INTERPOLATE,
+        1 => Identifiers::ATTRIBUTE_INTERPOLATE_1,
+        2 => Identifiers::ATTRIBUTE_INTERPOLATE_2,
+        3 => Identifiers::ATTRIBUTE_INTERPOLATE_3,
+        4 => Identifiers::ATTRIBUTE_INTERPOLATE_4,
+        5 => Identifiers::ATTRIBUTE_INTERPOLATE_5,
+        6 => Identifiers::ATTRIBUTE_INTERPOLATE_6,
+        7 => Identifiers::ATTRIBUTE_INTERPOLATE_7,
+        8 => Identifiers::ATTRIBUTE_INTERPOLATE_8,
+        _ => Identifiers::ATTRIBUTE_INTERPOLATE_V,
+    }
+}
+
+/// Returns the style prop interpolation instruction name for the given expression count (Angular 19).
+pub fn get_style_prop_interpolate_instruction(expr_count: usize) -> &'static str {
+    match expr_count {
+        1 => Identifiers::STYLE_PROP_INTERPOLATE_1,
+        2 => Identifiers::STYLE_PROP_INTERPOLATE_2,
+        3 => Identifiers::STYLE_PROP_INTERPOLATE_3,
+        4 => Identifiers::STYLE_PROP_INTERPOLATE_4,
+        5 => Identifiers::STYLE_PROP_INTERPOLATE_5,
+        6 => Identifiers::STYLE_PROP_INTERPOLATE_6,
+        7 => Identifiers::STYLE_PROP_INTERPOLATE_7,
+        8 => Identifiers::STYLE_PROP_INTERPOLATE_8,
+        _ => Identifiers::STYLE_PROP_INTERPOLATE_V,
+    }
+}
+
+/// Returns the style map interpolation instruction name for the given expression count (Angular 19).
+pub fn get_style_map_interpolate_instruction(expr_count: usize) -> &'static str {
+    match expr_count {
+        1 => Identifiers::STYLE_MAP_INTERPOLATE_1,
+        2 => Identifiers::STYLE_MAP_INTERPOLATE_2,
+        3 => Identifiers::STYLE_MAP_INTERPOLATE_3,
+        4 => Identifiers::STYLE_MAP_INTERPOLATE_4,
+        5 => Identifiers::STYLE_MAP_INTERPOLATE_5,
+        6 => Identifiers::STYLE_MAP_INTERPOLATE_6,
+        7 => Identifiers::STYLE_MAP_INTERPOLATE_7,
+        8 => Identifiers::STYLE_MAP_INTERPOLATE_8,
+        _ => Identifiers::STYLE_MAP_INTERPOLATE_V,
+    }
+}
+
+/// Returns the class map interpolation instruction name for the given expression count (Angular 19).
+pub fn get_class_map_interpolate_instruction(expr_count: usize) -> &'static str {
+    match expr_count {
+        1 => Identifiers::CLASS_MAP_INTERPOLATE_1,
+        2 => Identifiers::CLASS_MAP_INTERPOLATE_2,
+        3 => Identifiers::CLASS_MAP_INTERPOLATE_3,
+        4 => Identifiers::CLASS_MAP_INTERPOLATE_4,
+        5 => Identifiers::CLASS_MAP_INTERPOLATE_5,
+        6 => Identifiers::CLASS_MAP_INTERPOLATE_6,
+        7 => Identifiers::CLASS_MAP_INTERPOLATE_7,
+        8 => Identifiers::CLASS_MAP_INTERPOLATE_8,
+        _ => Identifiers::CLASS_MAP_INTERPOLATE_V,
     }
 }

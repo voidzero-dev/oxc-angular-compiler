@@ -261,6 +261,23 @@ impl<'a> ComponentCompilationJob<'a> {
         self.angular_version.map_or(true, |v: AngularVersion| v.supports_conditional_create())
     }
 
+    /// Check if standalone `ɵɵinterpolate*` instructions are supported (Angular 20+).
+    ///
+    /// Returns `true` for Angular 20+ or when version is unknown (None = latest).
+    /// Returns `false` for Angular 19 and earlier, which use combined
+    /// `ɵɵpropertyInterpolate*`/`ɵɵattributeInterpolate*` instructions.
+    pub fn supports_value_interpolation(&self) -> bool {
+        self.angular_version.map_or(true, |v: AngularVersion| v.supports_value_interpolation())
+    }
+
+    /// Check if `ɵɵdomProperty` is supported (Angular 20+).
+    ///
+    /// Returns `true` for Angular 20+ or when version is unknown (None = latest).
+    /// Returns `false` for Angular 19 and earlier, which use `ɵɵhostProperty` instead.
+    pub fn supports_dom_property(&self) -> bool {
+        self.angular_version.map_or(true, |v: AngularVersion| v.supports_dom_property())
+    }
+
     /// Allocates a new cross-reference ID.
     pub fn allocate_xref_id(&mut self) -> XrefId {
         let id = XrefId::new(self.next_xref_id);
@@ -601,6 +618,8 @@ pub struct HostBindingCompilationJob<'a> {
     pub fn_suffix: Atom<'a>,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
+    /// Angular version for version-gated instruction emission.
+    pub angular_version: Option<AngularVersion>,
 }
 
 impl<'a> HostBindingCompilationJob<'a> {
@@ -646,12 +665,23 @@ impl<'a> HostBindingCompilationJob<'a> {
             mode: TemplateCompilationMode::DomOnly, // Host bindings always use DomOnly
             fn_suffix: Atom::from("HostBindings"),
             diagnostics: std::vec::Vec::new(),
+            angular_version: None,
         }
     }
 
     /// Returns the kind of this compilation job.
     pub fn kind(&self) -> CompilationJobKind {
         CompilationJobKind::Host
+    }
+
+    /// Check if standalone `ɵɵinterpolate*` instructions are supported (Angular 20+).
+    pub fn supports_value_interpolation(&self) -> bool {
+        self.angular_version.map_or(true, |v| v.supports_value_interpolation())
+    }
+
+    /// Check if `ɵɵdomProperty` is supported (Angular 20+).
+    pub fn supports_dom_property(&self) -> bool {
+        self.angular_version.map_or(true, |v| v.supports_dom_property())
     }
 
     /// Allocates a new cross-reference ID.

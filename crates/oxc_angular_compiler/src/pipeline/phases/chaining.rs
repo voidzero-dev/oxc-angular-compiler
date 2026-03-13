@@ -15,8 +15,6 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/chaining.ts`.
 
-use std::sync::LazyLock;
-
 use oxc_allocator::Box;
 use oxc_diagnostics::OxcDiagnostic;
 
@@ -27,69 +25,271 @@ use crate::r3::Identifiers;
 /// Maximum number of chained instructions to prevent stack overflow from deep AST.
 const MAX_CHAIN_LENGTH: usize = 256;
 
-/// Maps an instruction to the instruction that can follow it in a chain.
-/// This allows different instructions to chain together (e.g., conditionalCreate → conditionalBranchCreate).
-static CHAIN_COMPATIBILITY: LazyLock<rustc_hash::FxHashMap<&'static str, &'static str>> =
-    LazyLock::new(|| {
-        let mut map = rustc_hash::FxHashMap::default();
+/// Returns the instruction that can follow `instruction` in a chain, or `None` if
+/// the instruction is not chainable.
+///
+/// Most instructions chain with themselves; the notable exception is
+/// `conditionalCreate` which chains into `conditionalBranchCreate`.
+const fn chain_compatible_instruction(instruction: &str) -> Option<&'static str> {
+    match instruction.as_bytes() {
+        // Property and binding instructions – chain with themselves
+        b if const_eq(b, Identifiers::PROPERTY.as_bytes()) => Some(Identifiers::PROPERTY),
+        b if const_eq(b, Identifiers::ATTRIBUTE.as_bytes()) => Some(Identifiers::ATTRIBUTE),
+        b if const_eq(b, Identifiers::STYLE_PROP.as_bytes()) => Some(Identifiers::STYLE_PROP),
+        b if const_eq(b, Identifiers::CLASS_PROP.as_bytes()) => Some(Identifiers::CLASS_PROP),
+        b if const_eq(b, Identifiers::DOM_PROPERTY.as_bytes()) => Some(Identifiers::DOM_PROPERTY),
+        b if const_eq(b, Identifiers::HOST_PROPERTY.as_bytes()) => Some(Identifiers::HOST_PROPERTY),
+        b if const_eq(b, Identifiers::TWO_WAY_PROPERTY.as_bytes()) => {
+            Some(Identifiers::TWO_WAY_PROPERTY)
+        }
+        b if const_eq(b, Identifiers::ARIA_PROPERTY.as_bytes()) => Some(Identifiers::ARIA_PROPERTY),
 
-        // Property and binding instructions - chain with themselves
-        map.insert(Identifiers::PROPERTY, Identifiers::PROPERTY);
-        map.insert(Identifiers::ATTRIBUTE, Identifiers::ATTRIBUTE);
-        map.insert(Identifiers::STYLE_PROP, Identifiers::STYLE_PROP);
-        map.insert(Identifiers::CLASS_PROP, Identifiers::CLASS_PROP);
-        map.insert(Identifiers::DOM_PROPERTY, Identifiers::DOM_PROPERTY);
-        map.insert(Identifiers::TWO_WAY_PROPERTY, Identifiers::TWO_WAY_PROPERTY);
-        map.insert(Identifiers::ARIA_PROPERTY, Identifiers::ARIA_PROPERTY);
+        // Angular 19 combined interpolation instructions – chain with themselves
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_1.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_1)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_2.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_2)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_3.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_3)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_4.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_4)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_5.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_5)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_6.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_6)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_7.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_7)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_8.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_8)
+        }
+        b if const_eq(b, Identifiers::PROPERTY_INTERPOLATE_V.as_bytes()) => {
+            Some(Identifiers::PROPERTY_INTERPOLATE_V)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_1.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_1)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_2.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_2)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_3.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_3)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_4.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_4)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_5.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_5)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_6.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_6)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_7.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_7)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_8.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_8)
+        }
+        b if const_eq(b, Identifiers::ATTRIBUTE_INTERPOLATE_V.as_bytes()) => {
+            Some(Identifiers::ATTRIBUTE_INTERPOLATE_V)
+        }
+
+        // Angular 19 combined style prop interpolation instructions – chain with themselves
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_1.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_1)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_2.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_2)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_3.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_3)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_4.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_4)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_5.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_5)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_6.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_6)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_7.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_7)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_8.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_8)
+        }
+        b if const_eq(b, Identifiers::STYLE_PROP_INTERPOLATE_V.as_bytes()) => {
+            Some(Identifiers::STYLE_PROP_INTERPOLATE_V)
+        }
+
+        // Angular 19 combined style map interpolation instructions – chain with themselves
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_1.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_1)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_2.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_2)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_3.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_3)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_4.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_4)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_5.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_5)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_6.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_6)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_7.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_7)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_8.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_8)
+        }
+        b if const_eq(b, Identifiers::STYLE_MAP_INTERPOLATE_V.as_bytes()) => {
+            Some(Identifiers::STYLE_MAP_INTERPOLATE_V)
+        }
+
+        // Angular 19 combined class map interpolation instructions – chain with themselves
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_1.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_1)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_2.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_2)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_3.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_3)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_4.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_4)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_5.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_5)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_6.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_6)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_7.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_7)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_8.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_8)
+        }
+        b if const_eq(b, Identifiers::CLASS_MAP_INTERPOLATE_V.as_bytes()) => {
+            Some(Identifiers::CLASS_MAP_INTERPOLATE_V)
+        }
 
         // Element instructions
-        map.insert(Identifiers::ELEMENT, Identifiers::ELEMENT);
-        map.insert(Identifiers::ELEMENT_START, Identifiers::ELEMENT_START);
-        map.insert(Identifiers::ELEMENT_END, Identifiers::ELEMENT_END);
-        map.insert(Identifiers::ELEMENT_CONTAINER, Identifiers::ELEMENT_CONTAINER);
-        map.insert(Identifiers::ELEMENT_CONTAINER_START, Identifiers::ELEMENT_CONTAINER_START);
-        map.insert(Identifiers::ELEMENT_CONTAINER_END, Identifiers::ELEMENT_CONTAINER_END);
+        b if const_eq(b, Identifiers::ELEMENT.as_bytes()) => Some(Identifiers::ELEMENT),
+        b if const_eq(b, Identifiers::ELEMENT_START.as_bytes()) => Some(Identifiers::ELEMENT_START),
+        b if const_eq(b, Identifiers::ELEMENT_END.as_bytes()) => Some(Identifiers::ELEMENT_END),
+        b if const_eq(b, Identifiers::ELEMENT_CONTAINER.as_bytes()) => {
+            Some(Identifiers::ELEMENT_CONTAINER)
+        }
+        b if const_eq(b, Identifiers::ELEMENT_CONTAINER_START.as_bytes()) => {
+            Some(Identifiers::ELEMENT_CONTAINER_START)
+        }
+        b if const_eq(b, Identifiers::ELEMENT_CONTAINER_END.as_bytes()) => {
+            Some(Identifiers::ELEMENT_CONTAINER_END)
+        }
 
         // Listener instructions
-        map.insert(Identifiers::LISTENER, Identifiers::LISTENER);
-        map.insert(Identifiers::SYNTHETIC_HOST_LISTENER, Identifiers::SYNTHETIC_HOST_LISTENER);
-        map.insert(Identifiers::SYNTHETIC_HOST_PROPERTY, Identifiers::SYNTHETIC_HOST_PROPERTY);
-        map.insert(Identifiers::TWO_WAY_LISTENER, Identifiers::TWO_WAY_LISTENER);
+        b if const_eq(b, Identifiers::LISTENER.as_bytes()) => Some(Identifiers::LISTENER),
+        b if const_eq(b, Identifiers::SYNTHETIC_HOST_LISTENER.as_bytes()) => {
+            Some(Identifiers::SYNTHETIC_HOST_LISTENER)
+        }
+        b if const_eq(b, Identifiers::SYNTHETIC_HOST_PROPERTY.as_bytes()) => {
+            Some(Identifiers::SYNTHETIC_HOST_PROPERTY)
+        }
+        b if const_eq(b, Identifiers::TWO_WAY_LISTENER.as_bytes()) => {
+            Some(Identifiers::TWO_WAY_LISTENER)
+        }
 
         // Template instructions
-        map.insert(Identifiers::TEMPLATE_CREATE, Identifiers::TEMPLATE_CREATE);
+        b if const_eq(b, Identifiers::TEMPLATE_CREATE.as_bytes()) => {
+            Some(Identifiers::TEMPLATE_CREATE)
+        }
 
         // i18n instructions
-        map.insert(Identifiers::I18N_EXP, Identifiers::I18N_EXP);
+        b if const_eq(b, Identifiers::I18N_EXP.as_bytes()) => Some(Identifiers::I18N_EXP),
 
         // DOM mode instructions
-        map.insert(Identifiers::DOM_ELEMENT, Identifiers::DOM_ELEMENT);
-        map.insert(Identifiers::DOM_ELEMENT_START, Identifiers::DOM_ELEMENT_START);
-        map.insert(Identifiers::DOM_ELEMENT_END, Identifiers::DOM_ELEMENT_END);
-        map.insert(Identifiers::DOM_ELEMENT_CONTAINER, Identifiers::DOM_ELEMENT_CONTAINER);
-        map.insert(
-            Identifiers::DOM_ELEMENT_CONTAINER_START,
-            Identifiers::DOM_ELEMENT_CONTAINER_START,
-        );
-        map.insert(Identifiers::DOM_ELEMENT_CONTAINER_END, Identifiers::DOM_ELEMENT_CONTAINER_END);
-        map.insert(Identifiers::DOM_LISTENER, Identifiers::DOM_LISTENER);
-        map.insert(Identifiers::DOM_TEMPLATE, Identifiers::DOM_TEMPLATE);
+        b if const_eq(b, Identifiers::DOM_ELEMENT.as_bytes()) => Some(Identifiers::DOM_ELEMENT),
+        b if const_eq(b, Identifiers::DOM_ELEMENT_START.as_bytes()) => {
+            Some(Identifiers::DOM_ELEMENT_START)
+        }
+        b if const_eq(b, Identifiers::DOM_ELEMENT_END.as_bytes()) => {
+            Some(Identifiers::DOM_ELEMENT_END)
+        }
+        b if const_eq(b, Identifiers::DOM_ELEMENT_CONTAINER.as_bytes()) => {
+            Some(Identifiers::DOM_ELEMENT_CONTAINER)
+        }
+        b if const_eq(b, Identifiers::DOM_ELEMENT_CONTAINER_START.as_bytes()) => {
+            Some(Identifiers::DOM_ELEMENT_CONTAINER_START)
+        }
+        b if const_eq(b, Identifiers::DOM_ELEMENT_CONTAINER_END.as_bytes()) => {
+            Some(Identifiers::DOM_ELEMENT_CONTAINER_END)
+        }
+        b if const_eq(b, Identifiers::DOM_LISTENER.as_bytes()) => Some(Identifiers::DOM_LISTENER),
+        b if const_eq(b, Identifiers::DOM_TEMPLATE.as_bytes()) => Some(Identifiers::DOM_TEMPLATE),
 
         // Animation instructions
-        map.insert(Identifiers::ANIMATION_ENTER, Identifiers::ANIMATION_ENTER);
-        map.insert(Identifiers::ANIMATION_LEAVE, Identifiers::ANIMATION_LEAVE);
-        map.insert(Identifiers::ANIMATION_ENTER_LISTENER, Identifiers::ANIMATION_ENTER_LISTENER);
-        map.insert(Identifiers::ANIMATION_LEAVE_LISTENER, Identifiers::ANIMATION_LEAVE_LISTENER);
+        b if const_eq(b, Identifiers::ANIMATION_ENTER.as_bytes()) => {
+            Some(Identifiers::ANIMATION_ENTER)
+        }
+        b if const_eq(b, Identifiers::ANIMATION_LEAVE.as_bytes()) => {
+            Some(Identifiers::ANIMATION_LEAVE)
+        }
+        b if const_eq(b, Identifiers::ANIMATION_ENTER_LISTENER.as_bytes()) => {
+            Some(Identifiers::ANIMATION_ENTER_LISTENER)
+        }
+        b if const_eq(b, Identifiers::ANIMATION_LEAVE_LISTENER.as_bytes()) => {
+            Some(Identifiers::ANIMATION_LEAVE_LISTENER)
+        }
 
-        // Conditional instructions - chain conditionalCreate with conditionalBranchCreate
-        map.insert(Identifiers::CONDITIONAL_CREATE, Identifiers::CONDITIONAL_BRANCH_CREATE);
-        map.insert(Identifiers::CONDITIONAL_BRANCH_CREATE, Identifiers::CONDITIONAL_BRANCH_CREATE);
+        // Conditional instructions – conditionalCreate chains into conditionalBranchCreate
+        b if const_eq(b, Identifiers::CONDITIONAL_CREATE.as_bytes()) => {
+            Some(Identifiers::CONDITIONAL_BRANCH_CREATE)
+        }
+        b if const_eq(b, Identifiers::CONDITIONAL_BRANCH_CREATE.as_bytes()) => {
+            Some(Identifiers::CONDITIONAL_BRANCH_CREATE)
+        }
 
         // Let declaration
-        map.insert(Identifiers::DECLARE_LET, Identifiers::DECLARE_LET);
+        b if const_eq(b, Identifiers::DECLARE_LET.as_bytes()) => Some(Identifiers::DECLARE_LET),
 
-        map
-    });
+        _ => None,
+    }
+}
+
+/// Const-compatible byte slice equality (needed because `==` on slices is not const).
+const fn const_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}
 
 /// Chains compatible instructions together.
 ///
@@ -97,13 +297,12 @@ static CHAIN_COMPATIBILITY: LazyLock<rustc_hash::FxHashMap<&'static str, &'stati
 /// calls to chainable instructions into chained calls.
 pub fn chain(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
-    let compatibility = &*CHAIN_COMPATIBILITY;
     let mut diagnostics = Vec::new();
 
     // Chain instructions in all views
     for view in job.all_views_mut() {
-        chain_statements(allocator, &mut view.create_statements, compatibility, &mut diagnostics);
-        chain_statements(allocator, &mut view.update_statements, compatibility, &mut diagnostics);
+        chain_statements(allocator, &mut view.create_statements, &mut diagnostics);
+        chain_statements(allocator, &mut view.update_statements, &mut diagnostics);
     }
 
     job.diagnostics.extend(diagnostics);
@@ -113,7 +312,6 @@ pub fn chain(job: &mut ComponentCompilationJob<'_>) {
 fn chain_statements<'a>(
     allocator: &'a oxc_allocator::Allocator,
     statements: &mut oxc_allocator::Vec<'a, OutputStatement<'a>>,
-    compatibility: &rustc_hash::FxHashMap<&'static str, &'static str>,
     diagnostics: &mut Vec<OxcDiagnostic>,
 ) {
     if statements.len() < 2 {
@@ -125,7 +323,7 @@ fn chain_statements<'a>(
         Vec::new();
     for stmt in statements.iter() {
         if let Some(instruction) = get_instruction_name(stmt) {
-            if compatibility.contains_key(instruction) {
+            if chain_compatible_instruction(instruction).is_some() {
                 if let Some(args) = extract_args(stmt) {
                     let cloned_args = clone_args(allocator, args, diagnostics);
                     stmt_info.push(Some((instruction.to_string(), cloned_args)));
@@ -147,7 +345,8 @@ fn chain_statements<'a>(
             // Check if this instruction can chain with the previous one
             let can_chain = if let Some(ref current_instr) = current_instruction {
                 // Check if the current chain's instruction can be followed by this instruction
-                compatibility.get(current_instr.as_str()).is_some_and(|&next| next == instruction)
+                chain_compatible_instruction(current_instr.as_str())
+                    .is_some_and(|next| next == instruction)
                     && current_chain_indices.len() < MAX_CHAIN_LENGTH
             } else {
                 false
@@ -749,11 +948,10 @@ fn chain_into_statement<'a>(
 /// Host version - only processes the root unit (no embedded views).
 pub fn chain_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
-    let compatibility = &*CHAIN_COMPATIBILITY;
     let mut diagnostics = Vec::new();
 
-    chain_statements(allocator, &mut job.root.create_statements, compatibility, &mut diagnostics);
-    chain_statements(allocator, &mut job.root.update_statements, compatibility, &mut diagnostics);
+    chain_statements(allocator, &mut job.root.create_statements, &mut diagnostics);
+    chain_statements(allocator, &mut job.root.update_statements, &mut diagnostics);
 
     job.diagnostics.extend(diagnostics);
 }

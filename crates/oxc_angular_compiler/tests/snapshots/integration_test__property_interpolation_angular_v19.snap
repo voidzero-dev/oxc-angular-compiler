@@ -1,0 +1,12 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵelementStart(0,"div",0);
+    i0.ɵɵtext(1,"static");
+    i0.ɵɵelementEnd();
+  }
+  if ((rf & 2)) { i0.ɵɵpropertyInterpolate1("title","Hello ",ctx.name); }
+}

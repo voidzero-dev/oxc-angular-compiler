@@ -1,0 +1,11 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵnamespaceSVG();
+    i0.ɵɵelement(0,"svg");
+  }
+  if ((rf & 2)) { i0.ɵɵattributeInterpolate2("viewBox","0 0 ",ctx.svgSize," ",ctx.svgSize); }
+}
