@@ -226,6 +226,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       configResolved(config) {
         resolvedConfig = config
       },
+      // Safety net: resolve @ng/component virtual modules in SSR context.
+      // The browser serves these via HTTP middleware, but Vite's module runner
+      // (used by Nitro/SSR) resolves through plugin hooks instead.
+      resolveId(source, _importer, options) {
+        if (options?.ssr && source.includes(ANGULAR_COMPONENT_PREFIX)) {
+          // Return as virtual module (with \0 prefix per Vite convention)
+          return `\0${source}`
+        }
+      },
+      load(id, options) {
+        if (options?.ssr && id.startsWith('\0') && id.includes(ANGULAR_COMPONENT_PREFIX)) {
+          // Return empty module — SSR doesn't need HMR update modules
+          return 'export default undefined;'
+        }
+      },
       configureServer(server) {
         viteServer = server
 
@@ -426,7 +441,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         filter: {
           id: ANGULAR_TS_REGEX,
         },
-        async handler(code, id) {
+        async handler(code, id, options) {
           // Skip node_modules
           if (id.includes('node_modules')) {
             return
@@ -450,10 +465,17 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // Resolve external resources
           const { resources, dependencies } = await resolveResources(code, actualId)
 
-          // Track dependencies for HMR
+          // Disable HMR for SSR transforms. SSR bundles must not contain HMR
+          // initialization code that dynamically imports @ng/component virtual
+          // modules, as those are served via HTTP middleware only. This matches
+          // Angular's official behavior where _enableHmr is only set for browser
+          // bundles (see @angular/build application-code-bundle.js).
+          const isSSR = !!options?.ssr
+
+          // Track dependencies for HMR (client-side only)
           // DON'T use addWatchFile - it creates modules in Vite's graph!
           // Instead, use our custom watcher that doesn't create modules.
-          if (watchMode && viteServer) {
+          if (watchMode && viteServer && !isSSR) {
             const watchFn = (viteServer as any).__angularWatchTemplate
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
@@ -470,7 +492,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           const transformOptions: TransformOptions = {
             sourcemap: pluginOptions.sourceMap,
             jit: pluginOptions.jit,
-            hmr: pluginOptions.liveReload && watchMode,
+            hmr: pluginOptions.liveReload && watchMode && !isSSR,
             angularVersion: pluginOptions.angularVersion,
           }
 
