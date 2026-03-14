@@ -472,10 +472,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // bundles (see @angular/build application-code-bundle.js).
           const isSSR = !!options?.ssr
 
-          // Track dependencies for HMR (client-side only)
+          // Track dependencies for resource cache invalidation and HMR.
           // DON'T use addWatchFile - it creates modules in Vite's graph!
           // Instead, use our custom watcher that doesn't create modules.
-          if (watchMode && viteServer && !isSSR) {
+          // Note: watchers are registered for both client AND SSR transforms
+          // because the fs.watch callback invalidates resourceCache (needed by
+          // both). The HMR-specific behavior inside the callback is separately
+          // gated by componentIds, which are only populated for client transforms.
+          if (watchMode && viteServer) {
             const watchFn = (viteServer as any).__angularWatchTemplate
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
