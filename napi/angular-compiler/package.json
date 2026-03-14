@@ -68,7 +68,7 @@
     "obug": "^2.1.1"
   },
   "devDependencies": {
-    "@angular/compiler": "^21.2.2",
+    "@angular/compiler": "^20.3.18",
     "@angular/compiler-cli": "^21.2.2",
     "@napi-rs/cli": "catalog:",
     "@oxc-node/cli": "catalog:",
