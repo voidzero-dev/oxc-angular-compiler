@@ -276,8 +276,8 @@ importers:
         specifier: 3.97.1
         version: 3.97.1(@types/react@19.2.14)
       '@types/d3-force':
-        specifier: 3.0.4
-        version: 3.0.4
+        specifier: 3.0.10
+        version: 3.0.10
       '@types/fontfaceobserver':
         specifier: 2.1.1
         version: 2.1.1
@@ -3282,8 +3282,8 @@ packages:
   '@types/css-font-loading-module@0.0.12':
     resolution: {integrity: sha512-x2tZZYkSxXqWvTDgveSynfjq/T2HyiZHXb00j/+gy19yp70PHCizM48XFdjBCWH7eHBD0R5i/pw9yMBP/BH5uA==}
 
-  '@types/d3-force@3.0.4':
-    resolution: {integrity: sha512-q7xbVLrWcXvSBBEoadowIUJ7sRpS1yvgMWnzHJggFy5cUZBq2HZL5k/pBSm0GdYWS1vs5/EDwMjSKF55PDY4Aw==}
+  '@types/d3-force@3.0.10':
+    resolution: {integrity: sha512-ZYeSaCF3p73RdOKcjj+swRlZfnYpK1EbaDiYICEEp5Q6sUiqFaFQ9qgoshp5CzIyyb/yD09kD9o2zEltCexlgw==}
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
@@ -6947,7 +6947,7 @@ snapshots:
 
   '@types/css-font-loading-module@0.0.12': {}
 
-  '@types/d3-force@3.0.4': {}
+  '@types/d3-force@3.0.10': {}
 
   '@types/deep-eql@4.0.2': {}
 
