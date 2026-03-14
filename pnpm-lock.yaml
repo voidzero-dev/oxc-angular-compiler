@@ -285,8 +285,8 @@ importers:
         specifier: ^22.19.3
         version: 22.19.15
       '@types/prismjs':
-        specifier: 1.26.0
-        version: 1.26.0
+        specifier: 1.26.6
+        version: 1.26.6
       sass:
         specifier: ^1.97.2
         version: 1.97.3
@@ -3312,8 +3312,8 @@ packages:
   '@types/node@24.1.0':
     resolution: {integrity: sha512-ut5FthK5moxFKH2T1CUOC6ctR67rQRvvHdFLCD2Ql6KXmMuCrjsSsRI9UsLCm9M18BMwClv4pn327UvB7eeO1w==}
 
-  '@types/prismjs@1.26.0':
-    resolution: {integrity: sha512-ZTaqn/qSqUuAq1YwvOFQfVW1AR/oQJlLSZVustdjwI+GZ8kr0MSHBj0tsXPW1EqHubx50gtBEjbPGsdZwQwCjQ==}
+  '@types/prismjs@1.26.6':
+    resolution: {integrity: sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw==}
 
   '@types/react@19.2.14':
     resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
@@ -6973,7 +6973,7 @@ snapshots:
     dependencies:
       undici-types: 7.8.0
 
-  '@types/prismjs@1.26.0': {}
+  '@types/prismjs@1.26.6': {}
 
   '@types/react@19.2.14':
     dependencies:
