@@ -13,7 +13,7 @@
  */
 import { describe, it, expect } from 'vitest'
 
-import { transformAngularFile } from '../index.js'
+import { compileForHmrSync, transformAngularFile } from '../index.js'
 
 const COMPONENT_SOURCE = `
   import { Component } from '@angular/core';
@@ -88,5 +88,20 @@ describe('Vite plugin SSR behavior (Issue #109)', () => {
     // Both should have the component definition
     expect(clientResult.code).toContain('ɵɵdefineComponent')
     expect(ssrResult.code).toContain('ɵɵdefineComponent')
+  })
+})
+
+describe('Component style minification', () => {
+  it('should minify encapsulated HMR styles when enabled', () => {
+    const result = compileForHmrSync(
+      '<div class="container">Hello</div>',
+      'AppComponent',
+      'app.component.ts',
+      ['.container { color: red; background: transparent; }'],
+      { minifyComponentStyles: true },
+    )
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.hmrModule).toContain('.container[_ngcontent-%COMP%]{color:red;background:0 0}')
   })
 })

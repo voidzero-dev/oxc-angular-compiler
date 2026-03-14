@@ -827,6 +827,13 @@ export interface TransformOptions {
    */
   emitClassMetadata?: boolean
   /**
+   * Minify final component styles before emitting them into `styles: [...]`.
+   *
+   * This runs after Angular style encapsulation, so it applies to the same
+   * final CSS strings that are embedded in generated component definitions.
+   */
+  minifyComponentStyles?: boolean
+  /**
    * Resolved import paths for host directives and other imports.
    *
    * Maps local identifier name (e.g., "AriaDisableDirective") to the resolved

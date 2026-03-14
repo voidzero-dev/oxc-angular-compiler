@@ -1525,6 +1525,34 @@ export class MultiStyledComponent {}
 }
 
 #[test]
+fn test_component_with_minified_styles() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-styled',
+    template: '<div class="container">Hello</div>',
+    styles: ['.container { color: red; background: transparent; }']
+})
+export class StyledComponent {}
+"#;
+
+    let mut options = ComponentTransformOptions::default();
+    options.minify_component_styles = true;
+
+    let result = transform_angular_file(&allocator, "styled.component.ts", source, &options, None);
+
+    assert_eq!(result.component_count, 1);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(".container[_ngcontent-%COMP%]{color:red;background:0 0}"),
+        "Generated code should contain minified component styles: {}",
+        result.code
+    );
+}
+
+#[test]
 fn test_component_without_styles_downgrades_encapsulation() {
     let allocator = Allocator::default();
     let source = r"

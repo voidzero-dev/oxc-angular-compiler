@@ -174,6 +174,12 @@ pub struct TransformOptions {
     ///
     /// Default: false (metadata is dev-only and usually stripped in production)
     pub emit_class_metadata: bool,
+
+    /// Minify final component styles before emitting them into `styles: [...]`.
+    ///
+    /// This runs after Angular style encapsulation, so it applies to the same
+    /// final CSS strings that are embedded in component definitions.
+    pub minify_component_styles: bool,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -223,6 +229,7 @@ impl Default for TransformOptions {
             resolved_imports: None,
             // Class metadata for TestBed support (disabled by default)
             emit_class_metadata: false,
+            minify_component_styles: false,
         }
     }
 }
@@ -2453,6 +2460,7 @@ fn compile_component_full<'a>(
     let definitions = generate_component_definitions(
         allocator,
         metadata,
+        options,
         &mut job,
         compiled.template_fn,
         host_binding_result,

@@ -139,6 +139,9 @@ interface TransformOptions {
   // i18n
   i18nUseExternalIds?: boolean
 
+  // Final component style output
+  minifyComponentStyles?: boolean
+
   // Component metadata
   selector?: string
   standalone?: boolean
@@ -176,6 +179,7 @@ interface AngularPluginOptions {
 
   // Style processing
   inlineStylesExtension?: string
+  minifyComponentStyles?: boolean | 'auto'
 
   // File replacements
   fileReplacements?: Array<{
@@ -184,6 +188,14 @@ interface AngularPluginOptions {
   }>
 }
 ```
+
+`minifyComponentStyles` resolves like this:
+
+- `true`: always minify component styles
+- `false`: never minify component styles
+- `"auto"` or `undefined`: follow the resolved Vite minification settings
+
+For `"auto"`, the plugin uses `build.cssMinify` when it is set, otherwise it falls back to `build.minify`. In dev, `"auto"` defaults to `false`.
 
 ## Vite Plugin Architecture
 
