@@ -9,7 +9,7 @@ catalog:
   '@napi-rs/cli': 3.5.1
   '@oxc-node/cli': 0.0.35
   '@oxc-node/core': 0.0.35
-  '@tailwindcss/vite': 4.1.18
+  '@tailwindcss/vite': 4.2.1
   '@types/node': 24.1.0
   tsdown: 0.21.2
   typescript: 5.9.3
