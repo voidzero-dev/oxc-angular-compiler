@@ -245,8 +245,8 @@ importers:
         specifier: 2.3.0
         version: 2.3.0
       interactjs:
-        specifier: 1.10.18
-        version: 1.10.18
+        specifier: 1.10.27
+        version: 1.10.27
       ngx-cookieconsent:
         specifier: 4.0.2
         version: 4.0.2(@angular/common@20.3.17(@angular/core@20.3.18(@angular/compiler@20.3.18)(rxjs@7.8.1)(zone.js@0.15.1))(rxjs@7.8.1))(@angular/core@20.3.18(@angular/compiler@20.3.18)(rxjs@7.8.1)(zone.js@0.15.1))(cookieconsent@3.1.1)(rxjs@7.8.1)
@@ -1105,8 +1105,8 @@ packages:
       '@types/node':
         optional: true
 
-  '@interactjs/types@1.10.18':
-    resolution: {integrity: sha512-3a+2Kx6PhA60ekxImRQJl+EyT4lD0/kd3/PveyaLtgfNxkxnSWdUq7Ixo3Y/t1lon4EqVGZQgp+qj/QNaEs6qA==}
+  '@interactjs/types@1.10.27':
+    resolution: {integrity: sha512-BUdv0cvs4H5ODuwft2Xp4eL8Vmi3LcihK42z0Ft/FbVJZoRioBsxH+LlsBdK4tAie7PqlKGy+1oyOncu1nQ6eA==}
 
   '@istanbuljs/schema@0.1.3':
     resolution: {integrity: sha512-ZXRY4jNvVgSVQ8DL3LTcakaAtXwTVUxE81hslsyD2AtoXW/wVob10HkOJ1X/pAlcI7D+2YoZKg5do8G/w6RYgA==}
@@ -3837,8 +3837,8 @@ packages:
   inherits@2.0.4:
     resolution: {integrity: sha512-k/vGaX4/Yla3WzyMCvTQOXYeIHvqOKtnqBduzTHpzpQZzAskKMhZ2K+EnBiSM9zGSoIFeMpXKxa4dYeZIQqewQ==}
 
-  interactjs@1.10.18:
-    resolution: {integrity: sha512-ho+Qgr5U3b3oz23Iv7MkIZGoWaTsSCRnrCL34Dtjzs5eFghwpESJeiPj9RhYKc/SgRJL9anR+2OQxFsCg4PmLA==}
+  interactjs@1.10.27:
+    resolution: {integrity: sha512-y/8RcCftGAF24gSp76X2JS3XpHiUvDQyhF8i7ujemBz77hwiHDuJzftHx7thY8cxGogwGiPJ+o97kWB6eAXnsA==}
 
   is-binary-path@2.1.0:
     resolution: {integrity: sha512-ZMERYes6pDydyuGidse7OsHxtbI7WVeUEozgR/g7rd0xUimYNlvZRE/K2MgZTjWy725IfelLeVcEM97mmtRGXw==}
@@ -5481,7 +5481,7 @@ snapshots:
     optionalDependencies:
       '@types/node': 24.1.0
 
-  '@interactjs/types@1.10.18': {}
+  '@interactjs/types@1.10.27': {}
 
   '@istanbuljs/schema@0.1.3': {}
 
@@ -7474,9 +7474,9 @@ snapshots:
 
   inherits@2.0.4: {}
 
-  interactjs@1.10.18:
+  interactjs@1.10.27:
     dependencies:
-      '@interactjs/types': 1.10.18
+      '@interactjs/types': 1.10.27
 
   is-binary-path@2.1.0:
     dependencies:
