@@ -13,7 +13,7 @@ catalog:
   '@types/node': 24.1.0
   tsdown: 0.21.2
   typescript: 5.9.3
-  vitest: 4.0.18
+  vitest: 4.1.0
   oxfmt: 0.37.0
   vite: 8.0.0
   rxjs: 7.8.2
