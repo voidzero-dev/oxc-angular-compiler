@@ -13,19 +13,19 @@
     "benchmark:incremental": "oxnode benchmark.ts --incremental"
   },
   "dependencies": {
-    "@angular/animations": "20.3.17",
+    "@angular/animations": "20.3.18",
     "@angular/cdk": "20.2.14",
-    "@angular/common": "20.3.17",
+    "@angular/common": "20.3.18",
     "@angular/compiler": "20.3.18",
     "@angular/core": "20.3.18",
-    "@angular/forms": "20.3.17",
-    "@angular/platform-browser": "20.3.17",
-    "@angular/platform-browser-dynamic": "20.3.17",
-    "@angular/router": "20.3.17",
+    "@angular/forms": "20.3.18",
+    "@angular/platform-browser": "20.3.18",
+    "@angular/platform-browser-dynamic": "20.3.18",
+    "@angular/router": "20.3.18",
     "core-js": "^3.48.0",
     "rxjs": "catalog:",
     "tslib": "catalog:",
-    "zone.js": "~0.15.0"
+    "zone.js": "~0.16.0"
   },
   "devDependencies": {
     "@oxc-angular/vite": "workspace:^",
