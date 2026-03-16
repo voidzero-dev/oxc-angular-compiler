@@ -1,5 +1,8 @@
 {
-  "extends": ["config:base", ":preserveSemverRanges"],
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "github>Boshen/renovate"
+  ],
   "ignorePaths": [
     "**/node_modules/**",
     "**/bower_components/**",
@@ -7,22 +10,5 @@
     "**/__tests__/**",
     "**/test/**",
     "**/__fixtures__/**"
-  ],
-  "packageRules": [
-    {
-      "automerge": true,
-      "autoApprove": true,
-      "matchUpdateTypes": ["minor", "patch", "pin", "digest"]
-    },
-    {
-      "matchPackageNames": ["^@angular"],
-      "rangeStrategy": "replace",
-      "groupName": "angular"
-    }
-  ],
-  "postUpdateOptions": ["pnpmDedupe"],
-  "lockFileMaintenance": {
-    "enabled": true,
-    "extends": ["schedule:monthly"]
-  }
+  ]
 }
