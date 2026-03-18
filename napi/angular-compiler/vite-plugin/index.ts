@@ -82,6 +82,9 @@ export interface PluginOptions {
    * ```
    */
   angularVersion?: AngularVersion
+
+  /** Optional callback to transform template content before compilation. Applied during both initial build and HMR. */
+  templateTransform?: (content: string, filePath: string) => string
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -160,6 +163,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       if (!content) {
         try {
           content = await readFile(templatePath, 'utf-8')
+          if (options.templateTransform) {
+            content = options.templateTransform(content, templatePath)
+          }
           resourceCache.set(templatePath, content)
         } catch {
           console.warn(`Failed to read template: ${templatePath}`)
@@ -368,6 +374,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               if (templateUrls.length > 0) {
                 const templatePath = resolve(dir, templateUrls[0])
                 templateContent = await readFile(templatePath, 'utf-8')
+                if (options.templateTransform) {
+                  templateContent = options.templateTransform(templateContent, templatePath)
+                }
               } else {
                 templateContent = extractInlineTemplate(source)
               }
