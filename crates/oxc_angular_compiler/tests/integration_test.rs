@@ -7833,3 +7833,131 @@ fn test_property_singleton_interpolation_with_sanitizer_angular_v19() {
     assert!(js.contains("ɵɵsanitizeUrl"), "Should include ɵɵsanitizeUrl sanitizer. Got:\n{js}");
     insta::assert_snapshot!("property_singleton_interpolation_with_sanitizer_v19", js);
 }
+
+// ============================================================================
+// Host Directive Alias Tests
+// ============================================================================
+
+/// Test host directives with simple aliased inputs/outputs.
+///
+/// Mirrors the compliance test `host_directives_with_inputs_outputs.ts`.
+/// The mapping array must use `[internalName, publicName]` ordering.
+#[test]
+fn test_host_directives_with_inputs_outputs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, EventEmitter, Input, Output } from '@angular/core';
+
+@Directive({})
+export class HostDir {
+  @Input() value = 0;
+  @Input() color = '';
+  @Output() opened = new EventEmitter();
+  @Output() closed = new EventEmitter();
+}
+
+@Component({
+    selector: 'my-component',
+    template: '',
+    hostDirectives: [{
+        directive: HostDir,
+        inputs: ['value', 'color: colorAlias'],
+        outputs: ['opened', 'closed: closedAlias'],
+    }],
+    standalone: false,
+})
+export class MyComponent {
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+
+    // Input mappings: 'value' (no alias) → ["value", "value"], 'color: colorAlias' → ["color", "colorAlias"]
+    // The array must be [internalName, publicName, ...] i.e. ["value", "value", "color", "colorAlias"]
+    assert!(
+        normalized.contains(r#"inputs:["value","value","color","colorAlias"]"#),
+        "Input mappings should be [internalName, publicName]. Got:\n{}",
+        result.code
+    );
+
+    // Output mappings: 'opened' → ["opened", "opened"], 'closed: closedAlias' → ["closed", "closedAlias"]
+    assert!(
+        normalized.contains(r#"outputs:["opened","opened","closed","closedAlias"]"#),
+        "Output mappings should be [internalName, publicName]. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("host_directives_with_inputs_outputs", result.code);
+}
+
+/// Test host directives where the directive has `@Input('alias')` and the host re-aliases.
+///
+/// Mirrors the compliance test `host_directives_with_host_aliases.ts`.
+#[test]
+fn test_host_directives_with_host_aliases() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, EventEmitter, Input, Output } from '@angular/core';
+
+@Directive({})
+export class HostDir {
+  @Input('valueAlias') value = 1;
+  @Input('colorAlias') color = '';
+  @Output('openedAlias') opened = new EventEmitter();
+  @Output('closedAlias') closed = new EventEmitter();
+}
+
+@Component({
+    selector: 'my-component',
+    template: '',
+    hostDirectives: [{
+        directive: HostDir,
+        inputs: ['valueAlias', 'colorAlias: customColorAlias'],
+        outputs: ['openedAlias', 'closedAlias: customClosedAlias'],
+    }],
+    standalone: false,
+})
+export class MyComponent {
+}
+"#;
+
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        &ComponentTransformOptions::default(),
+        None,
+    );
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+
+    // Input mappings: 'valueAlias' → ["valueAlias", "valueAlias"], 'colorAlias: customColorAlias' → ["colorAlias", "customColorAlias"]
+    assert!(
+        normalized
+            .contains(r#"inputs:["valueAlias","valueAlias","colorAlias","customColorAlias"]"#),
+        "Input mappings should be [internalName, publicName]. Got:\n{}",
+        result.code
+    );
+
+    // Output mappings: 'openedAlias' → ["openedAlias", "openedAlias"], 'closedAlias: customClosedAlias' → ["closedAlias", "customClosedAlias"]
+    assert!(
+        normalized
+            .contains(r#"outputs:["openedAlias","openedAlias","closedAlias","customClosedAlias"]"#),
+        "Output mappings should be [internalName, publicName]. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("host_directives_with_host_aliases", result.code);
+}

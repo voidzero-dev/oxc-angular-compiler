@@ -1201,7 +1201,7 @@ fn create_host_directives_arg<'a>(
                 quoted: false,
             });
 
-            // inputs: ['publicName', 'internalName', ...]
+            // inputs: ['internalName', 'publicName', ...]
             if !directive.inputs.is_empty() {
                 let inputs_array =
                     create_host_directive_mappings_array(allocator, &directive.inputs);
@@ -1212,7 +1212,7 @@ fn create_host_directives_arg<'a>(
                 });
             }
 
-            // outputs: ['publicName', 'internalName', ...]
+            // outputs: ['internalName', 'publicName', ...]
             if !directive.outputs.is_empty() {
                 let outputs_array =
                     create_host_directive_mappings_array(allocator, &directive.outputs);

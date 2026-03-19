@@ -915,7 +915,7 @@ fn create_host_directives_feature_arg<'a>(
 
 /// Creates a host directive mappings array.
 ///
-/// Format: `['publicName', 'internalName', 'publicName2', 'internalName2']`
+/// Format: `['internalName', 'publicName', 'internalName2', 'publicName2']`
 ///
 /// Shared between directive and component compilers, mirroring Angular's
 /// `createHostDirectivesMappingArray` in `view/compiler.ts`.
@@ -927,11 +927,11 @@ pub(crate) fn create_host_directive_mappings_array<'a>(
 
     for (public_name, internal_name) in mappings {
         entries.push(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(public_name.clone()), source_span: None },
+            LiteralExpr { value: LiteralValue::String(internal_name.clone()), source_span: None },
             allocator,
         )));
         entries.push(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(internal_name.clone()), source_span: None },
+            LiteralExpr { value: LiteralValue::String(public_name.clone()), source_span: None },
             allocator,
         )));
     }
@@ -1476,10 +1476,11 @@ mod tests {
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");
 
-        // Must contain flat array format: inputs:["uTooltip","brnTooltipTrigger"]
+        // Must contain flat array format: inputs:["brnTooltipTrigger","uTooltip"]
+        // (internalName first, then publicName — matching Angular's createHostDirectivesMappingArray)
         assert!(
-            normalized.contains(r#"inputs:["uTooltip","brnTooltipTrigger"]"#),
-            "Host directive inputs should be flat array [\"publicName\",\"internalName\"], not object. Got:\n{}",
+            normalized.contains(r#"inputs:["brnTooltipTrigger","uTooltip"]"#),
+            "Host directive inputs should be flat array [\"internalName\",\"publicName\"]. Got:\n{}",
             output
         );
         // Must NOT contain object format: inputs:{uTooltip:"brnTooltipTrigger"}
@@ -1540,10 +1541,11 @@ mod tests {
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");
 
-        // Must contain flat array format: outputs:["clicked","trackClick"]
+        // Must contain flat array format: outputs:["trackClick","clicked"]
+        // (internalName first, then publicName — matching Angular's createHostDirectivesMappingArray)
         assert!(
-            normalized.contains(r#"outputs:["clicked","trackClick"]"#),
-            "Host directive outputs should be flat array. Got:\n{}",
+            normalized.contains(r#"outputs:["trackClick","clicked"]"#),
+            "Host directive outputs should be flat array [\"internalName\",\"publicName\"]. Got:\n{}",
             output
         );
     }
