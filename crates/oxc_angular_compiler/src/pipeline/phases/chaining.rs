@@ -816,6 +816,10 @@ fn clone_expression<'a>(
             },
             allocator,
         )),
+        OutputExpression::RawSource(e) => OutputExpression::RawSource(Box::new_in(
+            RawSourceExpr { source: e.source.clone(), source_span: e.source_span },
+            allocator,
+        )),
     }
 }
 

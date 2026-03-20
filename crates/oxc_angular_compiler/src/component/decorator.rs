@@ -50,6 +50,7 @@ pub fn extract_component_metadata<'a>(
     class: &'a Class<'a>,
     implicit_standalone: bool,
     import_map: &ImportMap<'a>,
+    source: &'a str,
 ) -> Option<ComponentMetadata<'a>> {
     // Get the class name
     let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
@@ -130,7 +131,7 @@ pub fn extract_component_metadata<'a>(
                     // 1. The identifier list for local analysis
                     metadata.imports = extract_identifier_array(allocator, &prop.value);
                     // 2. The raw expression to pass to ɵɵgetComponentDepsFactory in RuntimeResolved mode
-                    metadata.raw_imports = convert_oxc_expression(allocator, &prop.value);
+                    metadata.raw_imports = convert_oxc_expression(allocator, &prop.value, source);
                 }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
@@ -150,7 +151,7 @@ pub fn extract_component_metadata<'a>(
                 "animations" => {
                     // Extract animations expression as full OutputExpression
                     // Handles both identifier references and complex array expressions
-                    metadata.animations = convert_oxc_expression(allocator, &prop.value);
+                    metadata.animations = convert_oxc_expression(allocator, &prop.value, source);
                 }
                 "schemas" => {
                     // Extract schemas identifiers (e.g., [CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA])
@@ -159,11 +160,11 @@ pub fn extract_component_metadata<'a>(
                 "providers" => {
                     // Extract providers as full OutputExpression
                     // Handles complex expressions like [{provide: TOKEN, useFactory: Factory}]
-                    metadata.providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.providers = convert_oxc_expression(allocator, &prop.value, source);
                 }
                 "viewProviders" => {
                     // Extract view providers as full OutputExpression
-                    metadata.view_providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.view_providers = convert_oxc_expression(allocator, &prop.value, source);
                 }
                 "hostDirectives" => {
                     // Extract host directives array
@@ -235,7 +236,7 @@ pub fn extract_component_metadata<'a>(
         extract_constructor_deps(allocator, class, import_map, has_superclass);
 
     // Extract inputs from @Input decorators on class members
-    metadata.inputs = extract_input_metadata(allocator, class);
+    metadata.inputs = extract_input_metadata(allocator, class, source);
 
     // Extract outputs from @Output decorators on class members
     metadata.outputs = extract_output_metadata(allocator, class);
@@ -1130,7 +1131,7 @@ mod tests {
 
             if let Some(class) = class {
                 if let Some(metadata) =
-                    extract_component_metadata(&allocator, class, implicit_standalone, &import_map)
+                    extract_component_metadata(&allocator, class, implicit_standalone, &import_map, code)
                 {
                     found_metadata = Some(metadata);
                     break;

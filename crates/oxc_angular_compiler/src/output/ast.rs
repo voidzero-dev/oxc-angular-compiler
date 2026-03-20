@@ -460,6 +460,10 @@ pub enum OutputExpression<'a> {
     // Spread element (for array spread)
     /// Spread element (...expr).
     SpreadElement(Box<'a, SpreadElementExpr<'a>>),
+
+    // Raw source text (verbatim pass-through)
+    /// Raw source text for unconvertible expressions.
+    RawSource(Box<'a, RawSourceExpr<'a>>),
 }
 
 /// Literal expression.
@@ -833,6 +837,18 @@ pub struct SpreadElementExpr<'a> {
     pub source_span: Option<Span>,
 }
 
+/// Raw source text expression (verbatim pass-through).
+///
+/// Used when an OXC expression cannot be fully converted to OutputExpression.
+/// The emitter prints the source text as-is, preserving the original code.
+#[derive(Debug)]
+pub struct RawSourceExpr<'a> {
+    /// The original source text.
+    pub source: Atom<'a>,
+    /// Source span.
+    pub source_span: Option<Span>,
+}
+
 // ============================================================================
 // Statements
 // ============================================================================
@@ -947,6 +963,7 @@ impl<'a> OutputExpression<'a> {
             OutputExpression::LiteralArray(arr) => arr.entries.iter().all(|e| e.is_constant()),
             OutputExpression::LiteralMap(map) => map.entries.iter().all(|e| e.value.is_constant()),
             OutputExpression::RegularExpressionLiteral(_) => true,
+            OutputExpression::RawSource(_) => false,
             _ => false,
         }
     }
@@ -1071,6 +1088,10 @@ impl<'a> OutputExpression<'a> {
             // Spread elements
             (OutputExpression::SpreadElement(a), OutputExpression::SpreadElement(b)) => {
                 a.expr.is_equivalent(&b.expr)
+            }
+            // Raw source
+            (OutputExpression::RawSource(a), OutputExpression::RawSource(b)) => {
+                a.source == b.source
             }
             _ => false,
         }
@@ -1400,6 +1421,10 @@ impl<'a> OutputExpression<'a> {
                     expr: Box::new_in(e.expr.clone_in(allocator), allocator),
                     source_span: e.source_span,
                 },
+                allocator,
+            )),
+            OutputExpression::RawSource(e) => OutputExpression::RawSource(Box::new_in(
+                RawSourceExpr { source: e.source.clone(), source_span: e.source_span },
                 allocator,
             )),
         }
@@ -1774,6 +1799,9 @@ pub trait RecursiveOutputAstVisitor<'a> {
         self.visit_expression(&expr.expr);
     }
 
+    /// Visit a raw source expression.
+    fn visit_raw_source(&mut self, _expr: &RawSourceExpr<'a>) {}
+
     /// Visit any output expression (dispatches to specific visit methods).
     fn visit_expression(&mut self, expr: &OutputExpression<'a>) {
         match expr {
@@ -1804,6 +1832,7 @@ pub trait RecursiveOutputAstVisitor<'a> {
             OutputExpression::WrappedNode(e) => self.visit_wrapped_node(e),
             OutputExpression::WrappedIrNode(e) => self.visit_wrapped_ir_node(e),
             OutputExpression::SpreadElement(e) => self.visit_spread_element(e),
+            OutputExpression::RawSource(e) => self.visit_raw_source(e),
         }
     }
 

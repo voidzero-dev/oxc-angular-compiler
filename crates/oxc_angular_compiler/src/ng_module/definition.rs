@@ -538,7 +538,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_ng_module_metadata(&allocator, class);
+        let metadata = extract_ng_module_metadata(&allocator, class, code);
         let metadata = metadata.expect("Should extract NgModule metadata");
 
         let definition = generate_ng_module_definition_from_decorator(&allocator, &metadata);
@@ -578,7 +578,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_ng_module_metadata(&allocator, class);
+        let metadata = extract_ng_module_metadata(&allocator, class, code);
         let metadata = metadata.expect("Should extract NgModule metadata");
 
         // Verify deps are extracted

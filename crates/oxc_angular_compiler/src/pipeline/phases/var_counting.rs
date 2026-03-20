@@ -841,7 +841,8 @@ fn assign_var_offsets_in_output_expression(
         | OutputExpression::External(_)
         | OutputExpression::ReadVar(_)
         | OutputExpression::RegularExpressionLiteral(_)
-        | OutputExpression::WrappedNode(_) => {}
+        | OutputExpression::WrappedNode(_)
+        | OutputExpression::RawSource(_) => {}
     }
 }
 

@@ -1559,7 +1559,7 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             if let Some(mut metadata) =
-                extract_component_metadata(allocator, class, implicit_standalone, &import_map)
+                extract_component_metadata(allocator, class, implicit_standalone, &import_map, source)
             {
                 // 3. Resolve external styles and merge into metadata
                 resolve_styles(allocator, &mut metadata, resolved_resources);
@@ -1574,11 +1574,11 @@ pub fn transform_angular_file(
                     let template = allocator.alloc_str(&template_string);
                     // 4.5 Extract view queries from the class (for @ViewChild/@ViewChildren)
                     // These need to be passed to compile_component_full so predicates can be pooled
-                    let view_queries = extract_view_queries(allocator, class);
+                    let view_queries = extract_view_queries(allocator, class, source);
 
                     // 4.6 Extract content queries from the class (for @ContentChild/@ContentChildren)
                     // Signal-based queries (contentChild(), contentChildren()) are also detected here
-                    let content_queries = extract_content_queries(allocator, class);
+                    let content_queries = extract_content_queries(allocator, class, source);
 
                     // Collect content query property names for .d.ts generation
                     // (before content_queries is moved into compile_component_full)
@@ -1637,7 +1637,7 @@ pub fn transform_angular_file(
 
                             // Check if the class also has an @Injectable decorator.
                             // @Injectable is SHARED precedence and can coexist with @Component.
-                            let has_injectable = extract_injectable_metadata(allocator, class);
+                            let has_injectable = extract_injectable_metadata(allocator, class, source);
                             if let Some(injectable_metadata) = &has_injectable {
                                 if let Some(span) = find_injectable_decorator_span(class) {
                                     decorator_spans_to_remove.push(span);
@@ -1699,6 +1699,7 @@ pub fn transform_angular_file(
                                         decorators: build_decorator_metadata_array(
                                             allocator,
                                             &[decorator],
+                                            source,
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,
@@ -1706,9 +1707,10 @@ pub fn transform_angular_file(
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
                                             &import_map,
+                                            source,
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
-                                            allocator, class,
+                                            allocator, class, source,
                                         ),
                                     };
 
@@ -1789,7 +1791,7 @@ pub fn transform_angular_file(
                 // the directive and creating conflicting property definitions (like
                 // ɵfac getters) that interfere with the AOT-compiled assignments.
                 if let Some(mut directive_metadata) =
-                    extract_directive_metadata(allocator, class, implicit_standalone)
+                    extract_directive_metadata(allocator, class, implicit_standalone, source)
                 {
                     // Track decorator span for removal
                     if let Some(span) = find_directive_decorator_span(class) {
@@ -1847,7 +1849,7 @@ pub fn transform_angular_file(
 
                     // Check if the class also has an @Injectable decorator.
                     // @Injectable is SHARED precedence and can coexist with @Directive.
-                    let has_injectable = extract_injectable_metadata(allocator, class);
+                    let has_injectable = extract_injectable_metadata(allocator, class, source);
                     if let Some(injectable_metadata) = &has_injectable {
                         if let Some(span) = find_injectable_decorator_span(class) {
                             decorator_spans_to_remove.push(span);
@@ -1921,7 +1923,7 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator (issue #65).
                         // @Injectable is SHARED precedence and can coexist with @Pipe.
-                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        let has_injectable = extract_injectable_metadata(allocator, class, source);
                         if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
@@ -1958,7 +1960,7 @@ pub fn transform_angular_file(
                         );
                     }
                 } else if let Some(mut ng_module_metadata) =
-                    extract_ng_module_metadata(allocator, class)
+                    extract_ng_module_metadata(allocator, class, source)
                 {
                     // Not a @Component, @Directive, @Injectable, or @Pipe - check if it's an @NgModule
                     // We need to compile @NgModule classes to generate ɵmod, ɵfac, and ɵinj definitions.
@@ -2002,7 +2004,7 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator.
                         // @Injectable is SHARED precedence and can coexist with @NgModule.
-                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        let has_injectable = extract_injectable_metadata(allocator, class, source);
                         if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
@@ -2049,7 +2051,7 @@ pub fn transform_angular_file(
                         );
                     }
                 } else if let Some(mut injectable_metadata) =
-                    extract_injectable_metadata(allocator, class)
+                    extract_injectable_metadata(allocator, class, source)
                 {
                     // Standalone @Injectable (no PRIMARY decorator on the class)
                     // We need to compile @Injectable classes to generate ɵprov and ɵfac definitions.

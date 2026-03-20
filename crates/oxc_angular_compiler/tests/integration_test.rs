@@ -7833,3 +7833,66 @@ fn test_property_singleton_interpolation_with_sanitizer_angular_v19() {
     assert!(js.contains("ɵɵsanitizeUrl"), "Should include ɵɵsanitizeUrl sanitizer. Got:\n{js}");
     insta::assert_snapshot!("property_singleton_interpolation_with_sanitizer_v19", js);
 }
+
+#[test]
+fn test_use_factory_with_if_statement_preserved() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Injectable } from '@angular/core';
+
+const isProd = true;
+
+@Injectable({
+    providedIn: 'root',
+    useFactory: () => { if (isProd) { return new ProdService(); } return new DevService(); }
+})
+export class MyService {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "factory.service.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    // The if statement should be preserved via raw source fallback
+    assert!(
+        result.code.contains("if (isProd)"),
+        "Should preserve if statement in factory body via raw source. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("ProdService"),
+        "Should preserve ProdService reference. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("DevService"),
+        "Should preserve DevService reference. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_providers_with_complex_expression_preserved() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'my-comp',
+    template: '<div></div>',
+    providers: [{ provide: 'TOKEN', useFactory: () => { if (true) { return 1; } return 2; } }]
+})
+export class MyComponent {}
+"#;
+
+    let options = ComponentTransformOptions::default();
+    let result = transform_angular_file(&allocator, "comp.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
+
+    // The complex expression should be preserved in the providers output
+    assert!(
+        result.code.contains("if (true)"),
+        "Should preserve complex expression in providers via raw source. Got:\n{}",
+        result.code
+    );
+}

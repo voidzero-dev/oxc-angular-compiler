@@ -410,9 +410,9 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     ///
     /// # Returns
     /// The builder with all extracted metadata added.
-    pub fn extract_from_class(mut self, allocator: &'a Allocator, class: &'a Class<'a>) -> Self {
+    pub fn extract_from_class(mut self, allocator: &'a Allocator, class: &'a Class<'a>, source: &'a str) -> Self {
         // Extract inputs from @Input decorators
-        let inputs = super::property_decorators::extract_input_metadata(allocator, class);
+        let inputs = super::property_decorators::extract_input_metadata(allocator, class, source);
         for input in inputs {
             self = self.add_input(input);
         }
@@ -424,13 +424,13 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         }
 
         // Extract view queries from @ViewChild/@ViewChildren
-        let view_queries = super::property_decorators::extract_view_queries(allocator, class);
+        let view_queries = super::property_decorators::extract_view_queries(allocator, class, source);
         for query in view_queries {
             self = self.add_view_query(query);
         }
 
         // Extract content queries from @ContentChild/@ContentChildren
-        let content_queries = super::property_decorators::extract_content_queries(allocator, class);
+        let content_queries = super::property_decorators::extract_content_queries(allocator, class, source);
         for query in content_queries {
             self = self.add_query(query);
         }
@@ -595,7 +595,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -633,7 +633,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -666,7 +666,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestComponent"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -699,7 +699,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestComponent"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -732,7 +732,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -767,7 +767,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -805,7 +805,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("TestComponent"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -835,7 +835,7 @@ mod tests {
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
             .name(Atom::from("EmptyDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("EmptyDirective")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -868,7 +868,7 @@ mod tests {
             .name(Atom::from("TestDirective"))
             .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
             .add_input(R3InputMetadata::simple(Atom::from("existingInput")))
-            .extract_from_class(&allocator, class.unwrap());
+            .extract_from_class(&allocator, class.unwrap(), code);
 
         let metadata = builder.build();
         assert!(metadata.is_some());
