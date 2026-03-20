@@ -424,6 +424,13 @@ pub enum InputFlags {
     HasDecoratorInputTransform = 2, // 1 << 1
 }
 
+/// Check if an object property key needs quoting because it contains unsafe characters.
+///
+/// Matches Angular's `UNSAFE_OBJECT_KEY_NAME_REGEXP = /[-.]/` from `render3/view/util.ts`.
+fn needs_object_key_quoting(key: &str) -> bool {
+    key.contains('.') || key.contains('-')
+}
+
 /// Creates the inputs literal map.
 ///
 /// Ported from Angular's `conditionallyCreateDirectiveBindingLiteral` in `render3/view/util.ts`.
@@ -512,7 +519,8 @@ pub fn create_inputs_literal<'a>(
             ))
         };
 
-        entries.push(LiteralMapEntry { key: declared_name.clone(), value, quoted: false });
+        let quoted = needs_object_key_quoting(declared_name);
+        entries.push(LiteralMapEntry { key: declared_name.clone(), value, quoted });
     }
 
     Some(OutputExpression::LiteralMap(Box::new_in(
@@ -533,6 +541,7 @@ pub fn create_outputs_literal<'a>(
     let mut entries = Vec::new_in(allocator);
 
     for (class_name, binding_name) in outputs {
+        let quoted = needs_object_key_quoting(class_name);
         entries.push(LiteralMapEntry {
             key: class_name.clone(),
             value: OutputExpression::Literal(Box::new_in(
@@ -542,7 +551,7 @@ pub fn create_outputs_literal<'a>(
                 },
                 allocator,
             )),
-            quoted: false,
+            quoted,
         });
     }
 
@@ -1545,6 +1554,103 @@ mod tests {
             normalized.contains(r#"outputs:["clicked","trackClick"]"#),
             "Host directive outputs should be flat array. Got:\n{}",
             output
+        );
+    }
+
+    #[test]
+    fn test_create_inputs_literal_quotes_dotted_key() {
+        let allocator = Allocator::default();
+        let inputs = vec![R3InputMetadata {
+            class_property_name: Atom::from("fxFlexAlign.xs"),
+            binding_property_name: Atom::from("fxFlexAlign.xs"),
+            required: false,
+            is_signal: false,
+            transform_function: None,
+        }];
+        let expr = create_inputs_literal(&allocator, &inputs).unwrap();
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&expr);
+        assert!(
+            output.contains(r#""fxFlexAlign.xs""#),
+            "Dotted key should be quoted. Got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_create_inputs_literal_quotes_hyphenated_key() {
+        let allocator = Allocator::default();
+        let inputs = vec![R3InputMetadata {
+            class_property_name: Atom::from("fxFlexAlign.lt-sm"),
+            binding_property_name: Atom::from("fxFlexAlign.lt-sm"),
+            required: false,
+            is_signal: false,
+            transform_function: None,
+        }];
+        let expr = create_inputs_literal(&allocator, &inputs).unwrap();
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&expr);
+        assert!(
+            output.contains(r#""fxFlexAlign.lt-sm""#),
+            "Hyphenated key should be quoted. Got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_create_inputs_literal_no_quotes_for_simple_identifier() {
+        let allocator = Allocator::default();
+        let inputs = vec![R3InputMetadata {
+            class_property_name: Atom::from("fxFlexAlign"),
+            binding_property_name: Atom::from("fxFlexAlign"),
+            required: false,
+            is_signal: false,
+            transform_function: None,
+        }];
+        let expr = create_inputs_literal(&allocator, &inputs).unwrap();
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&expr);
+        // Key should be bare (unquoted), followed by colon
+        assert!(
+            output.contains("fxFlexAlign:"),
+            "Simple identifier key should be bare. Got:\n{output}"
+        );
+        // Key should NOT be quoted — check that no quoted form appears before the colon
+        assert!(
+            !output.contains(r#""fxFlexAlign":"#),
+            "Simple identifier key should not be quoted. Got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_create_outputs_literal_quotes_dotted_key() {
+        let allocator = Allocator::default();
+        let outputs = vec![
+            (Atom::from("activate.xs"), Atom::from("activateXs")),
+        ];
+        let expr = create_outputs_literal(&allocator, &outputs).unwrap();
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&expr);
+        assert!(
+            output.contains(r#""activate.xs""#),
+            "Dotted output key should be quoted. Got:\n{output}"
+        );
+    }
+
+    #[test]
+    fn test_create_outputs_literal_no_quotes_for_simple_identifier() {
+        let allocator = Allocator::default();
+        let outputs = vec![
+            (Atom::from("activate"), Atom::from("activate")),
+        ];
+        let expr = create_outputs_literal(&allocator, &outputs).unwrap();
+        let emitter = JsEmitter::new();
+        let output = emitter.emit_expression(&expr);
+        assert!(
+            output.contains("activate:"),
+            "Simple identifier output key should be bare. Got:\n{output}"
+        );
+        assert!(
+            !output.contains(r#""activate":"#),
+            "Simple identifier output key should not be quoted. Got:\n{output}"
         );
     }
 }

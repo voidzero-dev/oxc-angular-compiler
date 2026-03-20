@@ -43,6 +43,22 @@ use oxc_span::{GetSpan, SourceType};
 use crate::optimizer::Edit;
 use crate::pipeline::selector::{R3SelectorElement, parse_selector_to_r3_selector};
 
+/// Check if an object property key needs quoting because it contains unsafe characters.
+///
+/// Matches Angular's `UNSAFE_OBJECT_KEY_NAME_REGEXP = /[-.]/` from `render3/view/util.ts`.
+fn needs_object_key_quoting(key: &str) -> bool {
+    key.contains('.') || key.contains('-')
+}
+
+/// Quote a property key if it contains unsafe characters (dots or hyphens).
+fn quote_key(key: &str) -> String {
+    if needs_object_key_quoting(key) {
+        format!("\"{key}\"")
+    } else {
+        key.to_string()
+    }
+}
+
 /// Partial declaration function names to link.
 const DECLARE_FACTORY: &str = "\u{0275}\u{0275}ngDeclareFactory";
 const DECLARE_INJECTABLE: &str = "\u{0275}\u{0275}ngDeclareInjectable";
@@ -1234,10 +1250,12 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             }
         };
 
+        let quoted_key = quote_key(&key);
+
         match &p.value {
             // Simple string: propertyName: "publicName" → keep as is
             Expression::StringLiteral(lit) => {
-                entries.push(format!("{key}: \"{}\"", lit.value));
+                entries.push(format!("{quoted_key}: \"{}\"", lit.value));
             }
             // Array: check if it's declaration format [publicName, classPropertyName]
             // and convert to definition format [InputFlags, publicName, classPropertyName]
@@ -1253,17 +1271,17 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
                         // Convert to: [0, "publicName", "classPropertyName"]
                         let arr_source =
                             &source[arr.span.start as usize + 1..arr.span.end as usize - 1];
-                        entries.push(format!("{key}: [0, {arr_source}]"));
+                        entries.push(format!("{quoted_key}: [0, {arr_source}]"));
                     } else {
                         // Already in definition format or unknown, keep as is
                         let val =
                             &source[p.value.span().start as usize..p.value.span().end as usize];
-                        entries.push(format!("{key}: {val}"));
+                        entries.push(format!("{quoted_key}: {val}"));
                     }
                 } else {
                     // 3+ elements likely already in definition format, keep as is
                     let val = &source[p.value.span().start as usize..p.value.span().end as usize];
-                    entries.push(format!("{key}: {val}"));
+                    entries.push(format!("{quoted_key}: {val}"));
                 }
             }
             // Object: Angular 16+ format with classPropertyName, publicName, isRequired, etc.
@@ -1290,20 +1308,20 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
 
                 if flags == 0 && transform.is_none() && public_name == declared_name {
                     // Simple case: no flags, no transform, names match
-                    entries.push(format!("{key}: \"{public_name}\""));
+                    entries.push(format!("{quoted_key}: \"{public_name}\""));
                 } else if let Some(transform_fn) = transform {
                     entries.push(format!(
-                        "{key}: [{flags}, \"{public_name}\", \"{declared_name}\", {transform_fn}]"
+                        "{quoted_key}: [{flags}, \"{public_name}\", \"{declared_name}\", {transform_fn}]"
                     ));
                 } else {
                     entries
-                        .push(format!("{key}: [{flags}, \"{public_name}\", \"{declared_name}\"]"));
+                        .push(format!("{quoted_key}: [{flags}, \"{public_name}\", \"{declared_name}\"]"));
                 }
             }
             // Unknown format, keep as is
             _ => {
                 let val = &source[p.value.span().start as usize..p.value.span().end as usize];
-                entries.push(format!("{key}: {val}"));
+                entries.push(format!("{quoted_key}: {val}"));
             }
         }
     }
