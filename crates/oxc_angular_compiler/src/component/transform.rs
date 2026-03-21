@@ -695,6 +695,8 @@ struct JitClassInfo {
     is_exported: bool,
     /// Whether the class is export default.
     is_default_export: bool,
+    /// Whether the class is abstract.
+    is_abstract: bool,
     /// Constructor parameter info for ctorParameters.
     ctor_params: std::vec::Vec<JitCtorParam>,
     /// Member decorator info for propDecorators.
@@ -1224,6 +1226,7 @@ fn transform_angular_file_jit(
             class_body_end: class.body.span.end,
             is_exported,
             is_default_export,
+            is_abstract: class.r#abstract,
             ctor_params,
             member_decorators,
             decorator_text,
@@ -1343,15 +1346,25 @@ fn transform_angular_file_jit(
         }
 
         // 4c. Class restructuring: `export class X` → `let X = class X`
+        // For abstract classes, also strip the `abstract` keyword since class expressions can't be abstract.
+        let class_keyword_start = if jit_info.is_abstract {
+            let rest = &source[jit_info.class_start as usize..];
+            let offset = rest.find("class").unwrap_or(0);
+            jit_info.class_start + offset as u32
+        } else {
+            jit_info.class_start
+        };
+
         if jit_info.is_exported || jit_info.is_default_export {
             edits.push(Edit::replace(
                 jit_info.stmt_start,
-                jit_info.class_start,
+                class_keyword_start,
                 format!("let {} = ", jit_info.class_name),
             ));
         } else {
-            edits.push(Edit::insert(
+            edits.push(Edit::replace(
                 jit_info.class_start,
+                class_keyword_start,
                 format!("let {} = ", jit_info.class_name),
             ));
         }

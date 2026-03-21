@@ -6406,6 +6406,52 @@ export class TestComponent {
     insta::assert_snapshot!("jit_union_type_ctor_params", result.code);
 }
 
+#[test]
+fn test_jit_abstract_class() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Injectable } from '@angular/core';
+
+@Injectable()
+export abstract class BaseProvider {
+    protected abstract get name(): string;
+    protected abstract initialize(): void;
+
+    public greet(): string {
+        return `Hello from ${this.name}`;
+    }
+}
+"#;
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "base.provider.ts", source, &options, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The abstract keyword should NOT appear before "class" in the output
+    // (JIT converts to class expression which can't be abstract)
+    assert!(
+        !result.code.contains("abstract class"),
+        "JIT output should not contain 'abstract class'. Got:\n{}",
+        result.code
+    );
+
+    // Should have proper class expression
+    assert!(
+        result.code.contains("let BaseProvider = class BaseProvider"),
+        "JIT output should have class expression. Got:\n{}",
+        result.code
+    );
+
+    // Should have __decorate call
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT output should use __decorate. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_abstract_class", result.code);
+}
+
 // =========================================================================
 // Source map tests
 // =========================================================================
