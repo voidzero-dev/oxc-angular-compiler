@@ -91,6 +91,26 @@ describe('transformAngularFile', () => {
     expect(result.errors).toHaveLength(0)
     expect(Object.keys(result.templateUpdates).length).toBeGreaterThan(0)
   })
+
+  it('should minify final component styles when enabled', async () => {
+    const source = `
+      import { Component } from '@angular/core';
+
+      @Component({
+        selector: 'app-root',
+        template: '<div class="container">Hello</div>',
+        styles: ['.container { color: red; background: transparent; }'],
+      })
+      export class AppComponent {}
+    `
+
+    const result = await transformAngularFile(source, 'app.component.ts', {
+      minifyComponentStyles: true,
+    })
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('.container[_ngcontent-%COMP%]{color:red;background:0 0}')
+  })
 })
 
 describe('extractComponentUrlsSync', () => {

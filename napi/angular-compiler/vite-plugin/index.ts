@@ -61,6 +61,21 @@ export interface PluginOptions {
   /** Enable zoneless mode. */
   zoneless?: boolean
 
+  /**
+   * Minify final component styles before emitting them into `styles: [...]`.
+   *
+   * When set to `"auto"` or left undefined, this follows Vite's resolved CSS
+   * minification settings for production builds:
+   *
+   * - `true`: always minify component styles
+   * - `false`: never minify component styles
+   * - `"auto"`/`undefined`: use `build.cssMinify` when set, otherwise fall back
+   *   to `build.minify`
+   *
+   * In dev, `"auto"` defaults to `false`.
+   */
+  minifyComponentStyles?: boolean | 'auto'
+
   /** File replacements (for environment files). */
   fileReplacements?: Array<{ replace: string; with: string }>
 
@@ -90,6 +105,44 @@ export interface PluginOptions {
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
 const ANGULAR_TS_REGEX = /\.tsx?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
+type InlineBuildMinifyOptions = {
+  cssMinify?: boolean | string
+  minify?: boolean | string
+}
+
+function resolveMinifyComponentStyles(
+  option: PluginOptions['minifyComponentStyles'],
+  isBuild: boolean,
+  inlineBuild?: InlineBuildMinifyOptions,
+  outputMinify?: unknown,
+  resolvedBuild?: ResolvedConfig['build'],
+): boolean {
+  if (typeof option === 'boolean') {
+    return option
+  }
+
+  if (!isBuild) {
+    return false
+  }
+
+  if (inlineBuild?.cssMinify !== undefined) {
+    return inlineBuild.cssMinify !== false
+  }
+
+  if (inlineBuild?.minify !== undefined) {
+    return inlineBuild.minify !== false
+  }
+
+  if (outputMinify !== undefined) {
+    return outputMinify !== false
+  }
+
+  if (resolvedBuild?.cssMinify !== undefined) {
+    return resolvedBuild.cssMinify !== false
+  }
+
+  return resolvedBuild?.minify !== false
+}
 
 /**
  * Create the Angular Vite plugin.
@@ -126,6 +179,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   let resolvedConfig: ResolvedConfig
   let viteServer: ViteDevServer | undefined
   let watchMode = false
+  let inlineBuild: InlineBuildMinifyOptions | undefined
+  let outputMinify: unknown
 
   // Track component IDs for HMR
   const componentIds = new Map<string, string>()
@@ -138,6 +193,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
   // Track component files with pending HMR updates (set by fs.watch, checked by HMR endpoint)
   const pendingHmrUpdates = new Set<string>()
+
+  function getMinifyComponentStyles(context?: {
+    environment?: { config?: { build?: ResolvedConfig['build'] } }
+  }): boolean {
+    return resolveMinifyComponentStyles(
+      options.minifyComponentStyles,
+      !watchMode,
+      inlineBuild,
+      outputMinify,
+      context?.environment?.config?.build ?? resolvedConfig?.build,
+    )
+  }
 
   /**
    * Resolve external template/style URLs and read their contents.
@@ -212,8 +279,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   function angularPlugin(): Plugin {
     return {
       name: '@oxc-angular/vite',
-      async config(_, { command }) {
+      async config(config, { command }) {
         watchMode = command === 'serve'
+        inlineBuild = config.build
+          ? {
+              cssMinify: config.build.cssMinify,
+              minify: config.build.minify,
+            }
+          : undefined
 
         return {
           optimizeDeps: {
@@ -231,6 +304,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       },
       configResolved(config) {
         resolvedConfig = config
+      },
+      outputOptions(options) {
+        outputMinify = options.minify
+        return null
       },
       // Safety net: resolve @ng/component virtual modules in SSR context.
       // The browser serves these via HTTP middleware, but Vite's module runner
@@ -410,7 +487,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   }
                 }
 
-                const result = compileForHmrSync(templateContent, className, resolvedId, styles)
+                const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
+                  angularVersion: pluginOptions.angularVersion,
+                  minifyComponentStyles: getMinifyComponentStyles(),
+                })
 
                 res.setHeader('Content-Type', 'text/javascript')
                 res.setHeader('Cache-Control', 'no-cache')
@@ -507,6 +587,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             jit: pluginOptions.jit,
             hmr: pluginOptions.liveReload && watchMode && !isSSR,
             angularVersion: pluginOptions.angularVersion,
+            minifyComponentStyles: getMinifyComponentStyles(this as any),
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)

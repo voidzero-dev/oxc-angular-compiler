@@ -27,7 +27,7 @@ use oxc_angular_compiler::{
     build_prop_decorators_metadata as core_build_prop_decorators_metadata,
     compile_template_for_hmr, compile_template_to_js_with_options,
     encapsulate_style as rust_encapsulate_style, generate_hmr_update_module_from_js,
-    generate_style_update_module, shim_css_text,
+    generate_style_update_module,
 };
 use oxc_napi::OxcError;
 
@@ -190,6 +190,12 @@ pub struct TransformOptions {
     /// Default: false (metadata is dev-only and usually stripped in production)
     pub emit_class_metadata: Option<bool>,
 
+    /// Minify final component styles before emitting them into `styles: [...]`.
+    ///
+    /// This runs after Angular style encapsulation, so it applies to the same
+    /// final CSS strings that are embedded in generated component definitions.
+    pub minify_component_styles: Option<bool>,
+
     /// Resolved import paths for host directives and other imports.
     ///
     /// Maps local identifier name (e.g., "AriaDisableDirective") to the resolved
@@ -231,6 +237,7 @@ impl From<TransformOptions> for RustTransformOptions {
             resolved_imports: options.resolved_imports,
             // Class metadata for TestBed support
             emit_class_metadata: options.emit_class_metadata.unwrap_or(false),
+            minify_component_styles: options.minify_component_styles.unwrap_or(false),
         }
     }
 }
@@ -512,12 +519,21 @@ pub fn compile_for_hmr_sync(
             let encapsulated_styles: Option<Vec<String>> = if all_styles.is_empty() {
                 None
             } else {
-                Some(
-                    all_styles
-                        .iter()
-                        .map(|style| shim_css_text(style, "_ngcontent-%COMP%", "_nghost-%COMP%"))
-                        .collect(),
-                )
+                let styles: Vec<String> = all_styles
+                    .iter()
+                    .map(|style| {
+                        oxc_angular_compiler::styles::finalize_component_style(
+                            style,
+                            true,
+                            "_ngcontent-%COMP%",
+                            "_nghost-%COMP%",
+                            opts.minify_component_styles,
+                        )
+                    })
+                    .filter(|style| !style.trim().is_empty())
+                    .collect();
+
+                if styles.is_empty() { None } else { Some(styles) }
             };
 
             // Generate HMR module with declarations, encapsulated styles, and consts

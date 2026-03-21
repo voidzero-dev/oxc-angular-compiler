@@ -26,6 +26,7 @@ oxc_sourcemap = { workspace = true }
 miette = { workspace = true }
 rustc-hash = { workspace = true }
 indexmap = { workspace = true }
+lightningcss = "1.0.0-alpha.71"
 oxc_resolver = { version = "11", optional = true }
 pathdiff = { version = "0.2", optional = true }
 semver = "1.0.27"

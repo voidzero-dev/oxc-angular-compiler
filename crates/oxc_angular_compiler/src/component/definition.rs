@@ -23,6 +23,7 @@ use super::metadata::{
     ViewEncapsulation,
 };
 use super::namespace_registry::NamespaceRegistry;
+use super::transform::TransformOptions;
 use crate::directive::{
     create_host_directive_mappings_array, create_inputs_literal, create_outputs_literal,
 };
@@ -62,6 +63,7 @@ pub struct ComponentDefinitions<'a> {
 pub fn generate_component_definitions<'a>(
     allocator: &'a Allocator,
     metadata: &ComponentMetadata<'a>,
+    options: &TransformOptions,
     job: &mut ComponentCompilationJob<'a>,
     template_fn: FunctionExpr<'a>,
     host_binding_result: Option<HostBindingCompilationResult<'a>>,
@@ -79,6 +81,7 @@ pub fn generate_component_definitions<'a>(
     let cmp_definition = generate_cmp_definition(
         allocator,
         metadata,
+        options,
         job,
         template_fn,
         host_binding_result,
@@ -109,6 +112,7 @@ pub fn generate_component_definitions<'a>(
 fn generate_cmp_definition<'a>(
     allocator: &'a Allocator,
     metadata: &ComponentMetadata<'a>,
+    options: &TransformOptions,
     job: &mut ComponentCompilationJob<'a>,
     template_fn: FunctionExpr<'a>,
     host_binding_result: Option<HostBindingCompilationResult<'a>>,
@@ -435,23 +439,17 @@ fn generate_cmp_definition<'a>(
     if !metadata.styles.is_empty() {
         let mut style_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
         for style in &metadata.styles {
-            // Apply CSS scoping for Emulated encapsulation
-            let style_value = if metadata.encapsulation == ViewEncapsulation::Emulated {
-                // Use shim_css_text with %COMP% placeholder
-                // Angular's runtime will replace %COMP% with the actual component ID
-                let scoped = crate::styles::shim_css_text(style.as_str(), content_attr, host_attr);
-                // Skip empty styles
-                if scoped.trim().is_empty() {
-                    continue;
-                }
-                Atom::from_in(scoped.as_str(), allocator)
-            } else {
-                // For None/ShadowDom, use styles as-is
-                if style.trim().is_empty() {
-                    continue;
-                }
-                style.clone()
-            };
+            let style = crate::styles::finalize_component_style(
+                style.as_str(),
+                metadata.encapsulation == ViewEncapsulation::Emulated,
+                content_attr,
+                host_attr,
+                options.minify_component_styles,
+            );
+            if style.trim().is_empty() {
+                continue;
+            }
+            let style_value = Atom::from_in(style.as_str(), allocator);
 
             style_entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(style_value), source_span: None },
