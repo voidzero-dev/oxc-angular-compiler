@@ -52,11 +52,7 @@ fn needs_object_key_quoting(key: &str) -> bool {
 
 /// Quote a property key if it contains unsafe characters (dots or hyphens).
 fn quote_key(key: &str) -> String {
-    if needs_object_key_quoting(key) {
-        format!("\"{key}\"")
-    } else {
-        key.to_string()
-    }
+    if needs_object_key_quoting(key) { format!("\"{key}\"") } else { key.to_string() }
 }
 
 /// Partial declaration function names to link.
@@ -1314,8 +1310,9 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
                         "{quoted_key}: [{flags}, \"{public_name}\", \"{declared_name}\", {transform_fn}]"
                     ));
                 } else {
-                    entries
-                        .push(format!("{quoted_key}: [{flags}, \"{public_name}\", \"{declared_name}\"]"));
+                    entries.push(format!(
+                        "{quoted_key}: [{flags}, \"{public_name}\", \"{declared_name}\"]"
+                    ));
                 }
             }
             // Unknown format, keep as is

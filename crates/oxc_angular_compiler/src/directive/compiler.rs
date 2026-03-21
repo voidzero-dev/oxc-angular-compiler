@@ -1623,9 +1623,7 @@ mod tests {
     #[test]
     fn test_create_outputs_literal_quotes_dotted_key() {
         let allocator = Allocator::default();
-        let outputs = vec![
-            (Atom::from("activate.xs"), Atom::from("activateXs")),
-        ];
+        let outputs = vec![(Atom::from("activate.xs"), Atom::from("activateXs"))];
         let expr = create_outputs_literal(&allocator, &outputs).unwrap();
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&expr);
@@ -1638,9 +1636,7 @@ mod tests {
     #[test]
     fn test_create_outputs_literal_no_quotes_for_simple_identifier() {
         let allocator = Allocator::default();
-        let outputs = vec![
-            (Atom::from("activate"), Atom::from("activate")),
-        ];
+        let outputs = vec![(Atom::from("activate"), Atom::from("activate"))];
         let expr = create_outputs_literal(&allocator, &outputs).unwrap();
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&expr);
