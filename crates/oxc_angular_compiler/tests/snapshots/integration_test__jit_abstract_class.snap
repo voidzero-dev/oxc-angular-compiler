@@ -1,0 +1,21 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 6452
+expression: result.code
+---
+
+import { Injectable } from '@angular/core';
+import { __decorate } from "tslib";
+
+let BaseProvider = class BaseProvider {
+    protected abstract get name(): string;
+    protected abstract initialize(): void;
+
+    public greet(): string {
+        return `Hello from ${this.name}`;
+    }
+};
+BaseProvider = __decorate([
+    Injectable()
+], BaseProvider);
+export { BaseProvider };
