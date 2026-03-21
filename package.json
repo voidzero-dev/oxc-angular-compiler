@@ -12,8 +12,8 @@
   "devDependencies": {
     "@napi-rs/cli": "catalog:",
     "oxfmt": "catalog:",
-    "oxlint": "^1.52.0",
-    "oxlint-tsgolint": "^0.17.0"
+    "oxlint": "^1.56.0",
+    "oxlint-tsgolint": "^0.17.1"
   },
   "packageManager": "pnpm@10.32.1"
 }
