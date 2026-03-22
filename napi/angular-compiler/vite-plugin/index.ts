@@ -370,6 +370,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     event: 'angular:component-update',
                     data: eventData,
                   })
+
+                  // Invalidate Vite's module transform cache so that a full page reload
+                  // picks up the new template/style content instead of serving stale output.
+                  const mod = server.moduleGraph.getModuleById(componentFile)
+                  if (mod) {
+                    server.moduleGraph.invalidateModule(mod)
+                  }
                 }
               }
             }
@@ -654,6 +661,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         debugHmr('componentIds keys: %O', Array.from(componentIds.keys()))
 
         if (isComponent && hasComponentId) {
+          // If there's a pending HMR update for this component, the .ts module
+          // was invalidated by our fs.watch handler (template/style change), not
+          // by an actual .ts file edit. Skip the full reload — HMR handles it.
+          if (pendingHmrUpdates.has(ctx.file)) {
+            debugHmr('skipping full reload — pending HMR update from template/style change')
+            return []
+          }
+
           debugHmr('triggering full reload for component file change')
           // Component FILE changes require a full reload because:
           // - Class definition changes can't be hot-swapped safely
