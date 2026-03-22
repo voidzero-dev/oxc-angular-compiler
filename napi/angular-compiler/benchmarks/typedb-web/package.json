@@ -32,7 +32,7 @@
     "interactjs": "1.10.27",
     "ngx-cookieconsent": "4.0.2",
     "pixi.js-legacy": "7.4.3",
-    "posthog-js": "1.361.1",
+    "posthog-js": "1.362.0",
     "prismjs": "1.30.0",
     "rxjs": "7.8.2",
     "tslib": "2.8.1",
