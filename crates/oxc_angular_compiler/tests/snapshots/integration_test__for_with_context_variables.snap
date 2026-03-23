@@ -18,7 +18,7 @@ function TestComponent_For_1_Template(rf,ctx) {
     i0.ɵɵadvance();
     i0.ɵɵclassProp("first",(ɵ$index_1_r2 === 0))("last",(ɵ$index_1_r2 === (ɵ$count_1_r3 - 1)));
     i0.ɵɵadvance();
-    i0.ɵɵtextInterpolate2("",ɵ$index_1_r2,": ",item_r1.name);
+    i0.ɵɵtextInterpolate2("",ɵ$index_1_r2,": ",item_r1.name,"");
   }
 }
 function TestComponent_Template(rf,ctx) {

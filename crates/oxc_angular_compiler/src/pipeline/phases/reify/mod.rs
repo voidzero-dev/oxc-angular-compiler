@@ -874,13 +874,15 @@ fn reify_update_op<'a>(
             }
         }
         UpdateOp::InterpolateText(interp) => {
-            // Handle multiple interpolations like "{{a}} and {{b}}"
+            // Handle multiple interpolations like "{{a}} and {{b}}" or "#{{a}}"
+            // has_extra_args must be true to preserve trailing empty strings —
+            // ɵɵtextInterpolateN always requires all positional string args.
             let (args, expr_count) = reify_interpolation(
                 allocator,
                 &interp.interpolation,
                 expressions,
                 root_xref,
-                false,
+                true,
             );
             Some(create_text_interpolate_stmt_with_args(allocator, args, expr_count))
         }

@@ -171,7 +171,7 @@ fn test_html_entity_between_interpolations() {
     // Should produce: textInterpolate2("", ctx.a, "×", ctx.b)
     // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00D7}\",ctx.b)"),
+        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00D7}\",ctx.b,\"\")"),
         "Expected textInterpolate2 with raw times character. Got:\n{js}"
     );
 }
@@ -183,7 +183,7 @@ fn test_html_entity_at_start_of_interpolation() {
     // Should produce: textInterpolate1("×", ctx.a)
     // Note: × (multiplication sign) = U+00D7, emitted as raw UTF-8
     assert!(
-        js.contains("textInterpolate1(\"\u{00D7}\",ctx.a)")
+        js.contains("textInterpolate1(\"\u{00D7}\",ctx.a,\"\")")
             || js.contains("textInterpolate(\"\u{00D7}\",ctx.a)"),
         "Expected textInterpolate with raw times character at start. Got:\n{js}"
     );
@@ -197,7 +197,7 @@ fn test_multiple_html_entities_between_interpolations() {
     // Should produce: textInterpolate2("", ctx.a, "\u{00A0}×\u{00A0}", ctx.b)
     // Note: &nbsp; = U+00A0, &times; = U+00D7, both emitted as raw UTF-8
     assert!(
-        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00A0}\u{00D7}\u{00A0}\",ctx.b)"),
+        js.contains("textInterpolate2(\"\",ctx.a,\"\u{00A0}\u{00D7}\u{00A0}\",ctx.b,\"\")"),
         "Expected textInterpolate2 with raw Unicode entities. Got:\n{js}"
     );
 }

@@ -20,7 +20,7 @@ function TestComponent_For_1_Template(rf,ctx) {
   if ((rf & 2)) {
     const ɵ$index_1_r2 = ctx.$index;
     i0.ɵɵadvance(2);
-    i0.ɵɵtextInterpolate1("Remove #",ɵ$index_1_r2);
+    i0.ɵɵtextInterpolate1("Remove #",ɵ$index_1_r2,"");
   }
 }
 function TestComponent_Template(rf,ctx) {

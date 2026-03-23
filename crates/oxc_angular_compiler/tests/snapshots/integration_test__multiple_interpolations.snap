@@ -10,6 +10,6 @@ function TestComponent_Template(rf,ctx) {
   }
   if ((rf & 2)) {
     i0.ɵɵadvance();
-    i0.ɵɵtextInterpolate2("",ctx.first," and ",ctx.second);
+    i0.ɵɵtextInterpolate2("",ctx.first," and ",ctx.second,"");
   }
 }
