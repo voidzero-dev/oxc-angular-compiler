@@ -87,14 +87,14 @@ multiple_crate_versions = "allow"
 
 [workspace.dependencies]
 # External oxc crates from crates.io
-oxc_allocator = "0.121"
-oxc_ast = "0.121"
-oxc_ast_visit = "0.121"
-oxc_diagnostics = "0.121"
-oxc_napi = "0.121"
-oxc_parser = "0.121"
-oxc_semantic = "0.121"
-oxc_span = "0.121"
+oxc_allocator = "0.122"
+oxc_ast = "0.122"
+oxc_ast_visit = "0.122"
+oxc_diagnostics = "0.122"
+oxc_napi = "0.122"
+oxc_parser = "0.122"
+oxc_semantic = "0.122"
+oxc_span = "0.122"
 oxc_sourcemap = "6.0.1"
 
 # Internal
