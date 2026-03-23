@@ -1,17 +1,15 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 6126
 expression: result.code
 ---
-import { Component } from '@angular/core';
+import { Component } from "@angular/core";
 import { __decorate } from "tslib";
 import __NG_CLI_RESOURCE__0 from "angular:jit:style:file;./app.css";
-
 let AppComponent = class AppComponent {};
-AppComponent = __decorate([
-    Component({
-    selector: 'app-root',
-    template: '<h1>Hello</h1>',
-    styles: [__NG_CLI_RESOURCE__0],
-})
-], AppComponent);
+AppComponent = __decorate([Component({
+	selector: "app-root",
+	template: "<h1>Hello</h1>",
+	styles: [__NG_CLI_RESOURCE__0]
+})], AppComponent);
 export { AppComponent };

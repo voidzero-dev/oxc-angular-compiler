@@ -96,6 +96,8 @@ oxc_parser = "0.122"
 oxc_semantic = "0.122"
 oxc_span = "0.122"
 oxc_sourcemap = "6.0.1"
+oxc_transformer = "0.122"
+oxc_codegen = "0.122"
 
 # Internal
 oxc_angular_compiler = { path = "crates/oxc_angular_compiler" }

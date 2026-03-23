@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use std::path::Path;
+
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Declaration, ExportDefaultDeclarationKind, Expression,
@@ -1140,6 +1142,37 @@ fn build_jit_decorator_text(
 
 /// Transform an Angular TypeScript file in JIT (Just-In-Time) compilation mode.
 ///
+/// Strip TypeScript syntax from JIT output using oxc_transformer.
+///
+/// This runs as a post-pass after JIT text-edits, converting TypeScript → JavaScript.
+/// It handles abstract members, type annotations, parameter properties, etc.
+fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, code, source_type).parse();
+    if parser_ret.panicked {
+        return code.to_string();
+    }
+
+    let mut program = parser_ret.program;
+
+    let semantic_ret =
+        oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
+
+    let ts_options =
+        oxc_transformer::TypeScriptOptions { only_remove_type_imports: true, ..Default::default() };
+
+    let transform_options =
+        oxc_transformer::TransformOptions { typescript: ts_options, ..Default::default() };
+
+    let transformer =
+        oxc_transformer::Transformer::new(allocator, Path::new(path), &transform_options);
+    transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
+
+    let codegen_ret = oxc_codegen::Codegen::new().with_source_text(code).build(&program);
+
+    codegen_ret.code
+}
+
 /// JIT mode produces output compatible with Angular's JIT runtime compiler:
 /// - Decorators are downleveled using `__decorate` from tslib
 /// - `templateUrl` is replaced with `angular:jit:template:file;` imports
@@ -1407,6 +1440,9 @@ fn transform_angular_file_jit(
     } else {
         result.code = apply_edits(source, edits);
     }
+
+    // 5. Strip TypeScript syntax from JIT output
+    result.code = strip_typescript(allocator, path, &result.code);
 
     result
 }

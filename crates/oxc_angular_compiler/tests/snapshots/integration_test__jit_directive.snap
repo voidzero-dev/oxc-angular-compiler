@@ -1,21 +1,16 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 6239
 expression: result.code
 ---
-import { Directive, Input } from '@angular/core';
+import { Directive, Input } from "@angular/core";
 import { __decorate } from "tslib";
-
 let HighlightDirective = class HighlightDirective {
-    color: string = 'yellow';
-
-static propDecorators = {
-    color: [{ type: Input }]
+	color = "yellow";
+	static propDecorators = { color: [{ type: Input }] };
 };
-};
-HighlightDirective = __decorate([
-    Directive({
-    selector: '[appHighlight]',
-    standalone: true,
-})
-], HighlightDirective);
+HighlightDirective = __decorate([Directive({
+	selector: "[appHighlight]",
+	standalone: true
+})], HighlightDirective);
 export { HighlightDirective };

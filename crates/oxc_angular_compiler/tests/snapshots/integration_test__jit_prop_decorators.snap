@@ -1,26 +1,27 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 6351
 expression: result.code
 ---
-import { Directive, Input, Output, HostBinding, EventEmitter } from '@angular/core';
+import { Directive, Input, Output, HostBinding, EventEmitter } from "@angular/core";
 import { __decorate } from "tslib";
-
 let HighlightDirective = class HighlightDirective {
-    color: string = 'yellow';
-    title: string = '';
-    colorChange = new EventEmitter<string>();
-    isActive = false;
-
-static propDecorators = {
-    color: [{ type: Input }],
-    title: [{ type: Input, args: ['aliasName'] }],
-    colorChange: [{ type: Output }],
-    isActive: [{ type: HostBinding, args: ['class.active'] }]
+	color = "yellow";
+	title = "";
+	colorChange = new EventEmitter();
+	isActive = false;
+	static propDecorators = {
+		color: [{ type: Input }],
+		title: [{
+			type: Input,
+			args: ["aliasName"]
+		}],
+		colorChange: [{ type: Output }],
+		isActive: [{
+			type: HostBinding,
+			args: ["class.active"]
+		}]
+	};
 };
-};
-HighlightDirective = __decorate([
-    Directive({
-    selector: '[appHighlight]',
-})
-], HighlightDirective);
+HighlightDirective = __decorate([Directive({ selector: "[appHighlight]" })], HighlightDirective);
 export { HighlightDirective };
