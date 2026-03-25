@@ -2,6 +2,7 @@
 source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: result.code
 ---
+
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
 
@@ -20,5 +21,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:MultiStyledComponent,s
 }
 (() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(MultiStyledComponent,
-      {className:"MultiStyledComponent",filePath:"multi-styled.component.ts",lineNumber:1}));
+      {className:"MultiStyledComponent",filePath:"multi-styled.component.ts",lineNumber:12}));
 })();

@@ -2,6 +2,7 @@
 source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: result.code
 ---
+
 import { Component } from '@angular/core';
 import * as i0 from '@angular/core';
 
@@ -33,5 +34,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selector
 }
 (() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(TestComponent,
-      {className:"TestComponent",filePath:"test.component.ts",lineNumber:1}));
+      {className:"TestComponent",filePath:"test.component.ts",lineNumber:9}));
 })();

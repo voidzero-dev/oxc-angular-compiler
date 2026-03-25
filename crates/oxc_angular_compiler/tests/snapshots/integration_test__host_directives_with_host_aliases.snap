@@ -33,5 +33,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:MyComponent,selectors:
 }
 (() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(MyComponent,
-      {className:"MyComponent",filePath:"test.component.ts",lineNumber:1}));
+      {className:"MyComponent",filePath:"test.component.ts",lineNumber:22}));
 })();

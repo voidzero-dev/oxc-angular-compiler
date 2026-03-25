@@ -1649,6 +1649,7 @@ pub fn transform_angular_file(
                         template,
                         &mut metadata,
                         path,
+                        source,
                         options,
                         view_queries,
                         content_queries,
@@ -2315,6 +2316,7 @@ fn compile_component_full<'a>(
     template: &'a str,
     metadata: &mut ComponentMetadata<'a>,
     file_path: &str,
+    source: &str,
     options: &TransformOptions,
     view_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     content_queries: OxcVec<'a, R3QueryMetadata<'a>>,
@@ -2589,13 +2591,22 @@ fn compile_component_full<'a>(
             allocator,
         ));
 
-        // Build the debug info
-        // Note: line_number is 1-indexed. We don't have access to the actual source
-        // line number here, but Angular uses the class declaration position.
-        // For now we use line 1, but this could be enhanced if we pass line info.
+        // Compute the 1-indexed line number of the class declaration from its byte offset
+        let class_line_number = {
+            let offset = metadata.class_span.start as usize;
+            let mut line = 1u32;
+            for &byte in &source.as_bytes()[..offset.min(source.len())] {
+                if byte == b'\n' {
+                    line += 1;
+                }
+            }
+            line
+        };
+
+        // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
             .with_file_path(Atom::from_in(file_path, allocator))
-            .with_line_number(1); // TODO: Get actual line number from class declaration
+            .with_line_number(class_line_number);
 
         // Compile to IIFE-wrapped expression
         let debug_info_expr = compile_class_debug_info(allocator, &debug_info);
