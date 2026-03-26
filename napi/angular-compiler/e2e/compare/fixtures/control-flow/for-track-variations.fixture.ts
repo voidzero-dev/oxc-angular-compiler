@@ -103,6 +103,81 @@ export class ForWithEmptyComponent {
     expectedFeatures: ['ɵɵrepeaterCreate', 'ɵɵrepeaterTrackByIdentity'],
   },
   {
+    name: 'for-track-binary-with-component-method',
+    category: 'control-flow',
+    description: '@for with track using binary operator and component method',
+    className: 'ForTrackBinaryComponentMethodComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-for-track-binary-method',
+  standalone: true,
+  template: \`
+    @for (item of items; track prefix() + item.id) {
+      <div>{{ item.name }}</div>
+    }
+  \`,
+})
+export class ForTrackBinaryComponentMethodComponent {
+  items = [{ id: '1', name: 'Item 1' }];
+  prefix() { return 'pfx'; }
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵrepeaterCreate'],
+  },
+  {
+    name: 'for-track-nullish-coalescing-with-component-method',
+    category: 'control-flow',
+    description: '@for with track using ?? operator and component method',
+    className: 'ForTrackNullishCoalesceComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-for-track-nullish',
+  standalone: true,
+  template: \`
+    @for (tag of tags; track (tag.queryPrefix ?? queryPrefix()) + '.' + tag.key) {
+      <span>{{ tag.key }}</span>
+    }
+  \`,
+})
+export class ForTrackNullishCoalesceComponent {
+  tags = [{ queryPrefix: null, key: 'k1' }];
+  queryPrefix() { return 'default'; }
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵrepeaterCreate'],
+  },
+  {
+    name: 'for-track-ternary-with-component-method',
+    category: 'control-flow',
+    description: '@for with track using ternary and component method',
+    className: 'ForTrackTernaryComponentMethodComponent',
+    type: 'full-transform',
+    sourceCode: `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-for-track-ternary-method',
+  standalone: true,
+  template: \`
+    @for (item of items; track useId() ? item.id : item.name) {
+      <div>{{ item.name }}</div>
+    }
+  \`,
+})
+export class ForTrackTernaryComponentMethodComponent {
+  items = [{ id: '1', name: 'Item 1' }];
+  useId() { return true; }
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵrepeaterCreate'],
+  },
+  {
     name: 'for-context-variables',
     category: 'control-flow',
     description: '@for with all context variables',

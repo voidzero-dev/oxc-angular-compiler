@@ -94,19 +94,24 @@ fn optimize_track_expression<'a>(
     // to the non-optimizable case below, which creates a wrapper function like:
     //   `function _forTrack($index,$item) { return this.trackByFn; }`
 
-    // First check if the expression contains any ContextExpr or AST expressions
-    // that reference the component instance (implicit receiver)
-    let has_context = expression_contains_context(&rep.track, expressions);
-    if has_context {
-        rep.uses_component_instance = true;
-    }
-
-    // For non-optimizable tracks, replace ContextExpr with TrackContextExpr
-    // This signals that context reads in track expressions need special handling
+    // The track function could not be optimized.
+    // Replace context reads with TrackContextExpr, since context reads in a track
+    // function are emitted specially (as `this` instead of `ctx`).
+    //
+    // Following Angular's implementation (track_fn_optimization.ts:54-70), we set
+    // usesComponentInstance inside the transform callback when a ContextExpr is found.
+    // This is the authoritative detection — transformExpressionsInExpression traverses
+    // all expression variants, so no ContextExpr can be missed regardless of nesting.
+    //
+    // By phase 34 (this phase), resolve_names (phase 31) has already converted all
+    // ImplicitReceiver AST nodes into Context IR expressions, so checking for Context
+    // during the transform is sufficient.
+    let found_context = std::cell::Cell::new(false);
     transform_expressions_in_expression(
         &mut rep.track,
         &|expr, _flags| {
             if let IrExpression::Context(ctx) = expr {
+                found_context.set(true);
                 *expr = IrExpression::TrackContext(oxc_allocator::Box::new_in(
                     TrackContextExpr { view: ctx.view, source_span: None },
                     allocator,
@@ -115,6 +120,9 @@ fn optimize_track_expression<'a>(
         },
         VisitorContextFlag::NONE,
     );
+    if found_context.get() {
+        rep.uses_component_instance = true;
+    }
 
     // Also create an op list for the tracking expression since it may need
     // additional ops when generating the final code (e.g. temporary variables).
@@ -144,179 +152,6 @@ fn optimize_track_expression<'a>(
     let mut track_by_ops = oxc_allocator::Vec::new_in(allocator);
     track_by_ops.push(statement_op);
     rep.track_by_ops = Some(track_by_ops);
-}
-
-/// Check if an expression contains any Context expressions or AST expressions that
-/// reference the component instance (implicit receiver).
-fn expression_contains_context(
-    expr: &IrExpression<'_>,
-    expressions: &crate::pipeline::expression_store::ExpressionStore<'_>,
-) -> bool {
-    match expr {
-        IrExpression::Context(_) => true,
-        // Check AST expressions for implicit receiver usage (this.property, this.method())
-        IrExpression::Ast(ast) => ast_contains_implicit_receiver(ast),
-        // Check ExpressionRef by looking up the stored expression
-        IrExpression::ExpressionRef(id) => {
-            let stored_expr = expressions.get(*id);
-            ast_contains_implicit_receiver(stored_expr)
-        }
-        // Resolved expressions (created by resolveNames phase)
-        IrExpression::ResolvedCall(rc) => {
-            expression_contains_context(&rc.receiver, expressions)
-                || rc.args.iter().any(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::ResolvedPropertyRead(rp) => {
-            expression_contains_context(&rp.receiver, expressions)
-        }
-        IrExpression::ResolvedBinary(rb) => {
-            expression_contains_context(&rb.left, expressions)
-                || expression_contains_context(&rb.right, expressions)
-        }
-        IrExpression::ResolvedKeyedRead(rk) => {
-            expression_contains_context(&rk.receiver, expressions)
-                || expression_contains_context(&rk.key, expressions)
-        }
-        IrExpression::ResolvedSafePropertyRead(rsp) => {
-            expression_contains_context(&rsp.receiver, expressions)
-        }
-        IrExpression::SafeTernary(st) => {
-            expression_contains_context(&st.guard, expressions)
-                || expression_contains_context(&st.expr, expressions)
-        }
-        IrExpression::SafePropertyRead(sp) => {
-            expression_contains_context(&sp.receiver, expressions)
-        }
-        IrExpression::SafeKeyedRead(sk) => {
-            expression_contains_context(&sk.receiver, expressions)
-                || expression_contains_context(&sk.index, expressions)
-        }
-        IrExpression::SafeInvokeFunction(sf) => {
-            expression_contains_context(&sf.receiver, expressions)
-                || sf.args.iter().any(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::PipeBinding(pb) => {
-            pb.args.iter().any(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::PipeBindingVariadic(pbv) => {
-            expression_contains_context(&pbv.args, expressions)
-        }
-        IrExpression::PureFunction(pf) => {
-            pf.args.iter().any(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::Interpolation(i) => {
-            i.expressions.iter().any(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::ResetView(rv) => expression_contains_context(&rv.expr, expressions),
-        IrExpression::ConditionalCase(cc) => {
-            cc.expr.as_ref().is_some_and(|e| expression_contains_context(e, expressions))
-        }
-        IrExpression::TwoWayBindingSet(tbs) => {
-            expression_contains_context(&tbs.target, expressions)
-                || expression_contains_context(&tbs.value, expressions)
-        }
-        IrExpression::StoreLet(sl) => expression_contains_context(&sl.value, expressions),
-        IrExpression::ConstCollected(cc) => expression_contains_context(&cc.expr, expressions),
-        IrExpression::RestoreView(rv) => {
-            if let crate::ir::expression::RestoreViewTarget::Dynamic(e) = &rv.view {
-                expression_contains_context(e, expressions)
-            } else {
-                false
-            }
-        }
-        // Leaf expressions
-        _ => false,
-    }
-}
-
-/// Check if an Angular AST expression contains any reference to the implicit receiver (this).
-/// This includes property reads like `this.foo` and method calls like `this.bar()`.
-fn ast_contains_implicit_receiver(ast: &crate::ast::expression::AngularExpression<'_>) -> bool {
-    use crate::ast::expression::AngularExpression;
-
-    match ast {
-        // Direct implicit receiver reference
-        AngularExpression::ImplicitReceiver(_) => true,
-        // Property read - check if it's on implicit receiver or recurse
-        AngularExpression::PropertyRead(pr) => ast_contains_implicit_receiver(&pr.receiver),
-        // Safe property read
-        AngularExpression::SafePropertyRead(pr) => ast_contains_implicit_receiver(&pr.receiver),
-        // Keyed read
-        AngularExpression::KeyedRead(kr) => {
-            ast_contains_implicit_receiver(&kr.receiver) || ast_contains_implicit_receiver(&kr.key)
-        }
-        // Safe keyed read
-        AngularExpression::SafeKeyedRead(kr) => {
-            ast_contains_implicit_receiver(&kr.receiver) || ast_contains_implicit_receiver(&kr.key)
-        }
-        // Function call
-        AngularExpression::Call(call) => {
-            ast_contains_implicit_receiver(&call.receiver)
-                || call.args.iter().any(ast_contains_implicit_receiver)
-        }
-        // Safe call
-        AngularExpression::SafeCall(call) => {
-            ast_contains_implicit_receiver(&call.receiver)
-                || call.args.iter().any(ast_contains_implicit_receiver)
-        }
-        // Binary expression
-        AngularExpression::Binary(b) => {
-            ast_contains_implicit_receiver(&b.left) || ast_contains_implicit_receiver(&b.right)
-        }
-        // Unary expression
-        AngularExpression::Unary(u) => ast_contains_implicit_receiver(&u.expr),
-        // Conditional (ternary)
-        AngularExpression::Conditional(c) => {
-            ast_contains_implicit_receiver(&c.condition)
-                || ast_contains_implicit_receiver(&c.true_exp)
-                || ast_contains_implicit_receiver(&c.false_exp)
-        }
-        // Pipe binding
-        AngularExpression::BindingPipe(p) => {
-            ast_contains_implicit_receiver(&p.exp)
-                || p.args.iter().any(ast_contains_implicit_receiver)
-        }
-        // Not expressions
-        AngularExpression::PrefixNot(n) => ast_contains_implicit_receiver(&n.expression),
-        AngularExpression::NonNullAssert(n) => ast_contains_implicit_receiver(&n.expression),
-        // Typeof/void expressions
-        AngularExpression::TypeofExpression(t) => ast_contains_implicit_receiver(&t.expression),
-        AngularExpression::VoidExpression(v) => ast_contains_implicit_receiver(&v.expression),
-        AngularExpression::SpreadElement(spread) => {
-            ast_contains_implicit_receiver(&spread.expression)
-        }
-        // Chain - check all expressions
-        AngularExpression::Chain(c) => c.expressions.iter().any(ast_contains_implicit_receiver),
-        // Interpolation - check all expressions
-        AngularExpression::Interpolation(i) => {
-            i.expressions.iter().any(ast_contains_implicit_receiver)
-        }
-        // Template literals
-        AngularExpression::TemplateLiteral(t) => {
-            t.expressions.iter().any(ast_contains_implicit_receiver)
-        }
-        AngularExpression::TaggedTemplateLiteral(t) => {
-            ast_contains_implicit_receiver(&t.tag)
-                || t.template.expressions.iter().any(ast_contains_implicit_receiver)
-        }
-        // Array literal
-        AngularExpression::LiteralArray(arr) => {
-            arr.expressions.iter().any(ast_contains_implicit_receiver)
-        }
-        // Map literal
-        AngularExpression::LiteralMap(map) => map.values.iter().any(ast_contains_implicit_receiver),
-        // Parenthesized expression
-        AngularExpression::ParenthesizedExpression(p) => {
-            ast_contains_implicit_receiver(&p.expression)
-        }
-        // Arrow function - check the body
-        AngularExpression::ArrowFunction(arrow) => ast_contains_implicit_receiver(&arrow.body),
-        // Literals and other leaf nodes don't contain implicit receiver
-        AngularExpression::LiteralPrimitive(_)
-        | AngularExpression::Empty(_)
-        | AngularExpression::ThisReceiver(_)
-        | AngularExpression::RegularExpressionLiteral(_) => false,
-    }
 }
 
 /// Check if the track expression is a simple variable read of $index or $item.

@@ -1188,6 +1188,130 @@ fn test_nested_for_with_outer_scope_track() {
     insta::assert_snapshot!("nested_for_with_outer_scope_track", js);
 }
 
+/// Tests that `track prefix() + item.id` generates a regular function (not arrow function).
+/// When a binary expression in track contains a component method call, the generated
+/// track function must use `function` declaration to properly bind `this`.
+#[test]
+fn test_for_track_binary_with_component_method() {
+    let js = compile_template_to_js(
+        r#"@for (item of items; track prefix() + item.id) { <div>{{item.name}}</div> }"#,
+        "TestComponent",
+    );
+    // Must generate a regular function, not an arrow function, because prefix() needs `this`
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with binary operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        js.contains("this.prefix()"),
+        "Track function should use 'this.prefix()' for component method access. Output:\n{js}"
+    );
+    // Must NOT be an arrow function (arrow functions don't bind `this`)
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function (const _forTrack = ...) for track expressions that reference component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_binary_with_component_method", js);
+}
+
+/// Tests that nullish coalescing (??) in track with component method generates a regular function.
+/// This is the exact pattern from the original bug report: `track item.prefix ?? defaultPrefix()`
+#[test]
+fn test_for_track_nullish_coalescing_with_component_method() {
+    let js = compile_template_to_js(
+        r#"@for (item of items; track item.prefix ?? defaultPrefix()) { <div>{{item.name}}</div> }"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ?? operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function for track with ?? referencing component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_nullish_coalescing_with_component_method", js);
+}
+
+/// Tests that ternary in track with component method generates a regular function.
+#[test]
+fn test_for_track_ternary_with_component_method() {
+    let js = compile_template_to_js(
+        r#"@for (item of items; track useId() ? item.id : item.name) { <div>{{item.name}}</div> }"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ternary containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function for track with ternary referencing component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_ternary_with_component_method", js);
+}
+
+/// Tests that a complex track expression with multiple component references and binary operators
+/// generates a regular function. Mirrors the original bug: `(tag.queryPrefix ?? queryPrefix()) + '.' + tag.key`
+#[test]
+fn test_for_track_complex_binary_with_nullish_coalescing() {
+    let js = compile_template_to_js(
+        r#"@for (tag of visibleTags(); track (tag.queryPrefix ?? queryPrefix()) + '.' + tag.key) { <span>{{ tag.key }}</span> }"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Complex track with ?? and + containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function. Output:\n{js}"
+    );
+    assert!(
+        js.contains("this.queryPrefix()"),
+        "Track function should use 'this.queryPrefix()' for component method access. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_complex_binary_with_nullish_coalescing", js);
+}
+
+/// Tests that a track expression with only item property reads in binary operators
+/// correctly generates an arrow function (no component context needed).
+#[test]
+fn test_for_track_binary_without_component_context() {
+    let js = compile_template_to_js(
+        r#"@for (item of items; track item.type + ':' + item.id) { <div>{{item.name}}</div> }"#,
+        "TestComponent",
+    );
+    // This should be an arrow function since no component members are referenced
+    assert!(
+        js.contains("const _forTrack"),
+        "Track with binary operator using only item properties should generate an arrow function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("function _forTrack"),
+        "Should NOT generate a regular function when no component members are referenced. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_binary_without_component_context", js);
+}
+
+/// Tests that negation (!) in track with component method generates a regular function.
+#[test]
+fn test_for_track_not_with_component_method() {
+    let js = compile_template_to_js(
+        r#"@for (item of items; track !isDisabled()) { <div>{{item.name}}</div> }"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ! operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_not_with_component_method", js);
+}
+
 #[test]
 fn test_if_inside_for() {
     let js = compile_template_to_js(
