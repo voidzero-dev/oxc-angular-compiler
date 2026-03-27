@@ -1395,13 +1395,31 @@ pub trait R3Visitor<'a> {
     /// Visit a bound text node.
     fn visit_bound_text(&mut self, _text: &R3BoundText<'a>) {}
 
+    /// Visit a static text attribute.
+    fn visit_text_attribute(&mut self, _attr: &R3TextAttribute<'a>) {}
+
+    /// Visit a bound attribute (input property).
+    fn visit_bound_attribute(&mut self, _attr: &R3BoundAttribute<'a>) {}
+
+    /// Visit a bound event (output).
+    fn visit_bound_event(&mut self, _event: &R3BoundEvent<'a>) {}
+
     /// Visit an element.
     fn visit_element(&mut self, element: &R3Element<'a>) {
         self.visit_element_children(element);
     }
 
-    /// Visit element children.
+    /// Visit element children, attributes, inputs, and outputs.
     fn visit_element_children(&mut self, element: &R3Element<'a>) {
+        for attr in &element.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &element.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &element.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &element.children {
             child.visit(self);
         }
@@ -1412,8 +1430,17 @@ pub trait R3Visitor<'a> {
         self.visit_template_children(template);
     }
 
-    /// Visit template children.
+    /// Visit template children, attributes, inputs, and outputs.
     fn visit_template_children(&mut self, template: &R3Template<'a>) {
+        for attr in &template.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &template.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &template.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &template.children {
             child.visit(self);
         }
@@ -1421,6 +1448,9 @@ pub trait R3Visitor<'a> {
 
     /// Visit a content projection slot.
     fn visit_content(&mut self, content: &R3Content<'a>) {
+        for attr in &content.attributes {
+            self.visit_text_attribute(attr);
+        }
         for child in &content.children {
             child.visit(self);
         }
@@ -1531,6 +1561,15 @@ pub trait R3Visitor<'a> {
 
     /// Visit a component.
     fn visit_component(&mut self, component: &R3Component<'a>) {
+        for attr in &component.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &component.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &component.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &component.children {
             child.visit(self);
         }
