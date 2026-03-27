@@ -25,7 +25,8 @@ const LINKER_DECLARATION_PREFIX = '\u0275\u0275ngDeclare'
 const SKIP_REGEX = /[\\/]@angular[\\/](?:compiler|core)[\\/]/
 
 // Match JS files in node_modules (Angular FESM bundles)
-const NODE_MODULES_JS_REGEX = /node_modules\/.*\.[cm]?js$/
+// Allows optional query strings (?v=...) that Vite appends to module IDs
+const NODE_MODULES_JS_REGEX = /node_modules[\\/].*\.[cm]?js(?:\?.*)?$/
 
 /**
  * Run the OXC Rust linker on the given code.
