@@ -144,9 +144,9 @@ describe('NODE_MODULES_JS_REGEX filter matching', () => {
   const NODE_MODULES_JS_REGEX = /node_modules[\\/].*\.[cm]?js(?:\?.*)?$/
 
   it('should match standard Angular FESM files', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.mjs'),
-    ).toBe(true)
+    expect(NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.mjs')).toBe(
+      true,
+    )
   })
 
   it('should match chunk files', () => {
@@ -167,9 +167,7 @@ describe('NODE_MODULES_JS_REGEX filter matching', () => {
 
   it('should match paths with Vite query strings', () => {
     expect(
-      NODE_MODULES_JS_REGEX.test(
-        'node_modules/@angular/common/fesm2022/common.mjs?v=abc123',
-      ),
+      NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.mjs?v=abc123'),
     ).toBe(true)
   })
 
@@ -182,28 +180,20 @@ describe('NODE_MODULES_JS_REGEX filter matching', () => {
   })
 
   it('should match Windows-style backslash paths', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test(
-        'node_modules\\@angular\\common\\fesm2022\\common.mjs',
-      ),
-    ).toBe(true)
+    expect(NODE_MODULES_JS_REGEX.test('node_modules\\@angular\\common\\fesm2022\\common.mjs')).toBe(
+      true,
+    )
   })
 
   it('should match .js and .cjs files', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test('node_modules/@ngrx/store/fesm2022/ngrx-store.js'),
-    ).toBe(true)
-    expect(
-      NODE_MODULES_JS_REGEX.test('node_modules/some-lib/index.cjs'),
-    ).toBe(true)
+    expect(NODE_MODULES_JS_REGEX.test('node_modules/@ngrx/store/fesm2022/ngrx-store.js')).toBe(true)
+    expect(NODE_MODULES_JS_REGEX.test('node_modules/some-lib/index.cjs')).toBe(true)
   })
 
   it('should not match non-JS files', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.d.ts'),
-    ).toBe(false)
-    expect(
-      NODE_MODULES_JS_REGEX.test('src/app/app.component.ts'),
-    ).toBe(false)
+    expect(NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.d.ts')).toBe(
+      false,
+    )
+    expect(NODE_MODULES_JS_REGEX.test('src/app/app.component.ts')).toBe(false)
   })
 })
