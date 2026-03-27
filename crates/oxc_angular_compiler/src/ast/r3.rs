@@ -1395,13 +1395,31 @@ pub trait R3Visitor<'a> {
     /// Visit a bound text node.
     fn visit_bound_text(&mut self, _text: &R3BoundText<'a>) {}
 
+    /// Visit a static text attribute.
+    fn visit_text_attribute(&mut self, _attr: &R3TextAttribute<'a>) {}
+
+    /// Visit a bound attribute (input property).
+    fn visit_bound_attribute(&mut self, _attr: &R3BoundAttribute<'a>) {}
+
+    /// Visit a bound event (output).
+    fn visit_bound_event(&mut self, _event: &R3BoundEvent<'a>) {}
+
     /// Visit an element.
     fn visit_element(&mut self, element: &R3Element<'a>) {
         self.visit_element_children(element);
     }
 
-    /// Visit element children.
+    /// Visit element children, attributes, inputs, and outputs.
     fn visit_element_children(&mut self, element: &R3Element<'a>) {
+        for attr in &element.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &element.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &element.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &element.children {
             child.visit(self);
         }
@@ -1412,8 +1430,17 @@ pub trait R3Visitor<'a> {
         self.visit_template_children(template);
     }
 
-    /// Visit template children.
+    /// Visit template children, attributes, inputs, and outputs.
     fn visit_template_children(&mut self, template: &R3Template<'a>) {
+        for attr in &template.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &template.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &template.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &template.children {
             child.visit(self);
         }
@@ -1421,6 +1448,9 @@ pub trait R3Visitor<'a> {
 
     /// Visit a content projection slot.
     fn visit_content(&mut self, content: &R3Content<'a>) {
+        for attr in &content.attributes {
+            self.visit_text_attribute(attr);
+        }
         for child in &content.children {
             child.visit(self);
         }
@@ -1531,6 +1561,15 @@ pub trait R3Visitor<'a> {
 
     /// Visit a component.
     fn visit_component(&mut self, component: &R3Component<'a>) {
+        for attr in &component.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &component.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &component.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &component.children {
             child.visit(self);
         }
@@ -1567,4 +1606,126 @@ pub struct R3ParseResult<'a> {
     pub ng_content_selectors: Vec<'a, Atom<'a>>,
     /// Comment nodes (if collected).
     pub comment_nodes: Option<Vec<'a, R3Comment<'a>>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use oxc_allocator::Allocator;
+
+    use crate::ast::r3::{R3Visitor, visit_all};
+    use crate::parser::html::HtmlParser;
+    use crate::transform::html_to_r3::{TransformOptions, html_ast_to_r3_ast};
+
+    /// A visitor that collects names of visited attributes, inputs, and outputs.
+    struct AttributeCollector {
+        text_attributes: Vec<String>,
+        bound_attributes: Vec<String>,
+        bound_events: Vec<String>,
+        elements: Vec<String>,
+    }
+
+    impl AttributeCollector {
+        fn new() -> Self {
+            Self {
+                text_attributes: Vec::new(),
+                bound_attributes: Vec::new(),
+                bound_events: Vec::new(),
+                elements: Vec::new(),
+            }
+        }
+    }
+
+    impl<'a> R3Visitor<'a> for AttributeCollector {
+        fn visit_element(&mut self, element: &super::R3Element<'a>) {
+            self.elements.push(element.name.to_string());
+            self.visit_element_children(element);
+        }
+
+        fn visit_text_attribute(&mut self, attr: &super::R3TextAttribute<'a>) {
+            self.text_attributes.push(attr.name.to_string());
+        }
+
+        fn visit_bound_attribute(&mut self, attr: &super::R3BoundAttribute<'a>) {
+            self.bound_attributes.push(attr.name.to_string());
+        }
+
+        fn visit_bound_event(&mut self, event: &super::R3BoundEvent<'a>) {
+            self.bound_events.push(event.name.to_string());
+        }
+    }
+
+    #[test]
+    fn test_r3_visitor_visits_attributes_inputs_outputs() {
+        let allocator = Allocator::default();
+        let template =
+            r#"<button type="submit" [disabled]="isDisabled" (click)="onClick()">Save</button>"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        let mut collector = AttributeCollector::new();
+        visit_all(&mut collector, &r3_result.nodes);
+
+        assert_eq!(collector.elements, vec!["button"]);
+        assert_eq!(collector.text_attributes, vec!["type"]);
+        assert_eq!(collector.bound_attributes, vec!["disabled"]);
+        assert_eq!(collector.bound_events, vec!["click"]);
+    }
+
+    #[test]
+    fn test_r3_visitor_visits_nested_elements() {
+        let allocator = Allocator::default();
+        let template = r#"<div id="outer"><span class="inner" [title]="t" (mouseenter)="onHover()">text</span></div>"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        let mut collector = AttributeCollector::new();
+        visit_all(&mut collector, &r3_result.nodes);
+
+        assert_eq!(collector.elements, vec!["div", "span"]);
+        assert_eq!(collector.text_attributes, vec!["id", "class"]);
+        assert_eq!(collector.bound_attributes, vec!["title"]);
+        assert_eq!(collector.bound_events, vec!["mouseenter"]);
+    }
+
+    #[test]
+    fn test_r3_visitor_default_noop_does_not_break() {
+        let allocator = Allocator::default();
+        let template = r#"<input [value]="name" (change)="update()" required />"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        // A visitor with all default no-op methods should traverse without panic
+        struct NoopVisitor;
+        impl<'a> R3Visitor<'a> for NoopVisitor {}
+
+        let mut visitor = NoopVisitor;
+        visit_all(&mut visitor, &r3_result.nodes);
+    }
 }
