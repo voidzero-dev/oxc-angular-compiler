@@ -2105,16 +2105,8 @@ import { Foo, Bar } from './types';
 export type { Foo, Bar };
 "#;
         let filtered = filter_source(source);
-        assert!(
-            !filtered.contains("Foo"),
-            "Foo should be removed.\nFiltered:\n{}",
-            filtered
-        );
-        assert!(
-            !filtered.contains("Bar"),
-            "Bar should be removed.\nFiltered:\n{}",
-            filtered
-        );
+        assert!(!filtered.contains("Foo"), "Foo should be removed.\nFiltered:\n{}", filtered);
+        assert!(!filtered.contains("Bar"), "Bar should be removed.\nFiltered:\n{}", filtered);
     }
 
     #[test]
