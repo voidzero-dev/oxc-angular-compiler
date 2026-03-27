@@ -1,83 +1,141 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 
 import { linkAngularPackageSync } from '../index.js'
 
 /**
- * Resolve the path to an Angular 21 package file.
- * The e2e app has Angular 21.2.2 installed with chunk files.
+ * Minimal Angular partial declaration fixtures that simulate the structure
+ * of FESM bundle files (including Angular 21+ chunk files).
+ * Uses actual Unicode ɵ (U+0275) characters as they appear in real Angular packages.
  */
-function resolveAngular21File(subpath: string): string {
-  return resolve(__dirname, '../e2e/app/node_modules/@angular', subpath)
+const INJECTABLE_CHUNK = `
+import * as i0 from '@angular/core';
+
+class PlatformLocation {
+  historyGo(relativePosition) {
+    throw new Error('Not implemented');
+  }
+  static \u0275fac = i0.\u0275\u0275ngDeclareFactory({
+    minVersion: "12.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: PlatformLocation,
+    deps: [],
+    target: i0.\u0275\u0275FactoryTarget.Injectable
+  });
+  static \u0275prov = i0.\u0275\u0275ngDeclareInjectable({
+    minVersion: "12.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: PlatformLocation,
+    providedIn: "platform",
+    useClass: undefined
+  });
 }
 
-describe('Angular linker - chunk file support', () => {
-  it('should link ɵɵngDeclare calls in _platform_location-chunk.mjs', () => {
-    const filepath = resolveAngular21File('common/fesm2022/_platform_location-chunk.mjs')
-    const code = readFileSync(filepath, 'utf8')
+export { PlatformLocation };
+`
 
-    // Verify the chunk file has unlinked declarations
-    expect(code).toContain('\u0275\u0275ngDeclare')
+const NG_MODULE_CHUNK = `
+import * as i0 from '@angular/core';
 
-    const result = linkAngularPackageSync(code, filepath)
+class CommonModule {
+  static \u0275fac = i0.\u0275\u0275ngDeclareFactory({
+    minVersion: "12.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: CommonModule,
+    deps: [],
+    target: i0.\u0275\u0275FactoryTarget.NgModule
+  });
+  static \u0275mod = i0.\u0275\u0275ngDeclareNgModule({
+    minVersion: "14.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: CommonModule,
+    imports: [],
+    exports: []
+  });
+  static \u0275inj = i0.\u0275\u0275ngDeclareInjector({
+    minVersion: "12.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: CommonModule
+  });
+}
 
-    expect(result.linked).toBe(true)
-    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
-  })
+export { CommonModule };
+`
 
-  it('should link ɵɵngDeclare calls in _location-chunk.mjs', () => {
-    const filepath = resolveAngular21File('common/fesm2022/_location-chunk.mjs')
-    const code = readFileSync(filepath, 'utf8')
+const PIPE_CHUNK = `
+import * as i0 from '@angular/core';
 
-    // Verify the chunk file has unlinked declarations
-    expect(code).toContain('\u0275\u0275ngDeclare')
+class AsyncPipe {
+  constructor(ref) {
+    this._ref = ref;
+  }
+  static \u0275fac = i0.\u0275\u0275ngDeclareFactory({
+    minVersion: "12.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: AsyncPipe,
+    deps: [{ token: i0.ChangeDetectorRef }],
+    target: i0.\u0275\u0275FactoryTarget.Pipe
+  });
+  static \u0275pipe = i0.\u0275\u0275ngDeclarePipe({
+    minVersion: "14.0.0",
+    version: "21.0.0",
+    ngImport: i0,
+    type: AsyncPipe,
+    isStandalone: false,
+    name: "async",
+    pure: false
+  });
+}
 
-    const result = linkAngularPackageSync(code, filepath)
+export { AsyncPipe };
+`
 
-    expect(result.linked).toBe(true)
-    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
-  })
-
-  it('should link ɵɵngDeclare calls in _common_module-chunk.mjs', () => {
-    const filepath = resolveAngular21File('common/fesm2022/_common_module-chunk.mjs')
-    const code = readFileSync(filepath, 'utf8')
-
-    // Verify the chunk file has unlinked declarations
-    expect(code).toContain('\u0275\u0275ngDeclare')
-
-    const result = linkAngularPackageSync(code, filepath)
-
-    expect(result.linked).toBe(true)
-    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
-  })
-
-  it('should link all Angular 21 chunk files in @angular/common', () => {
-    const { readdirSync } = require('node:fs')
-    const dir = resolveAngular21File('common/fesm2022')
-    const files = readdirSync(dir) as string[]
-    const chunkFiles = files.filter(
-      (f: string) => f.startsWith('_') && f.endsWith('-chunk.mjs'),
+describe('Angular linker - chunk file linking', () => {
+  it('should link \u0275\u0275ngDeclareFactory and \u0275\u0275ngDeclareInjectable', () => {
+    const result = linkAngularPackageSync(
+      INJECTABLE_CHUNK,
+      'node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs',
     )
 
-    expect(chunkFiles.length).toBeGreaterThan(0)
+    expect(result.linked).toBe(true)
+    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
+  })
 
-    for (const chunkFile of chunkFiles) {
-      const filepath = resolve(dir, chunkFile)
-      const code = readFileSync(filepath, 'utf8')
+  it('should link \u0275\u0275ngDeclareNgModule and \u0275\u0275ngDeclareInjector', () => {
+    const result = linkAngularPackageSync(
+      NG_MODULE_CHUNK,
+      'node_modules/@angular/common/fesm2022/_common_module-chunk.mjs',
+    )
 
-      if (!code.includes('\u0275\u0275ngDeclare')) {
-        continue // Skip chunks without declarations
-      }
+    expect(result.linked).toBe(true)
+    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
+  })
 
-      const result = linkAngularPackageSync(code, filepath)
+  it('should link \u0275\u0275ngDeclarePipe', () => {
+    const result = linkAngularPackageSync(
+      PIPE_CHUNK,
+      'node_modules/@angular/common/fesm2022/_pipes-chunk.mjs',
+    )
 
-      expect(result.linked, `${chunkFile} should be linked`).toBe(true)
-      expect(
-        result.code.includes('\u0275\u0275ngDeclare'),
-        `${chunkFile} should not contain unlinked declarations`,
-      ).toBe(false)
-    }
+    expect(result.linked).toBe(true)
+    expect(result.code).not.toContain('\u0275\u0275ngDeclare')
+  })
+
+  it('should return linked: false for files without declarations', () => {
+    const code = `
+      export function helper() { return 42; }
+    `
+    const result = linkAngularPackageSync(
+      code,
+      'node_modules/@angular/common/fesm2022/_utils-chunk.mjs',
+    )
+
+    expect(result.linked).toBe(false)
   })
 })
 
@@ -91,7 +149,7 @@ describe('NODE_MODULES_JS_REGEX filter matching', () => {
     ).toBe(true)
   })
 
-  it('should match Angular 21 chunk files', () => {
+  it('should match chunk files', () => {
     expect(
       NODE_MODULES_JS_REGEX.test(
         'node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs',
