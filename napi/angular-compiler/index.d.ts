@@ -731,14 +731,14 @@ export interface TopLevelDeclarations {
 export declare function transformAngularFile(
   source: string,
   filename: string,
-  options: TransformOptions,
+  options?: TransformOptions | undefined | null,
   resolvedResources?: ResolvedResources | undefined | null,
 ): Promise<TransformResult>
 
 export declare function transformAngularFileSync(
   source: string,
   filename: string,
-  options: TransformOptions,
+  options?: TransformOptions | undefined | null,
   resolvedResources?: ResolvedResources | undefined | null,
 ): TransformResult
 
