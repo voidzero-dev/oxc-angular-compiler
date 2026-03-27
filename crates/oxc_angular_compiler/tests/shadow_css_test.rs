@@ -911,3 +911,56 @@ fn test_sidebar_row_layout_full_css_regression() {
     println!("Result length: {}", result.len());
     assert!(!result.is_empty());
 }
+
+// ============================================================================
+// Regression: CSS comments before first selector must not break scoping
+// ============================================================================
+
+#[test]
+fn test_scope_first_selector_after_comment_with_space() {
+    // Comment followed by space then selector
+    let css = "/* comment */ .foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_comment_with_newline() {
+    // Comment followed by newline then selector (the SCSS @import case)
+    let css = "/* comment */\n.container { border-radius: 2px; }\n.container .tabs-group { width: 100%; }";
+    let expected = ".container[contenta] { border-radius: 2px; }\n.container[contenta] .tabs-group[contenta] { width: 100%; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_multiline_comment() {
+    // Multi-line comment followed by selector
+    let css = "/* multi\nline\ncomment */\n.root { padding: 16px; }\n.root .child { color: red; }";
+    let expected =
+        ".root[contenta] { padding: 16px; }\n.root[contenta] .child[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_multiple_comments() {
+    // Multiple comments before first selector
+    let css = "/* comment 1 */ /* comment 2 */ .foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_newline_as_descendant_combinator() {
+    // Newline between selectors is a valid CSS descendant combinator
+    let css = ".foo\n.bar { color: red; }";
+    let expected = ".foo[contenta] .bar[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_host_pseudo_with_newline_combinator() {
+    // :host with pseudo-selector followed by newline combinator to child
+    let css = ":host(:hover)\n.child { color: red; }";
+    let expected = "[hosta]:hover .child[contenta] { color: red; }";
+    assert_css_eq!(shim_with_host(css, "contenta", "hosta"), expected);
+}
