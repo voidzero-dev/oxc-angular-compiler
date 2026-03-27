@@ -2255,7 +2255,9 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
             ')' => paren_depth = paren_depth.saturating_sub(1),
             '[' => bracket_depth += 1,
             ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            ' ' | '>' | '+' | '~' if paren_depth == 0 && bracket_depth == 0 => {
+            ' ' | '\n' | '\t' | '\r' | '>' | '+' | '~'
+                if paren_depth == 0 && bracket_depth == 0 =>
+            {
                 // A space following an escaped hex value and followed by another hex character
                 // (ie: ".\fc ber" for ".über") is not a separator between 2 selectors
                 // Check: if the part ends with an escape placeholder AND next char is hex
@@ -2276,7 +2278,13 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
                 // Collect the combinator (may include spaces around it)
                 let combinator_start = i;
                 while i < chars.len()
-                    && (chars[i] == ' ' || chars[i] == '>' || chars[i] == '+' || chars[i] == '~')
+                    && (chars[i] == ' '
+                        || chars[i] == '\n'
+                        || chars[i] == '\t'
+                        || chars[i] == '\r'
+                        || chars[i] == '>'
+                        || chars[i] == '+'
+                        || chars[i] == '~')
                 {
                     i += 1;
                 }
@@ -2420,7 +2428,15 @@ fn scope_after_host_with_context(selector: &str, ctx: &mut ScopingContext) -> St
                     // First part (pseudo-selector attached to host) - don't scope
                     scoped_after.push_str(part);
                     if !combinator.is_empty()
-                        && combinator.chars().any(|c| c == ' ' || c == '>' || c == '+' || c == '~')
+                        && combinator.chars().any(|c| {
+                            c == ' '
+                                || c == '\n'
+                                || c == '\t'
+                                || c == '\r'
+                                || c == '>'
+                                || c == '+'
+                                || c == '~'
+                        })
                     {
                         found_combinator = true;
                     }
