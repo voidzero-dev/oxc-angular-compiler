@@ -116,9 +116,9 @@ Returns: `Promise<TransformResult>`
 interface TransformOptions {
   // Angular version (19, 20, 21)
   angularVersion?: {
-    major: number;
-    minor: number;
-    patch: number;
+    major: number
+    minor: number
+    patch: number
   }
 
   // Enable Hot Module Replacement
