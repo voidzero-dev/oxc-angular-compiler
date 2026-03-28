@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@napi-rs/cli':
-      specifier: 3.5.1
-      version: 3.5.1
+      specifier: 3.6.0
+      version: 3.6.0
     '@oxc-node/cli':
       specifier: 0.0.35
       version: 0.0.35
@@ -49,7 +49,7 @@ importers:
     devDependencies:
       '@napi-rs/cli':
         specifier: 'catalog:'
-        version: 3.5.1(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)
+        version: 3.6.0(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)
       oxfmt:
         specifier: 'catalog:'
         version: 0.42.0
@@ -74,7 +74,7 @@ importers:
         version: 21.2.5(@angular/compiler@21.2.5)(typescript@5.9.3)
       '@napi-rs/cli':
         specifier: 'catalog:'
-        version: 3.5.1(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)
+        version: 3.6.0(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)
       '@oxc-node/cli':
         specifier: 'catalog:'
         version: 0.0.35
@@ -1122,8 +1122,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@napi-rs/cli@3.5.1':
-    resolution: {integrity: sha512-XBfLQRDcB3qhu6bazdMJsecWW55kR85l5/k0af9BIBELXQSsCFU0fzug7PX8eQp6vVdm7W/U3z6uP5WmITB2Gw==}
+  '@napi-rs/cli@3.6.0':
+    resolution: {integrity: sha512-aA8m4+9XxnK1+0sr4GplZP0Ze90gkzO8sMKaplOK0zXbLnzsLl6O2BQQt6rTCcTRzIN24wrrByakr/imM+CxhA==}
     engines: {node: '>= 16'}
     hasBin: true
     peerDependencies:
@@ -3629,8 +3629,8 @@ packages:
   electron-to-chromium@1.5.307:
     resolution: {integrity: sha512-5z3uFKBWjiNR44nFcYdkcXjKMbg5KXNdciu7mhTPo9tB7NbqSNP2sSnGR+fqknZSCwKkBN+oxiiajWs4dT6ORg==}
 
-  emnapi@1.8.1:
-    resolution: {integrity: sha512-34i2BbgHx1LnEO4JCGQYo6h6s4e4KrdWtdTHfllBNLbXSHPmdIHplxKejfabsRK+ukNciqVdalB+fxMibqHdaQ==}
+  emnapi@1.9.1:
+    resolution: {integrity: sha512-s4RbfzgbYg9cWBZXJT6LazImJQ5p+F+LyTsCWQJXbGVdPmtCtdlwqd0Oiv3O51KyYV/Hq58xszaQ/l153tK6Uw==}
     peerDependencies:
       node-addon-api: '>= 6.1.0'
     peerDependenciesMeta:
@@ -5293,7 +5293,7 @@ snapshots:
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3':
     optional: true
 
-  '@napi-rs/cli@3.5.1(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)':
+  '@napi-rs/cli@3.6.0(@emnapi/runtime@1.8.1)(@types/node@24.1.0)(node-addon-api@7.1.1)':
     dependencies:
       '@inquirer/prompts': 8.3.0(@types/node@24.1.0)
       '@napi-rs/cross-toolchain': 1.0.3
@@ -5301,7 +5301,7 @@ snapshots:
       '@octokit/rest': 22.0.1
       clipanion: 4.0.0-rc.4(typanion@3.14.0)
       colorette: 2.0.20
-      emnapi: 1.8.1(node-addon-api@7.1.1)
+      emnapi: 1.9.1(node-addon-api@7.1.1)
       es-toolkit: 1.45.1
       js-yaml: 4.1.1
       obug: 2.1.1
@@ -7114,7 +7114,7 @@ snapshots:
 
   electron-to-chromium@1.5.307: {}
 
-  emnapi@1.8.1(node-addon-api@7.1.1):
+  emnapi@1.9.1(node-addon-api@7.1.1):
     optionalDependencies:
       node-addon-api: 7.1.1
 
