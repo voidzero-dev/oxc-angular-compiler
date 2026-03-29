@@ -914,13 +914,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should contain ["ngFor", "ngForOf"] in that order
     // This is emitted under the Template marker (4) in the attribute array
@@ -975,13 +969,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1037,13 +1025,7 @@ export class ExternalComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -1587,13 +1569,7 @@ import { Component } from '@angular/core';
 export class StyledComponent {}
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "styled.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "styled.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1630,13 +1606,8 @@ import { Component } from '@angular/core';
 export class MultiStyledComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-styled.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "multi-styled.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors());
@@ -1665,7 +1636,8 @@ export class StyledComponent {}
     let mut options = ComponentTransformOptions::default();
     options.minify_component_styles = true;
 
-    let result = transform_angular_file(&allocator, "styled.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "styled.component.ts", source, Some(&options), None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1689,13 +1661,7 @@ import { Component } from '@angular/core';
 export class NoStylesComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "no-styles.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "no-styles.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors());
@@ -1874,13 +1840,7 @@ import { Component } from '@angular/core';
 export class BadgeComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "badge.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "badge.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1949,13 +1909,7 @@ export class SecondComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2056,13 +2010,7 @@ export class GridComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "grid.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "grid.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1, "Should compile the component");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2132,13 +2080,7 @@ import { Component } from '@angular/core';
 export class MenuComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "menu.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "menu.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2168,13 +2110,7 @@ import { Component } from '@angular/core';
 export class MultiMenuComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-menu.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi-menu.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2213,13 +2149,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2272,13 +2202,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2414,13 +2338,7 @@ export class MatFabButton {
 export class MatMiniFabButton {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2511,13 +2429,7 @@ export class MatMiniFabButton {{
 "
     );
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        &source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", &source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2619,13 +2531,7 @@ export class MatMiniFabButton {
 
     let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        Some(&resources),
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", source, None, Some(&resources));
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2711,13 +2617,7 @@ export class MatDrawerContainer {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "drawer.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "drawer.ts", source, None, None);
 
     assert_eq!(result.component_count, 3, "Should compile all three components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2785,13 +2685,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2847,13 +2741,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2909,13 +2797,7 @@ export class BitLabelComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2992,13 +2874,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -3183,8 +3059,7 @@ import { Component } from '@angular/core';
 export class SvgInSwitchCaseComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Verify that conditionalCreate uses ":svg:svg" not just "svg"
     assert!(
@@ -3246,13 +3121,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     eprintln!("OUTPUT:\n{}", result.code);
@@ -3494,13 +3363,8 @@ export class DashboardBoxComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "dashboard-box.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "dashboard-box.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -3750,8 +3614,7 @@ export class TestComponent {
 ";
 
     // OXC always uses Full mode (elementStart, not domElementStart)
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Should use elementStart (Full mode), NOT domElementStart (DomOnly mode)
     assert!(
@@ -3789,8 +3652,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -3820,8 +3682,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Non-standalone should always use Full mode
     assert!(
@@ -4038,7 +3899,7 @@ export class TestComponent {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     // Should use Full mode (elementStart), NOT DomOnly (domElementStart)
     assert!(
@@ -4075,7 +3936,7 @@ export class TestComponent {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     // Implicit standalone + empty imports should still use Full mode
     assert!(
@@ -4108,8 +3969,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4145,8 +4005,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4180,8 +4039,7 @@ import { AsyncPipe, DatePipe, SlicePipe } from '@angular/common';
 export class TestComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4216,8 +4074,7 @@ export class HighlightDirective {}
 export class TestComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     assert!(
         result.code.contains("ɵɵelementStart"),
@@ -4286,13 +4143,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // Pure property bindings keep Bindings marker (3), NOT I18n marker (6).
     // The i18n marker on a property binding is a no-op for directive matching.
@@ -4324,13 +4175,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should contain [6,"heading"] (AttributeMarker.I18n = 6)
     // because the interpolated attribute has an i18n message (i18n-heading).
@@ -4377,13 +4222,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should NOT contain [6,"cuTooltip"] because [cuTooltip]="expr"
     // is a pure property binding, not an interpolated attribute.
@@ -4547,7 +4386,8 @@ export class TestComponent {
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4606,7 +4446,8 @@ export class TestComponent {
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4651,7 +4492,8 @@ export class TestComponent {
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4704,13 +4546,7 @@ import { Component } from '@angular/core';
 export class IconComponent {}
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "icon.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "icon.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -4755,13 +4591,7 @@ export class IconComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "icon.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "icon.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -4807,13 +4637,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -5038,7 +4862,7 @@ export class ToastPositionHelperDirective {
         &allocator,
         "toast-position-helper.directive.ts",
         source,
-        &ComponentTransformOptions::default(),
+        None,
         None,
     );
 
@@ -5101,13 +4925,7 @@ export class MultiDepDirective {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-dep.directive.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi-dep.directive.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5173,13 +4991,8 @@ export class ChatBotTriggerComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "chatbot-trigger.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "chatbot-trigger.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5233,13 +5046,7 @@ export class LoginFormComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "login-form.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "login-form.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5306,13 +5113,7 @@ export class TabsComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "tabs.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "tabs.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5375,13 +5176,7 @@ export class MixedQueryComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "mixed-query.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "mixed-query.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5630,13 +5425,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5672,13 +5461,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5713,13 +5496,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5756,13 +5533,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5789,13 +5560,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5837,13 +5602,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5892,13 +5651,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5957,13 +5710,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -6057,7 +5804,8 @@ export class TestComponent {}
 "#;
 
     let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -6084,8 +5832,7 @@ import { Component } from '@angular/core';
 export class LegacyComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -6116,7 +5863,8 @@ export class ImplicitStandaloneComponent {}
 "#;
 
     let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -6149,7 +5897,8 @@ export class AppComponent {}
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have __decorate import from tslib
@@ -6200,7 +5949,8 @@ export class AppComponent {}
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have resource import for template
@@ -6237,7 +5987,8 @@ export class AppComponent {}
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have resource import for style
@@ -6268,7 +6019,8 @@ export class AppComponent {
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have ctorParameters static property
@@ -6305,7 +6057,8 @@ export class AppComponent {
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have let declaration
@@ -6343,7 +6096,7 @@ export class HighlightDirective {
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
     let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+        transform_angular_file(&allocator, "highlight.directive.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have __decorate with Directive
@@ -6390,7 +6143,8 @@ export class App {
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have all JIT characteristics
@@ -6441,7 +6195,7 @@ export class HighlightDirective {
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
     let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+        transform_angular_file(&allocator, "highlight.directive.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // propDecorators must be present — Angular's JIT runtime reads this
@@ -6504,7 +6258,8 @@ export class TestComponent {
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // `ServiceC | null` resolves correctly (1 non-null type)
@@ -6548,7 +6303,8 @@ export abstract class BaseProvider {
 "#;
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "base.provider.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "base.provider.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // The abstract keyword should NOT appear before "class" in the output
@@ -6597,7 +6353,8 @@ export class TestComponent {
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
 
     assert!(
         result.map.is_some(),
@@ -6634,7 +6391,8 @@ export class TestComponent {
 
     let options = ComponentTransformOptions { sourcemap: true, jit: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
 
     assert!(
         result.map.is_some(),
@@ -6661,13 +6419,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "app.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
     assert!(result.map.is_none(), "Source map should be None when sourcemap option is false");
 }
@@ -6693,8 +6445,13 @@ export class TestComponent {
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result =
-        transform_angular_file(&allocator, "app.component.ts", source, &options, Some(&resolved));
+    let result = transform_angular_file(
+        &allocator,
+        "app.component.ts",
+        source,
+        Some(&options),
+        Some(&resolved),
+    );
 
     assert!(
         result.map.is_some(),
@@ -6713,7 +6470,7 @@ fn test_sourcemap_no_angular_classes() {
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "plain.ts", source, Some(&options), None);
 
     // Even for files with no Angular components, if sourcemap is requested,
     // a trivial identity source map should be returned
@@ -6741,8 +6498,7 @@ import { Component } from '@angular/core';
 export class HelloComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "hello.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "hello.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // Should have exactly one dts declaration
@@ -6792,8 +6548,7 @@ export class UserComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "user.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "user.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -6833,8 +6588,7 @@ import { Component } from '@angular/core';
 export class LegacyComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "legacy.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "legacy.component.ts", source, None, None);
     assert!(!result.has_errors());
 
     let decl = &result.dts_declarations[0];
@@ -6861,8 +6615,7 @@ import { Component } from '@angular/core';
 export class TooltipComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "tooltip.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "tooltip.component.ts", source, None, None);
     assert!(!result.has_errors());
 
     let decl = &result.dts_declarations[0];
@@ -6890,9 +6643,7 @@ export class HighlightDirective {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "highlight.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6947,8 +6698,7 @@ export class CapitalizePipe implements PipeTransform {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "capitalize.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "capitalize.pipe.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6987,8 +6737,7 @@ export class MyPipe implements PipeTransform {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "my.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "my.pipe.ts", source, None, None);
 
     assert_eq!(result.dts_declarations.len(), 1);
     let decl = &result.dts_declarations[0];
@@ -7017,8 +6766,7 @@ import { CommonModule } from '@angular/common';
 export class MyModule {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "my.module.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "my.module.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7071,8 +6819,7 @@ export class DataService {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "data.service.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "data.service.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7108,8 +6855,7 @@ export class GenericService<T, U> {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.service.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.service.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7145,8 +6891,7 @@ export class GenericPipe<T> implements PipeTransform {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.pipe.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7184,8 +6929,7 @@ export class GenericDirective<T, U> {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7218,8 +6962,7 @@ import { NgModule } from '@angular/core';
 export class GenericModule<T> {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.module.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.module.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7270,8 +7013,7 @@ export class MyPipe implements PipeTransform {
 export class MultiComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "multi.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "multi.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // Should have declarations for all 3 classes
@@ -7298,8 +7040,7 @@ export class PlainClass {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "plain.ts", source, None, None);
 
     // Should have no dts declarations for plain classes
     assert!(
@@ -7325,8 +7066,7 @@ export class SignalComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "signal.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "signal.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7360,8 +7100,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7393,8 +7132,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7424,8 +7162,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7457,8 +7194,7 @@ export class TestDirective {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7488,8 +7224,7 @@ import { Component } from '@angular/core';
 export class LayoutComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "layout.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "layout.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7527,8 +7262,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7565,8 +7299,7 @@ export class TestDirective {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7603,8 +7336,7 @@ export class TestComponent {
 }
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -8068,13 +7800,7 @@ export class MyComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -8129,13 +7855,7 @@ export class MyComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 

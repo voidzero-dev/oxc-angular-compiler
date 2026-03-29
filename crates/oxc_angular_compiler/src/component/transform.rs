@@ -1471,9 +1471,11 @@ pub fn transform_angular_file(
     allocator: &Allocator,
     path: &str,
     source: &str,
-    options: &TransformOptions,
+    options: Option<&TransformOptions>,
     resolved_resources: Option<&ResolvedResources>,
 ) -> TransformResult {
+    let default_options = TransformOptions::default();
+    let options = options.unwrap_or_else(|| &default_options);
     // JIT mode uses a completely different code path
     if options.jit {
         return transform_angular_file_jit(allocator, path, source, options);
@@ -3806,13 +3808,7 @@ export class HelloComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "hello.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "hello.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -3848,13 +3844,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(!result.has_errors());
 
@@ -3907,13 +3897,7 @@ export class TestComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(!result.has_errors());
 
@@ -3940,13 +3924,7 @@ export class RegularClass {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "regular.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "regular.ts", source, None, None);
 
         assert_eq!(result.component_count, 0);
         assert!(!result.has_errors());
@@ -3974,13 +3952,7 @@ export class FirstComponent {}
 export class SecondComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "multi.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "multi.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 2);
         assert!(!result.has_errors());
@@ -4019,13 +3991,7 @@ export class ButtonComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "button.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "button.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4062,13 +4028,8 @@ import { Component } from '@angular/core';
 export class BitErrorSummaryComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "error-summary.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "error-summary.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4109,13 +4070,7 @@ import { Component } from '@angular/core';
 export class AppComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4160,13 +4115,7 @@ import { Directive } from '@angular/core';
 export class MyDirective {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.directive.ts", source, None, None);
 
         // The @Directive decorator should be removed from the output
         assert!(
@@ -4213,13 +4162,7 @@ export class NavBaseDirective {}
 export class NavComponent extends NavBaseDirective {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "nav.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "nav.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -4264,13 +4207,8 @@ export abstract class NavBaseComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "nav-base.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "nav-base.component.ts", source, None, None);
 
         // The @Directive() decorator should be removed
         assert!(
@@ -4314,13 +4252,7 @@ export class MyService {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed from the output
         assert!(
@@ -4359,13 +4291,7 @@ import { Injectable } from '@angular/core';
 export class LocalService {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "local.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "local.service.ts", source, None, None);
 
         // The @Injectable() decorator should be removed
         assert!(
@@ -4408,13 +4334,7 @@ export class MyService {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "factory.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "factory.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed
         assert!(
@@ -4449,13 +4369,7 @@ import { Injectable } from '@angular/core';
 export class Config {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "config.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "config.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed
         assert!(
@@ -4495,13 +4409,7 @@ export class DataComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "data.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "data.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -4539,13 +4447,7 @@ import { Injectable } from '@angular/core';
 export class PlatformService {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "platform.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "platform.service.ts", source, None, None);
 
         // ɵprov should be generated
         assert!(
@@ -4575,13 +4477,7 @@ export class UppercasePipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "uppercase.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "uppercase.pipe.ts", source, None, None);
 
         // The @Pipe decorator should be removed from the output
         assert!(
@@ -4626,13 +4522,7 @@ import { Pipe } from '@angular/core';
 export class MyPurePipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my-pure.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my-pure.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4657,13 +4547,7 @@ import { Pipe } from '@angular/core';
 export class ImpurePipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "impure.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "impure.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4692,13 +4576,7 @@ import { Pipe } from '@angular/core';
 export class LegacyPipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "legacy.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "legacy.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4735,13 +4613,7 @@ export class DataComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "data.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "data.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -4800,13 +4672,7 @@ export class AppComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
         // All decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -4871,13 +4737,7 @@ import { NgModule } from '@angular/core';
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // The @NgModule decorator should be removed from the output
         assert!(
@@ -4916,13 +4776,7 @@ import { NgModule } from '@angular/core';
 export class EmptyModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "empty.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "empty.module.ts", source, None, None);
 
         // The @NgModule() decorator should be removed
         assert!(
@@ -4953,13 +4807,8 @@ import { NgModule, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 export class CustomElementsModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "custom-elements.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "custom-elements.module.ts", source, None, None);
 
         // ɵmod should be generated with schemas
         assert!(
@@ -4983,13 +4832,7 @@ import { NgModule } from '@angular/core';
 export class IdentifiedModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "identified.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "identified.module.ts", source, None, None);
 
         // ɵmod should be generated
         assert!(
@@ -5026,13 +4869,7 @@ export class AppComponent {}
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(!result.code.contains("@NgModule"), "Code should NOT contain @NgModule decorator");
@@ -5087,13 +4924,7 @@ export class AppComponent {
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // All decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -5161,13 +4992,8 @@ import { NgModule, forwardRef } from '@angular/core';
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "forward-ref.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "forward-ref.module.ts", source, None, None);
 
         // ɵmod should be generated
         assert!(
@@ -5257,7 +5083,7 @@ export class TestComponent {}
         options.resolved_imports = Some(resolved_imports);
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         assert!(!result.has_errors());
         // The output should contain the host directive feature
@@ -5402,7 +5228,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // @Inject(DARK_THEME) now uses namespace imports (i1 for @app/theme),
         // so rxjs gets i2 for Observable.
@@ -5459,7 +5285,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // The type 'AbstractService' is imported from './service' and should get a namespace import
         // even though the @Inject token 'SERVICE_TOKEN' is also from './service'.
@@ -5509,7 +5335,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // Should NOT generate a namespace import for ./some.interface
         // (the original `import type` statement may still appear, but no `import * as iN`)
@@ -5545,7 +5371,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // Should NOT generate a namespace import for ./some.interface
         assert!(
@@ -5576,13 +5402,7 @@ export class MyDirective {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.directive.ts", source, None, None);
 
         assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
 
@@ -5641,13 +5461,7 @@ export class OSTypeIconPipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "os-type-icon.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "os-type-icon.pipe.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -5695,13 +5509,7 @@ export class OSTypeIconPipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "os-type-icon.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "os-type-icon.pipe.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -5749,13 +5557,7 @@ import { Component, Injectable } from '@angular/core';
 export class TestCmp {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(
             !result.code.contains("@Component"),
@@ -5799,13 +5601,7 @@ import { Directive, Injectable } from '@angular/core';
 export class TestDir {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
 
         assert!(
             !result.code.contains("@Directive"),
@@ -5847,13 +5643,7 @@ import { NgModule, Injectable } from '@angular/core';
 export class TestNgModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.module.ts", source, None, None);
 
         assert!(
             !result.code.contains("@NgModule"),
@@ -5905,13 +5695,7 @@ import { BrnTooltipTrigger } from '@spartan-ng/brain/tooltip';
 export class UnityTooltipTrigger {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "tooltip.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "tooltip.directive.ts", source, None, None);
 
         assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
 

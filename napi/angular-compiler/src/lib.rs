@@ -1042,7 +1042,7 @@ pub struct ResolvedResources {
 pub struct TransformAngularFileTask {
     source: String,
     filename: String,
-    options: TransformOptions,
+    options: Option<TransformOptions>,
     resolved_resources: Option<ResolvedResources>,
 }
 
@@ -1057,7 +1057,7 @@ impl Task for TransformAngularFileTask {
         };
 
         let allocator = Allocator::default();
-        let rust_options: RustTransformOptions = std::mem::take(&mut self.options).into();
+        let rust_options: RustTransformOptions = self.options.take().unwrap_or_default().into();
 
         // Convert resolved resources to Rust types
         let rust_resources = self
@@ -1069,7 +1069,7 @@ impl Task for TransformAngularFileTask {
             &allocator,
             &self.filename,
             &self.source,
-            &rust_options,
+            Some(&rust_options),
             rust_resources.as_ref(),
         );
 
@@ -1120,7 +1120,7 @@ impl Task for TransformAngularFileTask {
 pub fn transform_angular_file(
     source: String,
     filename: String,
-    options: TransformOptions,
+    options: Option<TransformOptions>,
     resolved_resources: Option<ResolvedResources>,
 ) -> AsyncTask<TransformAngularFileTask> {
     AsyncTask::new(TransformAngularFileTask { source, filename, options, resolved_resources })
@@ -1130,7 +1130,7 @@ pub fn transform_angular_file(
 pub fn transform_angular_file_sync(
     source: String,
     filename: String,
-    options: TransformOptions,
+    options: Option<TransformOptions>,
     resolved_resources: Option<ResolvedResources>,
 ) -> napi::Result<TransformResult> {
     let mut result = TransformAngularFileTask { source, filename, options, resolved_resources };
