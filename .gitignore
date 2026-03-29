@@ -23,5 +23,7 @@ node_modules
 # Claude Code
 .claude
 
+.DS_Store
+
 # NOTE: For non-project files such as `.vscode` or `.idea`, please add them to your `.gitignore_global`.
 # In `.gitconfig`, add `[core] excludesfile = ~/.gitignore_global`
