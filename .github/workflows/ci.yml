@@ -24,6 +24,10 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
+      - name: Enable Git long paths (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
@@ -61,6 +65,10 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
+      - name: Enable Git long paths (Windows)
+        if: ${{ matrix.os == 'windows-latest' }}
+        run: git config --global core.longpaths true
+
       - uses: actions/checkout@v6
         with:
           submodules: recursive
