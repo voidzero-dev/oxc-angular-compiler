@@ -377,6 +377,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   if (mod) {
                     server.moduleGraph.invalidateModule(mod)
                   }
+
+                  // Emit a synthetic change event on Vite's watcher so that other plugins
+                  // (e.g., @tailwindcss/vite, PostCSS) are notified that this content file
+                  // changed. Without this, tools like Tailwind won't rescan for new utility
+                  // classes added in template files, since we unwatched them from Vite.
+                  // Our handleHotUpdate still returns [] for component resources, preventing
+                  // Vite from triggering a full page reload.
+                  server.watcher.emit('change', file)
                 }
               }
             }
@@ -640,13 +648,22 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           ctx.modules.map((m) => m.id).join(', '),
         )
 
-        // Template/style files are handled by our custom fs.watch in configureServer.
-        // We dynamically unwatch them from Vite's watcher during transform, so they shouldn't
-        // normally trigger handleHotUpdate. If they do appear here (e.g., file not yet transformed
-        // or from another plugin), return [] to prevent Vite's default handling.
+        // Component resource files (templates/styles referenced via templateUrl/styleUrls)
+        // are handled by our custom fs.watch in configureServer. We dynamically unwatch them
+        // from Vite's watcher during transform, so they shouldn't normally trigger handleHotUpdate.
+        // If they do appear here (e.g., file not yet transformed or from another plugin),
+        // return [] to prevent Vite's default handling.
+        //
+        // However, non-component files (e.g., global stylesheets imported in main.ts) are NOT
+        // managed by our custom watcher and must flow through Vite's normal HMR pipeline so that
+        // PostCSS/Tailwind and other plugins can process them correctly.
         if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
-          debugHmr('ignoring resource file in handleHotUpdate (handled by custom watcher)')
-          return []
+          const normalizedFile = normalizePath(ctx.file)
+          if (resourceToComponent.has(normalizedFile)) {
+            debugHmr('ignoring component resource file in handleHotUpdate (handled by custom watcher)')
+            return []
+          }
+          debugHmr('letting non-component resource file through to Vite HMR: %s', normalizedFile)
         }
 
         // Handle component file changes
