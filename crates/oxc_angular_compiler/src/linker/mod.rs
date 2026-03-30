@@ -1221,6 +1221,7 @@ fn link_class_metadata_async(
 /// Declaration format (`ɵɵngDeclareDirective`):
 ///   - `propertyName: "publicName"` (simple)
 ///   - `propertyName: ["publicName", "classPropertyName"]` (aliased)
+///   - `propertyName: ["publicName", "classPropertyName", transformFn]` (aliased with transform)
 ///   - `propertyName: { classPropertyName: "...", publicName: "...", isRequired: bool,
 ///      isSignal: bool, transformFunction: expr }` (Angular 16+ object format)
 ///
@@ -1256,28 +1257,27 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
             // Array: check if it's declaration format [publicName, classPropertyName]
             // and convert to definition format [InputFlags, publicName, classPropertyName]
             Expression::ArrayExpression(arr) => {
-                if arr.elements.len() == 2 {
-                    // Check if first element is a string (declaration format)
-                    let first_is_string = matches!(
-                        arr.elements.first(),
-                        Some(ArrayExpressionElement::StringLiteral(_))
-                    );
-                    if first_is_string {
-                        // Declaration format: ["publicName", "classPropertyName"]
-                        // Convert to: [0, "publicName", "classPropertyName"]
-                        let arr_source =
-                            &source[arr.span.start as usize + 1..arr.span.end as usize - 1];
-                        entries.push(format!("{quoted_key}: [0, {arr_source}]"));
-                    } else {
-                        // Already in definition format or unknown, keep as is
-                        let val =
-                            &source[p.value.span().start as usize..p.value.span().end as usize];
-                        entries.push(format!("{quoted_key}: {val}"));
-                    }
-                } else {
-                    // 3+ elements likely already in definition format, keep as is
-                    let val = &source[p.value.span().start as usize..p.value.span().end as usize];
+                let val = &source[p.value.span().start as usize..p.value.span().end as usize];
+                let first_is_string =
+                    matches!(arr.elements.first(), Some(ArrayExpressionElement::StringLiteral(_)));
+
+                if !first_is_string {
+                    // Already in definition format or unknown, keep as is.
                     entries.push(format!("{quoted_key}: {val}"));
+                    continue;
+                }
+
+                let arr_source = &source[arr.span.start as usize + 1..arr.span.end as usize - 1];
+                match arr.elements.len() {
+                    // Declaration format: ["publicName", "classPropertyName"]
+                    // Convert to: [0, "publicName", "classPropertyName"]
+                    2 => entries.push(format!("{quoted_key}: [0, {arr_source}]")),
+                    // Since Angular 16.1, support multi-directive inputs, so we need to convert to the definition format.
+                    // Declaration format: ["publicName", "classPropertyName", transformFn]
+                    // Convert to: [2, "publicName", "classPropertyName", transformFn]
+                    3 => entries.push(format!("{quoted_key}: [2, {arr_source}]")),
+                    // 4+ elements likely already in definition format, keep as is.
+                    _ => entries.push(format!("{quoted_key}: {val}")),
                 }
             }
             // Object: Angular 16+ format with classPropertyName, publicName, isRequired, etc.
@@ -2435,6 +2435,26 @@ RxFor.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "16.2.1
         assert!(
             result.code.contains(r#"renderParent: [0, "rxForParent", "renderParent"]"#),
             "Expected renderParent to have InputFlags prepended. Got: {}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_directive_input_array_with_transform() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyDirective {
+}
+MyDirective.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "16.1.0", version: "20.0.0", ngImport: i0, type: MyDirective, selector: "[myDir]", inputs: { push: ["cdkConnectedOverlayPush", "push", i0.booleanAttribute] } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result
+                .code
+                .contains(r#"push: [2, "cdkConnectedOverlayPush", "push", i0.booleanAttribute]"#),
+            "Expected transform input array to be converted with InputFlags.HasDecoratorInputTransform. Got: {}",
             result.code
         );
     }

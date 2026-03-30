@@ -86,3 +86,12 @@ fn test_link_outputs_simple_identifier() {
     let result = link(&allocator, &code, "test.mjs");
     insta::assert_snapshot!(result.code);
 }
+
+#[test]
+fn test_link_inputs_array_format_with_transform_function() {
+    let allocator = Allocator::default();
+    let code =
+        make_directive_source(r#"push: ["cdkConnectedOverlayPush", "push", i0.booleanAttribute]"#);
+    let result = link(&allocator, &code, "test.mjs");
+    insta::assert_snapshot!(result.code);
+}
