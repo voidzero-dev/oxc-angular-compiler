@@ -154,6 +154,12 @@ async function setupPluginWithServer(plugin: Plugin) {
     await (plugin.configureServer as Function)(mockServer)
   }
 
+  // Replace the real fs.watch-based watcher with a no-op to avoid EPERM
+  // errors on Windows when temp files are cleaned up. resourceToComponent
+  // is populated in transform *before* watchFn is called, so the map is
+  // still correctly populated for handleHotUpdate tests.
+  ;(mockServer as any).__angularWatchTemplate = () => {}
+
   return mockServer
 }
 

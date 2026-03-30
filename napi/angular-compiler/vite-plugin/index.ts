@@ -577,6 +577,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // gated by componentIds, which are only populated for client transforms.
           if (watchMode && viteServer) {
             const watchFn = (viteServer as any).__angularWatchTemplate
+
+            // Prune stale entries: if this component previously referenced
+            // different resources (e.g., templateUrl was renamed), remove the
+            // old reverse mappings so handleHotUpdate no longer swallows those files.
+            for (const [resource, owner] of resourceToComponent) {
+              if (owner === actualId) {
+                resourceToComponent.delete(resource)
+              }
+            }
+
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
