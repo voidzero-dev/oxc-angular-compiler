@@ -4316,10 +4316,10 @@ export class LocalService {}
             result.code.contains("ɵɵdefineInjectable"),
             "Code should contain ɵɵdefineInjectable"
         );
-        // Should default to providedIn: "root" (Angular's default behavior)
+        // Should NOT have providedIn when not explicitly specified
         assert!(
-            result.code.contains(r#"providedIn:"root""#),
-            "Code should contain providedIn:\"root\" by default, but got:\n{}",
+            !result.code.contains("providedIn"),
+            "Code should NOT contain providedIn when not specified, but got:\n{}",
             result.code
         );
     }
