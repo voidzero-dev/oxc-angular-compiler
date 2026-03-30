@@ -99,6 +99,16 @@ function createMockHmrContext(
   } as HmrContext
 }
 
+async function callHandleHotUpdate(
+  plugin: Plugin,
+  ctx: HmrContext,
+): Promise<ModuleNode[] | void | undefined> {
+  if (typeof plugin.handleHotUpdate === 'function') {
+    return (plugin.handleHotUpdate as Function).call(plugin, ctx)
+  }
+  return undefined
+}
+
 async function callPluginHook<TArgs extends unknown[], TResult>(
   hook:
     | {
@@ -182,13 +192,10 @@ describe('handleHotUpdate - Issue #185', () => {
 
     // A global CSS file (not referenced by any component's styleUrls)
     const globalCssFile = normalizePath(join(tempDir, 'src', 'styles.css'))
-    const mockModules = [{ id: globalCssFile, type: 'css' }]
+    const mockModules = [{ id: globalCssFile }]
     const ctx = createMockHmrContext(globalCssFile, mockModules)
 
-    let result: ModuleNode[] | void | undefined
-    if (typeof plugin.handleHotUpdate === 'function') {
-      result = await plugin.handleHotUpdate(ctx)
-    }
+    const result = await callHandleHotUpdate(plugin, ctx)
 
     // Non-component CSS should NOT be swallowed — either undefined (pass through)
     // or the original modules array, but NOT an empty array
@@ -207,10 +214,7 @@ describe('handleHotUpdate - Issue #185', () => {
     const mockModules = [{ id: componentCssFile }]
     const ctx = createMockHmrContext(componentCssFile, mockModules, mockServer)
 
-    let result: ModuleNode[] | void | undefined
-    if (typeof plugin.handleHotUpdate === 'function') {
-      result = await plugin.handleHotUpdate(ctx)
-    }
+    const result = await callHandleHotUpdate(plugin, ctx)
 
     // Component resources MUST be swallowed (return [])
     expect(result).toEqual([])
@@ -225,10 +229,7 @@ describe('handleHotUpdate - Issue #185', () => {
     const componentHtmlFile = normalizePath(templatePath)
     const ctx = createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer)
 
-    let result: ModuleNode[] | void | undefined
-    if (typeof plugin.handleHotUpdate === 'function') {
-      result = await plugin.handleHotUpdate(ctx)
-    }
+    const result = await callHandleHotUpdate(plugin, ctx)
 
     // Component templates MUST be swallowed (return [])
     expect(result).toEqual([])
@@ -243,10 +244,7 @@ describe('handleHotUpdate - Issue #185', () => {
     const mockModules = [{ id: indexHtml }]
     const ctx = createMockHmrContext(indexHtml, mockModules)
 
-    let result: ModuleNode[] | void | undefined
-    if (typeof plugin.handleHotUpdate === 'function') {
-      result = await plugin.handleHotUpdate(ctx)
-    }
+    const result = await callHandleHotUpdate(plugin, ctx)
 
     // Non-component HTML should pass through, not be swallowed
     if (result !== undefined) {
@@ -262,10 +260,7 @@ describe('handleHotUpdate - Issue #185', () => {
     const mockModules = [{ id: utilFile }]
     const ctx = createMockHmrContext(utilFile, mockModules)
 
-    let result: ModuleNode[] | void | undefined
-    if (typeof plugin.handleHotUpdate === 'function') {
-      result = await plugin.handleHotUpdate(ctx)
-    }
+    const result = await callHandleHotUpdate(plugin, ctx)
 
     // Non-Angular .ts files should pass through with their modules
     if (result !== undefined) {
