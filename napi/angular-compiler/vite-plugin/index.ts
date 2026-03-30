@@ -377,14 +377,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   if (mod) {
                     server.moduleGraph.invalidateModule(mod)
                   }
-
-                  // Emit a synthetic change event on Vite's watcher so that other plugins
-                  // (e.g., @tailwindcss/vite, PostCSS) are notified that this content file
-                  // changed. Without this, tools like Tailwind won't rescan for new utility
-                  // classes added in template files, since we unwatched them from Vite.
-                  // Our handleHotUpdate still returns [] for component resources, preventing
-                  // Vite from triggering a full page reload.
-                  server.watcher.emit('change', file)
                 }
               }
             }
@@ -660,7 +652,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
           const normalizedFile = normalizePath(ctx.file)
           if (resourceToComponent.has(normalizedFile)) {
-            debugHmr('ignoring component resource file in handleHotUpdate (handled by custom watcher)')
+            debugHmr(
+              'ignoring component resource file in handleHotUpdate (handled by custom watcher)',
+            )
             return []
           }
           debugHmr('letting non-component resource file through to Vite HMR: %s', normalizedFile)

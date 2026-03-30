@@ -9,11 +9,36 @@
  * HMR updates for global stylesheets and prevented PostCSS/Tailwind from
  * processing changes.
  */
-import type { Plugin, ModuleNode, ViteDevServer, HmrContext } from 'vite'
-import { describe, it, expect, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import type { Plugin, ModuleNode, HmrContext } from 'vite'
 import { normalizePath } from 'vite'
+import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest'
 
 import { angular } from '../vite-plugin/index.js'
+
+let tempDir: string
+let appDir: string
+let templatePath: string
+let stylePath: string
+
+beforeAll(() => {
+  tempDir = mkdtempSync(join(tmpdir(), 'hmr-test-'))
+  appDir = join(tempDir, 'src', 'app')
+  mkdirSync(appDir, { recursive: true })
+
+  templatePath = join(appDir, 'app.component.html')
+  stylePath = join(appDir, 'app.component.css')
+
+  writeFileSync(templatePath, '<h1>Hello</h1>')
+  writeFileSync(stylePath, 'h1 { color: red; }')
+})
+
+afterAll(() => {
+  rmSync(tempDir, { recursive: true, force: true })
+})
 
 function getAngularPlugin() {
   const plugin = angular({ liveReload: true }).find(
@@ -28,10 +53,8 @@ function getAngularPlugin() {
 }
 
 function createMockServer() {
-  const watchedFiles = new Set<string>()
-  const unwatchedFiles = new Set<string>()
   const wsMessages: any[] = []
-  const emittedEvents: { event: string; path: string }[] = []
+  const unwatchedFiles = new Set<string>()
 
   return {
     watcher: {
@@ -39,9 +62,7 @@ function createMockServer() {
         unwatchedFiles.add(file)
       },
       on: vi.fn(),
-      emit(event: string, path: string) {
-        emittedEvents.push({ event, path })
-      },
+      emit: vi.fn(),
     },
     ws: {
       send(msg: any) {
@@ -57,11 +78,10 @@ function createMockServer() {
       use: vi.fn(),
     },
     config: {
-      root: '/test',
+      root: tempDir,
     },
     _wsMessages: wsMessages,
     _unwatchedFiles: unwatchedFiles,
-    _emittedEvents: emittedEvents,
   }
 }
 
@@ -79,20 +99,89 @@ function createMockHmrContext(
   } as HmrContext
 }
 
+async function callPluginHook<TArgs extends unknown[], TResult>(
+  hook:
+    | {
+        handler: (...args: TArgs) => TResult
+      }
+    | ((...args: TArgs) => TResult)
+    | undefined,
+  ...args: TArgs
+): Promise<TResult | undefined> {
+  if (!hook) return undefined
+  if (typeof hook === 'function') return hook(...args)
+  return hook.handler(...args)
+}
+
+/**
+ * Set up a plugin through the full Vite lifecycle so that internal state
+ * (watchMode, viteServer, resourceToComponent, componentIds) is populated.
+ */
+async function setupPluginWithServer(plugin: Plugin) {
+  const mockServer = createMockServer()
+
+  // config() sets watchMode = true when command === 'serve'
+  await callPluginHook(
+    plugin.config as Plugin['config'],
+    {} as any,
+    {
+      command: 'serve',
+      mode: 'development',
+    } as any,
+  )
+
+  // configResolved() stores the resolved config
+  await callPluginHook(
+    plugin.configResolved as Plugin['configResolved'],
+    {
+      build: {},
+      isProduction: false,
+    } as any,
+  )
+
+  // configureServer() sets up the custom watcher and stores viteServer
+  if (typeof plugin.configureServer === 'function') {
+    await (plugin.configureServer as Function)(mockServer)
+  }
+
+  return mockServer
+}
+
+/**
+ * Transform a component that references external template + style files,
+ * populating resourceToComponent and componentIds.
+ */
+async function transformComponent(plugin: Plugin) {
+  const componentFile = join(appDir, 'app.component.ts')
+  const componentSource = `
+    import { Component } from '@angular/core';
+
+    @Component({
+      selector: 'app-root',
+      templateUrl: './app.component.html',
+      styleUrls: ['./app.component.css'],
+    })
+    export class AppComponent {}
+  `
+
+  if (!plugin.transform || typeof plugin.transform === 'function') {
+    throw new Error('Expected plugin transform handler')
+  }
+
+  await plugin.transform.handler.call(
+    { error() {}, warn() {} } as any,
+    componentSource,
+    componentFile,
+  )
+}
+
 describe('handleHotUpdate - Issue #185', () => {
   it('should let non-component CSS files pass through to Vite HMR', async () => {
     const plugin = getAngularPlugin()
+    await setupPluginWithServer(plugin)
 
-    // Configure the plugin (sets up internal state)
-    if (plugin.configResolved && typeof plugin.configResolved !== 'function') {
-      throw new Error('Expected configResolved to be a function')
-    }
-    if (typeof plugin.configResolved === 'function') {
-      await plugin.configResolved({ build: {}, isProduction: false } as any)
-    }
-
-    // Call handleHotUpdate with a global CSS file (not a component resource)
-    const globalCssFile = normalizePath('/workspace/src/styles.css')
+    // A global CSS file (not referenced by any component's styleUrls)
+    const globalCssFile = normalizePath(join(tempDir, 'src', 'styles.css'))
     const mockModules = [{ id: globalCssFile, type: 'css' }]
     const ctx = createMockHmrContext(globalCssFile, mockModules)
 
@@ -101,113 +190,75 @@ describe('handleHotUpdate - Issue #185', () => {
       result = await plugin.handleHotUpdate(ctx)
     }
 
-    // Non-component CSS should NOT be swallowed - result should be undefined
-    // (pass through) or the original modules, NOT an empty array
+    // Non-component CSS should NOT be swallowed — either undefined (pass through)
+    // or the original modules array, but NOT an empty array
     if (result !== undefined) {
-      expect(result.length).toBeGreaterThan(0)
+      expect(result).toEqual(mockModules)
     }
-    // If result is undefined, Vite uses ctx.modules (the default), which is correct
   })
 
-  it('should return [] for component resource files that are managed by custom watcher', async () => {
+  it('should return [] for component CSS files managed by custom watcher', async () => {
     const plugin = getAngularPlugin()
-    const mockServer = createMockServer()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
 
-    // Set up the plugin's internal state by going through the lifecycle
-    if (typeof plugin.configResolved === 'function') {
-      await plugin.configResolved({ build: {}, isProduction: false } as any)
-    }
-
-    // Call configureServer to set up the custom watcher infrastructure
-    if (typeof plugin.configureServer === 'function') {
-      await (plugin.configureServer as Function)(mockServer)
-    }
-
-    // Now we need to transform a component to populate resourceToComponent.
-    // Transform a component that references an external template
-    const componentSource = `
-      import { Component } from '@angular/core';
-
-      @Component({
-        selector: 'app-root',
-        templateUrl: './app.component.html',
-        styleUrls: ['./app.component.css'],
-      })
-      export class AppComponent {}
-    `
-
-    if (!plugin.transform || typeof plugin.transform === 'function') {
-      throw new Error('Expected plugin transform handler')
-    }
-
-    // Transform the component to populate internal maps
-    // Note: This may fail if the template/style files don't exist, but it should
-    // still register the resource paths in resourceToComponent during dependency resolution
-    try {
-      await plugin.transform.handler.call(
-        {
-          error() {},
-          warn() {},
-        } as any,
-        componentSource,
-        '/workspace/src/app/app.component.ts',
-      )
-    } catch {
-      // Transform may fail because template files don't exist on disk,
-      // but resourceToComponent should still be populated
-    }
-
-    // Test handleHotUpdate with a component resource file
-    const componentCssFile = normalizePath('/workspace/src/app/app.component.css')
-    const ctx = createMockHmrContext(componentCssFile, [{ id: componentCssFile }], mockServer)
+    // The component's CSS file IS in resourceToComponent
+    const componentCssFile = normalizePath(stylePath)
+    const mockModules = [{ id: componentCssFile }]
+    const ctx = createMockHmrContext(componentCssFile, mockModules, mockServer)
 
     let result: ModuleNode[] | void | undefined
     if (typeof plugin.handleHotUpdate === 'function') {
       result = await plugin.handleHotUpdate(ctx)
     }
 
-    // Component resources SHOULD be swallowed (return []) because they're handled
-    // by the custom fs.watch. If the transform didn't populate resourceToComponent
-    // (because the files don't exist), the result might pass through - that's also
-    // acceptable since Vite's default handling would apply.
-    // The key assertion is in the first test: non-component files must NOT be swallowed.
-    if (result !== undefined) {
-      // Either empty (swallowed) or passed through
-      expect(Array.isArray(result)).toBe(true)
+    // Component resources MUST be swallowed (return [])
+    expect(result).toEqual([])
+  })
+
+  it('should return [] for component template HTML files managed by custom watcher', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
+
+    // The component's HTML template IS in resourceToComponent
+    const componentHtmlFile = normalizePath(templatePath)
+    const ctx = createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer)
+
+    let result: ModuleNode[] | void | undefined
+    if (typeof plugin.handleHotUpdate === 'function') {
+      result = await plugin.handleHotUpdate(ctx)
     }
+
+    // Component templates MUST be swallowed (return [])
+    expect(result).toEqual([])
   })
 
   it('should not swallow non-resource HTML files', async () => {
     const plugin = getAngularPlugin()
+    await setupPluginWithServer(plugin)
 
-    if (typeof plugin.configResolved === 'function') {
-      await plugin.configResolved({ build: {}, isProduction: false } as any)
-    }
-
-    // An HTML file that is NOT a component template (e.g., index.html)
-    const indexHtml = normalizePath('/workspace/index.html')
-    const ctx = createMockHmrContext(indexHtml, [{ id: indexHtml }])
+    // index.html is NOT a component template
+    const indexHtml = normalizePath(join(tempDir, 'index.html'))
+    const mockModules = [{ id: indexHtml }]
+    const ctx = createMockHmrContext(indexHtml, mockModules)
 
     let result: ModuleNode[] | void | undefined
     if (typeof plugin.handleHotUpdate === 'function') {
       result = await plugin.handleHotUpdate(ctx)
     }
 
-    // Non-component HTML files should pass through
+    // Non-component HTML should pass through, not be swallowed
     if (result !== undefined) {
-      expect(result.length).toBeGreaterThan(0)
+      expect(result).toEqual(mockModules)
     }
   })
 
   it('should pass through non-style/template files unchanged', async () => {
     const plugin = getAngularPlugin()
+    await setupPluginWithServer(plugin)
 
-    if (typeof plugin.configResolved === 'function') {
-      await plugin.configResolved({ build: {}, isProduction: false } as any)
-    }
-
-    // A .ts file that is NOT a component
-    const utilFile = normalizePath('/workspace/src/utils.ts')
+    const utilFile = normalizePath(join(tempDir, 'src', 'utils.ts'))
     const mockModules = [{ id: utilFile }]
     const ctx = createMockHmrContext(utilFile, mockModules)
 
