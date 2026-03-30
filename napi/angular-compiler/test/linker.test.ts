@@ -139,61 +139,62 @@ describe('Angular linker - chunk file linking', () => {
   })
 })
 
-describe('NODE_MODULES_JS_REGEX filter matching', () => {
-  // This is the fixed regex from angular-linker-plugin.ts
-  const NODE_MODULES_JS_REGEX = /node_modules[\\/].*\.[cm]?js(?:\?.*)?$/
+describe('Linker transform filter matching', () => {
+  // These mirror the two-stage filter from angular-linker-plugin.ts:
+  // 1. Broad static filter (NODE_MODULES_JS_REGEX) for Vite's filter mechanism
+  // 2. Precise handler-level check (JS_EXT_REGEX) inside the transform handler
+  const NODE_MODULES_JS_REGEX = /node_modules/
+  const JS_EXT_REGEX = /\.[cm]?js(?:\?.*)?$/
+
+  function matches(id: string) {
+    return NODE_MODULES_JS_REGEX.test(id) && JS_EXT_REGEX.test(id)
+  }
 
   it('should match standard Angular FESM files', () => {
-    expect(NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.mjs')).toBe(
-      true,
-    )
+    expect(matches('node_modules/@angular/common/fesm2022/common.mjs')).toBe(true)
   })
 
   it('should match chunk files', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test(
-        'node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs',
-      ),
-    ).toBe(true)
+    expect(matches('node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs')).toBe(true)
   })
 
   it('should match absolute paths', () => {
     expect(
-      NODE_MODULES_JS_REGEX.test(
+      matches(
         '/Users/dev/project/node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs',
       ),
     ).toBe(true)
   })
 
   it('should match paths with Vite query strings', () => {
-    expect(
-      NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.mjs?v=abc123'),
-    ).toBe(true)
+    expect(matches('node_modules/@angular/common/fesm2022/common.mjs?v=abc123')).toBe(true)
   })
 
   it('should match chunk files with Vite query strings', () => {
     expect(
-      NODE_MODULES_JS_REGEX.test(
-        'node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs?v=df7b0864',
-      ),
+      matches('node_modules/@angular/common/fesm2022/_platform_location-chunk.mjs?v=df7b0864'),
     ).toBe(true)
   })
 
   it('should match Windows-style backslash paths', () => {
-    expect(NODE_MODULES_JS_REGEX.test('node_modules\\@angular\\common\\fesm2022\\common.mjs')).toBe(
-      true,
-    )
+    expect(matches('node_modules\\@angular\\common\\fesm2022\\common.mjs')).toBe(true)
   })
 
   it('should match .js and .cjs files', () => {
-    expect(NODE_MODULES_JS_REGEX.test('node_modules/@ngrx/store/fesm2022/ngrx-store.js')).toBe(true)
-    expect(NODE_MODULES_JS_REGEX.test('node_modules/some-lib/index.cjs')).toBe(true)
+    expect(matches('node_modules/@ngrx/store/fesm2022/ngrx-store.js')).toBe(true)
+    expect(matches('node_modules/some-lib/index.cjs')).toBe(true)
+  })
+
+  it('should match PrimeNG files (excluded from optimizeDeps)', () => {
+    expect(matches('node_modules/primeng/fesm2022/primeng-table.mjs')).toBe(true)
+    expect(matches('node_modules/primeng/fesm2022/primeng-table.mjs?v=abc123')).toBe(true)
   })
 
   it('should not match non-JS files', () => {
-    expect(NODE_MODULES_JS_REGEX.test('node_modules/@angular/common/fesm2022/common.d.ts')).toBe(
-      false,
-    )
-    expect(NODE_MODULES_JS_REGEX.test('src/app/app.component.ts')).toBe(false)
+    expect(matches('node_modules/@angular/common/fesm2022/common.d.ts')).toBe(false)
+  })
+
+  it('should not match application source files', () => {
+    expect(matches('src/app/app.component.ts')).toBe(false)
   })
 })
