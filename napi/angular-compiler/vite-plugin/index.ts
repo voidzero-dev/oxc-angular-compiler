@@ -581,9 +581,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             // Prune stale entries: if this component previously referenced
             // different resources (e.g., templateUrl was renamed), remove the
             // old reverse mappings so handleHotUpdate no longer swallows those files.
+            // Re-add pruned files to Vite's watcher so they can be processed as
+            // normal assets if used elsewhere (e.g., as a global stylesheet).
+            const newDeps = new Set(dependencies.map(normalizePath))
             for (const [resource, owner] of resourceToComponent) {
-              if (owner === actualId) {
+              if (owner === actualId && !newDeps.has(resource)) {
                 resourceToComponent.delete(resource)
+                viteServer.watcher.add(resource)
               }
             }
 
