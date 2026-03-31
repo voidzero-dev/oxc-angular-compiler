@@ -241,7 +241,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
             XrefId,                // view_xref
             NonNull<CreateOp<'_>>, // op_ptr
             XrefId,                // icu_context_xref
-            Ident<'_>,              // placeholder name
+            Ident<'_>,             // placeholder name
             String,                // formatted value
         )> = Vec::new();
 

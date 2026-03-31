@@ -440,7 +440,8 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         let host_bindings = super::property_decorators::extract_host_bindings(allocator, class);
         for (host_prop, class_prop) in host_bindings {
             // Add to host.properties with wrapped key
-            let wrapped_key = Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
+            let wrapped_key =
+                Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
             self.host.properties.push((wrapped_key, class_prop));
         }
 
@@ -568,7 +569,8 @@ mod tests {
     #[test]
     fn test_builder_missing_type_returns_none() {
         let allocator = Allocator::default();
-        let builder = R3DirectiveMetadataBuilder::new(&allocator).name(Ident::from("TestDirective"));
+        let builder =
+            R3DirectiveMetadataBuilder::new(&allocator).name(Ident::from("TestDirective"));
 
         let metadata = builder.build();
         assert!(metadata.is_none());

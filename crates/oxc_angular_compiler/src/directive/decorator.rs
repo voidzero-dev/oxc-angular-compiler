@@ -732,11 +732,15 @@ fn parse_mapping_element<'a>(
             let elements = &arr.elements;
             if elements.len() >= 2 {
                 let internal = match elements.first() {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone().into()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 let public = match elements.get(1) {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone().into()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 if let (Some(internal_name), Some(public_name)) = (internal, public) {

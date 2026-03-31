@@ -50,8 +50,12 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
 
     // Track text ops to be replaced with IcuPlaceholder ops
     // (text_op_ptr, text_xref, icu_placeholder_name, initial_value)
-    let mut text_ops_to_replace_with_icu: Vec<(NonNull<CreateOp<'_>>, XrefId, Ident<'_>, Ident<'_>)> =
-        Vec::new();
+    let mut text_ops_to_replace_with_icu: Vec<(
+        NonNull<CreateOp<'_>>,
+        XrefId,
+        Ident<'_>,
+        Ident<'_>,
+    )> = Vec::new();
 
     // Track text ops to be removed (those without ICU placeholder)
     let mut text_nodes_to_remove: Vec<NonNull<CreateOp<'_>>> = Vec::new();

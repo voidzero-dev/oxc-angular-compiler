@@ -196,7 +196,8 @@ pub fn extract_component_metadata<'a>(
         // Add @HostBinding properties
         // Wrap with brackets: "class.active" -> "[class.active]"
         for (host_prop, class_prop) in host_bindings {
-            let wrapped_key = Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
+            let wrapped_key =
+                Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
             host.properties.push((wrapped_key, class_prop));
         }
 
@@ -762,11 +763,15 @@ fn parse_mapping_element<'a>(
             let elements = &arr.elements;
             if elements.len() >= 2 {
                 let internal = match elements.first() {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone().into()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 let public = match elements.get(1) {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone().into()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 if let (Some(internal_name), Some(public_name)) = (internal, public) {

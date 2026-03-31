@@ -112,7 +112,10 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
             if selector.as_str() == "*" {
                 // Wildcard stays as string literal "*"
                 def_elements.push(OutputExpression::Literal(OxcBox::new_in(
-                    LiteralExpr { value: LiteralValue::String(Ident::from("*")), source_span: None },
+                    LiteralExpr {
+                        value: LiteralValue::String(Ident::from("*")),
+                        source_span: None,
+                    },
                     allocator,
                 )));
             } else {

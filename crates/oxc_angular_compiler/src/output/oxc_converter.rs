@@ -64,7 +64,10 @@ pub fn convert_oxc_expression<'a>(
         ))),
 
         Expression::StringLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(lit.value.clone().into()), source_span: None },
+            LiteralExpr {
+                value: LiteralValue::String(lit.value.clone().into()),
+                source_span: None,
+            },
             allocator,
         ))),
 
@@ -532,7 +535,11 @@ fn convert_template_literal<'a>(
             .map_or_else(|| quasi.value.raw.clone(), |cooked| cooked.clone());
         let raw_text = quasi.value.raw.clone();
 
-        elements.push(TemplateLiteralElement { text: text.into(), raw_text: raw_text.into(), source_span: None });
+        elements.push(TemplateLiteralElement {
+            text: text.into(),
+            raw_text: raw_text.into(),
+            source_span: None,
+        });
     }
 
     // Convert expressions

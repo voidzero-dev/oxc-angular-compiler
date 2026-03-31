@@ -263,7 +263,8 @@ pub fn name_functions_and_variables(job: &mut ComponentCompilationJob<'_>) {
     // This enables name reuse for variables with the same semantic identity,
     // matching TypeScript's behavior where multiple Variable ops can share
     // the same SemanticVariable object.
-    let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> = FxHashMap::default();
+    let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
+        FxHashMap::default();
 
     // Recursively name views starting from root
     // TypeScript: addNamesToView(job.root, job.componentName, state, compatibility)

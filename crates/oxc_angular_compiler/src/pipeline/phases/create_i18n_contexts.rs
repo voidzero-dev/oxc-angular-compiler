@@ -38,7 +38,7 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
         message_instance_id: u32,
         is_create_op: bool, // true for ExtractedAttribute, false for update ops
         // Additional fields to uniquely identify the attribute
-        target: XrefId, // Element xref this attribute belongs to
+        target: XrefId,  // Element xref this attribute belongs to
         name: Ident<'a>, // Attribute name
     }
     let mut attr_ops_needing_context: Vec<AttrI18nInfo<'_>> = Vec::new();
