@@ -704,7 +704,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     let local_name = &spec.local.name;
 
                     // Skip if already marked as type-only by semantic analysis
-                    if analyzer.type_only_specifiers.contains(local_name.as_str()) {
+                    if analyzer.type_only_specifiers.contains(local_name) {
                         continue;
                     }
 

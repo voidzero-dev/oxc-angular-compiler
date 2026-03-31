@@ -1586,7 +1586,7 @@ pub fn transform_angular_file(
     // a TypeScript type checker we cannot otherwise distinguish interfaces from classes.
     #[cfg(feature = "cross_file_elision")]
     for (name, is_type_only) in &cross_file_type_only {
-        if let Some(info) = import_map.get_mut(name.as_str()) {
+        if let Some(info) = import_map.get_mut(&Ident::from(name.as_str())) {
             if *is_type_only {
                 info.is_type_only = true;
             }
@@ -5174,7 +5174,7 @@ export class ButtonComponent {}
             &allocator,
             component_path.to_str().unwrap(),
             component_source,
-            &options,
+            Some(&options),
             None,
         );
 
