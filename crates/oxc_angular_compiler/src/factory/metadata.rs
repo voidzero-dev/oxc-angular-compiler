@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_factory.ts`.
 
 use oxc_allocator::Vec;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::OutputExpression;
 
@@ -98,7 +98,7 @@ pub enum R3FactoryDeps<'a> {
 #[derive(Debug)]
 pub struct R3ConstructorFactoryMetadata<'a> {
     /// String name of the type being generated (used to name the factory function).
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// An expression representing the interface type being constructed.
     pub type_expr: OutputExpression<'a>,
@@ -186,7 +186,7 @@ mod tests {
     fn test_dependency_metadata() {
         let allocator = Allocator::default();
         let token = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestService"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestService"), source_span: None },
             &allocator,
         ));
 
@@ -202,7 +202,7 @@ mod tests {
     fn test_optional_dependency() {
         let allocator = Allocator::default();
         let token = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("OptionalService"), source_span: None },
+            ReadVarExpr { name: Ident::from("OptionalService"), source_span: None },
             &allocator,
         ));
 

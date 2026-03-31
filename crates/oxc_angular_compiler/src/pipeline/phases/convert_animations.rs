@@ -38,7 +38,7 @@ fn get_animation_kind(name: &str) -> AnimationKind {
 /// Info needed to create Animation CreateOps.
 struct AnimationInfo<'a> {
     target: XrefId,
-    name: oxc_span::Atom<'a>,
+    name: oxc_span::Ident<'a>,
     animation_kind: AnimationKind,
     handler_ops: OxcVec<'a, UpdateOp<'a>>,
     source_span: Option<oxc_span::Span>,
@@ -47,7 +47,7 @@ struct AnimationInfo<'a> {
 /// Info needed to create AnimationString CreateOps.
 struct AnimationStringInfo<'a> {
     target: XrefId,
-    name: oxc_span::Atom<'a>,
+    name: oxc_span::Ident<'a>,
     animation_kind: AnimationKind,
     expression: Box<'a, IrExpression<'a>>,
     source_span: Option<oxc_span::Span>,
@@ -167,7 +167,7 @@ pub fn convert_animations(job: &mut ComponentCompilationJob<'_>) {
 
         // Third pass: insert Animation CreateOps into create list after their target elements
         if !animations_to_create.is_empty() || !strings_to_create.is_empty() {
-            let mut missing_targets: Vec<oxc_span::Atom<'_>> = Vec::new();
+            let mut missing_targets: Vec<oxc_span::Ident<'_>> = Vec::new();
 
             if let Some(view) = job.view_mut(view_xref) {
                 // Process Animation ops (Value kind)

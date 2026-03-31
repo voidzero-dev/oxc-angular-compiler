@@ -8,7 +8,7 @@
 //! Ported from Angular's `render3/r3_control_flow.ts`.
 
 use oxc_allocator::{Allocator, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 use crate::ast::expression::{ASTWithSource, AngularExpression};
 use crate::ast::html::HtmlBlockParameter;
@@ -261,8 +261,8 @@ pub fn parse_conditional_params<'a>(
                 );
                 let name_alloc = allocator.alloc_str(name_str);
                 expression_alias = Some(R3Variable {
-                    name: Atom::from(name_alloc),
-                    value: Atom::from(name_alloc), // value same as name for alias
+                    name: Ident::from(name_alloc),
+                    value: Ident::from(name_alloc), // value same as name for alias
                     source_span: name_span,
                     key_span: name_span,
                     value_span: None, // No value span for expression alias
@@ -374,14 +374,14 @@ pub fn parse_for_loop_parameters<'a>(
 
     // Create item variable - use the allocator to intern the string
     // Calculate a span that only covers the item name (not "of items.foo.bar")
-    let item_name_atom = Atom::from(allocator.alloc_str(&item_name_owned));
+    let item_name_atom = Ident::from(allocator.alloc_str(&item_name_owned));
     let item_name_span = Span::new(
         expression_param.span.start,
         expression_param.span.start + item_name_str.len() as u32,
     );
     let item = R3Variable {
         name: item_name_atom,
-        value: Atom::from("$implicit"),
+        value: Ident::from("$implicit"),
         source_span: item_name_span,
         key_span: item_name_span,
         value_span: None,
@@ -579,8 +579,8 @@ fn parse_let_parameter<'a>(
         let name_alloc = allocator.alloc_str(name);
         let value_alloc = allocator.alloc_str(variable_name);
         context_variables.push(R3Variable {
-            name: Atom::from(name_alloc),
-            value: Atom::from(value_alloc),
+            name: Ident::from(name_alloc),
+            value: Ident::from(value_alloc),
             source_span,
             key_span,
             value_span: Some(value_span),
@@ -605,8 +605,8 @@ fn create_default_context_variables<'a>(
 
     for &var_name in ALLOWED_FOR_LOOP_LET_VARIABLES {
         vars.push(R3Variable {
-            name: Atom::from(var_name),
-            value: Atom::from(var_name),
+            name: Ident::from(var_name),
+            value: Ident::from(var_name),
             source_span: empty_span,
             key_span: empty_span,
             value_span: None,
@@ -620,8 +620,8 @@ fn create_default_context_variables<'a>(
 fn create_empty_variable<'a>(_allocator: &'a Allocator, span: Span) -> R3Variable<'a> {
     // Note: allocator reserved for future use (e.g., allocating default expression).
     R3Variable {
-        name: Atom::from(""),
-        value: Atom::from("$implicit"),
+        name: Ident::from(""),
+        value: Ident::from("$implicit"),
         source_span: span,
         key_span: span,
         value_span: None,
@@ -641,7 +641,7 @@ fn create_empty_ast_with_source<'a>(allocator: &'a Allocator, span: Span) -> AST
             allocator,
         )),
         source: None,
-        location: Atom::from(""),
+        location: Ident::from(""),
         absolute_offset: span.start,
     }
 }
@@ -663,8 +663,8 @@ fn parse_expression_to_ast_with_source<'a>(
 
     ASTWithSource {
         ast: result.ast,
-        source: Some(Atom::from(expr_str)),
-        location: Atom::from(""),
+        source: Some(Ident::from(expr_str)),
+        location: Ident::from(""),
         absolute_offset: span.start + expression_start_offset,
     }
 }
@@ -1384,7 +1384,7 @@ fn parse_single_on_trigger<'a>(
                     return;
                 }
             }
-            let reference = params.map(|s| Atom::from(s.trim()));
+            let reference = params.map(|s| Ident::from(s.trim()));
             triggers.hover = Some(R3HoverDeferredTrigger {
                 reference,
                 source_span,
@@ -1416,7 +1416,7 @@ fn parse_single_on_trigger<'a>(
                     return;
                 }
             }
-            let reference = params.map(|s| Atom::from(s.trim()));
+            let reference = params.map(|s| Ident::from(s.trim()));
             triggers.interaction = Some(R3InteractionDeferredTrigger {
                 reference,
                 source_span,
@@ -1471,7 +1471,7 @@ fn parse_single_on_trigger<'a>(
                     (result.reference, result.options)
                 } else {
                     // Simple reference name
-                    (Some(Atom::from(trimmed)), None)
+                    (Some(Ident::from(trimmed)), None)
                 }
             } else {
                 (None, None)
@@ -1504,7 +1504,7 @@ fn parse_single_on_trigger<'a>(
 
 /// Result type for viewport trigger extraction.
 struct ViewportTriggerResult<'a> {
-    reference: Option<Atom<'a>>,
+    reference: Option<Ident<'a>>,
     options: Option<AngularExpression<'a>>,
     errors: std::vec::Vec<String>,
 }
@@ -1535,7 +1535,7 @@ fn extract_viewport_trigger_and_options<'a>(
     let mut errors = std::vec::Vec::new();
 
     if let AngularExpression::LiteralMap(map) = expr {
-        let mut trigger_ref: Option<Atom<'a>> = None;
+        let mut trigger_ref: Option<Ident<'a>> = None;
         let mut trigger_idx: Option<usize> = None;
 
         // First pass: find the trigger key, check for "root" key, and extract trigger value

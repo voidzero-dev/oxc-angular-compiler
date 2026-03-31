@@ -1089,7 +1089,7 @@ mod parse_template_bindings {
 
     /// Helper to extract key source from ASTWithSource if present.
     fn get_value_source<'a>(value: &'a Option<ASTWithSource<'a>>) -> Option<&'a str> {
-        value.as_ref().and_then(|v| v.source.as_ref().map(oxc_span::Atom::as_str))
+        value.as_ref().and_then(|v| v.source.as_ref().map(oxc_span::Ident::as_str))
     }
 
     /// Humanize bindings into (key, value, is_variable) tuples.
@@ -1128,7 +1128,7 @@ mod parse_template_bindings {
         let allocator = Box::leak(Box::new(Allocator::default()));
         let parser = Parser::new(allocator, value);
         let template_key = TemplateBindingIdentifier {
-            source: oxc_span::Atom::from(key),
+            source: oxc_span::Ident::from(key),
             span: oxc_angular_compiler::ast::expression::AbsoluteSourceSpan::new(
                 0,
                 key.len() as u32,
@@ -1288,7 +1288,7 @@ mod parse_interpolation {
     fn get_strings<'a>(result: &'a ParseResult<'a>) -> Vec<&'a str> {
         match &result.ast {
             AngularExpression::Interpolation(interp) => {
-                interp.strings.iter().map(oxc_span::Atom::as_str).collect()
+                interp.strings.iter().map(oxc_span::Ident::as_str).collect()
             }
             _ => vec![],
         }

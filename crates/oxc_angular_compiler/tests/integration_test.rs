@@ -13,7 +13,7 @@ use oxc_angular_compiler::{
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
     transform_angular_file,
 };
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 /// Compiles an Angular template to JavaScript.
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
@@ -55,12 +55,12 @@ fn compile_template_to_js_with_version(
         let options = IngestOptions { angular_version: Some(version), ..Default::default() };
         ingest_component_with_options(
             &allocator,
-            Atom::from(component_name),
+            Ident::from(component_name),
             r3_result.nodes,
             options,
         )
     } else {
-        ingest_component(&allocator, Atom::from(component_name), r3_result.nodes)
+        ingest_component(&allocator, Ident::from(component_name), r3_result.nodes)
     };
 
     // Stage 4-5: Transform and emit

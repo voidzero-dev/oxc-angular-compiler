@@ -7,7 +7,7 @@ use oxc_angular_compiler::{
     pipeline::{emit::compile_template, ingest::ingest_component},
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
 };
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let allocator = Allocator::default();
@@ -19,7 +19,7 @@ fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
     let r3_result = transformer.transform(&nodes);
     assert!(r3_result.errors.is_empty(), "Transform errors: {:?}", r3_result.errors);
-    let mut job = ingest_component(&allocator, Atom::from(component_name), r3_result.nodes);
+    let mut job = ingest_component(&allocator, Ident::from(component_name), r3_result.nodes);
     let result = compile_template(&mut job);
     let emitter = JsEmitter::new();
     let mut output = String::new();

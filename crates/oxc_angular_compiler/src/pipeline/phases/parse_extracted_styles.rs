@@ -6,7 +6,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/parse_extracted_styles.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashSet;
 
 use crate::ast::expression::{
@@ -65,7 +65,7 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
     // We collect first because we need to insert new ops and remove old ones
     for view_xref in &view_xrefs {
         // Collect ops to process
-        let ops_to_process: std::vec::Vec<(XrefId, Atom<'_>, String)> = {
+        let ops_to_process: std::vec::Vec<(XrefId, Ident<'_>, String)> = {
             let Some(view) = job.view(*view_xref) else {
                 continue;
             };
@@ -113,7 +113,7 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
                                     LiteralPrimitive {
                                         span: ParseSpan::new(0, 0),
                                         source_span: AbsoluteSourceSpan::new(0, 0),
-                                        value: LiteralValue::String(Atom::from(
+                                        value: LiteralValue::String(Ident::from(
                                             allocator.alloc_str(&prop_value),
                                         )),
                                     },
@@ -129,7 +129,7 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
                             target,
                             binding_kind: BindingKind::StyleProperty,
                             namespace: None,
-                            name: Atom::from(allocator.alloc_str(&prop_name)),
+                            name: Ident::from(allocator.alloc_str(&prop_name)),
                             value: Some(value_expr),
                             security_context: SecurityContext::Style,
                             truthy_expression: false,
@@ -159,7 +159,7 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
                             target,
                             binding_kind: BindingKind::ClassName,
                             namespace: None,
-                            name: Atom::from(allocator.alloc_str(&class_name)),
+                            name: Ident::from(allocator.alloc_str(&class_name)),
                             value: None,
                             security_context: SecurityContext::None,
                             truthy_expression: false,
@@ -351,7 +351,7 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
     let allocator = job.allocator;
 
     // Collect style/class attributes to parse
-    let ops_to_process: std::vec::Vec<(XrefId, Atom<'_>, String)> = job
+    let ops_to_process: std::vec::Vec<(XrefId, Ident<'_>, String)> = job
         .root
         .create
         .iter()
@@ -386,7 +386,7 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
                             LiteralPrimitive {
                                 span: ParseSpan::new(0, 0),
                                 source_span: AbsoluteSourceSpan::new(0, 0),
-                                value: LiteralValue::String(Atom::from(
+                                value: LiteralValue::String(Ident::from(
                                     allocator.alloc_str(&prop_value),
                                 )),
                             },
@@ -402,7 +402,7 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
                     target,
                     binding_kind: BindingKind::StyleProperty,
                     namespace: None,
-                    name: Atom::from(allocator.alloc_str(&prop_name)),
+                    name: Ident::from(allocator.alloc_str(&prop_name)),
                     value: Some(value_expr),
                     security_context: SecurityContext::Style,
                     truthy_expression: false,
@@ -429,7 +429,7 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
                     target,
                     binding_kind: BindingKind::ClassName,
                     namespace: None,
-                    name: Atom::from(allocator.alloc_str(&class_name)),
+                    name: Ident::from(allocator.alloc_str(&class_name)),
                     value: None,
                     security_context: SecurityContext::None,
                     truthy_expression: false,

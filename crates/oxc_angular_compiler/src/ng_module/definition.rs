@@ -335,13 +335,13 @@ mod tests {
     use crate::ng_module::metadata::{R3NgModuleMetadataBuilder, R3Reference, R3SelectorScopeMode};
     use crate::output::ast::ReadVarExpr;
     use oxc_allocator::Box;
-    use oxc_span::Atom;
+    use oxc_span::Ident;
 
     #[test]
     fn test_generate_simple_ng_module_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("AppModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("AppModule"), source_span: None },
             &allocator,
         ));
 
@@ -368,11 +368,11 @@ mod tests {
     fn test_generate_ng_module_with_declarations() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyModule"), source_span: None },
             &allocator,
         ));
         let component_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyComponent"), source_span: None },
             &allocator,
         ));
 
@@ -397,15 +397,15 @@ mod tests {
     fn test_generate_ng_module_with_imports_exports() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SharedModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("SharedModule"), source_span: None },
             &allocator,
         ));
         let import_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("CommonModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("CommonModule"), source_span: None },
             &allocator,
         ));
         let export_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SharedComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("SharedComponent"), source_span: None },
             &allocator,
         ));
 
@@ -433,11 +433,11 @@ mod tests {
     fn test_generate_ng_module_with_bootstrap() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("RootModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("RootModule"), source_span: None },
             &allocator,
         ));
         let bootstrap_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("AppComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("AppComponent"), source_span: None },
             &allocator,
         ));
 
@@ -461,11 +461,11 @@ mod tests {
     fn test_generate_ng_module_with_side_effect_scope() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("JitModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("JitModule"), source_span: None },
             &allocator,
         ));
         let decl_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("JitComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("JitComponent"), source_span: None },
             &allocator,
         ));
 
@@ -487,7 +487,7 @@ mod tests {
     fn test_emit_ng_module_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestModule"), source_span: None },
             &allocator,
         ));
 
@@ -618,7 +618,7 @@ mod tests {
         // This enables tree-shaking via the @__PURE__ annotation.
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TreeShakableModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("TreeShakableModule"), source_span: None },
             &allocator,
         ));
 

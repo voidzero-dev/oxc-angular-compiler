@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::{
     ExternalExpr, OutputExpression, OutputStatement, ReadVarExpr, RecursiveOutputAstVisitor,
@@ -29,16 +29,16 @@ use crate::output::ast::{
 #[derive(Debug, Clone)]
 pub struct HmrNamespaceDependency<'a> {
     /// Module name of the import (e.g., `@angular/core`).
-    pub module_name: Atom<'a>,
+    pub module_name: Ident<'a>,
 
     /// Name under which to refer to the namespace inside HMR-related code.
     /// Must be a valid JS identifier (e.g., `i0`).
-    pub assigned_name: Atom<'a>,
+    pub assigned_name: Ident<'a>,
 }
 
 impl<'a> HmrNamespaceDependency<'a> {
     /// Create a new namespace dependency.
-    pub fn new(module_name: Atom<'a>, assigned_name: Atom<'a>) -> Self {
+    pub fn new(module_name: Ident<'a>, assigned_name: Ident<'a>) -> Self {
         Self { module_name, assigned_name }
     }
 }
@@ -57,7 +57,7 @@ impl<'a> HmrNamespaceDependency<'a> {
 #[derive(Debug)]
 pub struct HmrLocalDependency<'a> {
     /// Name of the local symbol.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// Runtime representation of the local (the expression to pass as argument).
     pub runtime_representation: OutputExpression<'a>,
@@ -65,7 +65,7 @@ pub struct HmrLocalDependency<'a> {
 
 impl<'a> HmrLocalDependency<'a> {
     /// Create a new local dependency.
-    pub fn new(name: Atom<'a>, runtime_representation: OutputExpression<'a>) -> Self {
+    pub fn new(name: Ident<'a>, runtime_representation: OutputExpression<'a>) -> Self {
         Self { name, runtime_representation }
     }
 }
@@ -83,10 +83,10 @@ pub struct HmrMetadata<'a> {
     pub component_type: OutputExpression<'a>,
 
     /// Name of the component class.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// File path of the component class.
-    pub file_path: Atom<'a>,
+    pub file_path: Ident<'a>,
 
     /// Namespace dependencies (e.g., `import * as i0 from '@angular/core'`).
     ///
@@ -105,8 +105,8 @@ impl<'a> HmrMetadata<'a> {
     /// Create new HMR metadata.
     pub fn new(
         component_type: OutputExpression<'a>,
-        class_name: Atom<'a>,
-        file_path: Atom<'a>,
+        class_name: Ident<'a>,
+        file_path: Ident<'a>,
     ) -> Self {
         Self {
             component_type,
@@ -118,14 +118,14 @@ impl<'a> HmrMetadata<'a> {
     }
 
     /// Add a namespace dependency.
-    pub fn add_namespace_dependency(&mut self, module_name: Atom<'a>, assigned_name: Atom<'a>) {
+    pub fn add_namespace_dependency(&mut self, module_name: Ident<'a>, assigned_name: Ident<'a>) {
         self.namespace_dependencies.push(HmrNamespaceDependency::new(module_name, assigned_name));
     }
 
     /// Add a local dependency.
     pub fn add_local_dependency(
         &mut self,
-        name: Atom<'a>,
+        name: Ident<'a>,
         runtime_representation: OutputExpression<'a>,
     ) {
         self.local_dependencies.push(HmrLocalDependency::new(name, runtime_representation));
@@ -243,7 +243,7 @@ pub struct ExtractedHmrDependencies<'a> {
 #[derive(Debug)]
 pub struct LocalDependency<'a> {
     /// Name of the local symbol.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// Runtime representation (the expression to pass as argument).
     pub runtime_representation: OutputExpression<'a>,
@@ -310,8 +310,8 @@ pub fn extract_compiled_dependencies<'a>(
         .get_namespace_dependencies()
         .into_iter()
         .map(|(module_name, assigned_name)| HmrNamespaceDependency {
-            module_name: Atom::from(allocator.alloc_str(module_name)),
-            assigned_name: Atom::from(allocator.alloc_str(&assigned_name)),
+            module_name: Ident::from(allocator.alloc_str(module_name)),
+            assigned_name: Ident::from(allocator.alloc_str(&assigned_name)),
         })
         .collect();
 
@@ -322,10 +322,10 @@ pub fn extract_compiled_dependencies<'a>(
         .map(|name| {
             // Create variable reference as runtime representation
             let runtime_representation = OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from(allocator.alloc_str(name)), source_span: None },
+                ReadVarExpr { name: Ident::from(allocator.alloc_str(name)), source_span: None },
                 allocator,
             ));
-            LocalDependency { name: Atom::from(allocator.alloc_str(name)), runtime_representation }
+            LocalDependency { name: Ident::from(allocator.alloc_str(name)), runtime_representation }
         })
         .collect();
 
@@ -498,7 +498,7 @@ mod tests {
 
         // Create a variable read expression
         let var_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("myVar"), source_span: None },
+            ReadVarExpr { name: Ident::from("myVar"), source_span: None },
             &allocator,
         ));
 
@@ -516,8 +516,8 @@ mod tests {
         let external_expr = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("@angular/core")),
-                    name: Some(Atom::from("Component")),
+                    module_name: Some(Ident::from("@angular/core")),
+                    name: Some(Ident::from("Component")),
                 },
                 source_span: None,
             },
@@ -540,8 +540,8 @@ mod tests {
         let expr1 = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("@angular/core")),
-                    name: Some(Atom::from("Component")),
+                    module_name: Some(Ident::from("@angular/core")),
+                    name: Some(Ident::from("Component")),
                 },
                 source_span: None,
             },
@@ -551,8 +551,8 @@ mod tests {
         let expr2 = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("@angular/core")),
-                    name: Some(Atom::from("Injectable")),
+                    module_name: Some(Ident::from("@angular/core")),
+                    name: Some(Ident::from("Injectable")),
                 },
                 source_span: None,
             },
@@ -575,8 +575,8 @@ mod tests {
         let expr1 = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("@angular/core")),
-                    name: Some(Atom::from("Component")),
+                    module_name: Some(Ident::from("@angular/core")),
+                    name: Some(Ident::from("Component")),
                 },
                 source_span: None,
             },
@@ -586,8 +586,8 @@ mod tests {
         let expr2 = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("./my-dep")),
-                    name: Some(Atom::from("MyDep")),
+                    module_name: Some(Ident::from("./my-dep")),
+                    name: Some(Ident::from("MyDep")),
                 },
                 source_span: None,
             },
@@ -612,7 +612,7 @@ mod tests {
         // Add some variable reads
         for name in ["MyService", "localVar", "AppComponent", "helperFn"] {
             let expr = OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from(name), source_span: None },
+                ReadVarExpr { name: Ident::from(name), source_span: None },
                 &allocator,
             ));
             collector.visit_expression(&expr);
@@ -643,8 +643,8 @@ mod tests {
         let def_expr = OutputExpression::External(Box::new_in(
             ExternalExpr {
                 value: ExternalReference {
-                    module_name: Some(Atom::from("@angular/core")),
-                    name: Some(Atom::from("ɵɵdefineComponent")),
+                    module_name: Some(Ident::from("@angular/core")),
+                    name: Some(Ident::from("ɵɵdefineComponent")),
                 },
                 source_span: None,
             },

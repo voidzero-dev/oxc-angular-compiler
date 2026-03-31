@@ -834,7 +834,7 @@ mod tests {
     use crate::ast::html::HtmlText;
     use crate::util::ParseSourceFile;
     use oxc_allocator::{Allocator, Box, Vec as AllocVec};
-    use oxc_span::Atom;
+    use oxc_span::Ident;
     use std::sync::Arc;
 
     #[test]
@@ -858,7 +858,7 @@ mod tests {
         let factory = create_i18n_message_factory(false, false);
 
         let text = HtmlText {
-            value: Atom::from("Hello {{name}}!"),
+            value: Ident::from("Hello {{name}}!"),
             span: Span::default(),
             full_start: None,
             tokens: AllocVec::new_in(&allocator),
@@ -889,7 +889,7 @@ mod tests {
         let factory = create_i18n_message_factory(false, false);
 
         let text = HtmlText {
-            value: Atom::from("Hello World"),
+            value: Ident::from("Hello World"),
             span: Span::default(),
             full_start: None,
             tokens: AllocVec::new_in(&allocator),
@@ -910,7 +910,7 @@ mod tests {
         let factory = create_i18n_message_factory(false, false);
 
         let text = HtmlText {
-            value: Atom::from("{{greeting}} {{name}}!"),
+            value: Ident::from("{{greeting}} {{name}}!"),
             span: Span::default(),
             full_start: None,
             tokens: AllocVec::new_in(&allocator),

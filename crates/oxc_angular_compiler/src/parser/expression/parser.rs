@@ -5,7 +5,7 @@
 //! Ported from Angular's `expression_parser/parser.ts`.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ast::expression::{
     ASTWithSource, AbsoluteSourceSpan, AngularExpression, ArrowFunction, ArrowFunctionParameter,
@@ -314,7 +314,7 @@ impl<'a> Parser<'a> {
         let source_span = span.to_absolute(absolute_offset);
 
         let value = match input {
-            Some(s) => LiteralValue::String(Atom::from_in(s, self.allocator)),
+            Some(s) => LiteralValue::String(Ident::from_in(s, self.allocator)),
             None => LiteralValue::Null,
         };
 
@@ -323,8 +323,8 @@ impl<'a> Parser<'a> {
 
         ASTWithSource {
             ast,
-            source: input.map(|s| Atom::from_in(s, self.allocator)),
-            location: Atom::from_in(location, self.allocator),
+            source: input.map(|s| Ident::from_in(s, self.allocator)),
+            location: Ident::from_in(location, self.allocator),
             absolute_offset,
         }
     }
@@ -512,8 +512,8 @@ impl<'a> Parser<'a> {
             } else {
                 Some(ASTWithSource {
                     ast: value,
-                    source: Some(Atom::from_in(value_source, self.allocator)),
-                    location: Atom::from_in("", self.allocator),
+                    source: Some(Ident::from_in(value_source, self.allocator)),
+                    location: Ident::from_in("", self.allocator),
                     absolute_offset: self.absolute_offset + start,
                 })
             };
@@ -597,7 +597,7 @@ impl<'a> Parser<'a> {
         end: u32,
     ) -> TemplateBindingIdentifier<'a> {
         TemplateBindingIdentifier {
-            source: Atom::from_in(source, self.allocator),
+            source: Ident::from_in(source, self.allocator),
             span: AbsoluteSourceSpan::new(start, end),
         }
     }
@@ -747,8 +747,8 @@ impl<'a> Parser<'a> {
         let value_source = &self.source[expr_start as usize..value_end as usize];
         let ast_with_source = ASTWithSource {
             ast: value,
-            source: Some(Atom::from_in(value_source, self.allocator)),
-            location: Atom::from_in("", self.allocator),
+            source: Some(Ident::from_in(value_source, self.allocator)),
+            location: Ident::from_in("", self.allocator),
             absolute_offset: self.absolute_offset + expr_start,
         };
 
@@ -996,7 +996,7 @@ impl<'a> Parser<'a> {
                 {
                     // Add text before the interpolation
                     let text = &self.source[current_pos..abs_start];
-                    strings.push(Atom::from_in(text, self.allocator));
+                    strings.push(Ident::from_in(text, self.allocator));
 
                     let expr_text = &self.source[expr_start..expr_start + end_idx];
 
@@ -1016,13 +1016,13 @@ impl<'a> Parser<'a> {
                     // Treat the {{ and everything after as literal text
                     // by adding all remaining text to strings and exiting
                     let text = &self.source[current_pos..];
-                    strings.push(Atom::from_in(text, self.allocator));
+                    strings.push(Ident::from_in(text, self.allocator));
                     break;
                 }
             } else {
                 // No more interpolations - add remaining text and exit
                 let text = &self.source[current_pos..];
-                strings.push(Atom::from_in(text, self.allocator));
+                strings.push(Ident::from_in(text, self.allocator));
                 break;
             }
         }
@@ -1031,7 +1031,7 @@ impl<'a> Parser<'a> {
         // all input including the last "}}"), we still need to add the trailing string.
         // This ensures strings.len() == expressions.len() + 1 for proper interleaving.
         if !expressions.is_empty() && strings.len() == expressions.len() {
-            strings.push(Atom::from_in("", self.allocator));
+            strings.push(Ident::from_in("", self.allocator));
         }
 
         if expressions.is_empty() {
@@ -1861,7 +1861,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let name_span = source_span;
-                let empty_name = Atom::from_in("", self.allocator);
+                let empty_name = Ident::from_in("", self.allocator);
                 if safe {
                     let read = SafePropertyRead {
                         span,
@@ -1990,7 +1990,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let name_span = source_span; // Empty name span at end
-        let empty_name = Atom::from_in("", self.allocator);
+        let empty_name = Ident::from_in("", self.allocator);
 
         if safe {
             let read =
@@ -2160,7 +2160,7 @@ impl<'a> Parser<'a> {
         &mut self,
         receiver: AngularExpression<'a>,
         start: u32,
-        name: Atom<'a>,
+        name: Ident<'a>,
         name_start: u32,
         name_end: u32,
         safe: bool,
@@ -2889,7 +2889,7 @@ impl<'a> Parser<'a> {
                 ));
                 self.advance();
                 let key = LiteralMapKey::Property(LiteralMapPropertyKey {
-                    key: Atom::from_in("", self.allocator),
+                    key: Ident::from_in("", self.allocator),
                     quoted: false,
                     is_shorthand_initialized: false,
                 });
@@ -2944,7 +2944,7 @@ impl<'a> Parser<'a> {
 
         self.error("Missing expected identifier, keyword, or string");
         let key = LiteralMapKey::Property(LiteralMapPropertyKey {
-            key: Atom::from_in("", self.allocator),
+            key: Ident::from_in("", self.allocator),
             quoted: false,
             is_shorthand_initialized: false,
         });
@@ -3014,13 +3014,13 @@ impl<'a> Parser<'a> {
                     // The fullSpanEnd tracks whitespace after the pipe character
                     let full_span_end =
                         self.peek().map(|t| t.index).unwrap_or(self.source.len() as u32);
-                    (Atom::from_in("", self.allocator), full_span_end, Some(full_span_end))
+                    (Ident::from_in("", self.allocator), full_span_end, Some(full_span_end))
                 }
             } else {
                 // End of input - create empty pipe name
                 self.error("Unexpected end of input, expected identifier or keyword");
                 let end_pos = self.source.len() as u32;
-                (Atom::from_in("", self.allocator), end_pos, Some(end_pos))
+                (Ident::from_in("", self.allocator), end_pos, Some(end_pos))
             };
 
             // Parse pipe arguments
@@ -3251,7 +3251,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "condition");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngIf"),
+            source: Ident::from("ngIf"),
             span: AbsoluteSourceSpan::new(0, 4),
         };
         let result = parser.parse_template_bindings(key);
@@ -3275,7 +3275,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "let item of items");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngFor"),
+            source: Ident::from("ngFor"),
             span: AbsoluteSourceSpan::new(0, 5),
         };
         let result = parser.parse_template_bindings(key);
@@ -3317,7 +3317,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "let item of items; let i = index");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngFor"),
+            source: Ident::from("ngFor"),
             span: AbsoluteSourceSpan::new(0, 5),
         };
         let result = parser.parse_template_bindings(key);
@@ -3367,7 +3367,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "let item of items; trackBy: trackByFn");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngFor"),
+            source: Ident::from("ngFor"),
             span: AbsoluteSourceSpan::new(0, 5),
         };
         let result = parser.parse_template_bindings(key);
@@ -3391,7 +3391,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "obs$ | async as result");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngIf"),
+            source: Ident::from("ngIf"),
             span: AbsoluteSourceSpan::new(0, 4),
         };
         let result = parser.parse_template_bindings(key);
@@ -3437,7 +3437,7 @@ mod tests {
         let allocator = Allocator::default();
         let parser = Parser::new(&allocator, "let item of items; index as i");
         let key = TemplateBindingIdentifier {
-            source: Atom::from("ngFor"),
+            source: Ident::from("ngFor"),
             span: AbsoluteSourceSpan::new(0, 5),
         };
         let result = parser.parse_template_bindings(key);

@@ -4,7 +4,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_i18n_expression_placeholders.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nExpressionFor, I18nParamResolutionTime, I18nParamValueFlags};
@@ -50,7 +50,7 @@ pub fn resolve_i18n_expression_placeholders(job: &mut ComponentCompilationJob<'_
     // (context_xref, placeholder_name, value, resolution_time, icu_placeholder_xref)
     struct ExprUpdate<'a> {
         context_xref: XrefId,
-        placeholder: Option<Atom<'a>>,
+        placeholder: Option<Ident<'a>>,
         value: I18nParamValue,
         resolution_time: I18nParamResolutionTime,
         icu_placeholder: Option<XrefId>,
@@ -115,7 +115,7 @@ pub fn resolve_i18n_expression_placeholders(job: &mut ComponentCompilationJob<'_
                                 };
 
                                 // Add to params map
-                                let placeholder_atom = Atom::from(placeholder.as_str());
+                                let placeholder_atom = Ident::from(placeholder.as_str());
                                 if let Some(values) = params.get_mut(&placeholder_atom) {
                                     values.push(update.value);
                                 } else {

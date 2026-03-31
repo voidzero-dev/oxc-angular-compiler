@@ -611,7 +611,7 @@ fn get_bool_property(obj: &ObjectExpression<'_>, name: &str) -> Option<bool> {
             && matches!(&prop.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
             && let Expression::BooleanLiteral(lit) = &prop.value
         {
-            return Some(lit.value);
+            return Some(lit.value.into());
         }
     }
     None
@@ -1252,7 +1252,7 @@ fn convert_inputs_to_definition_format(inputs_obj: &ObjectExpression<'_>, source
         match &p.value {
             // Simple string: propertyName: "publicName" → keep as is
             Expression::StringLiteral(lit) => {
-                entries.push(format!("{quoted_key}: \"{}\"", lit.value));
+                entries.push(format!("{quoted_key}: \"{}\"", lit.value.as_str()));
             }
             // Array: check if it's declaration format [publicName, classPropertyName]
             // and convert to definition format [InputFlags, publicName, classPropertyName]

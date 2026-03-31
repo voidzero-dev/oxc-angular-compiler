@@ -193,20 +193,20 @@ mod tests {
     use crate::output::ast::ReadVarExpr;
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Box;
-    use oxc_span::Atom;
+    use oxc_span::Ident;
 
     fn create_test_metadata<'a>(allocator: &'a Allocator) -> R3DirectiveMetadata<'a> {
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
             allocator,
         ));
 
         R3DirectiveMetadata {
-            name: Atom::from("TestDirective"),
+            name: Ident::from("TestDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[testDir]")),
+            selector: Some(Ident::from("[testDir]")),
             queries: Vec::new_in(allocator),
             view_queries: Vec::new_in(allocator),
             host: R3HostMetadata::new(allocator),
@@ -270,16 +270,16 @@ mod tests {
         // an inherited factory pattern
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ChildDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("ChildDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("ChildDirective"),
+            name: Ident::from("ChildDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None, // No explicit constructor deps
-            selector: Some(Atom::from("[childDir]")),
+            selector: Some(Ident::from("[childDir]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -309,16 +309,16 @@ mod tests {
     fn test_generate_fac_definition_with_empty_deps() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("TestDirective"),
+            name: Ident::from("TestDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: Some(Vec::new_in(&allocator)), // Empty deps - has constructor but no params
-            selector: Some(Atom::from("[testDir]")),
+            selector: Some(Ident::from("[testDir]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -350,12 +350,12 @@ mod tests {
     fn test_generate_fac_definition_with_deps() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
             &allocator,
         ));
 
         let dep_token = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SomeService"), source_span: None },
+            ReadVarExpr { name: Ident::from("SomeService"), source_span: None },
             &allocator,
         ));
 
@@ -363,11 +363,11 @@ mod tests {
         deps.push(crate::factory::R3DependencyMetadata::simple(dep_token));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("TestDirective"),
+            name: Ident::from("TestDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: Some(deps),
-            selector: Some(Atom::from("[testDir]")),
+            selector: Some(Ident::from("[testDir]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -418,20 +418,20 @@ mod tests {
 
         // Create first directive with host bindings
         let type_expr1 = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("Dir1"), source_span: None },
+            ReadVarExpr { name: Ident::from("Dir1"), source_span: None },
             &allocator,
         ));
 
         let mut host1 = R3HostMetadata::new(&allocator);
         // Add a property binding which will use the constant pool
-        host1.properties.push((Atom::from("[attr.role]"), Atom::from("'button'")));
+        host1.properties.push((Ident::from("[attr.role]"), Ident::from("'button'")));
 
         let metadata1 = R3DirectiveMetadata {
-            name: Atom::from("Dir1"),
+            name: Ident::from("Dir1"),
             r#type: type_expr1,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[dir1]")),
+            selector: Some(Ident::from("[dir1]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: host1,
@@ -456,19 +456,19 @@ mod tests {
 
         // Create second directive with host bindings using the returned pool index
         let type_expr2 = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("Dir2"), source_span: None },
+            ReadVarExpr { name: Ident::from("Dir2"), source_span: None },
             &allocator,
         ));
 
         let mut host2 = R3HostMetadata::new(&allocator);
-        host2.properties.push((Atom::from("[attr.id]"), Atom::from("'test'")));
+        host2.properties.push((Ident::from("[attr.id]"), Ident::from("'test'")));
 
         let metadata2 = R3DirectiveMetadata {
-            name: Atom::from("Dir2"),
+            name: Ident::from("Dir2"),
             r#type: type_expr2,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[dir2]")),
+            selector: Some(Ident::from("[dir2]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: host2,

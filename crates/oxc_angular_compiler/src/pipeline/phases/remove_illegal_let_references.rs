@@ -18,7 +18,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/remove_illegal_let_references.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, LiteralPrimitive, LiteralValue, ParseSpan,
@@ -41,7 +41,7 @@ pub fn remove_illegal_let_references(job: &mut ComponentCompilationJob<'_>) {
 
     for view_xref in view_xrefs {
         // First pass: collect let variable names from Variable ops
-        let let_names: Vec<Atom<'_>> = {
+        let let_names: Vec<Ident<'_>> = {
             let view = match job.view(view_xref) {
                 Some(v) => v,
                 None => continue,
@@ -77,7 +77,7 @@ pub fn remove_illegal_let_references(job: &mut ComponentCompilationJob<'_>) {
         // A let name is "declared" AFTER we finish transforming its Variable op.
         // This matches Angular which walks backward from the declaration op itself,
         // replacing self-references (e.g. `@let x = x + 1`) with `undefined`.
-        let mut declared_names: Vec<Atom<'_>> = Vec::new();
+        let mut declared_names: Vec<Ident<'_>> = Vec::new();
 
         for op in view.update.iter_mut() {
             // Check if this op declares a let variable — extract the name before

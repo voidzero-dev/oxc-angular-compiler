@@ -11,7 +11,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/create_i18n_contexts.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::I18nContextKind;
@@ -39,7 +39,7 @@ pub fn create_i18n_contexts(job: &mut ComponentCompilationJob<'_>) {
         is_create_op: bool, // true for ExtractedAttribute, false for update ops
         // Additional fields to uniquely identify the attribute
         target: XrefId, // Element xref this attribute belongs to
-        name: Atom<'a>, // Attribute name
+        name: Ident<'a>, // Attribute name
     }
     let mut attr_ops_needing_context: Vec<AttrI18nInfo<'_>> = Vec::new();
 

@@ -7,7 +7,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/track_variables.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::{
@@ -36,10 +36,10 @@ pub fn generate_track_variables(job: &mut ComponentCompilationJob<'_>) {
         for op in view.create.iter_mut() {
             if let CreateOp::RepeaterCreate(rep) = op {
                 // Get $index names and $implicit name for this repeater
-                let index_names: Vec<Atom<'_>> = {
-                    let mut names: Vec<Atom<'_>> = rep.var_names.index.iter().cloned().collect();
+                let index_names: Vec<Ident<'_>> = {
+                    let mut names: Vec<Ident<'_>> = rep.var_names.index.iter().cloned().collect();
                     // Also include '$index' itself
-                    names.push(Atom::from("$index"));
+                    names.push(Ident::from("$index"));
                     names
                 };
                 let implicit_name = rep.var_names.item.clone();
@@ -63,12 +63,12 @@ pub fn generate_track_variables(job: &mut ComponentCompilationJob<'_>) {
 fn transform_track_expression<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expr: &mut Box<'a, IrExpression<'a>>,
-    index_names: &[Atom<'a>],
-    implicit_name: Option<&Atom<'a>>,
+    index_names: &[Ident<'a>],
+    implicit_name: Option<&Ident<'a>>,
     expressions: &crate::pipeline::expression_store::ExpressionStore<'a>,
 ) {
-    let index_names_clone: Vec<Atom<'a>> = index_names.to_vec();
-    let implicit_name_clone: Option<Atom<'a>> = implicit_name.cloned();
+    let index_names_clone: Vec<Ident<'a>> = index_names.to_vec();
+    let implicit_name_clone: Option<Ident<'a>> = implicit_name.cloned();
 
     transform_expressions_in_expression(
         expr,
@@ -80,7 +80,7 @@ fn transform_track_expression<'a>(
                     // Replace with o.variable('$index')
                     *inner_expr = IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("$index"), source_span: None },
+                            ReadVarExpr { name: Ident::from("$index"), source_span: None },
                             allocator,
                         )),
                         allocator,
@@ -94,7 +94,7 @@ fn transform_track_expression<'a>(
                         // Replace with o.variable('$item')
                         *inner_expr = IrExpression::OutputExpr(Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
-                                ReadVarExpr { name: Atom::from("$item"), source_span: None },
+                                ReadVarExpr { name: Ident::from("$item"), source_span: None },
                                 allocator,
                             )),
                             allocator,
@@ -107,7 +107,7 @@ fn transform_track_expression<'a>(
                 if lexical.name.as_str() == "$implicit" {
                     *inner_expr = IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("$item"), source_span: None },
+                            ReadVarExpr { name: Ident::from("$item"), source_span: None },
                             allocator,
                         )),
                         allocator,
@@ -157,8 +157,8 @@ fn transform_track_expression<'a>(
 fn transform_angular_expression_for_track<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expr: &AngularExpression<'a>,
-    index_names: &[Atom<'a>],
-    implicit_name: Option<&Atom<'a>>,
+    index_names: &[Ident<'a>],
+    implicit_name: Option<&Ident<'a>>,
 ) -> Option<IrExpression<'a>> {
     match expr {
         // Direct read of loop variable: `item` or `$index`
@@ -171,7 +171,7 @@ fn transform_angular_expression_for_track<'a>(
             if index_names.iter().any(|n| *n == *name) {
                 return Some(IrExpression::OutputExpr(Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("$index"), source_span: None },
+                        ReadVarExpr { name: Ident::from("$index"), source_span: None },
                         allocator,
                     )),
                     allocator,
@@ -183,7 +183,7 @@ fn transform_angular_expression_for_track<'a>(
                 if *name == *item_name {
                     return Some(IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("$item"), source_span: None },
+                            ReadVarExpr { name: Ident::from("$item"), source_span: None },
                             allocator,
                         )),
                         allocator,
@@ -195,7 +195,7 @@ fn transform_angular_expression_for_track<'a>(
             if name.as_str() == "$implicit" {
                 return Some(IrExpression::OutputExpr(Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("$item"), source_span: None },
+                        ReadVarExpr { name: Ident::from("$item"), source_span: None },
                         allocator,
                     )),
                     allocator,

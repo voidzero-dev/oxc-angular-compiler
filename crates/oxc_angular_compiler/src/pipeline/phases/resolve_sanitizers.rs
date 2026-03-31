@@ -6,7 +6,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_sanitizers.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ast::r3::SecurityContext;
 use crate::ir::ops::{CreateOp, UpdateOp};
@@ -62,7 +62,7 @@ pub fn resolve_sanitizers(job: &mut ComponentCompilationJob<'_>) {
             for op in view.create.iter_mut() {
                 if let CreateOp::ExtractedAttribute(attr) = op {
                     if let Some(fn_name) = get_trusted_value_fn(attr.security_context) {
-                        attr.trusted_value_fn = Some(Atom::from(fn_name));
+                        attr.trusted_value_fn = Some(Ident::from(fn_name));
                     }
                 }
             }
@@ -72,17 +72,17 @@ pub fn resolve_sanitizers(job: &mut ComponentCompilationJob<'_>) {
                 match op {
                     UpdateOp::Property(prop) => {
                         if let Some(fn_name) = get_sanitizer_fn(prop.security_context) {
-                            prop.sanitizer = Some(Atom::from(fn_name));
+                            prop.sanitizer = Some(Ident::from(fn_name));
                         }
                     }
                     UpdateOp::Attribute(attr) => {
                         if let Some(fn_name) = get_sanitizer_fn(attr.security_context) {
-                            attr.sanitizer = Some(Atom::from(fn_name));
+                            attr.sanitizer = Some(Ident::from(fn_name));
                         }
                     }
                     UpdateOp::DomProperty(dom_prop) => {
                         if let Some(fn_name) = get_sanitizer_fn(dom_prop.security_context) {
-                            dom_prop.sanitizer = Some(Atom::from(fn_name));
+                            dom_prop.sanitizer = Some(Ident::from(fn_name));
                         }
                     }
                     _ => {}
@@ -100,7 +100,7 @@ pub fn resolve_sanitizers_for_host(job: &mut HostBindingCompilationJob<'_>) {
     for op in job.root.create.iter_mut() {
         if let CreateOp::ExtractedAttribute(attr) = op {
             if let Some(fn_name) = get_trusted_value_fn(attr.security_context) {
-                attr.trusted_value_fn = Some(Atom::from(fn_name));
+                attr.trusted_value_fn = Some(Ident::from(fn_name));
             }
         }
     }
@@ -110,17 +110,17 @@ pub fn resolve_sanitizers_for_host(job: &mut HostBindingCompilationJob<'_>) {
         match op {
             UpdateOp::Property(prop) => {
                 if let Some(fn_name) = get_sanitizer_fn(prop.security_context) {
-                    prop.sanitizer = Some(Atom::from(fn_name));
+                    prop.sanitizer = Some(Ident::from(fn_name));
                 }
             }
             UpdateOp::Attribute(attr) => {
                 if let Some(fn_name) = get_sanitizer_fn(attr.security_context) {
-                    attr.sanitizer = Some(Atom::from(fn_name));
+                    attr.sanitizer = Some(Ident::from(fn_name));
                 }
             }
             UpdateOp::DomProperty(dom_prop) => {
                 if let Some(fn_name) = get_sanitizer_fn(dom_prop.security_context) {
-                    dom_prop.sanitizer = Some(Atom::from(fn_name));
+                    dom_prop.sanitizer = Some(Ident::from(fn_name));
                 }
             }
             _ => {}

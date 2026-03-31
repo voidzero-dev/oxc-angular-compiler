@@ -7,7 +7,7 @@
 //! - `setClassMetadataAsync(type, resolver, callback)` for deferred dependencies
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::{R3ClassMetadata, R3DeferPerComponentDependency};
 use crate::output::ast::{
@@ -77,7 +77,7 @@ pub fn compile_opaque_async_class_metadata<'a>(
     allocator: &'a Allocator,
     metadata: &R3ClassMetadata<'a>,
     defer_resolver: OutputExpression<'a>,
-    deferred_dependency_names: &[Atom<'a>],
+    deferred_dependency_names: &[Ident<'a>],
 ) -> OutputExpression<'a> {
     let mut params = Vec::new_in(allocator);
     for name in deferred_dependency_names {
@@ -106,16 +106,16 @@ pub fn compile_component_metadata_async_resolver<'a>(
     for dep in dependencies {
         // Create: (m) => m.CmpA  (or m.default for default imports)
         let mut inner_params = Vec::new_in(allocator);
-        inner_params.push(FnParam { name: Atom::from("m") });
+        inner_params.push(FnParam { name: Ident::from("m") });
 
         let prop_name =
-            if dep.is_default_import { Atom::from("default") } else { dep.symbol_name.clone() };
+            if dep.is_default_import { Ident::from("default") } else { dep.symbol_name.clone() };
 
         let inner_body = OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("m"), source_span: None },
+                        ReadVarExpr { name: Ident::from("m"), source_span: None },
                         allocator,
                     )),
                     allocator,
@@ -149,7 +149,7 @@ pub fn compile_component_metadata_async_resolver<'a>(
         let then_prop = OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
                 receiver: Box::new_in(dynamic_import, allocator),
-                name: Atom::from("then"),
+                name: Ident::from("then"),
                 optional: false,
                 source_span: None,
             },
@@ -296,7 +296,7 @@ fn guarded_expression<'a>(
     expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     let guard_var = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(guard), source_span: None },
+        ReadVarExpr { name: Ident::from(guard), source_span: None },
         allocator,
     ));
 
@@ -349,12 +349,12 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(identifier),
+            name: Ident::from(identifier),
             optional: false,
             source_span: None,
         },
@@ -373,7 +373,7 @@ fn literal_null<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
 /// Creates a string literal.
 fn literal_string<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from(value)), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
         allocator,
     ))
 }

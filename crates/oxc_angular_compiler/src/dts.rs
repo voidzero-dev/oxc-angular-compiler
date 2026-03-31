@@ -578,7 +578,7 @@ fn generate_input_map_type(inputs: &[R3InputMetadata]) -> String {
 /// Generate the output map type.
 ///
 /// Produces: `{ "clicked": "clicked"; "valueChanged": "onChange"; }`
-fn generate_output_map_type(outputs: &[(oxc_span::Atom, oxc_span::Atom)]) -> String {
+fn generate_output_map_type(outputs: &[(oxc_span::Ident, oxc_span::Ident)]) -> String {
     if outputs.is_empty() {
         return "{}".to_string();
     }
@@ -762,7 +762,7 @@ mod tests {
 
     #[test]
     fn test_generate_output_map_type_empty() {
-        let outputs: Vec<(oxc_span::Atom, oxc_span::Atom)> = vec![];
+        let outputs: Vec<(oxc_span::Ident, oxc_span::Ident)> = vec![];
         assert_eq!(generate_output_map_type(&outputs), "{}");
     }
 }

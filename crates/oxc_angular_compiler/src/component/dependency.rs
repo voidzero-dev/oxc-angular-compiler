@@ -9,7 +9,7 @@
 //! Ported from: `packages/compiler/src/render3/r3_factory.ts`
 
 use oxc_allocator::{Allocator, Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::namespace_registry::NamespaceRegistry;
 use crate::output::ast::{
@@ -29,12 +29,12 @@ use crate::r3::Identifiers;
 pub struct R3DependencyMetadata<'a> {
     /// The injection token name (service class name, InjectionToken, etc.).
     /// `None` represents an invalid/unresolved dependency.
-    pub token: Option<Atom<'a>>,
+    pub token: Option<Ident<'a>>,
 
     /// The source module of the token (e.g., "@angular/core", "@angular/router").
     /// Used to generate proper namespace aliases for imported dependencies.
     /// `None` for local dependencies or when the source is unknown.
-    pub token_source_module: Option<Atom<'a>>,
+    pub token_source_module: Option<Ident<'a>>,
 
     /// Whether the token has an existing named import in the source file.
     /// If true, the token can be used with a bare name instead of namespace prefix.
@@ -47,7 +47,7 @@ pub struct R3DependencyMetadata<'a> {
 
     /// For `@Attribute()` dependencies, the attribute name.
     /// `None` for regular dependencies.
-    pub attribute_name: Option<Atom<'a>>,
+    pub attribute_name: Option<Ident<'a>>,
 
     /// Whether `@Host()` decorator is present.
     pub host: bool,
@@ -64,7 +64,7 @@ pub struct R3DependencyMetadata<'a> {
 
 impl<'a> R3DependencyMetadata<'a> {
     /// Create a new dependency metadata with default flags.
-    pub fn new(token: Atom<'a>) -> Self {
+    pub fn new(token: Ident<'a>) -> Self {
         Self {
             token: Some(token),
             token_source_module: None,
@@ -116,7 +116,7 @@ impl<'a> R3DependencyMetadata<'a> {
     }
 
     /// Create an `@Attribute()` dependency.
-    pub fn attribute(attribute_name: Atom<'a>) -> Self {
+    pub fn attribute(attribute_name: Ident<'a>) -> Self {
         Self {
             token: Some(attribute_name.clone()),
             token_source_module: None,
@@ -136,7 +136,7 @@ impl<'a> R3DependencyMetadata<'a> {
     }
 
     /// Set the source module for the token.
-    pub fn with_token_source_module(mut self, source_module: Atom<'a>) -> Self {
+    pub fn with_token_source_module(mut self, source_module: Ident<'a>) -> Self {
         self.token_source_module = Some(source_module);
         self
     }
@@ -322,7 +322,7 @@ fn compile_inject_dependency<'a>(
 fn create_token_expression<'a>(
     allocator: &'a Allocator,
     dep: &R3DependencyMetadata<'a>,
-    token_name: &Atom<'a>,
+    token_name: &Ident<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
     if let Some(ref source_module) = dep.token_source_module {
@@ -391,7 +391,7 @@ fn create_invalid_factory_dep_call<'a>(
 /// Create an `i0.ɵɵinjectAttribute(attrName)` call.
 fn create_inject_attribute_call<'a>(
     allocator: &'a Allocator,
-    attr_name: Atom<'a>,
+    attr_name: Ident<'a>,
 ) -> OutputExpression<'a> {
     let fn_expr = create_angular_fn_ref(allocator, Identifiers::INJECT_ATTRIBUTE);
 
@@ -460,12 +460,12 @@ fn create_angular_fn_ref<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(fn_name),
+            name: Ident::from(fn_name),
             optional: false,
             source_span: None,
         },
@@ -494,7 +494,7 @@ mod tests {
     #[test]
     fn test_simple_dependency() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("MyService"));
+        let dep = R3DependencyMetadata::new(Ident::from("MyService"));
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn test_optional_dependency() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("MyService")).with_optional();
+        let dep = R3DependencyMetadata::new(Ident::from("MyService")).with_optional();
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -528,7 +528,7 @@ mod tests {
     #[test]
     fn test_host_dependency() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("HostService")).with_host();
+        let dep = R3DependencyMetadata::new(Ident::from("HostService")).with_host();
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn test_combined_flags() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("Service")).with_optional().with_host();
+        let dep = R3DependencyMetadata::new(Ident::from("Service")).with_optional().with_host();
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -561,7 +561,7 @@ mod tests {
     #[test]
     fn test_injectable_uses_inject() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("Service"));
+        let dep = R3DependencyMetadata::new(Ident::from("Service"));
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result = compile_inject_dependency(
@@ -598,7 +598,7 @@ mod tests {
     #[test]
     fn test_attribute_dependency() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::attribute(Atom::from("title"));
+        let dep = R3DependencyMetadata::attribute(Ident::from("title"));
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -614,8 +614,8 @@ mod tests {
     #[test]
     fn test_imported_dependency_with_namespace() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("AuthService"))
-            .with_token_source_module(Atom::from("@app/auth"));
+        let dep = R3DependencyMetadata::new(Ident::from("AuthService"))
+            .with_token_source_module(Ident::from("@app/auth"));
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =
@@ -632,10 +632,10 @@ mod tests {
     #[test]
     fn test_multiple_imported_dependencies_same_module() {
         let allocator = Allocator::default();
-        let dep1 = R3DependencyMetadata::new(Atom::from("AuthService"))
-            .with_token_source_module(Atom::from("@app/auth"));
-        let dep2 = R3DependencyMetadata::new(Atom::from("UserService"))
-            .with_token_source_module(Atom::from("@app/auth"));
+        let dep1 = R3DependencyMetadata::new(Ident::from("AuthService"))
+            .with_token_source_module(Ident::from("@app/auth"));
+        let dep2 = R3DependencyMetadata::new(Ident::from("UserService"))
+            .with_token_source_module(Ident::from("@app/auth"));
         let deps = vec![dep1, dep2];
         let mut registry = NamespaceRegistry::new(&allocator);
 
@@ -654,10 +654,10 @@ mod tests {
     #[test]
     fn test_multiple_imported_dependencies_different_modules() {
         let allocator = Allocator::default();
-        let dep1 = R3DependencyMetadata::new(Atom::from("AuthService"))
-            .with_token_source_module(Atom::from("@app/auth"));
-        let dep2 = R3DependencyMetadata::new(Atom::from("HttpService"))
-            .with_token_source_module(Atom::from("@app/http"));
+        let dep1 = R3DependencyMetadata::new(Ident::from("AuthService"))
+            .with_token_source_module(Ident::from("@app/auth"));
+        let dep2 = R3DependencyMetadata::new(Ident::from("HttpService"))
+            .with_token_source_module(Ident::from("@app/http"));
         let deps = vec![dep1, dep2];
         let mut registry = NamespaceRegistry::new(&allocator);
 
@@ -676,8 +676,8 @@ mod tests {
     #[test]
     fn test_angular_core_dependency() {
         let allocator = Allocator::default();
-        let dep = R3DependencyMetadata::new(Atom::from("ChangeDetectorRef"))
-            .with_token_source_module(Atom::from("@angular/core"));
+        let dep = R3DependencyMetadata::new(Ident::from("ChangeDetectorRef"))
+            .with_token_source_module(Ident::from("@angular/core"));
         let mut registry = NamespaceRegistry::new(&allocator);
 
         let result =

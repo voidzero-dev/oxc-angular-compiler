@@ -41,7 +41,7 @@ use oxc_ast::ast::{
     Program, Statement, TSType,
 };
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashSet;
 
 use crate::optimizer::Edit;
@@ -55,7 +55,7 @@ const PARAM_DECORATORS: &[&str] = &["Inject", "Optional", "Self", "SkipSelf", "H
 /// Analyzer for determining which imports are type-only and can be elided.
 pub struct ImportElisionAnalyzer<'a> {
     /// Set of import specifier local names that should be removed (type-only).
-    type_only_specifiers: FxHashSet<Atom<'a>>,
+    type_only_specifiers: FxHashSet<Ident<'a>>,
 }
 
 impl<'a> ImportElisionAnalyzer<'a> {
@@ -98,7 +98,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                             continue;
                         }
 
-                        let name: Atom<'a> = spec.local.name.clone().into();
+                        let name: Ident<'a> = spec.local.name.clone().into();
 
                         // Check if this import has only type references
                         if Self::is_type_only_import(&spec.local, semantic) {
@@ -110,7 +110,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         }
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                        let name: Atom<'a> = spec.local.name.clone().into();
+                        let name: Ident<'a> = spec.local.name.clone().into();
 
                         if Self::is_type_only_import(&spec.local, semantic) {
                             type_only_specifiers.insert(name.clone());
@@ -145,7 +145,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Computed property keys like `[fromEmail]` in type literals reference runtime values,
     /// even when they appear in type contexts. TypeScript considers these as value references
     /// and preserves their imports.
-    fn collect_computed_property_key_idents(program: &'a Program<'a>) -> FxHashSet<Atom<'a>> {
+    fn collect_computed_property_key_idents(program: &'a Program<'a>) -> FxHashSet<Ident<'a>> {
         let mut result = FxHashSet::default();
 
         for stmt in &program.body {
@@ -158,7 +158,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Walk a statement collecting computed property key identifiers from type annotations.
     fn collect_computed_keys_from_statement(
         stmt: &'a Statement<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match stmt {
             Statement::ClassDeclaration(class) => {
@@ -185,7 +185,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Walk class members collecting computed property key identifiers from type annotations.
     fn collect_computed_keys_from_class(
         class: &'a oxc_ast::ast::Class<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         for element in &class.body.body {
             if let ClassElement::PropertyDefinition(prop) = element {
@@ -200,7 +200,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Recursively walk a TypeScript type collecting computed property key identifiers.
     fn collect_computed_keys_from_ts_type(
         ts_type: &'a TSType<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match ts_type {
             TSType::TSTypeLiteral(type_lit) => {
@@ -256,7 +256,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Collect identifier names from an expression (for computed property keys).
     fn collect_idents_from_expr(
         expr: &'a oxc_ast::ast::PropertyKey<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match expr {
             oxc_ast::ast::PropertyKey::StaticIdentifier(_) => {
@@ -272,7 +272,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     }
 
     /// Collect identifier names from an expression.
-    fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Atom<'a>>) {
+    fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Ident<'a>>) {
         match expr {
             Expression::Identifier(id) => {
                 result.insert(id.name.clone().into());
@@ -641,11 +641,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
 
     /// Check if a specifier name should be elided (removed).
     pub fn should_elide(&self, name: &str) -> bool {
-        self.type_only_specifiers.contains(name)
+        self.type_only_specifiers.contains(&Ident::from(name))
     }
 
     /// Get the set of type-only specifier names.
-    pub fn type_only_specifiers(&self) -> &FxHashSet<Atom<'a>> {
+    pub fn type_only_specifiers(&self) -> &FxHashSet<Ident<'a>> {
         &self.type_only_specifiers
     }
 

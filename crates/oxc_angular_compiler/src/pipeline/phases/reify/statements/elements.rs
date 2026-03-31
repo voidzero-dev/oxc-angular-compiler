@@ -1,7 +1,7 @@
 //! Element, container, template, and text statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::{
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
@@ -16,7 +16,7 @@ use super::super::utils::create_instruction_call_stmt;
 /// If localRefIndex is present, constIndex must also be present (even if null).
 pub fn create_element_args<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    tag: &Atom<'a>,
+    tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
@@ -64,7 +64,7 @@ pub fn create_element_args<'a>(
 /// Creates an ɵɵelementStart() call statement.
 pub fn create_element_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    tag: &Atom<'a>,
+    tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
@@ -76,7 +76,7 @@ pub fn create_element_start_stmt<'a>(
 /// Creates an ɵɵelement() call statement.
 pub fn create_element_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    tag: &Atom<'a>,
+    tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
@@ -100,7 +100,7 @@ pub fn create_element_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> O
 /// This is an optimized version that skips directive matching at runtime.
 pub fn create_dom_element_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    tag: &Atom<'a>,
+    tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
@@ -115,7 +115,7 @@ pub fn create_dom_element_start_stmt<'a>(
 /// This is an optimized version that skips directive matching at runtime.
 pub fn create_dom_element_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    tag: &Atom<'a>,
+    tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
@@ -175,10 +175,10 @@ pub fn create_text_stmt<'a>(
 pub fn create_template_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
     vars: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
@@ -202,10 +202,10 @@ pub fn create_template_stmt<'a>(
 fn create_template_args<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
     vars: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OxcVec<'a, OutputExpression<'a>> {
@@ -225,7 +225,7 @@ fn create_template_args<'a>(
         )));
     } else {
         let placeholder_str = allocator.alloc_str(&format!("_r{slot}"));
-        let placeholder = Atom::from(placeholder_str);
+        let placeholder = Ident::from(placeholder_str);
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: placeholder, source_span: None },
             allocator,
@@ -283,12 +283,12 @@ fn create_template_args<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
+                name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
@@ -326,10 +326,10 @@ fn create_template_args<'a>(
 pub fn create_dom_template_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
     vars: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {

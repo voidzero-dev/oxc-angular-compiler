@@ -292,21 +292,21 @@ fn create_pure_function_for_ir_array<'a>(
 
 /// Create a PureFunctionExpr for a literal map with IR expression values.
 fn create_pure_function_for_ir_map<'a>(
-    keys: &oxc_allocator::Vec<'a, oxc_span::Atom<'a>>,
+    keys: &oxc_allocator::Vec<'a, oxc_span::Ident<'a>>,
     values: &oxc_allocator::Vec<'a, IrExpression<'a>>,
     quoted: &oxc_allocator::Vec<'a, bool>,
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) -> Option<PureFunctionExpr<'a>> {
     let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_keys: AllocVec<'a, oxc_span::Atom<'a>> = AllocVec::new_in(allocator);
+    let mut body_keys: AllocVec<'a, oxc_span::Ident<'a>> = AllocVec::new_in(allocator);
     let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
     let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(allocator);
     let mut param_index: u32 = 0;
 
     for (i, value) in values.iter().enumerate() {
         // Get key and quoted from the arrays
-        let key = keys.get(i).cloned().unwrap_or_else(|| oxc_span::Atom::from(""));
+        let key = keys.get(i).cloned().unwrap_or_else(|| oxc_span::Ident::from(""));
         let is_quoted = quoted.get(i).copied().unwrap_or(false);
         body_keys.push(key);
         body_quoted.push(is_quoted);
@@ -399,7 +399,7 @@ fn create_pure_function_for_map<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> Option<PureFunctionExpr<'a>> {
     let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_keys: AllocVec<'a, oxc_span::Atom<'a>> = AllocVec::new_in(allocator);
+    let mut body_keys: AllocVec<'a, oxc_span::Ident<'a>> = AllocVec::new_in(allocator);
     let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
     let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(allocator);
     let mut param_index: u32 = 0;
@@ -417,7 +417,7 @@ fn create_pure_function_for_map<'a>(
                     None // Skip spread keys
                 }
             })
-            .unwrap_or_else(|| (oxc_span::Atom::from(""), false));
+            .unwrap_or_else(|| (oxc_span::Ident::from(""), false));
         body_keys.push(key);
         body_quoted.push(quoted);
 

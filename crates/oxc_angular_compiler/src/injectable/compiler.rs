@@ -12,7 +12,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::{InjectableProvider, ProvidedIn, R3InjectableMetadata};
 use crate::factory::{
@@ -205,12 +205,12 @@ fn create_inject_call<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::RESOLVE_FORWARD_REF),
+                name: Ident::from(Identifiers::RESOLVE_FORWARD_REF),
                 optional: false,
                 source_span: None,
             },
@@ -239,12 +239,12 @@ fn create_inject_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::INJECT),
+            name: Ident::from(Identifiers::INJECT),
             optional: false,
             source_span: None,
         },
@@ -274,7 +274,7 @@ fn create_factory_delegation<'a>(
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(type_expr.clone_in(allocator), allocator),
-            name: Atom::from("ɵfac"),
+            name: Ident::from("ɵfac"),
             optional: false,
             source_span: None,
         },
@@ -287,7 +287,7 @@ fn create_forward_ref_factory<'a>(
     allocator: &'a Allocator,
     type_expr: &OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let param_name = Atom::from("t");
+    let param_name = Ident::from("t");
     let mut params = Vec::new_in(allocator);
     params.push(FnParam { name: param_name.clone() });
 
@@ -296,12 +296,12 @@ fn create_forward_ref_factory<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::RESOLVE_FORWARD_REF),
+            name: Ident::from(Identifiers::RESOLVE_FORWARD_REF),
             optional: false,
             source_span: None,
         },
@@ -326,7 +326,7 @@ fn create_forward_ref_factory<'a>(
     let fac_access = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(resolved_type, allocator),
-            name: Atom::from("ɵfac"),
+            name: Ident::from("ɵfac"),
             optional: false,
             source_span: None,
         },
@@ -405,14 +405,14 @@ fn build_definition_map<'a>(
 
     // token: MyService
     entries.push(LiteralMapEntry {
-        key: Atom::from("token"),
+        key: Ident::from("token"),
         value: metadata.r#type.clone_in(allocator),
         quoted: false,
     });
 
     // factory: <factory_function>
     entries.push(LiteralMapEntry {
-        key: Atom::from("factory"),
+        key: Ident::from("factory"),
         value: factory_expr,
         quoted: false,
     });
@@ -421,10 +421,10 @@ fn build_definition_map<'a>(
     match &metadata.provided_in {
         ProvidedIn::Root => {
             entries.push(LiteralMapEntry {
-                key: Atom::from("providedIn"),
+                key: Ident::from("providedIn"),
                 value: OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from("root")),
+                        value: LiteralValue::String(Ident::from("root")),
                         source_span: None,
                     },
                     allocator,
@@ -434,10 +434,10 @@ fn build_definition_map<'a>(
         }
         ProvidedIn::Platform => {
             entries.push(LiteralMapEntry {
-                key: Atom::from("providedIn"),
+                key: Ident::from("providedIn"),
                 value: OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from("platform")),
+                        value: LiteralValue::String(Ident::from("platform")),
                         source_span: None,
                     },
                     allocator,
@@ -447,10 +447,10 @@ fn build_definition_map<'a>(
         }
         ProvidedIn::Any => {
             entries.push(LiteralMapEntry {
-                key: Atom::from("providedIn"),
+                key: Ident::from("providedIn"),
                 value: OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from("any")),
+                        value: LiteralValue::String(Ident::from("any")),
                         source_span: None,
                     },
                     allocator,
@@ -460,7 +460,7 @@ fn build_definition_map<'a>(
         }
         ProvidedIn::Module(module_expr) => {
             entries.push(LiteralMapEntry {
-                key: Atom::from("providedIn"),
+                key: Ident::from("providedIn"),
                 value: module_expr.clone_in(allocator),
                 quoted: false,
             });
@@ -483,12 +483,12 @@ fn create_define_injectable_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_INJECTABLE),
+            name: Ident::from(Identifiers::DEFINE_INJECTABLE),
             optional: false,
             source_span: None,
         },
@@ -527,12 +527,12 @@ mod tests {
     fn test_compile_simple_injectable() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyService"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("MyService"))
+            .name(Ident::from("MyService"))
             .r#type(type_expr)
             .provided_in_root()
             .build()
@@ -552,19 +552,19 @@ mod tests {
     fn test_compile_injectable_with_use_value() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("CONFIG_TOKEN"), source_span: None },
+            ReadVarExpr { name: Ident::from("CONFIG_TOKEN"), source_span: None },
             &allocator,
         ));
         let value_expr = OutputExpression::Literal(Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Atom::from("config_value")),
+                value: LiteralValue::String(Ident::from("config_value")),
                 source_span: None,
             },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("CONFIG_TOKEN"))
+            .name(Ident::from("CONFIG_TOKEN"))
             .r#type(type_expr)
             .use_value(value_expr)
             .provided_in_root()
@@ -584,16 +584,16 @@ mod tests {
     fn test_compile_injectable_with_use_existing() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("AliasService"), source_span: None },
+            ReadVarExpr { name: Ident::from("AliasService"), source_span: None },
             &allocator,
         ));
         let existing_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("RealService"), source_span: None },
+            ReadVarExpr { name: Ident::from("RealService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("AliasService"))
+            .name(Ident::from("AliasService"))
             .r#type(type_expr)
             .use_existing(existing_expr, false)
             .provided_in_root()
@@ -612,12 +612,12 @@ mod tests {
     fn test_compile_injectable_no_provided_in() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("LocalService"), source_span: None },
+            ReadVarExpr { name: Ident::from("LocalService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("LocalService"))
+            .name(Ident::from("LocalService"))
             .r#type(type_expr)
             .build()
             .unwrap();
@@ -648,11 +648,11 @@ mod tests {
 
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("CipherService"), source_span: None },
+            ReadVarExpr { name: Ident::from("CipherService"), source_span: None },
             &allocator,
         ));
         let factory_fn = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("cipherServiceFactory"), source_span: None },
+            ReadVarExpr { name: Ident::from("cipherServiceFactory"), source_span: None },
             &allocator,
         ));
 
@@ -660,7 +660,7 @@ mod tests {
         let mut deps = Vec::new_in(&allocator);
         deps.push(R3DependencyMetadata {
             token: Some(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("LogService"), source_span: None },
+                ReadVarExpr { name: Ident::from("LogService"), source_span: None },
                 &allocator,
             ))),
             attribute_name_type: None,
@@ -671,7 +671,7 @@ mod tests {
         });
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("CipherService"))
+            .name(Ident::from("CipherService"))
             .r#type(type_expr)
             .use_factory(factory_fn, Some(deps))
             .provided_in_root()
@@ -705,11 +705,11 @@ mod tests {
 
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("BaseService"), source_span: None },
+            ReadVarExpr { name: Ident::from("BaseService"), source_span: None },
             &allocator,
         ));
         let class_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ConcreteService"), source_span: None },
+            ReadVarExpr { name: Ident::from("ConcreteService"), source_span: None },
             &allocator,
         ));
 
@@ -717,7 +717,7 @@ mod tests {
         let mut deps = Vec::new_in(&allocator);
         deps.push(R3DependencyMetadata {
             token: Some(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("DepService"), source_span: None },
+                ReadVarExpr { name: Ident::from("DepService"), source_span: None },
                 &allocator,
             ))),
             attribute_name_type: None,
@@ -728,7 +728,7 @@ mod tests {
         });
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("BaseService"))
+            .name(Ident::from("BaseService"))
             .r#type(type_expr)
             .use_class(class_expr, false, Some(deps))
             .provided_in_root()

@@ -26,7 +26,7 @@ use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
 /// Info about an op that needs local refs serialized.
 struct LocalRefInfo<'a> {
     op_kind: LocalRefOpKind,
-    refs: std::vec::Vec<(oxc_span::Atom<'a>, oxc_span::Atom<'a>)>,
+    refs: std::vec::Vec<(oxc_span::Ident<'a>, oxc_span::Ident<'a>)>,
 }
 
 #[derive(Clone, Copy)]
@@ -171,7 +171,7 @@ pub fn lift_local_refs(job: &mut ComponentCompilationJob<'_>) {
 /// not extracted to a top-level const declaration.
 fn serialize_local_refs_to_const_value<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    refs: &[(oxc_span::Atom<'a>, oxc_span::Atom<'a>)],
+    refs: &[(oxc_span::Ident<'a>, oxc_span::Ident<'a>)],
 ) -> ConstValue<'a> {
     let mut entries = OxcVec::with_capacity_in(refs.len() * 2, allocator);
 

@@ -6,7 +6,7 @@
 //! Ported from Angular's `template/pipeline/ir/src/expression.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 use super::enums::ExpressionKind;
 use super::ops::{SlotId, XrefId};
@@ -793,7 +793,7 @@ pub struct IrParenthesizedExpr<'a> {
 #[derive(Debug)]
 pub struct LexicalReadExpr<'a> {
     /// Variable name to read.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -884,7 +884,7 @@ pub struct ReadVariableExpr<'a> {
     /// Variable XrefId.
     pub xref: XrefId,
     /// Resolved variable name.
-    pub name: Option<Atom<'a>>,
+    pub name: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -899,7 +899,7 @@ pub struct ResolvedPropertyReadExpr<'a> {
     /// The resolved receiver expression (e.g., ReadVariable for a loop variable).
     pub receiver: Box<'a, IrExpression<'a>>,
     /// Property name to read.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -961,7 +961,7 @@ pub struct ResolvedSafePropertyReadExpr<'a> {
     /// The resolved receiver expression (e.g., ReadVariable for a loop variable).
     pub receiver: Box<'a, IrExpression<'a>>,
     /// Property name to read.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -985,7 +985,7 @@ pub struct ResolvedTemplateLiteralExpr<'a> {
 #[derive(Debug, Clone)]
 pub struct IrTemplateLiteralElement<'a> {
     /// The text content.
-    pub text: Atom<'a>,
+    pub text: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1007,7 +1007,7 @@ pub struct DerivedLiteralArrayExpr<'a> {
 #[derive(Debug)]
 pub struct DerivedLiteralMapExpr<'a> {
     /// Map keys (string keys from the original literal map).
-    pub keys: Vec<'a, Atom<'a>>,
+    pub keys: Vec<'a, Ident<'a>>,
     /// Map values - can be Ast (constants) or PureFunctionParameter (refs).
     pub values: Vec<'a, IrExpression<'a>>,
     /// Whether each key is quoted.
@@ -1031,7 +1031,7 @@ pub struct IrLiteralArrayExpr<'a> {
 #[derive(Debug)]
 pub struct IrLiteralMapExpr<'a> {
     /// Map keys (string keys from the original literal map).
-    pub keys: Vec<'a, Atom<'a>>,
+    pub keys: Vec<'a, Ident<'a>>,
     /// Map values as IR expressions.
     pub values: Vec<'a, IrExpression<'a>>,
     /// Whether each key is quoted.
@@ -1072,7 +1072,7 @@ pub struct PipeBindingExpr<'a> {
     /// Target slot.
     pub target_slot: SlotHandle,
     /// Pipe name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Pipe arguments.
     pub args: Vec<'a, IrExpression<'a>>,
     /// Variable offset.
@@ -1089,7 +1089,7 @@ pub struct PipeBindingVariadicExpr<'a> {
     /// Target slot.
     pub target_slot: SlotHandle,
     /// Pipe name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Arguments as an array expression.
     pub args: Box<'a, IrExpression<'a>>,
     /// Number of arguments.
@@ -1106,7 +1106,7 @@ pub struct SafePropertyReadExpr<'a> {
     /// Receiver expression.
     pub receiver: Box<'a, IrExpression<'a>>,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1159,7 +1159,7 @@ pub struct AssignTemporaryExpr<'a> {
     /// Temporary variable XrefId.
     pub xref: XrefId,
     /// Resolved variable name.
-    pub name: Option<Atom<'a>>,
+    pub name: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1170,7 +1170,7 @@ pub struct ReadTemporaryExpr<'a> {
     /// Temporary variable XrefId.
     pub xref: XrefId,
     /// Resolved variable name.
-    pub name: Option<Atom<'a>>,
+    pub name: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1197,7 +1197,7 @@ pub struct ConditionalCaseExpr<'a> {
     /// Target slot.
     pub target_slot: SlotHandle,
     /// Alias variable name.
-    pub alias: Option<Atom<'a>>,
+    pub alias: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1261,13 +1261,13 @@ pub struct StoreLetExpr<'a> {
 #[derive(Debug)]
 pub struct Interpolation<'a> {
     /// Static string parts.
-    pub strings: Vec<'a, Atom<'a>>,
+    pub strings: Vec<'a, Ident<'a>>,
     /// Dynamic expression parts.
     pub expressions: Vec<'a, IrExpression<'a>>,
     /// I18n placeholder names for each expression.
     /// Used by convert_i18n_bindings phase to create I18nExpression ops.
     /// Empty if not in an i18n context.
-    pub i18n_placeholders: Vec<'a, Atom<'a>>,
+    pub i18n_placeholders: Vec<'a, Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1279,7 +1279,7 @@ impl<'a> Interpolation<'a> {
     }
 
     /// Returns the constant string value if this is a pure interpolation.
-    pub fn const_value(&self) -> Option<&Atom<'a>> {
+    pub fn const_value(&self) -> Option<&Ident<'a>> {
         if self.is_const_string() && self.strings.len() == 1 {
             Some(&self.strings[0])
         } else {

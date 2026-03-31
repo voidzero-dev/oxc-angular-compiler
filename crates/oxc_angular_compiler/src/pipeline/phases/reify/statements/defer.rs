@@ -1,7 +1,7 @@
 //! @defer block statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ir::enums::{DeferOpModifierKind, DeferTriggerKind};
 use crate::output::ast::{
@@ -141,12 +141,12 @@ pub fn create_defer_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::DEFER_ENABLE_TIMER_SCHEDULING),
+                name: Ident::from(Identifiers::DEFER_ENABLE_TIMER_SCHEDULING),
                 optional: false,
                 source_span: None,
             },

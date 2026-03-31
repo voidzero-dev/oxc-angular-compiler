@@ -11,7 +11,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/naming.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{BindingKind, SemanticVariableKind};
@@ -65,7 +65,7 @@ enum SemanticVariableKey<'a> {
     /// SavedView variable for a specific view.
     SavedView { view: XrefId },
     /// Alias variable with a specific identifier.
-    Alias { identifier: Atom<'a> },
+    Alias { identifier: Ident<'a> },
     /// Reference variable (template ref like #defaultContent).
     /// Multiple child views accessing the same template ref share this key.
     /// Identified by the target element and offset.
@@ -86,7 +86,7 @@ enum SemanticVariableKey<'a> {
         /// The view whose context is being read (the parent view with context variables).
         view: XrefId,
         /// The identifier name for the variable (e.g., "breadcrumb").
-        identifier: Atom<'a>,
+        identifier: Ident<'a>,
     },
 }
 
@@ -104,7 +104,7 @@ enum SemanticVariableKey<'a> {
 /// We detect references by checking if the initializer is an `IrExpression::Reference`.
 fn make_semantic_key<'a>(
     kind: SemanticVariableKind,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     view: Option<XrefId>,
     initializer: &IrExpression<'a>,
 ) -> Option<SemanticVariableKey<'a>> {
@@ -257,13 +257,13 @@ pub fn name_functions_and_variables(job: &mut ComponentCompilationJob<'_>) {
     let sanitized_base = sanitize_identifier(component_name);
 
     // Map from xref to generated variable name
-    let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+    let mut var_names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
     // Map from semantic key to generated variable name.
     // This enables name reuse for variables with the same semantic identity,
     // matching TypeScript's behavior where multiple Variable ops can share
     // the same SemanticVariable object.
-    let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> = FxHashMap::default();
+    let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> = FxHashMap::default();
 
     // Recursively name views starting from root
     // TypeScript: addNamesToView(job.root, job.componentName, state, compatibility)
@@ -302,8 +302,8 @@ fn add_names_to_root_view<'a>(
     base_name: &str,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     // Name the root view
     // TypeScript: unit.fnName = unit.job.pool.uniqueName(sanitizeIdentifier(`${baseName}_${unit.job.fnSuffix}`), false)
@@ -335,8 +335,8 @@ fn add_names_to_child_view<'a>(
     base_name: &str,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     // Name this view
     // TypeScript: unit.fnName = unit.job.pool.uniqueName(sanitizeIdentifier(`${baseName}_${unit.job.fnSuffix}`), false)
@@ -386,10 +386,10 @@ fn process_view_ops_depth_first<'a>(
     view_xref: Option<XrefId>, // None for root view
     base_name: &str,
     allocator: &'a oxc_allocator::Allocator,
-    fn_name: Option<&Atom<'a>>,
+    fn_name: Option<&Ident<'a>>,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     // Phase 0: Process function ops FIRST (matches TypeScript ops() generator order)
     // Arrow functions have their own ops lists that contain Variable ops prepended
@@ -550,10 +550,10 @@ fn process_create_ops_with_child_recursion<'a>(
     view_xref: Option<XrefId>,
     allocator: &'a oxc_allocator::Allocator,
     base_name: &str,
-    fn_name: Option<&Atom<'a>>,
+    fn_name: Option<&Ident<'a>>,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
     child_views: &[ChildViewInfo],
 ) {
     // Group child views by their create op index for efficient lookup
@@ -679,8 +679,8 @@ fn name_create_variable_op<'a>(
     var_op: &mut crate::ir::ops::VariableOp<'a>,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     // Check if we need to assign a name
     let needs_naming =
@@ -726,8 +726,8 @@ fn name_variable_op<'a>(
     var_op: &mut crate::ir::ops::UpdateVariableOp<'a>,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     // Check if we need to assign a name
     let needs_naming =
@@ -770,10 +770,10 @@ fn process_single_create_op_ref<'a>(
     op: &mut CreateOp<'a>,
     allocator: &'a oxc_allocator::Allocator,
     base_name: &str,
-    fn_name: Option<&Atom<'a>>,
+    fn_name: Option<&Ident<'a>>,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     match op {
         CreateOp::Listener(listener) => {
@@ -805,7 +805,7 @@ fn process_single_create_op_ref<'a>(
                         .unwrap_or("start");
                     let new_name = format!("@{}.{}", listener.name.as_str(), phase_str);
                     let name_str = allocator.alloc_str(&new_name);
-                    listener.name = Atom::from(name_str);
+                    listener.name = Ident::from(name_str);
                     // Note: no trailing underscore - the @ in event_name will become _ after sanitize
                     (new_name, "animation")
                 } else {
@@ -825,7 +825,7 @@ fn process_single_create_op_ref<'a>(
 
                 let sanitized = sanitize_identifier(&handler_name);
                 let name_str = allocator.alloc_str(&sanitized);
-                listener.handler_fn_name = Some(Atom::from(name_str));
+                listener.handler_fn_name = Some(Ident::from(name_str));
             }
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
@@ -844,7 +844,7 @@ fn process_single_create_op_ref<'a>(
                 let handler_name = format!("{fn_name_str}_{tag}_{event_name}_{slot}_listener");
                 let sanitized = sanitize_identifier(&handler_name);
                 let name_str = allocator.alloc_str(&sanitized);
-                listener.handler_fn_name = Some(Atom::from(name_str));
+                listener.handler_fn_name = Some(Ident::from(name_str));
             }
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
@@ -872,7 +872,7 @@ fn process_single_create_op_ref<'a>(
 
                 let sanitized = sanitize_identifier(&handler_name);
                 let name_str = allocator.alloc_str(&sanitized);
-                listener.handler_fn_name = Some(Atom::from(name_str));
+                listener.handler_fn_name = Some(Ident::from(name_str));
             }
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
@@ -892,7 +892,7 @@ fn process_single_create_op_ref<'a>(
                 let handler_name = format!("{fn_name_str}_{animation_kind}_cb");
                 let sanitized = sanitize_identifier(&handler_name);
                 let name_str = allocator.alloc_str(&sanitized);
-                animation.handler_fn_name = Some(Atom::from(name_str));
+                animation.handler_fn_name = Some(Ident::from(name_str));
             }
             // Process handler ops inline
             for handler_op in animation.handler_ops.iter_mut() {
@@ -942,7 +942,7 @@ fn process_function_ops_in_view<'a>(
     view_xref: Option<XrefId>,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
 ) {
     let functions = match view_xref {
         None => &job.root.functions,
@@ -967,7 +967,7 @@ fn process_function_ops_in_view<'a>(
 
         // Each arrow function gets its own semantic variable map to prevent
         // deduplication with other scopes (listeners, update, other arrow functions).
-        let mut arrow_fn_semantic_var_names: FxHashMap<SemanticVariableKey<'a>, Atom<'a>> =
+        let mut arrow_fn_semantic_var_names: FxHashMap<SemanticVariableKey<'a>, Ident<'a>> =
             FxHashMap::default();
 
         // Process Variable ops in this arrow function
@@ -991,8 +991,8 @@ fn process_update_ops_in_view<'a>(
     view_xref: Option<XrefId>,
     allocator: &'a oxc_allocator::Allocator,
     state: &mut NamingState,
-    var_names: &mut FxHashMap<XrefId, Atom<'a>>,
-    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Atom<'a>>,
+    var_names: &mut FxHashMap<XrefId, Ident<'a>>,
+    semantic_var_names: &mut FxHashMap<SemanticVariableKey<'a>, Ident<'a>>,
 ) {
     let update_ops = match view_xref {
         None => &mut job.root.update,
@@ -1014,25 +1014,25 @@ fn process_update_ops_in_view<'a>(
                 if prop.binding_kind == BindingKind::LegacyAnimation && !prop.name.starts_with('@')
                 {
                     let prefixed = format!("@{}", prop.name.as_str());
-                    prop.name = Atom::from(allocator.alloc_str(&prefixed));
+                    prop.name = Ident::from(allocator.alloc_str(&prefixed));
                 }
             }
             UpdateOp::DomProperty(prop) => {
                 if prop.binding_kind == BindingKind::LegacyAnimation && !prop.name.starts_with('@')
                 {
                     let prefixed = format!("@{}", prop.name.as_str());
-                    prop.name = Atom::from(allocator.alloc_str(&prefixed));
+                    prop.name = Ident::from(allocator.alloc_str(&prefixed));
                 }
             }
             UpdateOp::StyleProp(style) => {
                 if !style.name.starts_with("--") {
                     let hyphenated = hyphenate(style.name.as_str());
-                    style.name = Atom::from(allocator.alloc_str(&hyphenated));
+                    style.name = Ident::from(allocator.alloc_str(&hyphenated));
                 }
                 if style.name.contains("!important") {
                     let stripped = style.name.as_str().replace("!important", "");
                     let stripped = stripped.trim_end();
-                    style.name = Atom::from(allocator.alloc_str(stripped));
+                    style.name = Ident::from(allocator.alloc_str(stripped));
                 }
             }
             UpdateOp::Variable(var_op) => {
@@ -1053,9 +1053,9 @@ fn process_update_ops_in_view<'a>(
 fn get_variable_name<'a>(
     allocator: &'a oxc_allocator::Allocator,
     kind: SemanticVariableKind,
-    identifier: Option<&Atom<'a>>,
+    identifier: Option<&Ident<'a>>,
     state: &mut NamingState,
-) -> Atom<'a> {
+) -> Ident<'a> {
     let name = match kind {
         SemanticVariableKind::Context => {
             // Context uses post-increment (starts at 0)
@@ -1088,14 +1088,14 @@ fn get_variable_name<'a>(
     };
 
     let name_str = allocator.alloc_str(&name);
-    Atom::from(name_str)
+    Ident::from(name_str)
 }
 
 /// Propagates variable names to ReadVariableExpr expressions in a view.
 fn propagate_variable_names_in_view<'a>(
     create_ops: &mut crate::ir::list::CreateOpList<'a>,
     update_ops: &mut crate::ir::list::UpdateOpList<'a>,
-    var_names: &FxHashMap<XrefId, Atom<'a>>,
+    var_names: &FxHashMap<XrefId, Ident<'a>>,
 ) {
     // Process create operations
     for op in create_ops.iter_mut() {
@@ -1123,7 +1123,7 @@ fn propagate_variable_names_in_view<'a>(
 /// Propagates a variable name to a ReadVariableExpr expression.
 fn propagate_name_to_expression<'a>(
     expr: &mut IrExpression<'a>,
-    var_names: &FxHashMap<XrefId, Atom<'a>>,
+    var_names: &FxHashMap<XrefId, Ident<'a>>,
 ) {
     if let IrExpression::ReadVariable(read_var) = expr {
         // Only set name if it's currently None
@@ -1148,7 +1148,7 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
 
     // Generate the function name for the host binding function
     let fn_name = format!("{}_{}", component_name, job.fn_suffix);
-    job.root.fn_name = Some(oxc_span::Atom::from(allocator.alloc_str(&fn_name)));
+    job.root.fn_name = Some(oxc_span::Ident::from(allocator.alloc_str(&fn_name)));
 
     // Name listener handlers in create ops
     // Host listeners need names like: ComponentName_click_HostBindingHandler
@@ -1162,7 +1162,7 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
                     let handler_name = format!("{sanitized_base}_{event_name}_HostBindingHandler");
                     let sanitized = sanitize_identifier(&handler_name);
                     let name_str = allocator.alloc_str(&sanitized);
-                    listener.handler_fn_name = Some(Atom::from(name_str));
+                    listener.handler_fn_name = Some(Ident::from(name_str));
                 }
             }
             CreateOp::AnimationListener(listener) => {
@@ -1172,7 +1172,7 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
                         format!("{sanitized_base}_{animation_kind}_HostBindingHandler");
                     let sanitized = sanitize_identifier(&handler_name);
                     let name_str = allocator.alloc_str(&sanitized);
-                    listener.handler_fn_name = Some(Atom::from(name_str));
+                    listener.handler_fn_name = Some(Ident::from(name_str));
                 }
             }
             _ => {}
@@ -1187,7 +1187,7 @@ mod tests {
     use crate::ir::expression::{IrExpression, NextContextExpr};
     use crate::ir::ops::{UpdateVariableOp, XrefId};
     use oxc_allocator::{Allocator, Box as AllocBox};
-    use oxc_span::Atom;
+    use oxc_span::Ident;
 
     /// Helper: create an `UpdateVariableOp` representing a NextContext-based
     /// context variable for the given `view_xref`.  The variable starts with
@@ -1201,7 +1201,7 @@ mod tests {
             base: Default::default(),
             xref,
             kind: SemanticVariableKind::Context,
-            name: Atom::from(""),
+            name: Ident::from(""),
             initializer: AllocBox::new_in(
                 IrExpression::NextContext(AllocBox::new_in(
                     NextContextExpr { steps: 1, source_span: None },
@@ -1225,8 +1225,8 @@ mod tests {
     fn test_shared_semantic_map_deduplicates_context_variables() {
         let allocator = Allocator::default();
         let mut state = NamingState { index: 0 };
-        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
-        let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut var_names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
+        let mut semantic_var_names: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
 
         let parent_view = XrefId(100);
@@ -1280,12 +1280,12 @@ mod tests {
     fn test_arrow_function_gets_independent_context_variable_name() {
         let allocator = Allocator::default();
         let mut state = NamingState { index: 0 };
-        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+        let mut var_names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
         let parent_view = XrefId(100);
 
         // --- Simulate the update scope naming a Context variable ---
-        let mut update_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut update_semantic: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
         let mut update_ctx_var = make_context_var_op(&allocator, XrefId(1), parent_view);
         name_variable_op(
@@ -1303,7 +1303,7 @@ mod tests {
         assert_eq!(state.index, 1);
 
         // --- Simulate an arrow function with its OWN semantic map (the fix) ---
-        let mut arrow_fn_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut arrow_fn_semantic: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
         let mut arrow_ctx_var = make_context_var_op(&allocator, XrefId(2), parent_view);
         name_variable_op(
@@ -1335,12 +1335,12 @@ mod tests {
     fn test_multiple_arrow_functions_get_independent_names() {
         let allocator = Allocator::default();
         let mut state = NamingState { index: 0 };
-        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+        let mut var_names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
         let parent_view = XrefId(100);
 
         // Arrow function 1: own semantic map.
-        let mut arrow1_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut arrow1_semantic: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
         let mut arrow1_ctx = make_context_var_op(&allocator, XrefId(1), parent_view);
         name_variable_op(
@@ -1353,7 +1353,7 @@ mod tests {
         assert_eq!(arrow1_ctx.name.as_str(), "ctx_r0");
 
         // Arrow function 2: own semantic map.
-        let mut arrow2_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut arrow2_semantic: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
         let mut arrow2_ctx = make_context_var_op(&allocator, XrefId(2), parent_view);
         name_variable_op(
@@ -1383,10 +1383,10 @@ mod tests {
     fn test_shared_map_causes_incorrect_deduplication_for_arrow_functions() {
         let allocator = Allocator::default();
         let mut state = NamingState { index: 0 };
-        let mut var_names: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+        let mut var_names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
         // Use a SINGLE shared semantic map (simulating the buggy behavior).
-        let mut shared_semantic: FxHashMap<SemanticVariableKey<'_>, Atom<'_>> =
+        let mut shared_semantic: FxHashMap<SemanticVariableKey<'_>, Ident<'_>> =
             FxHashMap::default();
 
         let parent_view = XrefId(100);

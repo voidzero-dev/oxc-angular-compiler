@@ -9,7 +9,7 @@
 use indexmap::IndexMap;
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::AngularVersion;
@@ -86,18 +86,18 @@ pub enum DeferMetadata<'a> {
 #[derive(Debug)]
 pub struct I18nMessageMetadata<'a> {
     /// Message ID (computed).
-    pub message_id: Option<Atom<'a>>,
+    pub message_id: Option<Ident<'a>>,
     /// Custom ID supplied by the author.
-    pub custom_id: Option<Atom<'a>>,
+    pub custom_id: Option<Ident<'a>>,
     /// Message meaning for disambiguation.
-    pub meaning: Option<Atom<'a>>,
+    pub meaning: Option<Ident<'a>>,
     /// Message description for translators.
-    pub description: Option<Atom<'a>>,
+    pub description: Option<Ident<'a>>,
     /// Legacy message IDs.
-    pub legacy_ids: Vec<'a, Atom<'a>>,
+    pub legacy_ids: Vec<'a, Ident<'a>>,
     /// The serialized message string for goog.getMsg and $localize.
     /// Contains the message text with placeholder markers like "{$interpolation}".
-    pub message_string: Option<Atom<'a>>,
+    pub message_string: Option<Ident<'a>>,
 }
 
 /// A complete compilation job for a single component template.
@@ -108,7 +108,7 @@ pub struct ComponentCompilationJob<'a> {
     /// The allocator for this compilation.
     pub allocator: &'a Allocator,
     /// Name of the component being compiled.
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// Constant pool for deduplication.
     pub pool: ConstantPool<'a>,
     /// Expression store for managing expressions by reference.
@@ -156,7 +156,7 @@ pub struct ComponentCompilationJob<'a> {
     ///
     /// Used to generate unique, file-based variable names for i18n translations.
     /// The path is sanitized to create a valid identifier suffix.
-    pub relative_context_file_path: Option<Atom<'a>>,
+    pub relative_context_file_path: Option<Ident<'a>>,
     /// Relocation entries.
     pub relocation_entries: Vec<'a, RelocationEntry>,
     /// Whether to attach debug source locations.
@@ -165,7 +165,7 @@ pub struct ComponentCompilationJob<'a> {
     pub enable_debug_locations: bool,
     /// Relative path to the template file for source location debugging.
     /// Required when `enable_debug_locations` is true.
-    pub relative_template_path: Option<Atom<'a>>,
+    pub relative_template_path: Option<Ident<'a>>,
     /// Template source text for computing line/column from byte offsets.
     /// Required when `enable_debug_locations` is true.
     pub template_source: Option<&'a str>,
@@ -196,7 +196,7 @@ pub struct ComponentCompilationJob<'a> {
 
 impl<'a> ComponentCompilationJob<'a> {
     /// Creates a new compilation job.
-    pub fn new(allocator: &'a Allocator, component_name: Atom<'a>) -> Self {
+    pub fn new(allocator: &'a Allocator, component_name: Ident<'a>) -> Self {
         Self::with_pool_starting_index(allocator, component_name, 0)
     }
 
@@ -210,7 +210,7 @@ impl<'a> ComponentCompilationJob<'a> {
     /// be created with `pool_starting_index: 3` to start with _c3.
     pub fn with_pool_starting_index(
         allocator: &'a Allocator,
-        component_name: Atom<'a>,
+        component_name: Ident<'a>,
         pool_starting_index: u32,
     ) -> Self {
         let root_xref = XrefId::new(0);
@@ -408,7 +408,7 @@ pub struct ViewCompilationUnit<'a> {
     /// Number of variable slots needed.
     pub vars: Option<u32>,
     /// Generated function name.
-    pub fn_name: Option<Atom<'a>>,
+    pub fn_name: Option<Ident<'a>>,
     /// Declaration count for template compatibility.
     pub decl_count: Option<u32>,
     /// First child element/template xref.
@@ -464,10 +464,10 @@ pub const CTX_REF: &str = "CTX_REF_MARKER";
 #[derive(Debug)]
 pub struct ContextVariable<'a> {
     /// Variable name (the user-defined identifier).
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Variable value (the context property name, e.g., "$implicit").
     /// If this equals `CTX_REF`, the variable represents the entire context object.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Cross-reference to the variable's origin.
     pub xref: XrefId,
 }
@@ -481,7 +481,7 @@ pub struct ContextVariable<'a> {
 #[derive(Debug)]
 pub struct AliasVariable<'a> {
     /// The user-visible identifier for this alias.
-    pub identifier: Atom<'a>,
+    pub identifier: Ident<'a>,
     /// The expression that computes this alias's value.
     /// This expression is cloned and inlined at every usage site.
     pub expression: crate::ir::expression::IrExpression<'a>,
@@ -491,7 +491,7 @@ pub struct AliasVariable<'a> {
 #[derive(Debug)]
 pub enum ConstValue<'a> {
     /// A string constant.
-    String(Atom<'a>),
+    String(Ident<'a>),
     /// An array of constants (attribute arrays).
     Array(Vec<'a, ConstValue<'a>>),
     /// A number constant.
@@ -535,9 +535,9 @@ impl<'a> ConstValue<'a> {
 #[derive(Debug)]
 pub struct ExternalRef<'a> {
     /// Module name (e.g., "@angular/core").
-    pub module_name: Atom<'a>,
+    pub module_name: Ident<'a>,
     /// Export name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// A relocation entry for defer blocks.
@@ -566,7 +566,7 @@ pub struct CompilationResult<'a> {
 /// A compiled template function.
 pub struct TemplateFn<'a> {
     /// Function name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Number of creation slots.
     pub creation_slots: u32,
     /// Number of variable slots.
@@ -599,9 +599,9 @@ pub struct HostBindingCompilationJob<'a> {
     /// The allocator for this compilation.
     pub allocator: &'a Allocator,
     /// Name of the component/directive being compiled.
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// The CSS selector for the component/directive.
-    pub component_selector: Atom<'a>,
+    pub component_selector: Ident<'a>,
     /// Constant pool for deduplication.
     pub pool: ConstantPool<'a>,
     /// Expression store for managing expressions by reference.
@@ -615,7 +615,7 @@ pub struct HostBindingCompilationJob<'a> {
     /// Template compilation mode (always DomOnly for host bindings).
     pub mode: TemplateCompilationMode,
     /// Function name suffix.
-    pub fn_suffix: Atom<'a>,
+    pub fn_suffix: Ident<'a>,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
     /// Angular version for version-gated instruction emission.
@@ -626,8 +626,8 @@ impl<'a> HostBindingCompilationJob<'a> {
     /// Creates a new host binding compilation job.
     pub fn new(
         allocator: &'a Allocator,
-        component_name: Atom<'a>,
-        component_selector: Atom<'a>,
+        component_name: Ident<'a>,
+        component_selector: Ident<'a>,
     ) -> Self {
         Self::with_pool_starting_index(allocator, component_name, component_selector, 0)
     }
@@ -646,8 +646,8 @@ impl<'a> HostBindingCompilationJob<'a> {
     /// compilation share the same ConstantPool instance.
     pub fn with_pool_starting_index(
         allocator: &'a Allocator,
-        component_name: Atom<'a>,
-        component_selector: Atom<'a>,
+        component_name: Ident<'a>,
+        component_selector: Ident<'a>,
         pool_starting_index: u32,
     ) -> Self {
         let root_xref = XrefId::new(0);
@@ -663,7 +663,7 @@ impl<'a> HostBindingCompilationJob<'a> {
             next_xref_id: 1, // 0 is reserved for root
             compatibility_mode: CompatibilityMode::TemplateDefinitionBuilder,
             mode: TemplateCompilationMode::DomOnly, // Host bindings always use DomOnly
-            fn_suffix: Atom::from("HostBindings"),
+            fn_suffix: Ident::from("HostBindings"),
             diagnostics: std::vec::Vec::new(),
             angular_version: None,
         }
@@ -731,7 +731,7 @@ pub struct HostBindingCompilationUnit<'a> {
     /// Number of variable slots needed.
     pub vars: Option<u32>,
     /// Generated function name.
-    pub fn_name: Option<Atom<'a>>,
+    pub fn_name: Option<Ident<'a>>,
 }
 
 impl<'a> HostBindingCompilationUnit<'a> {
@@ -760,14 +760,14 @@ pub enum FnStatement<'a> {
     /// A runtime instruction call.
     Instruction(Instruction<'a>),
     /// A variable declaration.
-    VarDecl(Atom<'a>),
+    VarDecl(Ident<'a>),
 }
 
 /// A runtime instruction call.
 #[derive(Debug)]
 pub struct Instruction<'a> {
     /// Instruction name (e.g., "ɵɵelement").
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Arguments to the instruction.
     pub args: Vec<'a, InstructionArg<'a>>,
 }
@@ -782,5 +782,5 @@ pub enum InstructionArg<'a> {
     /// A slot reference.
     Slot(u32),
     /// An expression string.
-    Expression(Atom<'a>),
+    Expression(Ident<'a>),
 }

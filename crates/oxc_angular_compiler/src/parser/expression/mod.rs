@@ -223,7 +223,7 @@ impl<'a> BindingParser<'a> {
     ) -> TemplateBindingParseResult<'a> {
         let parser = Parser::with_offset(self.allocator, template_value, value_span.start);
         let key_identifier = TemplateBindingIdentifier {
-            source: oxc_span::Atom::from(template_key),
+            source: oxc_span::Ident::from(template_key),
             span: AbsoluteSourceSpan::new(key_span.start, key_span.end),
         };
         parser.parse_template_bindings(key_identifier)

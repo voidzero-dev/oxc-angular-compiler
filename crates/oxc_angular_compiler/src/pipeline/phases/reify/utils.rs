@@ -1,7 +1,7 @@
 //! Shared utilities for the reify phase.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::{
     ExpressionStatement, InvokeFunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,
@@ -10,9 +10,9 @@ use crate::output::ast::{
 
 /// Strips a prefix from a binding name if present.
 /// For example: "class.active" -> "active", "style.color" -> "color", "attr.aria-label" -> "aria-label"
-pub fn strip_prefix<'a>(name: &Atom<'a>, prefix: &str) -> Atom<'a> {
+pub fn strip_prefix<'a>(name: &Ident<'a>, prefix: &str) -> Ident<'a> {
     if name.as_str().starts_with(prefix) {
-        Atom::from(&name.as_str()[prefix.len()..])
+        Ident::from(&name.as_str()[prefix.len()..])
     } else {
         name.clone()
     }
@@ -29,12 +29,12 @@ pub fn create_instruction_call_stmt<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(instruction),
+            name: Ident::from(instruction),
             optional: false,
             source_span: None,
         },
@@ -68,12 +68,12 @@ pub fn create_instruction_call_expr<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(instruction),
+            name: Ident::from(instruction),
             optional: false,
             source_span: None,
         },

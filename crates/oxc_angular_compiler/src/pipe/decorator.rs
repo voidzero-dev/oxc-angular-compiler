@@ -8,7 +8,7 @@ use oxc_ast::ast::{
     Argument, Class, ClassElement, Decorator, Expression, MethodDefinitionKind, ObjectPropertyKind,
     PropertyKey,
 };
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 use super::metadata::R3PipeMetadata;
 use crate::factory::R3DependencyMetadata;
@@ -21,13 +21,13 @@ use crate::output::ast::{OutputExpression, ReadVarExpr};
 #[derive(Debug)]
 pub struct PipeMetadata<'a> {
     /// The name of the pipe class.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// Span of the class declaration.
     pub class_span: Span,
 
     /// The pipe name used in templates (from `@Pipe({name: '...'})`).
-    pub pipe_name: Option<Atom<'a>>,
+    pub pipe_name: Option<Ident<'a>>,
 
     /// Whether the pipe is pure (default: true).
     /// Pure pipes only transform when inputs change.
@@ -46,7 +46,7 @@ impl<'a> PipeMetadata<'a> {
     /// Create a new PipeMetadata with defaults.
     pub fn new(
         _allocator: &'a Allocator,
-        class_name: Atom<'a>,
+        class_name: Ident<'a>,
         class_span: Span,
         implicit_standalone: bool,
     ) -> Self {
@@ -109,7 +109,7 @@ pub fn extract_pipe_metadata<'a>(
     implicit_standalone: bool,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
-    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
+    let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Pipe decorator
@@ -200,20 +200,20 @@ fn is_pipe_call(callee: &Expression<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -222,7 +222,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
-        Expression::BooleanLiteral(lit) => Some(lit.value),
+        Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }
@@ -267,7 +267,7 @@ fn extract_param_dependency<'a>(
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
-    let mut attribute_name: Option<Atom<'a>> = None;
+    let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name(&decorator.expression) {
@@ -280,7 +280,7 @@ fn extract_param_dependency<'a>(
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone());
+                            attribute_name = Some(s.value.clone().into());
                         }
                     }
                 }
@@ -314,7 +314,7 @@ fn extract_param_dependency<'a>(
 }
 
 /// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
+fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
     match expr {
         // @Optional
         Expression::Identifier(id) => Some(id.name.clone().into()),
@@ -342,7 +342,7 @@ fn extract_param_token<'a>(
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
-        let type_name: Atom<'a> = match &type_ref.type_name {
+        let type_name: Ident<'a> = match &type_ref.type_name {
             oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {

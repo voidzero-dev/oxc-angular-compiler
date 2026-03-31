@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::ops::XrefId;
@@ -29,13 +29,13 @@ impl<'a> SafeConversionContext<'a> {
     }
 
     /// Allocates a new temporary variable name.
-    fn allocate_temp_name(&self) -> Atom<'a> {
+    fn allocate_temp_name(&self) -> Ident<'a> {
         let mut count = self.temp_count.borrow_mut();
         // Use op_index 0 since angular_expression conversion happens during reify
         // The actual op_index will be adjusted by temporary_variables phase if needed
         let name = format!("tmp_0_{}", *count);
         *count += 1;
-        Atom::from(self.allocator.alloc_str(&name))
+        Ident::from(self.allocator.alloc_str(&name))
     }
 }
 
@@ -130,7 +130,7 @@ fn convert_angular_expression_with_ctx<'a>(
             // Implicit receiver becomes ctx
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr {
-                    name: Atom::from("ctx"),
+                    name: Ident::from("ctx"),
                     source_span: Some(ir.source_span.to_span()),
                 },
                 allocator,
@@ -141,7 +141,7 @@ fn convert_angular_expression_with_ctx<'a>(
             // This receiver becomes ctx
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr {
-                    name: Atom::from("ctx"),
+                    name: Ident::from("ctx"),
                     source_span: Some(tr.source_span.to_span()),
                 },
                 allocator,
@@ -155,7 +155,7 @@ fn convert_angular_expression_with_ctx<'a>(
                 if matches!(&prop.receiver, AngularExpression::ImplicitReceiver(_)) {
                     return OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr {
-                            name: Atom::from("$event"),
+                            name: Ident::from("$event"),
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -733,7 +733,7 @@ fn convert_angular_expression_with_ctx<'a>(
             } else {
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from("")),
+                        value: LiteralValue::String(Ident::from("")),
                         source_span: Some(interp.source_span.to_span()),
                     },
                     allocator,

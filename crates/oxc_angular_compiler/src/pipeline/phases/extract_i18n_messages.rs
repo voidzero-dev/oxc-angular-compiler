@@ -7,7 +7,7 @@
 
 use std::ptr::NonNull;
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nContextKind, I18nParamValueFlags};
@@ -57,7 +57,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
     let mut i18n_blocks: FxHashMap<XrefId, (Option<XrefId>, Option<XrefId>)> = FxHashMap::default(); // xref -> (root, context)
     let mut i18n_contexts: FxHashMap<XrefId, (I18nContextKind, Option<XrefId>)> =
         FxHashMap::default(); // xref -> (kind, i18n_block)
-    let mut context_params: FxHashMap<XrefId, Vec<(Atom<'_>, Vec<I18nParamValue>)>> =
+    let mut context_params: FxHashMap<XrefId, Vec<(Ident<'_>, Vec<I18nParamValue>)>> =
         FxHashMap::default();
 
     // Create an i18n message for each context.
@@ -154,7 +154,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
 
     // Third pass: handle ICU sub-messages
     // Collect ICU info first to avoid borrow issues
-    let mut icu_sub_message_associations: Vec<(XrefId, XrefId, Option<Atom<'_>>)> = Vec::new();
+    let mut icu_sub_message_associations: Vec<(XrefId, XrefId, Option<Ident<'_>>)> = Vec::new();
 
     for view_xref in &view_xrefs {
         let view = if view_xref.0 == 0 { Some(&job.root) } else { job.view(*view_xref) };
@@ -241,7 +241,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
             XrefId,                // view_xref
             NonNull<CreateOp<'_>>, // op_ptr
             XrefId,                // icu_context_xref
-            Atom<'_>,              // placeholder name
+            Ident<'_>,              // placeholder name
             String,                // formatted value
         )> = Vec::new();
 
@@ -286,7 +286,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
         for (view_xref, op_ptr, context_xref, name, formatted) in icu_placeholders_to_process {
             // Find the I18nContext and add the icu_placeholder_literal
             // Allocate the formatted string in the arena
-            let formatted_atom = Atom::from(allocator.alloc_str(&formatted));
+            let formatted_atom = Ident::from(allocator.alloc_str(&formatted));
             for vx in &view_xrefs_for_icu {
                 let view = if vx.0 == 0 { Some(&mut job.root) } else { job.view_mut(*vx) };
 
@@ -352,7 +352,7 @@ pub fn extract_i18n_messages(job: &mut ComponentCompilationJob<'_>) {
 /// Formats a list of params into (placeholder, formatted_value) pairs.
 /// Returns the formatted params and whether postprocessing is needed.
 pub fn format_params(
-    params: &[(Atom<'_>, Vec<I18nParamValue>)],
+    params: &[(Ident<'_>, Vec<I18nParamValue>)],
 ) -> (std::vec::Vec<(String, String)>, bool) {
     let mut formatted = std::vec::Vec::new();
     let mut needs_postprocessing = false;
@@ -398,7 +398,7 @@ pub fn format_param_values(values: &[I18nParamValue]) -> Option<String> {
 ///
 /// Ported from Angular's `formatIcuPlaceholder` function.
 pub fn format_icu_placeholder(
-    strings: &[Atom<'_>],
+    strings: &[Ident<'_>],
     expression_placeholders: &[I18nParamValue],
 ) -> String {
     let mut result = String::new();

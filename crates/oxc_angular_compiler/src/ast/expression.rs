@@ -11,7 +11,7 @@
 //! - No bitwise operators
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 /// A span within the expression source.
 #[derive(Debug, Clone, Copy)]
@@ -594,7 +594,7 @@ pub struct PropertyRead<'a> {
     /// The receiver expression.
     pub receiver: AngularExpression<'a>,
     /// The property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// A safe property read expression: `receiver?.property`.
@@ -609,7 +609,7 @@ pub struct SafePropertyRead<'a> {
     /// The receiver expression.
     pub receiver: AngularExpression<'a>,
     /// The property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// A keyed read expression: `receiver[key]`.
@@ -659,7 +659,7 @@ pub struct BindingPipe<'a> {
     /// The expression being piped.
     pub exp: AngularExpression<'a>,
     /// The pipe name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The pipe arguments.
     pub args: Vec<'a, AngularExpression<'a>>,
     /// The type of pipe reference.
@@ -670,7 +670,7 @@ pub struct BindingPipe<'a> {
 #[derive(Debug, Clone)]
 pub enum LiteralValue<'a> {
     /// A string literal.
-    String(Atom<'a>),
+    String(Ident<'a>),
     /// A number literal.
     Number(f64),
     /// A boolean literal.
@@ -718,7 +718,7 @@ pub struct SpreadElement<'a> {
 #[derive(Debug)]
 pub struct ArrowFunctionParameter<'a> {
     /// The parameter name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The span of this parameter.
     pub span: ParseSpan,
     /// The absolute source span.
@@ -751,7 +751,7 @@ pub enum LiteralMapKey<'a> {
 #[derive(Debug)]
 pub struct LiteralMapPropertyKey<'a> {
     /// The key string.
-    pub key: Atom<'a>,
+    pub key: Ident<'a>,
     /// Whether the key is quoted.
     pub quoted: bool,
     /// Whether this is a shorthand initialization.
@@ -788,7 +788,7 @@ pub struct Interpolation<'a> {
     /// The absolute source span.
     pub source_span: AbsoluteSourceSpan,
     /// The static string parts.
-    pub strings: Vec<'a, Atom<'a>>,
+    pub strings: Vec<'a, Ident<'a>>,
     /// The dynamic expression parts.
     pub expressions: Vec<'a, AngularExpression<'a>>,
 }
@@ -1062,7 +1062,7 @@ pub struct TemplateLiteralElement<'a> {
     /// The absolute source span.
     pub source_span: AbsoluteSourceSpan,
     /// The text content.
-    pub text: Atom<'a>,
+    pub text: Ident<'a>,
 }
 
 /// A parenthesized expression.
@@ -1084,9 +1084,9 @@ pub struct RegularExpressionLiteral<'a> {
     /// The absolute source span.
     pub source_span: AbsoluteSourceSpan,
     /// The regex pattern.
-    pub body: Atom<'a>,
+    pub body: Ident<'a>,
     /// The regex flags.
-    pub flags: Option<Atom<'a>>,
+    pub flags: Option<Ident<'a>>,
 }
 
 // ============================================================================
@@ -1128,7 +1128,7 @@ pub struct ExpressionBinding<'a> {
 #[derive(Debug, Clone)]
 pub struct TemplateBindingIdentifier<'a> {
     /// The source text.
-    pub source: Atom<'a>,
+    pub source: Ident<'a>,
     /// The span.
     pub span: AbsoluteSourceSpan,
 }
@@ -1139,9 +1139,9 @@ pub struct ASTWithSource<'a> {
     /// The AST.
     pub ast: AngularExpression<'a>,
     /// The original source.
-    pub source: Option<Atom<'a>>,
+    pub source: Option<Ident<'a>>,
     /// The source location.
-    pub location: Atom<'a>,
+    pub location: Ident<'a>,
     /// The absolute offset in the template.
     pub absolute_offset: u32,
     // Note: Errors are collected separately in the parser/transformer context
@@ -1210,7 +1210,7 @@ pub enum BindingType {
 #[derive(Debug)]
 pub struct ParsedProperty<'a> {
     /// The property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The binding expression.
     pub expression: ASTWithSource<'a>,
     /// The type of property binding.
@@ -1247,11 +1247,11 @@ impl<'a> ParsedProperty<'a> {
 #[derive(Debug)]
 pub struct ParsedEvent<'a> {
     /// The event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The event target or animation phase.
     /// For regular events: "window", "document", "body", or None.
     /// For legacy animation events: the animation phase.
-    pub target_or_phase: Option<Atom<'a>>,
+    pub target_or_phase: Option<Ident<'a>>,
     /// The type of event binding.
     pub event_type: ParsedEventType,
     /// The handler expression.

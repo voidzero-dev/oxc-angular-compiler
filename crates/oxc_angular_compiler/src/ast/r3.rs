@@ -6,7 +6,7 @@
 //! Ported from Angular's `render3/r3_ast.ts`.
 
 use oxc_allocator::{Allocator, Box, HashMap, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 use crate::ast::expression::{ASTWithSource, AngularExpression, BindingType, ParsedEventType};
 use crate::i18n::serializer::format_i18n_placeholder_name;
@@ -43,18 +43,18 @@ pub struct I18nMessage<'a> {
     /// Message AST nodes.
     pub nodes: Vec<'a, I18nNode<'a>>,
     /// The meaning of the message (for disambiguation).
-    pub meaning: Atom<'a>,
+    pub meaning: Ident<'a>,
     /// Description of the message for translators.
-    pub description: Atom<'a>,
+    pub description: Ident<'a>,
     /// Custom ID specified by the developer.
-    pub custom_id: Atom<'a>,
+    pub custom_id: Ident<'a>,
     /// The computed message ID.
-    pub id: Atom<'a>,
+    pub id: Ident<'a>,
     /// Legacy IDs for backwards compatibility.
-    pub legacy_ids: Vec<'a, Atom<'a>>,
+    pub legacy_ids: Vec<'a, Ident<'a>>,
     /// The serialized message string for goog.getMsg and $localize.
     /// Contains the message text with placeholder markers like "{$interpolation}".
-    pub message_string: Atom<'a>,
+    pub message_string: Ident<'a>,
 }
 
 /// i18n AST node.
@@ -80,7 +80,7 @@ pub enum I18nNode<'a> {
 #[derive(Debug)]
 pub struct I18nText<'a> {
     /// The text value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -98,28 +98,28 @@ pub struct I18nContainer<'a> {
 #[derive(Debug)]
 pub struct I18nIcu<'a> {
     /// The expression being evaluated.
-    pub expression: Atom<'a>,
+    pub expression: Ident<'a>,
     /// ICU type string (plural, select, selectordinal, or custom).
-    pub icu_type: Atom<'a>,
+    pub icu_type: Ident<'a>,
     /// Case branches.
-    pub cases: HashMap<'a, Atom<'a>, I18nNode<'a>>,
+    pub cases: HashMap<'a, Ident<'a>, I18nNode<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Expression placeholder name (for message serialization).
-    pub expression_placeholder: Option<Atom<'a>>,
+    pub expression_placeholder: Option<Ident<'a>>,
 }
 
 /// HTML tag placeholder.
 #[derive(Debug)]
 pub struct I18nTagPlaceholder<'a> {
     /// Tag name.
-    pub tag: Atom<'a>,
+    pub tag: Ident<'a>,
     /// Tag attributes.
-    pub attrs: HashMap<'a, Atom<'a>, Atom<'a>>,
+    pub attrs: HashMap<'a, Ident<'a>, Ident<'a>>,
     /// Start tag placeholder name.
-    pub start_name: Atom<'a>,
+    pub start_name: Ident<'a>,
     /// Close tag placeholder name.
-    pub close_name: Atom<'a>,
+    pub close_name: Ident<'a>,
     /// Child nodes.
     pub children: Vec<'a, I18nNode<'a>>,
     /// Whether this is a void element.
@@ -136,9 +136,9 @@ pub struct I18nTagPlaceholder<'a> {
 #[derive(Debug)]
 pub struct I18nPlaceholder<'a> {
     /// The expression value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Placeholder name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -149,7 +149,7 @@ pub struct I18nIcuPlaceholder<'a> {
     /// The ICU expression.
     pub value: Box<'a, I18nIcu<'a>>,
     /// Placeholder name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -158,13 +158,13 @@ pub struct I18nIcuPlaceholder<'a> {
 #[derive(Debug)]
 pub struct I18nBlockPlaceholder<'a> {
     /// Block name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Block parameters.
-    pub parameters: Vec<'a, Atom<'a>>,
+    pub parameters: Vec<'a, Ident<'a>>,
     /// Start block placeholder name.
-    pub start_name: Atom<'a>,
+    pub start_name: Ident<'a>,
     /// End block placeholder name.
-    pub close_name: Atom<'a>,
+    pub close_name: Ident<'a>,
     /// Child nodes.
     pub children: Vec<'a, I18nNode<'a>>,
     /// Source span (overall).
@@ -559,7 +559,7 @@ impl<'a> R3Node<'a> {
 #[derive(Debug, Clone)]
 pub struct R3Comment<'a> {
     /// The comment text.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -568,7 +568,7 @@ pub struct R3Comment<'a> {
 #[derive(Debug)]
 pub struct R3Text<'a> {
     /// The text content.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -592,9 +592,9 @@ pub struct R3BoundText<'a> {
 #[derive(Debug)]
 pub struct R3TextAttribute<'a> {
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Attribute value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span (the attribute name).
@@ -647,7 +647,7 @@ impl Default for SecurityContext {
 #[derive(Debug)]
 pub struct R3BoundAttribute<'a> {
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Binding type (Property, Attribute, Class, Style, etc.).
     pub binding_type: BindingType,
     /// Security context for sanitization.
@@ -655,7 +655,7 @@ pub struct R3BoundAttribute<'a> {
     /// The binding expression.
     pub value: AngularExpression<'a>,
     /// Unit for style bindings (e.g., "px").
-    pub unit: Option<Atom<'a>>,
+    pub unit: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -670,15 +670,15 @@ pub struct R3BoundAttribute<'a> {
 #[derive(Debug)]
 pub struct R3BoundEvent<'a> {
     /// Event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Event type.
     pub event_type: ParsedEventType,
     /// Handler expression.
     pub handler: AngularExpression<'a>,
     /// Target element (for `window:` or `document:` events).
-    pub target: Option<Atom<'a>>,
+    pub target: Option<Ident<'a>>,
     /// Animation phase.
-    pub phase: Option<Atom<'a>>,
+    pub phase: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Handler span.
@@ -695,7 +695,7 @@ pub struct R3BoundEvent<'a> {
 #[derive(Debug)]
 pub struct R3Element<'a> {
     /// Element tag name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound input properties.
@@ -726,7 +726,7 @@ pub struct R3Element<'a> {
 #[derive(Debug)]
 pub struct R3Template<'a> {
     /// Tag name (None for structural directives on `ng-template`).
-    pub tag_name: Option<Atom<'a>>,
+    pub tag_name: Option<Ident<'a>>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -768,7 +768,7 @@ pub enum R3TemplateAttr<'a> {
 #[derive(Debug)]
 pub struct R3Content<'a> {
     /// The selector for content projection.
-    pub selector: Atom<'a>,
+    pub selector: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Child nodes (usually empty).
@@ -789,9 +789,9 @@ pub struct R3Content<'a> {
 #[derive(Debug)]
 pub struct R3Variable<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Variable value (for `let x = value`).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -804,9 +804,9 @@ pub struct R3Variable<'a> {
 #[derive(Debug)]
 pub struct R3Reference<'a> {
     /// Reference name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Reference value (directive name or empty).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -1068,7 +1068,7 @@ pub struct R3ImmediateDeferredTrigger {
 #[derive(Debug)]
 pub struct R3HoverDeferredTrigger<'a> {
     /// Reference to the element to hover.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1102,7 +1102,7 @@ pub struct R3TimerDeferredTrigger {
 #[derive(Debug)]
 pub struct R3InteractionDeferredTrigger<'a> {
     /// Reference to the element to interact with.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1119,7 +1119,7 @@ pub struct R3InteractionDeferredTrigger<'a> {
 #[derive(Debug)]
 pub struct R3ViewportDeferredTrigger<'a> {
     /// Reference to the element to observe.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Viewport options (margin, etc.).
     pub options: Option<AngularExpression<'a>>,
     /// Source span.
@@ -1265,7 +1265,7 @@ pub struct R3DeferredBlockError<'a> {
 #[derive(Debug)]
 pub struct R3UnknownBlock<'a> {
     /// Block name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1276,7 +1276,7 @@ pub struct R3UnknownBlock<'a> {
 #[derive(Debug)]
 pub struct R3LetDeclaration<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Value expression.
     pub value: AngularExpression<'a>,
     /// Source span.
@@ -1291,11 +1291,11 @@ pub struct R3LetDeclaration<'a> {
 #[derive(Debug)]
 pub struct R3Component<'a> {
     /// Component class name.
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// Tag name in template.
-    pub tag_name: Option<Atom<'a>>,
+    pub tag_name: Option<Ident<'a>>,
     /// Full component name.
-    pub full_name: Atom<'a>,
+    pub full_name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -1324,7 +1324,7 @@ pub struct R3Component<'a> {
 #[derive(Debug)]
 pub struct R3Directive<'a> {
     /// Directive class name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -1349,7 +1349,7 @@ pub struct R3Directive<'a> {
 #[derive(Debug)]
 pub struct R3HostElement<'a> {
     /// Possible tag names for the host element. Must have at least one.
-    pub tag_names: Vec<'a, Atom<'a>>,
+    pub tag_names: Vec<'a, Ident<'a>>,
     /// Attribute and property bindings.
     pub bindings: Vec<'a, R3BoundAttribute<'a>>,
     /// Event listeners.
@@ -1362,9 +1362,9 @@ pub struct R3HostElement<'a> {
 #[derive(Debug)]
 pub struct R3Icu<'a> {
     /// Variable expressions (ordered: must preserve insertion order like JS objects).
-    pub vars: Vec<'a, (Atom<'a>, R3BoundText<'a>)>,
+    pub vars: Vec<'a, (Ident<'a>, R3BoundText<'a>)>,
     /// Placeholder expressions (ordered: must preserve insertion order like JS objects).
-    pub placeholders: Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
+    pub placeholders: Vec<'a, (Ident<'a>, R3IcuPlaceholder<'a>)>,
     /// Source span.
     pub source_span: Span,
     /// i18n metadata.
@@ -1599,11 +1599,11 @@ pub struct R3ParseResult<'a> {
     /// Uses std::vec::Vec since ParseError contains Drop types (Arc, String).
     pub errors: std::vec::Vec<crate::util::ParseError>,
     /// Extracted styles.
-    pub styles: Vec<'a, Atom<'a>>,
+    pub styles: Vec<'a, Ident<'a>>,
     /// Extracted style URLs.
-    pub style_urls: Vec<'a, Atom<'a>>,
+    pub style_urls: Vec<'a, Ident<'a>>,
     /// Content projection selectors.
-    pub ng_content_selectors: Vec<'a, Atom<'a>>,
+    pub ng_content_selectors: Vec<'a, Ident<'a>>,
     /// Comment nodes (if collected).
     pub comment_nodes: Option<Vec<'a, R3Comment<'a>>>,
 }

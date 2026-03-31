@@ -212,7 +212,7 @@ struct PipeInfo<'a> {
     /// This is preserved from the expression to match Angular's behavior.
     target_slot: SlotHandle,
     /// Pipe name.
-    name: oxc_span::Atom<'a>,
+    name: oxc_span::Ident<'a>,
     /// Number of arguments (including the input expression).
     num_args: u32,
     /// Target element xref (for compatibility mode insertion ordering).

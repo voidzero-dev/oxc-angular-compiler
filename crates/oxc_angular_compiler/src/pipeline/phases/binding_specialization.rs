@@ -21,7 +21,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/binding_specialization.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::{AbsoluteSourceSpan, AngularExpression, EmptyExpr, ParseSpan};
@@ -237,8 +237,8 @@ fn specialize_in_view<'a>(
                                 &mut binding.expression,
                                 create_placeholder_expression(allocator),
                             );
-                            let ns_atom = namespace.map(|ns| Atom::from(ns));
-                            let local_atom = Atom::from(local_name);
+                            let ns_atom = namespace.map(|ns| Ident::from(ns));
+                            let local_atom = Ident::from(local_name);
                             let new_op = UpdateOp::Attribute(AttributeOp {
                                 base: UpdateOpBase { source_span, ..Default::default() },
                                 target,
@@ -473,8 +473,8 @@ pub fn specialize_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
                                 &mut binding.expression,
                                 create_placeholder_expression(allocator),
                             );
-                            let ns_atom = namespace.map(|ns| Atom::from(ns));
-                            let local_atom = Atom::from(local_name);
+                            let ns_atom = namespace.map(|ns| Ident::from(ns));
+                            let local_atom = Ident::from(local_name);
                             let new_op = UpdateOp::Attribute(AttributeOp {
                                 base: UpdateOpBase { source_span, ..Default::default() },
                                 target,

@@ -11,7 +11,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::R3InjectorMetadata;
 use crate::output::ast::{
@@ -64,7 +64,7 @@ fn build_definition_map<'a>(
     // providers: [...] (only if present)
     if let Some(providers) = &metadata.providers {
         entries.push(LiteralMapEntry {
-            key: Atom::from("providers"),
+            key: Ident::from("providers"),
             value: providers.clone_in(allocator),
             quoted: false,
         });
@@ -87,7 +87,7 @@ fn build_definition_map<'a>(
         };
 
         entries.push(LiteralMapEntry {
-            key: Atom::from("imports"),
+            key: Ident::from("imports"),
             value: imports_value,
             quoted: false,
         });
@@ -106,12 +106,12 @@ fn create_define_injector_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_INJECTOR),
+            name: Ident::from(Identifiers::DEFINE_INJECTOR),
             optional: false,
             source_span: None,
         },
@@ -150,12 +150,12 @@ mod tests {
     fn test_compile_simple_injector() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyModule"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
-            .name(Atom::from("MyModule"))
+            .name(Ident::from("MyModule"))
             .r#type(type_expr)
             .build()
             .unwrap();
@@ -172,17 +172,17 @@ mod tests {
     fn test_compile_injector_with_providers() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ProviderModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("ProviderModule"), source_span: None },
             &allocator,
         ));
 
         let providers_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("PROVIDERS"), source_span: None },
+            ReadVarExpr { name: Ident::from("PROVIDERS"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
-            .name(Atom::from("ProviderModule"))
+            .name(Ident::from("ProviderModule"))
             .r#type(type_expr)
             .providers(providers_expr)
             .build()
@@ -201,21 +201,21 @@ mod tests {
     fn test_compile_injector_with_imports() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ImportModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("ImportModule"), source_span: None },
             &allocator,
         ));
 
         let import1 = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("CommonModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("CommonModule"), source_span: None },
             &allocator,
         ));
         let import2 = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("FormsModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("FormsModule"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
-            .name(Atom::from("ImportModule"))
+            .name(Ident::from("ImportModule"))
             .r#type(type_expr)
             .add_import(import1)
             .add_import(import2)
@@ -236,12 +236,12 @@ mod tests {
     fn test_compile_injector_empty_statements() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("EmptyModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("EmptyModule"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
-            .name(Atom::from("EmptyModule"))
+            .name(Ident::from("EmptyModule"))
             .r#type(type_expr)
             .build()
             .unwrap();

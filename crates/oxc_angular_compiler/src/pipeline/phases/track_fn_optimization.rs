@@ -9,7 +9,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/track_fn_optimization.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ir::expression::{
     IrExpression, TrackContextExpr, VisitorContextFlag, transform_expressions_in_expression,
@@ -62,7 +62,7 @@ fn optimize_track_expression<'a>(
     // Check for simple $index or $item tracking
     if let Some(opt_fn) = check_simple_track_variable(&rep.track, expressions) {
         // Set the optimized track function name
-        rep.track_fn_name = Some(Atom::from(opt_fn));
+        rep.track_fn_name = Some(Ident::from(opt_fn));
         return;
     }
 
@@ -77,13 +77,13 @@ fn optimize_track_expression<'a>(
             // Emit as ctx.methodName
             let fn_name = format!("ctx.{}", method_name);
             let name_str = allocator.alloc_str(&fn_name);
-            rep.track_fn_name = Some(Atom::from(name_str));
+            rep.track_fn_name = Some(Ident::from(name_str));
         } else {
             // Need to use componentInstance() to access the method
             // Create the full function reference string
             let fn_name = format!("{}().{}", Identifiers::COMPONENT_INSTANCE, method_name);
             let name_str = allocator.alloc_str(&fn_name);
-            rep.track_fn_name = Some(Atom::from(name_str));
+            rep.track_fn_name = Some(Ident::from(name_str));
         }
         return;
     }
@@ -317,14 +317,14 @@ mod tests {
         let prop_read = IrExpression::ResolvedPropertyRead(oxc_allocator::Box::new_in(
             ResolvedPropertyReadExpr {
                 receiver: oxc_allocator::Box::new_in(ctx, alloc),
-                name: Atom::from(method_name),
+                name: Ident::from(method_name),
                 source_span: None,
             },
             alloc,
         ));
         let index_arg = IrExpression::OutputExpr(oxc_allocator::Box::new_in(
             OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                ReadVarExpr { name: Atom::from("$index"), source_span: None },
+                ReadVarExpr { name: Ident::from("$index"), source_span: None },
                 alloc,
             )),
             alloc,

@@ -1,7 +1,7 @@
 //! Control flow and variable statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::{
     DeclareVarStmt, LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
@@ -27,10 +27,10 @@ use super::super::utils::create_instruction_call_stmt;
 pub fn create_conditional_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
     vars: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
@@ -52,7 +52,7 @@ pub fn create_conditional_create_stmt<'a>(
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_c{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from(placeholder_str), source_span: None },
+            ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
             allocator,
         )));
     }
@@ -109,12 +109,12 @@ pub fn create_conditional_create_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
+                name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
@@ -168,10 +168,10 @@ pub fn create_conditional_update_stmt<'a>(
 pub fn create_conditional_branch_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
     vars: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
@@ -193,7 +193,7 @@ pub fn create_conditional_branch_create_stmt<'a>(
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_c{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from(placeholder_str), source_span: None },
+            ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
             allocator,
         )));
     }
@@ -250,12 +250,12 @@ pub fn create_conditional_branch_create_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
+                name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
@@ -324,17 +324,17 @@ pub fn create_repeater_stmt<'a>(
 pub fn create_repeater_create_stmt_with_track_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    fn_name: Option<Atom<'a>>,
+    fn_name: Option<Ident<'a>>,
     body_decl_count: Option<u32>,
     body_var_count: Option<u32>,
-    tag: Option<&Atom<'a>>,
+    tag: Option<&Ident<'a>>,
     attributes: Option<u32>,
     track_fn_expr: OutputExpression<'a>,
     uses_component_instance: bool,
-    empty_fn_name: Option<Atom<'a>>,
+    empty_fn_name: Option<Ident<'a>>,
     empty_decls: Option<u32>,
     empty_vars: Option<u32>,
-    empty_tag: Option<&Atom<'a>>,
+    empty_tag: Option<&Ident<'a>>,
     empty_attributes: Option<u32>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -355,7 +355,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_r{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from(placeholder_str), source_span: None },
+            ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
             allocator,
         )));
     }
@@ -476,7 +476,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
 /// All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts.
 pub fn create_variable_decl_stmt_with_value<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     OutputStatement::DeclareVar(Box::new_in(
@@ -524,7 +524,7 @@ mod tests {
         let stmt = create_conditional_create_stmt(
             &allocator,
             0,
-            Some(Atom::from("TestComponent_Conditional_0_Template")),
+            Some(Ident::from("TestComponent_Conditional_0_Template")),
             Some(1),
             Some(0),
             None,
@@ -553,7 +553,7 @@ mod tests {
         let stmt = create_conditional_create_stmt(
             &allocator,
             0,
-            Some(Atom::from("TestComponent_Conditional_0_Template")),
+            Some(Ident::from("TestComponent_Conditional_0_Template")),
             Some(1),
             Some(0),
             None,
@@ -575,7 +575,7 @@ mod tests {
         let stmt = create_conditional_branch_create_stmt(
             &allocator,
             1,
-            Some(Atom::from("TestComponent_Conditional_1_Template")),
+            Some(Ident::from("TestComponent_Conditional_1_Template")),
             Some(1),
             Some(0),
             None,
@@ -602,7 +602,7 @@ mod tests {
         let stmt = create_conditional_branch_create_stmt(
             &allocator,
             1,
-            Some(Atom::from("TestComponent_Conditional_1_Template")),
+            Some(Ident::from("TestComponent_Conditional_1_Template")),
             Some(1),
             Some(0),
             None,

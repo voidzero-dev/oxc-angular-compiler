@@ -54,7 +54,7 @@ impl SpecExtractor {
                     let parts: Vec<&str> = lit
                         .quasis
                         .iter()
-                        .filter_map(|q| q.value.cooked.as_ref().map(oxc_span::Atom::as_str))
+                        .filter_map(|q| q.value.cooked.as_ref().map(oxc_span::Str::as_str))
                         .collect();
                     Some(parts.join(""))
                 }
@@ -138,10 +138,10 @@ impl SpecExtractor {
                 Some(serde_json::Value::String(lit.value.to_string()))
             }
             Expression::NumericLiteral(lit) => {
-                serde_json::Number::from_f64(lit.value).map(serde_json::Value::Number)
+                serde_json::Number::from_f64(lit.value.into()).map(serde_json::Value::Number)
             }
             Expression::NullLiteral(_) => Some(serde_json::Value::Null),
-            Expression::BooleanLiteral(lit) => Some(serde_json::Value::Bool(lit.value)),
+            Expression::BooleanLiteral(lit) => Some(serde_json::Value::Bool(lit.value.into())),
             Expression::ArrayExpression(arr) => {
                 let mut values = Vec::new();
                 for element in &arr.elements {

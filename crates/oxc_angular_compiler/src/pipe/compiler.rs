@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_pipe_compiler.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::R3PipeMetadata;
 use crate::output::ast::{
@@ -65,7 +65,7 @@ fn build_definition_map<'a>(
     // name: literal(metadata.pipeName ?? metadata.name)
     let pipe_name = metadata.pipe_name.clone().unwrap_or_else(|| metadata.name.clone());
     entries.push(LiteralMapEntry {
-        key: Atom::from("name"),
+        key: Ident::from("name"),
         value: OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(pipe_name), source_span: None },
             allocator,
@@ -75,14 +75,14 @@ fn build_definition_map<'a>(
 
     // type: metadata.type.value
     entries.push(LiteralMapEntry {
-        key: Atom::from("type"),
+        key: Ident::from("type"),
         value: metadata.r#type.clone_in(allocator),
         quoted: false,
     });
 
     // pure: literal(metadata.pure)
     entries.push(LiteralMapEntry {
-        key: Atom::from("pure"),
+        key: Ident::from("pure"),
         value: OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(metadata.pure), source_span: None },
             allocator,
@@ -93,7 +93,7 @@ fn build_definition_map<'a>(
     // standalone: only included if false (Angular's runtime defaults standalone to true)
     if !metadata.is_standalone {
         entries.push(LiteralMapEntry {
-            key: Atom::from("standalone"),
+            key: Ident::from("standalone"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
@@ -115,12 +115,12 @@ fn create_define_pipe_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_PIPE),
+            name: Ident::from(Identifiers::DEFINE_PIPE),
             optional: false,
             source_span: None,
         },
@@ -157,15 +157,15 @@ mod tests {
     #[test]
     fn test_compile_pure_pipe() {
         let allocator = Allocator::default();
-        let name = Atom::from("TestPipe");
+        let name = Ident::from("TestPipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestPipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestPipe"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3PipeMetadata {
             name: name.clone(),
-            pipe_name: Some(Atom::from("test")),
+            pipe_name: Some(Ident::from("test")),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
@@ -187,9 +187,9 @@ mod tests {
     #[test]
     fn test_compile_impure_pipe() {
         let allocator = Allocator::default();
-        let name = Atom::from("ImpurePipe");
+        let name = Ident::from("ImpurePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ImpurePipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("ImpurePipe"), source_span: None },
             &allocator,
         ));
 
@@ -214,16 +214,16 @@ mod tests {
     #[test]
     fn test_compile_standalone_pipe() {
         let allocator = Allocator::default();
-        let name = Atom::from("StandalonePipe");
+        let name = Ident::from("StandalonePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("StandalonePipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("StandalonePipe"), source_span: None },
             &allocator,
         ));
 
         // Standalone = true means DON'T include standalone in output (it's the default)
         let metadata = R3PipeMetadata {
             name: name.clone(),
-            pipe_name: Some(Atom::from("standalone")),
+            pipe_name: Some(Ident::from("standalone")),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
@@ -242,16 +242,16 @@ mod tests {
     #[test]
     fn test_compile_non_standalone_pipe() {
         let allocator = Allocator::default();
-        let name = Atom::from("NonStandalonePipe");
+        let name = Ident::from("NonStandalonePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("NonStandalonePipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("NonStandalonePipe"), source_span: None },
             &allocator,
         ));
 
         // Non-standalone pipes should include standalone: false
         let metadata = R3PipeMetadata {
             name: name.clone(),
-            pipe_name: Some(Atom::from("legacy")),
+            pipe_name: Some(Ident::from("legacy")),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,

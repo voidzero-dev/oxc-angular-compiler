@@ -4,7 +4,7 @@
 
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::Class;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::OutputExpression;
@@ -15,10 +15,10 @@ use crate::output::ast::OutputExpression;
 #[derive(Debug)]
 pub struct R3InputMetadata<'a> {
     /// The property name on the class.
-    pub class_property_name: Atom<'a>,
+    pub class_property_name: Ident<'a>,
 
     /// The binding property name (can differ from class property name).
-    pub binding_property_name: Atom<'a>,
+    pub binding_property_name: Ident<'a>,
 
     /// Whether this input is required.
     pub required: bool,
@@ -33,7 +33,7 @@ pub struct R3InputMetadata<'a> {
 
 impl<'a> R3InputMetadata<'a> {
     /// Create a simple input with matching class and binding names.
-    pub fn simple(name: Atom<'a>) -> Self {
+    pub fn simple(name: Ident<'a>) -> Self {
         Self {
             class_property_name: name.clone(),
             binding_property_name: name,
@@ -44,7 +44,7 @@ impl<'a> R3InputMetadata<'a> {
     }
 
     /// Create a required input.
-    pub fn required(name: Atom<'a>) -> Self {
+    pub fn required(name: Ident<'a>) -> Self {
         Self {
             class_property_name: name.clone(),
             binding_property_name: name,
@@ -55,7 +55,7 @@ impl<'a> R3InputMetadata<'a> {
     }
 
     /// Create a signal-based input.
-    pub fn signal(name: Atom<'a>) -> Self {
+    pub fn signal(name: Ident<'a>) -> Self {
         Self {
             class_property_name: name.clone(),
             binding_property_name: name,
@@ -72,7 +72,7 @@ impl<'a> R3InputMetadata<'a> {
 #[derive(Debug)]
 pub struct R3QueryMetadata<'a> {
     /// Name of the property on the class to update with query results.
-    pub property_name: Atom<'a>,
+    pub property_name: Ident<'a>,
 
     /// Whether to read only the first matching result.
     pub first: bool,
@@ -103,12 +103,12 @@ pub enum QueryPredicate<'a> {
     Type(OutputExpression<'a>),
 
     /// String selectors.
-    Selectors(Vec<'a, Atom<'a>>),
+    Selectors(Vec<'a, Ident<'a>>),
 }
 
 impl<'a> R3QueryMetadata<'a> {
     /// Create a new query metadata with defaults.
-    pub fn new(allocator: &'a Allocator, property_name: Atom<'a>) -> Self {
+    pub fn new(allocator: &'a Allocator, property_name: Ident<'a>) -> Self {
         Self {
             property_name,
             first: false,
@@ -128,19 +128,19 @@ impl<'a> R3QueryMetadata<'a> {
 #[derive(Debug)]
 pub struct R3HostMetadata<'a> {
     /// A mapping of attribute binding keys to expressions.
-    pub attributes: Vec<'a, (Atom<'a>, OutputExpression<'a>)>,
+    pub attributes: Vec<'a, (Ident<'a>, OutputExpression<'a>)>,
 
     /// A mapping of event binding keys to unparsed expressions.
-    pub listeners: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub listeners: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// A mapping of property binding keys to unparsed expressions.
-    pub properties: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub properties: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Special style attribute value.
-    pub style_attr: Option<Atom<'a>>,
+    pub style_attr: Option<Ident<'a>>,
 
     /// Special class attribute value.
-    pub class_attr: Option<Atom<'a>>,
+    pub class_attr: Option<Ident<'a>>,
 }
 
 impl<'a> R3HostMetadata<'a> {
@@ -178,11 +178,11 @@ pub struct R3HostDirectiveMetadata<'a> {
 
     /// Inputs from the host directive that will be exposed on the host.
     /// Key: public name, Value: internal name
-    pub inputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub inputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Outputs from the host directive that will be exposed on the host.
     /// Key: public name, Value: internal name
-    pub outputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 }
 
 /// Metadata needed to compile a directive.
@@ -191,7 +191,7 @@ pub struct R3HostDirectiveMetadata<'a> {
 #[derive(Debug)]
 pub struct R3DirectiveMetadata<'a> {
     /// Name of the directive type.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// An expression representing a reference to the directive itself.
     pub r#type: OutputExpression<'a>,
@@ -203,7 +203,7 @@ pub struct R3DirectiveMetadata<'a> {
     pub deps: Option<Vec<'a, R3DependencyMetadata<'a>>>,
 
     /// Unparsed selector of the directive, or None if there was no selector.
-    pub selector: Option<Atom<'a>>,
+    pub selector: Option<Ident<'a>>,
 
     /// Content queries made by the directive.
     pub queries: Vec<'a, R3QueryMetadata<'a>>,
@@ -221,13 +221,13 @@ pub struct R3DirectiveMetadata<'a> {
     pub inputs: Vec<'a, R3InputMetadata<'a>>,
 
     /// Outputs of the directive (class property name -> binding property name).
-    pub outputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Whether or not the directive inherits from another class.
     pub uses_inheritance: bool,
 
     /// Export names for template references.
-    pub export_as: Vec<'a, Atom<'a>>,
+    pub export_as: Vec<'a, Ident<'a>>,
 
     /// The list of providers defined in the directive.
     pub providers: Option<OutputExpression<'a>>,
@@ -254,19 +254,19 @@ impl<'a> R3DirectiveMetadata<'a> {
 
 /// Builder for R3DirectiveMetadata.
 pub struct R3DirectiveMetadataBuilder<'a> {
-    name: Option<Atom<'a>>,
+    name: Option<Ident<'a>>,
     r#type: Option<OutputExpression<'a>>,
     type_argument_count: u32,
     deps: Option<Vec<'a, R3DependencyMetadata<'a>>>,
-    selector: Option<Atom<'a>>,
+    selector: Option<Ident<'a>>,
     queries: Vec<'a, R3QueryMetadata<'a>>,
     view_queries: Vec<'a, R3QueryMetadata<'a>>,
     host: R3HostMetadata<'a>,
     uses_on_changes: bool,
     inputs: Vec<'a, R3InputMetadata<'a>>,
-    outputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
     uses_inheritance: bool,
-    export_as: Vec<'a, Atom<'a>>,
+    export_as: Vec<'a, Ident<'a>>,
     providers: Option<OutputExpression<'a>>,
     is_standalone: bool,
     is_signal: bool,
@@ -298,7 +298,7 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     }
 
     /// Set the directive name.
-    pub fn name(mut self, name: Atom<'a>) -> Self {
+    pub fn name(mut self, name: Ident<'a>) -> Self {
         self.name = Some(name);
         self
     }
@@ -322,7 +322,7 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     }
 
     /// Set the selector.
-    pub fn selector(mut self, selector: Atom<'a>) -> Self {
+    pub fn selector(mut self, selector: Ident<'a>) -> Self {
         self.selector = Some(selector);
         self
     }
@@ -358,7 +358,7 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     }
 
     /// Add an output.
-    pub fn add_output(mut self, class_name: Atom<'a>, binding_name: Atom<'a>) -> Self {
+    pub fn add_output(mut self, class_name: Ident<'a>, binding_name: Ident<'a>) -> Self {
         self.outputs.push((class_name, binding_name));
         self
     }
@@ -370,7 +370,7 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     }
 
     /// Add an export name.
-    pub fn add_export_as(mut self, export_name: Atom<'a>) -> Self {
+    pub fn add_export_as(mut self, export_name: Ident<'a>) -> Self {
         self.export_as.push(export_name);
         self
     }
@@ -440,7 +440,7 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         let host_bindings = super::property_decorators::extract_host_bindings(allocator, class);
         for (host_prop, class_prop) in host_bindings {
             // Add to host.properties with wrapped key
-            let wrapped_key = Atom::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
+            let wrapped_key = Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
             self.host.properties.push((wrapped_key, class_prop));
         }
 
@@ -451,15 +451,15 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         for (event_name, method_name, args) in host_listeners {
             // Wrap event name: "click" -> "(click)"
             let wrapped_key =
-                Atom::from(allocator.alloc_str(&format!("({})", event_name.as_str())));
+                Ident::from(allocator.alloc_str(&format!("({})", event_name.as_str())));
 
             // Build method expression with args: "handleClick" + ["$event"] -> "handleClick($event)"
             let method_expr = if args.is_empty() {
-                Atom::from(allocator.alloc_str(&format!("{}()", method_name.as_str())))
+                Ident::from(allocator.alloc_str(&format!("{}()", method_name.as_str())))
             } else {
                 let args_str: String =
                     args.iter().map(|a| a.as_str()).collect::<std::vec::Vec<_>>().join(",");
-                Atom::from(allocator.alloc_str(&format!("{}({})", method_name.as_str(), args_str)))
+                Ident::from(allocator.alloc_str(&format!("{}({})", method_name.as_str(), args_str)))
             };
 
             // Add to host.listeners
@@ -542,9 +542,9 @@ mod tests {
     fn test_builder_basic() {
         let allocator = Allocator::default();
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .selector(Atom::from("[test]"));
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
+            .selector(Ident::from("[test]"));
 
         let metadata = builder.build();
         assert!(metadata.is_some());
@@ -559,7 +559,7 @@ mod tests {
     fn test_builder_missing_name_returns_none() {
         let allocator = Allocator::default();
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")));
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")));
 
         let metadata = builder.build();
         assert!(metadata.is_none());
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn test_builder_missing_type_returns_none() {
         let allocator = Allocator::default();
-        let builder = R3DirectiveMetadataBuilder::new(&allocator).name(Atom::from("TestDirective"));
+        let builder = R3DirectiveMetadataBuilder::new(&allocator).name(Ident::from("TestDirective"));
 
         let metadata = builder.build();
         assert!(metadata.is_none());
@@ -593,8 +593,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -631,8 +631,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -664,8 +664,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestComponent"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
+            .name(Ident::from("TestComponent"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestComponent")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -697,8 +697,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestComponent"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
+            .name(Ident::from("TestComponent"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestComponent")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -730,8 +730,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -765,8 +765,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -803,8 +803,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestComponent"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestComponent")))
+            .name(Ident::from("TestComponent"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestComponent")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -833,8 +833,8 @@ mod tests {
         assert!(class.is_some());
 
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("EmptyDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("EmptyDirective")))
+            .name(Ident::from("EmptyDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("EmptyDirective")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();
@@ -865,9 +865,9 @@ mod tests {
 
         // Pre-add an input before extract_from_class
         let builder = R3DirectiveMetadataBuilder::new(&allocator)
-            .name(Atom::from("TestDirective"))
-            .r#type(OutputAstBuilder::variable(&allocator, Atom::from("TestDirective")))
-            .add_input(R3InputMetadata::simple(Atom::from("existingInput")))
+            .name(Ident::from("TestDirective"))
+            .r#type(OutputAstBuilder::variable(&allocator, Ident::from("TestDirective")))
+            .add_input(R3InputMetadata::simple(Ident::from("existingInput")))
             .extract_from_class(&allocator, class.unwrap());
 
         let metadata = builder.build();

@@ -8,7 +8,7 @@ use oxc_ast::ast::{
     Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind, PropertyKey,
     TSType, TSTypeName,
 };
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::output::ast::{
@@ -65,7 +65,7 @@ pub fn build_decorator_metadata_array<'a>(
 
         // Add "type" entry
         map_entries.push(LiteralMapEntry {
-            key: Atom::from("type"),
+            key: Ident::from("type"),
             value: type_expr,
             quoted: false,
         });
@@ -84,7 +84,7 @@ pub fn build_decorator_metadata_array<'a>(
 
             if !args.is_empty() {
                 map_entries.push(LiteralMapEntry {
-                    key: Atom::from("args"),
+                    key: Ident::from("args"),
                     value: OutputExpression::LiteralArray(Box::new_in(
                         LiteralArrayExpr { entries: args, source_span: None },
                         allocator,
@@ -155,7 +155,7 @@ pub fn build_ctor_params_metadata<'a>(
         });
 
         map_entries.push(LiteralMapEntry {
-            key: Atom::from("type"),
+            key: Ident::from("type"),
             value: type_expr,
             quoted: false,
         });
@@ -165,7 +165,7 @@ pub fn build_ctor_params_metadata<'a>(
         if !param_decorators.is_empty() {
             let decorators_array = build_decorator_metadata_array(allocator, &param_decorators);
             map_entries.push(LiteralMapEntry {
-                key: Atom::from("decorators"),
+                key: Ident::from("decorators"),
                 value: decorators_array,
                 quoted: false,
             });
@@ -366,7 +366,7 @@ fn build_param_type_expression<'a>(
 ///
 /// Returns the simple type name from the annotation, if present.
 /// Used to get the type name for namespace-prefixed references in metadata.
-fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Atom<'a>> {
+fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Ident<'a>> {
     let type_annotation = param.type_annotation.as_ref()?;
     match &type_annotation.type_annotation {
         TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
@@ -444,10 +444,10 @@ fn get_decorator_name<'a>(decorator: &Decorator<'a>) -> Option<&'a str> {
 }
 
 /// Get property key name as an Atom.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }

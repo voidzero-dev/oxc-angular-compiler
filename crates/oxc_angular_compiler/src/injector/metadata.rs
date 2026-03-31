@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_injector_compiler.ts`.
 
 use oxc_allocator::Vec;
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::output::ast::OutputExpression;
 
@@ -14,7 +14,7 @@ use crate::output::ast::OutputExpression;
 #[derive(Debug)]
 pub struct R3InjectorMetadata<'a> {
     /// Name of the injector type.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// An expression representing a reference to the injector class.
     pub r#type: OutputExpression<'a>,
@@ -46,7 +46,7 @@ impl<'a> R3InjectorMetadata<'a> {
 
 /// Builder for R3InjectorMetadata.
 pub struct R3InjectorMetadataBuilder<'a> {
-    name: Option<Atom<'a>>,
+    name: Option<Ident<'a>>,
     r#type: Option<OutputExpression<'a>>,
     providers: Option<OutputExpression<'a>>,
     imports: Vec<'a, OutputExpression<'a>>,
@@ -66,7 +66,7 @@ impl<'a> R3InjectorMetadataBuilder<'a> {
     }
 
     /// Set the injector name.
-    pub fn name(mut self, name: Atom<'a>) -> Self {
+    pub fn name(mut self, name: Ident<'a>) -> Self {
         self.name = Some(name);
         self
     }

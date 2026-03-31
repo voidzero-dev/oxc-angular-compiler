@@ -1266,7 +1266,7 @@ pub fn compile_pipe_sync(
     use oxc_angular_compiler::{R3PipeMetadataBuilder, compile_pipe, extract_pipe_metadata};
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
-    use oxc_span::{Atom, SourceType};
+    use oxc_span::{Ident, SourceType};
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(&file_path).unwrap_or_default();
@@ -1316,7 +1316,7 @@ pub fn compile_pipe_sync(
                     .is_standalone(metadata.standalone);
 
                 if let Some(name) = &metadata.pipe_name {
-                    builder = builder.pipe_name(Atom::from(name.as_str()));
+                    builder = builder.pipe_name(Ident::from(name.as_str()));
                 }
 
                 let r3_metadata = builder.build();
@@ -1715,7 +1715,7 @@ pub fn extract_component_metadata_sync(
                             metadata
                                 .export_as
                                 .iter()
-                                .map(oxc_span::Atom::as_str)
+                                .map(oxc_span::Ident::as_str)
                                 .collect::<Vec<_>>()
                                 .join(","),
                         )
@@ -1804,25 +1804,25 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
     use oxc_angular_compiler::output::emitter::JsEmitter;
     use oxc_angular_compiler::{R3InjectorMetadataBuilder, compile_injector};
-    use oxc_span::Atom;
+    use oxc_span::Ident;
 
     let allocator = Allocator::default();
 
     // Create type expression for the injector class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(input.name.as_str()), source_span: None },
+        ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
         &allocator,
     ));
 
     // Build the metadata
     let mut builder = R3InjectorMetadataBuilder::new(&allocator)
-        .name(Atom::from(input.name.as_str()))
+        .name(Ident::from(input.name.as_str()))
         .r#type(type_expr);
 
     // Add providers if present (as a variable reference)
     if let Some(providers_str) = &input.providers {
         let providers_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from(providers_str.as_str()), source_span: None },
+            ReadVarExpr { name: Ident::from(providers_str.as_str()), source_span: None },
             &allocator,
         ));
         builder = builder.providers(providers_expr);
@@ -1832,7 +1832,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     if let Some(imports) = &input.imports {
         for import_name in imports {
             let import_expr = OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from(import_name.as_str()), source_span: None },
+                ReadVarExpr { name: Ident::from(import_name.as_str()), source_span: None },
                 &allocator,
             ));
             builder = builder.add_import(import_expr);
@@ -1905,7 +1905,7 @@ pub fn compile_class_metadata_sync(
     use oxc_angular_compiler::output::emitter::JsEmitter;
     use oxc_ast::ast::{Class, Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
-    use oxc_span::{Atom, SourceType};
+    use oxc_span::{Ident, SourceType};
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(&file_path).unwrap_or_default();
@@ -1959,7 +1959,7 @@ pub fn compile_class_metadata_sync(
 
     // Build the class type expression
     let type_expr = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(class_name.as_str()), source_span: None },
+        ReadVarExpr { name: Ident::from(class_name.as_str()), source_span: None },
         &allocator,
     ));
 
@@ -2144,7 +2144,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
     };
     use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
     use oxc_angular_compiler::output::emitter::JsEmitter;
-    use oxc_span::Atom;
+    use oxc_span::Ident;
 
     let allocator = Allocator::default();
 
@@ -2167,7 +2167,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
 
     // Create type expression for the class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(input.name.as_str()), source_span: None },
+        ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
         &allocator,
     ));
 
@@ -2183,7 +2183,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
                     // Use ReadVarExpr for token since WrappedNodeExpr cannot be emitted
                     let token = dep.token.as_ref().map(|t| {
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from(t.as_str()), source_span: None },
+                            ReadVarExpr { name: Ident::from(t.as_str()), source_span: None },
                             &allocator,
                         ))
                     });
@@ -2191,7 +2191,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
                     // Use ReadVarExpr for attribute name type
                     let attribute_name_type = dep.attribute_name_type.as_ref().map(|a| {
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from(a.as_str()), source_span: None },
+                            ReadVarExpr { name: Ident::from(a.as_str()), source_span: None },
                             &allocator,
                         ))
                     });
@@ -2221,7 +2221,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
     // Build factory metadata
     let factory_name = format!("{}_Factory", input.name);
     let metadata = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
-        name: Atom::from(input.name.as_str()),
+        name: Ident::from(input.name.as_str()),
         type_expr: type_expr.clone_in(&allocator),
         type_decl: type_expr,
         type_argument_count: 0,

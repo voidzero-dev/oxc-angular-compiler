@@ -287,7 +287,7 @@ where
 /// Data extracted from an access expression for processing.
 enum AccessInfo<'a> {
     /// Property read: `.name`
-    PropertyRead { name: oxc_span::Atom<'a>, source_span: Option<Span> },
+    PropertyRead { name: oxc_span::Ident<'a>, source_span: Option<Span> },
     /// Keyed read: `[key]`
     KeyedRead { key: IrExpression<'a>, source_span: Option<Span> },
     /// Function call: `(args)`

@@ -13,7 +13,7 @@
 //! - Inject dependencies
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::r3::Identifiers;
 
@@ -129,7 +129,7 @@ fn generate_cmp_definition<'a>(
 
     // 1. type: ComponentClass
     entries.push(LiteralMapEntry {
-        key: Atom::from("type"),
+        key: Ident::from("type"),
         value: OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
             allocator,
@@ -142,10 +142,10 @@ fn generate_cmp_definition<'a>(
     // See: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts:264-290
     // and packages/compiler/src/schema/dom_element_schema_registry.ts:463
     let selector_value =
-        metadata.selector.as_ref().map_or_else(|| Atom::from("ng-component"), |s| s.clone());
+        metadata.selector.as_ref().map_or_else(|| Ident::from("ng-component"), |s| s.clone());
     let selector_entries = parse_selector_to_array(allocator, &selector_value);
     entries.push(LiteralMapEntry {
-        key: Atom::from("selectors"),
+        key: Ident::from("selectors"),
         value: selector_entries,
         quoted: false,
     });
@@ -156,7 +156,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 57-63 (baseDirectiveFields)
     if let Some(content_queries) = content_queries_fn {
         entries.push(LiteralMapEntry {
-            key: Atom::from("contentQueries"),
+            key: Ident::from("contentQueries"),
             value: content_queries,
             quoted: false,
         });
@@ -168,7 +168,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 65-70 (baseDirectiveFields)
     if let Some(view_query) = view_query_fn {
         entries.push(LiteralMapEntry {
-            key: Atom::from("viewQuery"),
+            key: Ident::from("viewQuery"),
             value: view_query,
             quoted: false,
         });
@@ -182,7 +182,7 @@ fn generate_cmp_definition<'a>(
         // 5. hostAttrs: [...] - static host attributes
         if let Some(host_attrs) = host_result.host_attrs {
             entries.push(LiteralMapEntry {
-                key: Atom::from("hostAttrs"),
+                key: Ident::from("hostAttrs"),
                 value: host_attrs,
                 quoted: false,
             });
@@ -191,7 +191,7 @@ fn generate_cmp_definition<'a>(
         // 6. hostVars: number - only if > 0
         if let Some(host_vars) = host_result.host_vars {
             entries.push(LiteralMapEntry {
-                key: Atom::from("hostVars"),
+                key: Ident::from("hostVars"),
                 value: OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::Number(host_vars as f64),
@@ -206,7 +206,7 @@ fn generate_cmp_definition<'a>(
         // 7. hostBindings: function(rf, ctx) { ... } (if any)
         if let Some(host_fn) = host_result.host_binding_fn {
             entries.push(LiteralMapEntry {
-                key: Atom::from("hostBindings"),
+                key: Ident::from("hostBindings"),
                 value: OutputExpression::Function(Box::new_in(host_fn, allocator)),
                 quoted: false,
             });
@@ -218,7 +218,7 @@ fn generate_cmp_definition<'a>(
     if !metadata.inputs.is_empty() {
         if let Some(inputs_expr) = create_inputs_literal(allocator, &metadata.inputs) {
             entries.push(LiteralMapEntry {
-                key: Atom::from("inputs"),
+                key: Ident::from("inputs"),
                 value: inputs_expr,
                 quoted: false,
             });
@@ -230,7 +230,7 @@ fn generate_cmp_definition<'a>(
     if !metadata.outputs.is_empty() {
         if let Some(outputs_expr) = create_outputs_literal(allocator, &metadata.outputs) {
             entries.push(LiteralMapEntry {
-                key: Atom::from("outputs"),
+                key: Ident::from("outputs"),
                 value: outputs_expr,
                 quoted: false,
             });
@@ -248,7 +248,7 @@ fn generate_cmp_definition<'a>(
             )));
         }
         entries.push(LiteralMapEntry {
-            key: Atom::from("exportAs"),
+            key: Ident::from("exportAs"),
             value: OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: export_items, source_span: None },
                 allocator,
@@ -261,7 +261,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 96-98 (baseDirectiveFields)
     if !metadata.standalone {
         entries.push(LiteralMapEntry {
-            key: Atom::from("standalone"),
+            key: Ident::from("standalone"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
@@ -274,7 +274,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 99-101 (baseDirectiveFields)
     if metadata.is_signal {
         entries.push(LiteralMapEntry {
-            key: Atom::from("signals"),
+            key: Ident::from("signals"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
                 allocator,
@@ -291,7 +291,7 @@ fn generate_cmp_definition<'a>(
     // See: packages/compiler/src/render3/view/compiler.ts:119-161
     if let Some(features) = generate_features_array(allocator, metadata, namespace_registry) {
         entries.push(LiteralMapEntry {
-            key: Atom::from("features"),
+            key: Ident::from("features"),
             value: features,
             quoted: false,
         });
@@ -307,14 +307,14 @@ fn generate_cmp_definition<'a>(
     // The attrs_ref is pre-pooled BEFORE template compilation to ensure correct constant ordering.
     // TypeScript Angular adds attrs to the pool BEFORE template ingestion/compilation.
     if let Some(attrs) = attrs_ref {
-        entries.push(LiteralMapEntry { key: Atom::from("attrs"), value: attrs, quoted: false });
+        entries.push(LiteralMapEntry { key: Ident::from("attrs"), value: attrs, quoted: false });
     }
 
     // 15. ngContentSelectors: [...] - content projection selectors
     // Per Angular compiler.ts lines 254-256
     if let Some(content_selectors) = job.content_selectors.take() {
         entries.push(LiteralMapEntry {
-            key: Atom::from("ngContentSelectors"),
+            key: Ident::from("ngContentSelectors"),
             value: content_selectors,
             quoted: false,
         });
@@ -324,7 +324,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts line 258
     let decls = job.root.decl_count.unwrap_or(0);
     entries.push(LiteralMapEntry {
-        key: Atom::from("decls"),
+        key: Ident::from("decls"),
         value: OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(decls as f64), source_span: None },
             allocator,
@@ -336,7 +336,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts line 259
     let vars = job.root.vars.unwrap_or(0);
     entries.push(LiteralMapEntry {
-        key: Atom::from("vars"),
+        key: Ident::from("vars"),
         value: OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(vars as f64), source_span: None },
             allocator,
@@ -395,7 +395,7 @@ fn generate_cmp_definition<'a>(
         };
 
         entries.push(LiteralMapEntry {
-            key: Atom::from("consts"),
+            key: Ident::from("consts"),
             value: consts_value,
             quoted: false,
         });
@@ -404,7 +404,7 @@ fn generate_cmp_definition<'a>(
     // 19. template: function(rf, ctx) { ... }
     // Per Angular compiler.ts line 270
     entries.push(LiteralMapEntry {
-        key: Atom::from("template"),
+        key: Ident::from("template"),
         value: OutputExpression::Function(Box::new_in(template_fn, allocator)),
         quoted: false,
     });
@@ -415,7 +415,7 @@ fn generate_cmp_definition<'a>(
         generate_dependencies_expression(allocator, metadata, namespace_registry)
     {
         entries.push(LiteralMapEntry {
-            key: Atom::from("dependencies"),
+            key: Ident::from("dependencies"),
             value: dependencies,
             quoted: false,
         });
@@ -449,7 +449,7 @@ fn generate_cmp_definition<'a>(
             if style.trim().is_empty() {
                 continue;
             }
-            let style_value = Atom::from_in(style.as_str(), allocator);
+            let style_value = Ident::from_in(style.as_str(), allocator);
 
             style_entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(style_value), source_span: None },
@@ -460,7 +460,7 @@ fn generate_cmp_definition<'a>(
         if !style_entries.is_empty() {
             has_styles = true;
             entries.push(LiteralMapEntry {
-                key: Atom::from("styles"),
+                key: Ident::from("styles"),
                 value: OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries: style_entries, source_span: None },
                     allocator,
@@ -486,7 +486,7 @@ fn generate_cmp_definition<'a>(
             ViewEncapsulation::ShadowDom => 3,
         };
         entries.push(LiteralMapEntry {
-            key: Atom::from("encapsulation"),
+            key: Ident::from("encapsulation"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
                     value: LiteralValue::Number(encapsulation_value as f64),
@@ -505,14 +505,14 @@ fn generate_cmp_definition<'a>(
         let mut data_entries: OxcVec<'a, LiteralMapEntry<'a>> =
             OxcVec::with_capacity_in(1, allocator);
         data_entries.push(LiteralMapEntry {
-            key: Atom::from("animation"),
+            key: Ident::from("animation"),
             // Use the full animations expression directly
             value: animations.clone_in(allocator),
             quoted: false,
         });
 
         entries.push(LiteralMapEntry {
-            key: Atom::from("data"),
+            key: Ident::from("data"),
             value: OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries: data_entries, source_span: None },
                 allocator,
@@ -535,7 +535,7 @@ fn generate_cmp_definition<'a>(
         // ReadPropExpr { receiver: ReadVarExpr("ChangeDetectionStrategy"), name: "OnPush" }
         let change_detection_strategy_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr {
-                name: Atom::from(Identifiers::CHANGE_DETECTION_STRATEGY),
+                name: Ident::from(Identifiers::CHANGE_DETECTION_STRATEGY),
                 source_span: None,
             },
             allocator,
@@ -543,14 +543,14 @@ fn generate_cmp_definition<'a>(
         let strategy_value_expr = OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
                 receiver: Box::new_in(change_detection_strategy_expr, allocator),
-                name: Atom::from(strategy_name),
+                name: Ident::from(strategy_name),
                 optional: false,
                 source_span: None,
             },
             allocator,
         ));
         entries.push(LiteralMapEntry {
-            key: Atom::from("changeDetection"),
+            key: Ident::from("changeDetection"),
             value: strategy_value_expr,
             quoted: false,
         });
@@ -633,11 +633,11 @@ fn generate_constructor_factory<'a>(
 ) -> OutputExpression<'a> {
     // Function name: ComponentClass_Factory
     let fn_name_string = format!("{}_Factory", metadata.class_name);
-    let fn_name = Atom::from_in(fn_name_string.as_str(), allocator);
+    let fn_name = Ident::from_in(fn_name_string.as_str(), allocator);
 
     // Parameter: __ngFactoryType__ (type override for inheritance/testing)
     let mut params: OxcVec<'a, FnParam<'a>> = OxcVec::new_in(allocator);
-    params.push(FnParam { name: Atom::from("__ngFactoryType__") });
+    params.push(FnParam { name: Ident::from("__ngFactoryType__") });
 
     // Body: return new (__ngFactoryType__ || ComponentClass)(deps...);
     let mut statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
@@ -648,7 +648,7 @@ fn generate_constructor_factory<'a>(
             operator: crate::output::ast::BinaryOperator::Or,
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("__ngFactoryType__"), source_span: None },
+                    ReadVarExpr { name: Ident::from("__ngFactoryType__"), source_span: None },
                     allocator,
                 )),
                 allocator,
@@ -720,15 +720,15 @@ fn generate_inherited_factory<'a>(
         StmtModifier,
     };
 
-    let factory_type_param = Atom::from("__ngFactoryType__");
+    let factory_type_param = Ident::from("__ngFactoryType__");
 
     // Create base factory variable name: ɵComponentClass_BaseFactory
     let base_factory_var_name =
-        Atom::from_in(format!("ɵ{}_BaseFactory", metadata.class_name).as_str(), allocator);
+        Ident::from_in(format!("ɵ{}_BaseFactory", metadata.class_name).as_str(), allocator);
 
     // Function name: ComponentClass_Factory
     let fn_name_string = format!("{}_Factory", metadata.class_name);
-    let fn_name = Atom::from_in(fn_name_string.as_str(), allocator);
+    let fn_name = Ident::from_in(fn_name_string.as_str(), allocator);
 
     // Create ɵɵgetInheritedFactory(ComponentClass) call
     let get_inherited_factory_call = {
@@ -736,12 +736,12 @@ fn generate_inherited_factory<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::GET_INHERITED_FACTORY),
+                name: Ident::from(Identifiers::GET_INHERITED_FACTORY),
                 optional: false,
                 source_span: None,
             },
@@ -913,12 +913,12 @@ fn create_define_component_call<'a>(
         crate::output::ast::ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_COMPONENT),
+            name: Ident::from(Identifiers::DEFINE_COMPONENT),
             optional: false,
             source_span: None,
         },
@@ -953,7 +953,7 @@ fn create_define_component_call<'a>(
 /// Ported from Angular's `parseSelectorToR3Selector` in `core.ts`.
 fn parse_selector_to_array<'a>(
     allocator: &'a Allocator,
-    selector: &Atom<'a>,
+    selector: &Ident<'a>,
 ) -> OutputExpression<'a> {
     let r3_selectors = parse_selector_to_r3_selector(selector.as_str());
 
@@ -1194,7 +1194,7 @@ fn create_host_directives_arg<'a>(
 
             // directive: DirectiveClass (or i1.DirectiveClass for imports)
             entries.push(LiteralMapEntry {
-                key: Atom::from("directive"),
+                key: Ident::from("directive"),
                 value: directive_ref,
                 quoted: false,
             });
@@ -1204,7 +1204,7 @@ fn create_host_directives_arg<'a>(
                 let inputs_array =
                     create_host_directive_mappings_array(allocator, &directive.inputs);
                 entries.push(LiteralMapEntry {
-                    key: Atom::from("inputs"),
+                    key: Ident::from("inputs"),
                     value: inputs_array,
                     quoted: false,
                 });
@@ -1215,7 +1215,7 @@ fn create_host_directives_arg<'a>(
                 let outputs_array =
                     create_host_directive_mappings_array(allocator, &directive.outputs);
                 entries.push(LiteralMapEntry {
-                    key: Atom::from("outputs"),
+                    key: Ident::from("outputs"),
                     value: outputs_array,
                     quoted: false,
                 });
@@ -1305,12 +1305,12 @@ fn create_angular_fn_ref<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(fn_name),
+            name: Ident::from(fn_name),
             optional: false,
             source_span: None,
         },
@@ -1471,7 +1471,7 @@ fn compile_declaration_list<'a>(
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(list, allocator),
-                                name: Atom::from("map"),
+                                name: Ident::from("map"),
                                 optional: false,
                                 source_span: None,
                             },
@@ -1568,7 +1568,7 @@ pub fn const_value_to_expression<'a>(
                 crate::output::ast::ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
                             allocator,
                         )),
                         allocator,
@@ -1593,8 +1593,8 @@ mod tests {
 
     fn create_test_metadata<'a>(allocator: &'a Allocator) -> ComponentMetadata<'a> {
         let mut metadata =
-            ComponentMetadata::new(allocator, Atom::from("TestComponent"), Span::empty(0), true);
-        metadata.selector = Some(Atom::from("app-test"));
+            ComponentMetadata::new(allocator, Ident::from("TestComponent"), Span::empty(0), true);
+        metadata.selector = Some(Ident::from("app-test"));
         metadata
     }
 
@@ -1617,7 +1617,7 @@ mod tests {
     #[test]
     fn test_parse_element_selector() {
         let allocator = Allocator::default();
-        let result = parse_selector_to_array(&allocator, &Atom::from("app-root"));
+        let result = parse_selector_to_array(&allocator, &Ident::from("app-root"));
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1628,7 +1628,7 @@ mod tests {
     #[test]
     fn test_parse_attribute_selector() {
         let allocator = Allocator::default();
-        let result = parse_selector_to_array(&allocator, &Atom::from("[type=button]"));
+        let result = parse_selector_to_array(&allocator, &Ident::from("[type=button]"));
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1649,7 +1649,7 @@ mod tests {
         let allocator = Allocator::default();
         let mut metadata = ComponentMetadata::new(
             &allocator,
-            Atom::from("EmptyOutletComponent"),
+            Ident::from("EmptyOutletComponent"),
             Span::empty(0),
             true,
         );
@@ -1657,7 +1657,7 @@ mod tests {
         metadata.selector = None;
 
         let selector_value =
-            metadata.selector.as_ref().map_or_else(|| Atom::from("ng-component"), |s| s.clone());
+            metadata.selector.as_ref().map_or_else(|| Ident::from("ng-component"), |s| s.clone());
         let result = parse_selector_to_array(&allocator, &selector_value);
 
         let emitter = JsEmitter::new();
@@ -1671,11 +1671,11 @@ mod tests {
     fn test_explicit_selector_overrides_default() {
         let allocator = Allocator::default();
         let mut metadata =
-            ComponentMetadata::new(&allocator, Atom::from("TestComponent"), Span::empty(0), true);
-        metadata.selector = Some(Atom::from("app-test"));
+            ComponentMetadata::new(&allocator, Ident::from("TestComponent"), Span::empty(0), true);
+        metadata.selector = Some(Ident::from("app-test"));
 
         let selector_value =
-            metadata.selector.as_ref().map_or_else(|| Atom::from("ng-component"), |s| s.clone());
+            metadata.selector.as_ref().map_or_else(|| Ident::from("ng-component"), |s| s.clone());
         let result = parse_selector_to_array(&allocator, &selector_value);
 
         let emitter = JsEmitter::new();
@@ -1709,7 +1709,7 @@ mod tests {
             OxcVec::with_capacity_in(names.len(), allocator);
         for name in names {
             entries.push(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from(*name), source_span: None },
+                ReadVarExpr { name: Ident::from(*name), source_span: None },
                 allocator,
             )));
         }
@@ -1817,8 +1817,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
-        metadata.external_styles.push(Atom::from("./styles.css"));
-        metadata.external_styles.push(Atom::from("./theme.css"));
+        metadata.external_styles.push(Ident::from("./styles.css"));
+        metadata.external_styles.push(Ident::from("./theme.css"));
 
         let result =
             generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
@@ -1837,7 +1837,7 @@ mod tests {
         let mut metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
-        let directive = HostDirectiveMetadata::new(&allocator, Atom::from("MyDirective"));
+        let directive = HostDirectiveMetadata::new(&allocator, Ident::from("MyDirective"));
         metadata.host_directives.push(directive);
 
         let result =
@@ -1856,9 +1856,9 @@ mod tests {
         let mut metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
-        let mut directive = HostDirectiveMetadata::new(&allocator, Atom::from("MyDirective"));
-        directive.inputs.push((Atom::from("publicInput"), Atom::from("internalInput")));
-        directive.outputs.push((Atom::from("publicOutput"), Atom::from("internalOutput")));
+        let mut directive = HostDirectiveMetadata::new(&allocator, Ident::from("MyDirective"));
+        directive.inputs.push((Ident::from("publicInput"), Ident::from("internalInput")));
+        directive.outputs.push((Ident::from("publicOutput"), Ident::from("internalOutput")));
         metadata.host_directives.push(directive);
 
         let result =
@@ -1881,7 +1881,7 @@ mod tests {
         let mut metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
-        let mut directive = HostDirectiveMetadata::new(&allocator, Atom::from("ForwardRefDir"));
+        let mut directive = HostDirectiveMetadata::new(&allocator, Ident::from("ForwardRefDir"));
         directive.is_forward_reference = true;
         metadata.host_directives.push(directive);
 
@@ -1904,8 +1904,8 @@ mod tests {
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
         // Create directive with source_module (imported from another module)
-        let directive = HostDirectiveMetadata::new(&allocator, Atom::from("ExternalDirective"))
-            .with_source_module(Atom::from("@angular/external"));
+        let directive = HostDirectiveMetadata::new(&allocator, Ident::from("ExternalDirective"))
+            .with_source_module(Ident::from("@angular/external"));
         metadata.host_directives.push(directive);
 
         let result =
@@ -1932,13 +1932,13 @@ mod tests {
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
         // Local directive (no source_module)
-        let local_directive = HostDirectiveMetadata::new(&allocator, Atom::from("LocalDirective"));
+        let local_directive = HostDirectiveMetadata::new(&allocator, Ident::from("LocalDirective"));
         metadata.host_directives.push(local_directive);
 
         // Imported directive (with source_module)
         let imported_directive =
-            HostDirectiveMetadata::new(&allocator, Atom::from("ImportedDirective"))
-                .with_source_module(Atom::from("@angular/library"));
+            HostDirectiveMetadata::new(&allocator, Ident::from("ImportedDirective"))
+                .with_source_module(Ident::from("@angular/library"));
         metadata.host_directives.push(imported_directive);
 
         let result =
@@ -2007,16 +2007,16 @@ mod tests {
         // Add directives using the TemplateDependency from metadata module
         let dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("MyDirective"),
-            Atom::from("[myDir]"),
+            Ident::from("MyDirective"),
+            Ident::from("[myDir]"),
             false,
         );
         metadata.declarations.push(dir);
 
         let pipe = crate::component::metadata::TemplateDependency::pipe(
             &allocator,
-            Atom::from("MyPipe"),
-            Atom::from("myPipe"),
+            Ident::from("MyPipe"),
+            Ident::from("myPipe"),
         );
         metadata.declarations.push(pipe);
 
@@ -2043,8 +2043,8 @@ mod tests {
 
         let dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("ForwardDir"),
-            Atom::from("[fwd]"),
+            Ident::from("ForwardDir"),
+            Ident::from("[fwd]"),
             false,
         );
         metadata.declarations.push(dir);
@@ -2072,8 +2072,8 @@ mod tests {
 
         let dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("JitDir"),
-            Atom::from("[jit]"),
+            Ident::from("JitDir"),
+            Ident::from("[jit]"),
             false,
         );
         metadata.declarations.push(dir);
@@ -2122,7 +2122,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::RuntimeResolved;
         // Test with a variable reference as raw_imports
         metadata.raw_imports = Some(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("IMPORTS"), source_span: None },
+            ReadVarExpr { name: Ident::from("IMPORTS"), source_span: None },
             &allocator,
         )));
 
@@ -2151,15 +2151,15 @@ mod tests {
         // Test with an array literal as raw_imports (like imports: [A, B, C])
         let mut entries: OxcVec<'_, OutputExpression<'_>> = OxcVec::with_capacity_in(3, &allocator);
         entries.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("A"), source_span: None },
+            ReadVarExpr { name: Ident::from("A"), source_span: None },
             &allocator,
         )));
         entries.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("B"), source_span: None },
+            ReadVarExpr { name: Ident::from("B"), source_span: None },
             &allocator,
         )));
         entries.push(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("C"), source_span: None },
+            ReadVarExpr { name: Ident::from("C"), source_span: None },
             &allocator,
         )));
         metadata.raw_imports = Some(OutputExpression::LiteralArray(Box::new_in(
@@ -2187,11 +2187,11 @@ mod tests {
         // Add an imported directive with source_module
         let dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("RouterOutlet"),
-            Atom::from("router-outlet"),
+            Ident::from("RouterOutlet"),
+            Ident::from("router-outlet"),
             false,
         )
-        .with_source_module(Atom::from("@angular/router"));
+        .with_source_module(Ident::from("@angular/router"));
         metadata.declarations.push(dir);
 
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Direct;
@@ -2207,7 +2207,7 @@ mod tests {
         assert!(js.contains("i1.RouterOutlet"));
 
         // Verify namespace was registered
-        assert!(namespace_registry.has_module(&Atom::from("@angular/router")));
+        assert!(namespace_registry.has_module(&Ident::from("@angular/router")));
     }
 
     #[test]
@@ -2219,8 +2219,8 @@ mod tests {
         // Add a local directive (no source_module)
         let local_dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("LocalDirective"),
-            Atom::from("[local]"),
+            Ident::from("LocalDirective"),
+            Ident::from("[local]"),
             false,
         );
         metadata.declarations.push(local_dir);
@@ -2228,11 +2228,11 @@ mod tests {
         // Add an imported directive
         let imported_dir = crate::component::metadata::TemplateDependency::directive(
             &allocator,
-            Atom::from("CommonModule"),
-            Atom::from("[common]"),
+            Ident::from("CommonModule"),
+            Ident::from("[common]"),
             false,
         )
-        .with_source_module(Atom::from("@angular/common"));
+        .with_source_module(Ident::from("@angular/common"));
         metadata.declarations.push(imported_dir);
 
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Direct;
@@ -2258,10 +2258,10 @@ mod tests {
         metadata.providers = Some(create_test_providers_array(&allocator, &["ServiceA"]));
         metadata.uses_inheritance = true;
         metadata.lifecycle = LifecycleMetadata { uses_on_changes: true };
-        metadata.external_styles.push(Atom::from("./styles.css"));
+        metadata.external_styles.push(Ident::from("./styles.css"));
 
         // Add host directive
-        let directive = HostDirectiveMetadata::new(&allocator, Atom::from("HostDir"));
+        let directive = HostDirectiveMetadata::new(&allocator, Ident::from("HostDir"));
         metadata.host_directives.push(directive);
 
         let result =
@@ -2305,7 +2305,7 @@ mod tests {
         let mut metadata = create_test_metadata(&allocator);
         // Create an animations expression (identifier reference)
         metadata.animations = Some(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("myAnimations"), source_span: None },
+            ReadVarExpr { name: Ident::from("myAnimations"), source_span: None },
             &allocator,
         )));
 

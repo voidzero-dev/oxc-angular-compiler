@@ -9,7 +9,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/generate_projection_def.ts`.
 
 use oxc_allocator::{Box as OxcBox, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 use std::ptr::NonNull;
 
 use crate::ir::ops::{CreateOp, CreateOpBase, ProjectionDefOp, XrefId};
@@ -72,7 +72,7 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
 
     // Phase 2: Assign projection slot indexes and collect selectors
     let allocator = job.allocator;
-    let mut selectors: Vec<Atom<'_>> = Vec::new();
+    let mut selectors: Vec<Ident<'_>> = Vec::new();
 
     for (slot_index, ptr) in projection_ptrs.iter().enumerate() {
         // SAFETY: ptr is valid from our cursor traversal
@@ -82,7 +82,7 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
             proj.projection_slot_index = slot_index as u32;
 
             // Collect selector (use "*" for wildcard if None)
-            let selector = proj.selector.clone().unwrap_or_else(|| Atom::from("*"));
+            let selector = proj.selector.clone().unwrap_or_else(|| Ident::from("*"));
             selectors.push(selector);
         }
     }
@@ -112,7 +112,7 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
             if selector.as_str() == "*" {
                 // Wildcard stays as string literal "*"
                 def_elements.push(OutputExpression::Literal(OxcBox::new_in(
-                    LiteralExpr { value: LiteralValue::String(Atom::from("*")), source_span: None },
+                    LiteralExpr { value: LiteralValue::String(Ident::from("*")), source_span: None },
                     allocator,
                 )));
             } else {

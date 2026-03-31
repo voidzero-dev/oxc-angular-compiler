@@ -16,7 +16,7 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Expression, ObjectPropertyKind, PropertyKey,
     UnaryOperator as OxcUnaryOperator,
 };
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, CommaExpr,
@@ -49,7 +49,7 @@ pub fn convert_oxc_expression<'a>(
     match expr {
         // Literals
         Expression::BooleanLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::Boolean(lit.value), source_span: None },
+            LiteralExpr { value: LiteralValue::Boolean(lit.value.into()), source_span: None },
             allocator,
         ))),
 
@@ -59,12 +59,12 @@ pub fn convert_oxc_expression<'a>(
         ))),
 
         Expression::NumericLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::Number(lit.value), source_span: None },
+            LiteralExpr { value: LiteralValue::Number(lit.value.into()), source_span: None },
             allocator,
         ))),
 
         Expression::StringLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
-            LiteralExpr { value: LiteralValue::String(lit.value.clone()), source_span: None },
+            LiteralExpr { value: LiteralValue::String(lit.value.clone().into()), source_span: None },
             allocator,
         ))),
 
@@ -203,7 +203,7 @@ pub fn convert_oxc_expression<'a>(
 
         // This expression
         Expression::ThisExpression(_) => Some(OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("this"), source_span: None },
+            ReadVarExpr { name: Ident::from("this"), source_span: None },
             allocator,
         ))),
 
@@ -288,9 +288,9 @@ fn convert_object_expression<'a>(
                 // Get the property key
                 let (key, quoted) = match &p.key {
                     PropertyKey::StaticIdentifier(id) => (id.name.clone().into(), false),
-                    PropertyKey::StringLiteral(lit) => (lit.value.clone(), true),
+                    PropertyKey::StringLiteral(lit) => (lit.value.clone().into(), true),
                     PropertyKey::NumericLiteral(lit) => {
-                        (Atom::from(allocator.alloc_str(&lit.value.to_string())), true)
+                        (Ident::from(allocator.alloc_str(&lit.value.to_string())), true)
                     }
                     PropertyKey::PrivateIdentifier(_) => return None, // Private fields not supported
                     _ => {
@@ -532,7 +532,7 @@ fn convert_template_literal<'a>(
             .map_or_else(|| quasi.value.raw.clone(), |cooked| cooked.clone());
         let raw_text = quasi.value.raw.clone();
 
-        elements.push(TemplateLiteralElement { text, raw_text, source_span: None });
+        elements.push(TemplateLiteralElement { text: text.into(), raw_text: raw_text.into(), source_span: None });
     }
 
     // Convert expressions

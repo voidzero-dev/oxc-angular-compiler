@@ -16,7 +16,7 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
     MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::{QueryPredicate, R3InputMetadata, R3QueryMetadata};
 use crate::output::ast::OutputExpression;
@@ -50,10 +50,10 @@ fn find_decorator_by_name<'a>(
 /// Get the property key name as an Atom.
 ///
 /// Handles both identifier keys and string literal keys.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
@@ -61,11 +61,11 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
 /// Extract a string value from an expression.
 ///
 /// Handles string literals and simple template literals (no expressions).
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -74,7 +74,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
-        Expression::BooleanLiteral(lit) => Some(lit.value),
+        Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }
@@ -128,7 +128,7 @@ fn try_unwrap_forward_ref<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression
 /// Parsed @Input decorator configuration.
 struct InputConfig<'a> {
     /// Alias name for the input binding (different from property name).
-    alias: Option<Atom<'a>>,
+    alias: Option<Ident<'a>>,
     /// Whether this input is required.
     required: bool,
     /// Transform function for the input value.
@@ -162,7 +162,7 @@ fn parse_input_config<'a>(
     match first_arg {
         // @Input('alias')
         Argument::StringLiteral(lit) => {
-            InputConfig { alias: Some(lit.value.clone()), ..Default::default() }
+            InputConfig { alias: Some(lit.value.clone().into()), ..Default::default() }
         }
 
         // @Input({ alias: 'name', required: true, transform: fn })
@@ -205,7 +205,7 @@ struct ModelMapping<'a> {
     input: R3InputMetadata<'a>,
     /// The output metadata (class property name, binding property name).
     /// Output binding name is always `inputName + "Change"`.
-    output: (Atom<'a>, Atom<'a>),
+    output: (Ident<'a>, Ident<'a>),
 }
 
 /// Try to detect and parse a signal-based model from a property initializer.
@@ -224,7 +224,7 @@ struct ModelMapping<'a> {
 fn try_parse_signal_model<'a>(
     allocator: &'a Allocator,
     value: &Expression<'a>,
-    property_name: Atom<'a>,
+    property_name: Ident<'a>,
 ) -> Option<ModelMapping<'a>> {
     // Check if the value is a call expression
     let call_expr = match value {
@@ -247,7 +247,7 @@ fn try_parse_signal_model<'a>(
             } else if member.property.name == "model" {
                 // Handle namespaced calls like `core.model()`
                 if let Expression::Identifier(_) = &member.object {
-                    let output_binding = Atom::from(
+                    let output_binding = Ident::from(
                         allocator.alloc_str(&format!("{}Change", property_name.as_str())),
                     );
                     return Some(ModelMapping {
@@ -274,7 +274,7 @@ fn try_parse_signal_model<'a>(
     // For model.required(): first arg is options
     let options_arg_index = if is_required { 0 } else { 1 };
 
-    let mut alias: Option<Atom<'a>> = None;
+    let mut alias: Option<Ident<'a>> = None;
 
     if let Some(options_arg) = call_expr.arguments.get(options_arg_index) {
         if let Argument::ObjectExpression(obj) = options_arg {
@@ -295,7 +295,7 @@ fn try_parse_signal_model<'a>(
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
     // Output binding name is always `bindingPropertyName + "Change"`
     let output_binding_name =
-        Atom::from(allocator.alloc_str(&format!("{}Change", binding_property_name.as_str())));
+        Ident::from(allocator.alloc_str(&format!("{}Change", binding_property_name.as_str())));
 
     Some(ModelMapping {
         input: R3InputMetadata {
@@ -324,8 +324,8 @@ fn try_parse_signal_model<'a>(
 /// Based on Angular's `output_function.ts` in the compiler-cli.
 fn try_parse_signal_output<'a>(
     value: &Expression<'a>,
-    property_name: Atom<'a>,
-) -> Option<(Atom<'a>, Atom<'a>)> {
+    property_name: Ident<'a>,
+) -> Option<(Ident<'a>, Ident<'a>)> {
     // Check if the value is a call expression
     let call_expr = match value {
         Expression::CallExpression(call) => call,
@@ -353,7 +353,7 @@ fn try_parse_signal_output<'a>(
 
     // Parse options from the first argument (options are the first arg for output())
     // Options can contain an alias
-    let mut alias: Option<Atom<'a>> = None;
+    let mut alias: Option<Ident<'a>> = None;
 
     if let Some(first_arg) = call_expr.arguments.first() {
         if let Argument::ObjectExpression(obj) = first_arg {
@@ -393,7 +393,7 @@ fn try_parse_signal_output<'a>(
 fn try_parse_signal_input<'a>(
     _allocator: &'a Allocator,
     value: &Expression<'a>,
-    property_name: Atom<'a>,
+    property_name: Ident<'a>,
 ) -> Option<R3InputMetadata<'a>> {
     // Check if the value is a call expression
     let call_expr = match value {
@@ -437,7 +437,7 @@ fn try_parse_signal_input<'a>(
     // For input.required(): first arg is options
     let options_arg_index = if is_required { 0 } else { 1 };
 
-    let mut alias: Option<Atom<'a>> = None;
+    let mut alias: Option<Ident<'a>> = None;
 
     if let Some(options_arg) = call_expr.arguments.get(options_arg_index) {
         if let Argument::ObjectExpression(obj) = options_arg {
@@ -589,7 +589,7 @@ pub fn extract_input_metadata<'a>(
 /// Parsed @Output decorator configuration.
 struct OutputConfig<'a> {
     /// Alias name for the output binding (different from property name).
-    alias: Option<Atom<'a>>,
+    alias: Option<Ident<'a>>,
 }
 
 impl<'a> Default for OutputConfig<'a> {
@@ -614,7 +614,7 @@ fn parse_output_config<'a>(decorator: &'a Decorator<'a>) -> OutputConfig<'a> {
 
     match first_arg {
         // @Output('alias')
-        Argument::StringLiteral(lit) => OutputConfig { alias: Some(lit.value.clone()) },
+        Argument::StringLiteral(lit) => OutputConfig { alias: Some(lit.value.clone().into()) },
         _ => OutputConfig::default(),
     }
 }
@@ -635,7 +635,7 @@ fn parse_output_config<'a>(decorator: &'a Decorator<'a>) -> OutputConfig<'a> {
 pub fn extract_output_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
-) -> Vec<'a, (Atom<'a>, Atom<'a>)> {
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut outputs = Vec::new_in(allocator);
 
     for element in &class.body.body {
@@ -770,7 +770,7 @@ fn parse_query_config<'a>(
         // @ViewChild('refName') - string selector
         Argument::StringLiteral(lit) => {
             let mut selectors = Vec::new_in(allocator);
-            selectors.push(lit.value.clone());
+            selectors.push(lit.value.clone().into());
             config.predicate = Some(QueryPredicate::Selectors(selectors));
         }
 
@@ -865,7 +865,7 @@ impl SignalQueryType {
 fn try_parse_signal_query<'a>(
     allocator: &'a Allocator,
     value: &'a Expression<'a>,
-    property_name: Atom<'a>,
+    property_name: Ident<'a>,
 ) -> Option<(SignalQueryType, R3QueryMetadata<'a>)> {
     // Check if the value is a call expression
     let call_expr = match value {
@@ -933,7 +933,7 @@ fn try_parse_signal_query<'a>(
         // String selector: viewChild('myRef')
         Argument::StringLiteral(lit) => {
             let mut selectors = oxc_allocator::Vec::new_in(allocator);
-            selectors.push(lit.value.clone());
+            selectors.push(lit.value.clone().into());
             QueryPredicate::Selectors(selectors)
         }
         // Type predicate: viewChild(TemplateRef) or viewChild(forwardRef(() => MyClass))
@@ -1285,7 +1285,7 @@ pub fn extract_content_queries<'a>(
 pub fn extract_host_bindings<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
-) -> Vec<'a, (Atom<'a>, Atom<'a>)> {
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut bindings = Vec::new_in(allocator);
 
     for element in &class.body.body {
@@ -1323,7 +1323,7 @@ pub fn extract_host_bindings<'a>(
 /// Extract the binding name from a @HostBinding decorator.
 ///
 /// Returns the string argument if present, None otherwise.
-fn extract_host_binding_name<'a>(decorator: &'a Decorator<'a>) -> Option<Atom<'a>> {
+fn extract_host_binding_name<'a>(decorator: &'a Decorator<'a>) -> Option<Ident<'a>> {
     let Expression::CallExpression(call) = &decorator.expression else {
         return None;
     };
@@ -1331,7 +1331,7 @@ fn extract_host_binding_name<'a>(decorator: &'a Decorator<'a>) -> Option<Atom<'a
     let first_arg = call.arguments.first()?;
 
     match first_arg {
-        Argument::StringLiteral(lit) => Some(lit.value.clone()),
+        Argument::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => {
             let expr = first_arg.to_expression();
             extract_string_value(expr)
@@ -1357,7 +1357,7 @@ fn extract_host_binding_name<'a>(decorator: &'a Decorator<'a>) -> Option<Atom<'a
 pub fn extract_host_listeners<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
-) -> Vec<'a, (Atom<'a>, Atom<'a>, Vec<'a, Atom<'a>>)> {
+) -> Vec<'a, (Ident<'a>, Ident<'a>, Vec<'a, Ident<'a>>)> {
     let mut listeners = Vec::new_in(allocator);
 
     for element in &class.body.body {
@@ -1398,7 +1398,7 @@ pub fn extract_host_listeners<'a>(
 fn parse_host_listener_config<'a>(
     allocator: &'a Allocator,
     decorator: &'a Decorator<'a>,
-) -> (Option<Atom<'a>>, Vec<'a, Atom<'a>>) {
+) -> (Option<Ident<'a>>, Vec<'a, Ident<'a>>) {
     let mut args = Vec::new_in(allocator);
 
     let Expression::CallExpression(call) = &decorator.expression else {
@@ -1407,7 +1407,7 @@ fn parse_host_listener_config<'a>(
 
     // First argument: event name
     let event_name = call.arguments.first().and_then(|arg| match arg {
-        Argument::StringLiteral(lit) => Some(lit.value.clone()),
+        Argument::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => {
             let expr = arg.to_expression();
             extract_string_value(expr)
@@ -1420,7 +1420,7 @@ fn parse_host_listener_config<'a>(
             for elem in &arr.elements {
                 match elem {
                     ArrayExpressionElement::StringLiteral(lit) => {
-                        args.push(lit.value.clone());
+                        args.push(lit.value.clone().into());
                     }
                     ArrayExpressionElement::Elision(_) => {}
                     _ => {

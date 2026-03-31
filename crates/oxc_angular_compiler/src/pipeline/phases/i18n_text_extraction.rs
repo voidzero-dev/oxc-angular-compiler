@@ -9,7 +9,7 @@
 
 use std::ptr::NonNull;
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nExpressionFor, I18nParamResolutionTime};
@@ -50,7 +50,7 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
 
     // Track text ops to be replaced with IcuPlaceholder ops
     // (text_op_ptr, text_xref, icu_placeholder_name, initial_value)
-    let mut text_ops_to_replace_with_icu: Vec<(NonNull<CreateOp<'_>>, XrefId, Atom<'_>, Atom<'_>)> =
+    let mut text_ops_to_replace_with_icu: Vec<(NonNull<CreateOp<'_>>, XrefId, Ident<'_>, Ident<'_>)> =
         Vec::new();
 
     // Track text ops to be removed (those without ICU placeholder)
@@ -260,7 +260,7 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
                         expression: oxc_allocator::Box::new_in(expr.clone_in(allocator), allocator),
                         resolution_time,
                         usage: I18nExpressionFor::I18nText,
-                        name: oxc_span::Atom::from(""),
+                        name: oxc_span::Ident::from(""),
                         i18n_placeholder,
                         icu_placeholder: info.icu_placeholder_xref,
                     }));
@@ -305,7 +305,7 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
                     ),
                     resolution_time,
                     usage: I18nExpressionFor::I18nText,
-                    name: oxc_span::Atom::from(""),
+                    name: oxc_span::Ident::from(""),
                     i18n_placeholder: None,
                     icu_placeholder: info.icu_placeholder_xref,
                 }));

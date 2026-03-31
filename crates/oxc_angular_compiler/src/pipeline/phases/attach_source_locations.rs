@@ -7,7 +7,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/attach_source_locations.ts`.
 
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ir::ops::{CreateOp, CreateOpBase, SourceLocationOp, XrefId};
 use crate::pipeline::compilation::ComponentCompilationJob;
@@ -110,7 +110,7 @@ pub fn attach_source_locations(job: &mut ComponentCompilationJob<'_>) {
                 let source_op = CreateOp::SourceLocation(SourceLocationOp {
                     base: CreateOpBase::default(),
                     target: loc.target,
-                    template_url: Atom::from(template_path.as_str()),
+                    template_url: Ident::from(template_path.as_str()),
                     line: loc.line,
                     column: loc.column,
                 });

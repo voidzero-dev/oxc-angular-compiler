@@ -14,7 +14,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use super::metadata::{R3NgModuleMetadata, R3Reference};
 use crate::output::ast::{
@@ -82,7 +82,7 @@ fn build_definition_map<'a>(
 
     // type: ModuleClass
     entries.push(LiteralMapEntry {
-        key: Atom::from("type"),
+        key: Ident::from("type"),
         value: metadata.r#type.value.clone_in(allocator),
         quoted: false,
     });
@@ -92,7 +92,7 @@ fn build_definition_map<'a>(
         let bootstrap_array =
             create_reference_array(allocator, &metadata.bootstrap, metadata.contains_forward_decls);
         entries.push(LiteralMapEntry {
-            key: Atom::from("bootstrap"),
+            key: Ident::from("bootstrap"),
             value: bootstrap_array,
             quoted: false,
         });
@@ -108,7 +108,7 @@ fn build_definition_map<'a>(
                 metadata.contains_forward_decls,
             );
             entries.push(LiteralMapEntry {
-                key: Atom::from("declarations"),
+                key: Ident::from("declarations"),
                 value: declarations_array,
                 quoted: false,
             });
@@ -122,7 +122,7 @@ fn build_definition_map<'a>(
                 metadata.contains_forward_decls,
             );
             entries.push(LiteralMapEntry {
-                key: Atom::from("imports"),
+                key: Ident::from("imports"),
                 value: imports_array,
                 quoted: false,
             });
@@ -136,7 +136,7 @@ fn build_definition_map<'a>(
                 metadata.contains_forward_decls,
             );
             entries.push(LiteralMapEntry {
-                key: Atom::from("exports"),
+                key: Ident::from("exports"),
                 value: exports_array,
                 quoted: false,
             });
@@ -148,7 +148,7 @@ fn build_definition_map<'a>(
         let schemas_array =
             create_reference_array(allocator, &metadata.schemas, metadata.contains_forward_decls);
         entries.push(LiteralMapEntry {
-            key: Atom::from("schemas"),
+            key: Ident::from("schemas"),
             value: schemas_array,
             quoted: false,
         });
@@ -157,7 +157,7 @@ fn build_definition_map<'a>(
     // id: 'unique-module-id'
     if let Some(id) = &metadata.id {
         entries.push(LiteralMapEntry {
-            key: Atom::from("id"),
+            key: Ident::from("id"),
             value: id.clone_in(allocator),
             quoted: false,
         });
@@ -211,12 +211,12 @@ fn create_define_ng_module_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_NG_MODULE),
+            name: Ident::from(Identifiers::DEFINE_NG_MODULE),
             optional: false,
             source_span: None,
         },
@@ -277,7 +277,7 @@ fn create_set_scope_side_effect<'a>(
             metadata.contains_forward_decls,
         );
         scope_entries.push(LiteralMapEntry {
-            key: Atom::from("declarations"),
+            key: Ident::from("declarations"),
             value: decls,
             quoted: false,
         });
@@ -287,7 +287,7 @@ fn create_set_scope_side_effect<'a>(
         let imports =
             create_reference_array(allocator, &metadata.imports, metadata.contains_forward_decls);
         scope_entries.push(LiteralMapEntry {
-            key: Atom::from("imports"),
+            key: Ident::from("imports"),
             value: imports,
             quoted: false,
         });
@@ -297,7 +297,7 @@ fn create_set_scope_side_effect<'a>(
         let exports =
             create_reference_array(allocator, &metadata.exports, metadata.contains_forward_decls);
         scope_entries.push(LiteralMapEntry {
-            key: Atom::from("exports"),
+            key: Ident::from("exports"),
             value: exports,
             quoted: false,
         });
@@ -313,12 +313,12 @@ fn create_set_scope_side_effect<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::SET_NG_MODULE_SCOPE),
+            name: Ident::from(Identifiers::SET_NG_MODULE_SCOPE),
             optional: false,
             source_span: None,
         },
@@ -342,7 +342,7 @@ fn create_set_scope_side_effect<'a>(
 
     // Create: (typeof ngJitMode === "undefined" || ngJitMode)
     let typeof_expr = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from("typeof ngJitMode"), source_span: None },
+        ReadVarExpr { name: Ident::from("typeof ngJitMode"), source_span: None },
         allocator,
     ));
 
@@ -353,7 +353,7 @@ fn create_set_scope_side_effect<'a>(
             rhs: Box::new_in(
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from("undefined")),
+                        value: LiteralValue::String(Ident::from("undefined")),
                         source_span: None,
                     },
                     allocator,
@@ -366,7 +366,7 @@ fn create_set_scope_side_effect<'a>(
     ));
 
     let ng_jit_mode = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from("ngJitMode"), source_span: None },
+        ReadVarExpr { name: Ident::from("ngJitMode"), source_span: None },
         allocator,
     ));
 
@@ -431,12 +431,12 @@ fn create_register_ng_module_type<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::REGISTER_NG_MODULE_TYPE),
+            name: Ident::from(Identifiers::REGISTER_NG_MODULE_TYPE),
             optional: false,
             source_span: None,
         },
@@ -474,7 +474,7 @@ mod tests {
     fn test_compile_simple_ng_module() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("AppModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("AppModule"), source_span: None },
             &allocator,
         ));
 
@@ -496,11 +496,11 @@ mod tests {
     fn test_compile_ng_module_with_declarations() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyModule"), source_span: None },
             &allocator,
         ));
         let component_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyComponent"), source_span: None },
             &allocator,
         ));
 
@@ -524,15 +524,15 @@ mod tests {
     fn test_compile_ng_module_with_imports_exports() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SharedModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("SharedModule"), source_span: None },
             &allocator,
         ));
         let import_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("CommonModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("CommonModule"), source_span: None },
             &allocator,
         ));
         let export_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SharedComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("SharedComponent"), source_span: None },
             &allocator,
         ));
 
@@ -558,11 +558,11 @@ mod tests {
     fn test_compile_ng_module_with_side_effect_scope() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("JitModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("JitModule"), source_span: None },
             &allocator,
         ));
         let decl_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("JitComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("JitComponent"), source_span: None },
             &allocator,
         ));
 
@@ -583,11 +583,11 @@ mod tests {
     fn test_compile_ng_module_with_forward_decls() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ForwardModule"), source_span: None },
+            ReadVarExpr { name: Ident::from("ForwardModule"), source_span: None },
             &allocator,
         ));
         let decl_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ForwardComponent"), source_span: None },
+            ReadVarExpr { name: Ident::from("ForwardComponent"), source_span: None },
             &allocator,
         ));
 

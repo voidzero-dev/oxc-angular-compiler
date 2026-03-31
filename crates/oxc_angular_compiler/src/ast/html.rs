@@ -4,7 +4,7 @@
 //! ported from Angular's `ml_parser/ast.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 
 use super::expression::AngularExpression;
 
@@ -31,7 +31,7 @@ pub struct InterpolatedToken<'a> {
     /// The token type.
     pub token_type: InterpolatedTokenType,
     /// The token parts (structure depends on token type).
-    pub parts: Vec<'a, Atom<'a>>,
+    pub parts: Vec<'a, Ident<'a>>,
     /// The source span.
     pub span: Span,
 }
@@ -83,7 +83,7 @@ impl<'a> HtmlNode<'a> {
 #[derive(Debug)]
 pub struct HtmlText<'a> {
     /// The decoded text value (entities resolved, interpolations joined).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// The source span (after stripping leading trivia).
     pub span: Span,
     /// The full start offset before stripping leading trivia (for source maps).
@@ -100,13 +100,13 @@ pub struct HtmlElement<'a> {
     /// The element tag name.
     /// For regular elements: the tag name (e.g., "div", ":svg:rect").
     /// For selectorless components: the component name (e.g., "MyComp").
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// For selectorless components: the namespace prefix (e.g., "svg" in `<ng-component:MyComp:svg:rect>`).
     /// None for regular elements or selectorless components without namespace.
-    pub component_prefix: Option<Atom<'a>>,
+    pub component_prefix: Option<Ident<'a>>,
     /// For selectorless components: the HTML tag name (e.g., "rect" in `<ng-component:MyComp:svg:rect>`).
     /// None for regular elements or selectorless components without tag name.
-    pub component_tag_name: Option<Atom<'a>>,
+    pub component_tag_name: Option<Ident<'a>>,
     /// The element attributes.
     pub attrs: Vec<'a, HtmlAttribute<'a>>,
     /// Selectorless directives (e.g., @Dir, @Dir(attr="value")).
@@ -133,12 +133,12 @@ pub struct HtmlElement<'a> {
 #[derive(Debug)]
 pub struct HtmlComponent<'a> {
     /// The component class name (e.g., "MyComp").
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// The HTML tag name (e.g., "button" in `<MyComp:button>`).
     /// None for component-only syntax like `<MyComp>`.
-    pub tag_name: Option<Atom<'a>>,
+    pub tag_name: Option<Ident<'a>>,
     /// The full qualified name (e.g., "MyComp:svg:rect").
-    pub full_name: Atom<'a>,
+    pub full_name: Ident<'a>,
     /// The element attributes.
     pub attrs: Vec<'a, HtmlAttribute<'a>>,
     /// Selectorless directives (e.g., @Dir).
@@ -159,7 +159,7 @@ pub struct HtmlComponent<'a> {
 #[derive(Debug)]
 pub struct HtmlDirective<'a> {
     /// The directive name (without the @ prefix).
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The directive attributes (inside parentheses, if any).
     pub attrs: Vec<'a, HtmlAttribute<'a>>,
     /// The source span for the entire directive.
@@ -176,9 +176,9 @@ pub struct HtmlDirective<'a> {
 #[derive(Debug)]
 pub struct HtmlAttribute<'a> {
     /// The attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The decoded attribute value (entities resolved, interpolations joined).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// The source span.
     pub span: Span,
     /// The name span.
@@ -194,7 +194,7 @@ pub struct HtmlAttribute<'a> {
 #[derive(Debug)]
 pub struct HtmlComment<'a> {
     /// The comment value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// The source span.
     pub span: Span,
 }
@@ -203,9 +203,9 @@ pub struct HtmlComment<'a> {
 #[derive(Debug)]
 pub struct HtmlExpansion<'a> {
     /// The switch value.
-    pub switch_value: Atom<'a>,
+    pub switch_value: Ident<'a>,
     /// The expansion type (e.g., "plural", "select").
-    pub expansion_type: Atom<'a>,
+    pub expansion_type: Ident<'a>,
     /// The expansion cases.
     pub cases: Vec<'a, HtmlExpansionCase<'a>>,
     /// The source span.
@@ -222,7 +222,7 @@ pub struct HtmlExpansion<'a> {
 #[derive(Debug)]
 pub struct HtmlExpansionCase<'a> {
     /// The case value (e.g., "one", "other").
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// The expansion nodes.
     pub expansion: Vec<'a, HtmlNode<'a>>,
     /// The source span.
@@ -268,7 +268,7 @@ pub struct HtmlBlock<'a> {
     /// The block type.
     pub block_type: BlockType,
     /// The block name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The block parameters.
     pub parameters: Vec<'a, HtmlBlockParameter<'a>>,
     /// The child nodes.
@@ -291,7 +291,7 @@ pub struct HtmlBlock<'a> {
 #[derive(Debug)]
 pub struct HtmlBlockParameter<'a> {
     /// The raw expression text (e.g., "minimum 500ms", "track item.id").
-    pub expression: Atom<'a>,
+    pub expression: Ident<'a>,
     /// The source span.
     pub span: Span,
 }
@@ -300,7 +300,7 @@ pub struct HtmlBlockParameter<'a> {
 #[derive(Debug)]
 pub struct HtmlLetDeclaration<'a> {
     /// The variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// The value expression.
     pub value: AngularExpression<'a>,
     /// The source span.
@@ -506,7 +506,7 @@ mod tests {
 
         // Create a simple tree: root element with two child elements
         let child1 = HtmlElement {
-            name: Atom::from("span"),
+            name: Ident::from("span"),
             component_prefix: None,
             component_tag_name: None,
             attrs: Vec::new_in(&allocator),
@@ -520,7 +520,7 @@ mod tests {
         };
 
         let child2 = HtmlElement {
-            name: Atom::from("p"),
+            name: Ident::from("p"),
             component_prefix: None,
             component_tag_name: None,
             attrs: Vec::new_in(&allocator),
@@ -538,7 +538,7 @@ mod tests {
         children.push(HtmlNode::Element(Box::new_in(child2, &allocator)));
 
         let root = HtmlElement {
-            name: Atom::from("div"),
+            name: Ident::from("div"),
             component_prefix: None,
             component_tag_name: None,
             attrs: Vec::new_in(&allocator),
@@ -565,7 +565,7 @@ mod tests {
         let allocator = Allocator::default();
 
         let text = HtmlText {
-            value: Atom::from("Hello"),
+            value: Ident::from("Hello"),
             span: Span::default(),
             full_start: None,
             tokens: Vec::new_in(&allocator),

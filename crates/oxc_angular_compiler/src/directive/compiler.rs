@@ -15,7 +15,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::{Ident, Span};
 use rustc_hash::FxHashMap;
 
 use super::metadata::{
@@ -108,7 +108,7 @@ fn build_base_directive_fields<'a>(
 
     // type: MyDirective
     entries.push(LiteralMapEntry {
-        key: Atom::from("type"),
+        key: Ident::from("type"),
         value: metadata.r#type.clone_in(allocator),
         quoted: false,
     });
@@ -117,7 +117,7 @@ fn build_base_directive_fields<'a>(
     if let Some(selector) = &metadata.selector {
         if let Some(selectors_expr) = parse_selector_to_r3_selector(allocator, selector) {
             entries.push(LiteralMapEntry {
-                key: Atom::from("selectors"),
+                key: Ident::from("selectors"),
                 value: selectors_expr,
                 quoted: false,
             });
@@ -135,7 +135,7 @@ fn build_base_directive_fields<'a>(
             None,
         );
         entries.push(LiteralMapEntry {
-            key: Atom::from("contentQueries"),
+            key: Ident::from("contentQueries"),
             value: content_queries_fn,
             quoted: false,
         });
@@ -152,7 +152,7 @@ fn build_base_directive_fields<'a>(
             None,
         );
         entries.push(LiteralMapEntry {
-            key: Atom::from("viewQuery"),
+            key: Ident::from("viewQuery"),
             value: view_queries_fn,
             quoted: false,
         });
@@ -175,7 +175,7 @@ fn build_base_directive_fields<'a>(
             // as they are dynamic bindings handled by hostBindings function
             if let Some(host_attrs) = result.host_attrs {
                 entries.push(LiteralMapEntry {
-                    key: Atom::from("hostAttrs"),
+                    key: Ident::from("hostAttrs"),
                     value: host_attrs,
                     quoted: false,
                 });
@@ -184,7 +184,7 @@ fn build_base_directive_fields<'a>(
             // hostVars: number - only if > 0
             if let Some(host_vars) = result.host_vars {
                 entries.push(LiteralMapEntry {
-                    key: Atom::from("hostVars"),
+                    key: Ident::from("hostVars"),
                     value: OutputExpression::Literal(Box::new_in(
                         LiteralExpr {
                             value: LiteralValue::Number(host_vars as f64),
@@ -199,7 +199,7 @@ fn build_base_directive_fields<'a>(
             // hostBindings: function(rf, ctx) { ... }
             if let Some(host_fn) = result.host_binding_fn {
                 entries.push(LiteralMapEntry {
-                    key: Atom::from("hostBindings"),
+                    key: Ident::from("hostBindings"),
                     value: OutputExpression::Function(Box::new_in(host_fn, allocator)),
                     quoted: false,
                 });
@@ -214,7 +214,7 @@ fn build_base_directive_fields<'a>(
     if !metadata.inputs.is_empty() {
         if let Some(inputs_expr) = create_inputs_literal(allocator, &metadata.inputs) {
             entries.push(LiteralMapEntry {
-                key: Atom::from("inputs"),
+                key: Ident::from("inputs"),
                 value: inputs_expr,
                 quoted: false,
             });
@@ -225,7 +225,7 @@ fn build_base_directive_fields<'a>(
     if !metadata.outputs.is_empty() {
         if let Some(outputs_expr) = create_outputs_literal(allocator, &metadata.outputs) {
             entries.push(LiteralMapEntry {
-                key: Atom::from("outputs"),
+                key: Ident::from("outputs"),
                 value: outputs_expr,
                 quoted: false,
             });
@@ -242,7 +242,7 @@ fn build_base_directive_fields<'a>(
             )));
         }
         entries.push(LiteralMapEntry {
-            key: Atom::from("exportAs"),
+            key: Ident::from("exportAs"),
             value: OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: export_items, source_span: None },
                 allocator,
@@ -254,7 +254,7 @@ fn build_base_directive_fields<'a>(
     // standalone: false (only if not standalone, since true is default)
     if !metadata.is_standalone {
         entries.push(LiteralMapEntry {
-            key: Atom::from("standalone"),
+            key: Ident::from("standalone"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
@@ -266,7 +266,7 @@ fn build_base_directive_fields<'a>(
     // signals: true (only if signal-based)
     if metadata.is_signal {
         entries.push(LiteralMapEntry {
-            key: Atom::from("signals"),
+            key: Ident::from("signals"),
             value: OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
                 allocator,
@@ -316,7 +316,7 @@ fn add_features<'a>(
 
     if !features.is_empty() {
         definition_map.push(LiteralMapEntry {
-            key: Atom::from("features"),
+            key: Ident::from("features"),
             value: OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: features, source_span: None },
                 allocator,
@@ -336,12 +336,12 @@ fn create_define_directive_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::DEFINE_DIRECTIVE),
+            name: Ident::from(Identifiers::DEFINE_DIRECTIVE),
             optional: false,
             source_span: None,
         },
@@ -382,7 +382,7 @@ fn create_define_directive_call<'a>(
 /// Ported from Angular's `parseSelectorToR3Selector` in `core.ts`.
 fn parse_selector_to_r3_selector<'a>(
     allocator: &'a Allocator,
-    selector: &Atom<'a>,
+    selector: &Ident<'a>,
 ) -> Option<OutputExpression<'a>> {
     let selector_str = selector.as_str();
     if selector_str.is_empty() {
@@ -532,7 +532,7 @@ pub fn create_inputs_literal<'a>(
 /// Creates the outputs literal map.
 pub fn create_outputs_literal<'a>(
     allocator: &'a Allocator,
-    outputs: &[(Atom<'a>, Atom<'a>)],
+    outputs: &[(Ident<'a>, Ident<'a>)],
 ) -> Option<OutputExpression<'a>> {
     if outputs.is_empty() {
         return None;
@@ -586,7 +586,7 @@ fn compile_directive_host_bindings<'a>(
 
     // Get directive name and selector
     let directive_name = metadata.name.clone();
-    let directive_selector = metadata.selector.clone().unwrap_or_else(|| Atom::from(""));
+    let directive_selector = metadata.selector.clone().unwrap_or_else(|| Ident::from(""));
 
     // Convert R3HostMetadata to HostBindingInput
     let input =
@@ -606,17 +606,17 @@ fn compile_directive_host_bindings<'a>(
 /// Convert R3HostMetadata to HostBindingInput.
 ///
 /// R3HostMetadata has:
-/// - `attributes`: Vec<(Atom, OutputExpression)> - already compiled expressions
-/// - `properties`: Vec<(Atom, Atom)> - unparsed property binding strings
-/// - `listeners`: Vec<(Atom, Atom)> - unparsed event handler strings
+/// - `attributes`: Vec<(Ident, OutputExpression)> - already compiled expressions
+/// - `properties`: Vec<(Ident, Ident)> - unparsed property binding strings
+/// - `listeners`: Vec<(Ident, Ident)> - unparsed event handler strings
 ///
 /// This function parses the property and listener strings and passes through
 /// the already-compiled attribute expressions.
 fn convert_r3_host_metadata_to_input<'a>(
     allocator: &'a Allocator,
     host: &R3HostMetadata<'a>,
-    directive_name: Atom<'a>,
-    directive_selector: Atom<'a>,
+    directive_name: Ident<'a>,
+    directive_selector: Ident<'a>,
 ) -> HostBindingInput<'a> {
     use oxc_allocator::FromIn;
 
@@ -643,11 +643,11 @@ fn convert_r3_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
 
         properties.push(R3BoundAttribute {
-            name: Atom::from_in(final_name, allocator),
+            name: Ident::from_in(final_name, allocator),
             binding_type,
             security_context: SecurityContext::None,
             value: parse_result.ast,
-            unit: unit.map(|u| Atom::from_in(u, allocator)),
+            unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,
             key_span: empty_span,
             value_span: Some(empty_span),
@@ -675,10 +675,10 @@ fn convert_r3_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_event(value_str, empty_span);
 
         events.push(R3BoundEvent {
-            name: Atom::from_in(final_event_name, allocator),
+            name: Ident::from_in(final_event_name, allocator),
             event_type: ParsedEventType::Regular,
             handler: parse_result.ast,
-            target: target.map(|t| Atom::from_in(t, allocator)),
+            target: target.map(|t| Ident::from_in(t, allocator)),
             phase: None,
             source_span: empty_span,
             handler_span: empty_span,
@@ -688,7 +688,7 @@ fn convert_r3_host_metadata_to_input<'a>(
 
     // Copy attributes directly - they are already OutputExpressions
     // Handle special style_attr and class_attr if present
-    let mut attributes: FxHashMap<Atom<'a>, OutputExpression<'a>> = FxHashMap::default();
+    let mut attributes: FxHashMap<Ident<'a>, OutputExpression<'a>> = FxHashMap::default();
 
     for (key, value) in host.attributes.iter() {
         // Use clone_in to deep clone the OutputExpression with the allocator
@@ -701,7 +701,7 @@ fn convert_r3_host_metadata_to_input<'a>(
             LiteralExpr { value: LiteralValue::String(style_attr.clone()), source_span: None },
             allocator,
         ));
-        attributes.insert(Atom::from("style"), expr);
+        attributes.insert(Ident::from("style"), expr);
     }
 
     if let Some(ref class_attr) = host.class_attr {
@@ -709,7 +709,7 @@ fn convert_r3_host_metadata_to_input<'a>(
             LiteralExpr { value: LiteralValue::String(class_attr.clone()), source_span: None },
             allocator,
         ));
-        attributes.insert(Atom::from("class"), expr);
+        attributes.insert(Ident::from("class"), expr);
     }
 
     HostBindingInput {
@@ -771,12 +771,12 @@ fn create_feature_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(feature_name),
+            name: Ident::from(feature_name),
             optional: false,
             source_span: None,
         },
@@ -804,12 +804,12 @@ fn create_feature_ref<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(feature_name),
+            name: Ident::from(feature_name),
             optional: false,
             source_span: None,
         },
@@ -858,12 +858,12 @@ fn create_host_directives_feature_arg<'a>(
                 ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
                             allocator,
                         )),
                         allocator,
                     ),
-                    name: Atom::from(Identifiers::FORWARD_REF),
+                    name: Ident::from(Identifiers::FORWARD_REF),
                     optional: false,
                     source_span: None,
                 },
@@ -885,7 +885,7 @@ fn create_host_directives_feature_arg<'a>(
         };
 
         entries.push(LiteralMapEntry {
-            key: Atom::from("directive"),
+            key: Ident::from("directive"),
             value: directive_expr,
             quoted: false,
         });
@@ -894,7 +894,7 @@ fn create_host_directives_feature_arg<'a>(
         if !hd.inputs.is_empty() {
             let inputs_array = create_host_directive_mappings_array(allocator, &hd.inputs);
             entries.push(LiteralMapEntry {
-                key: Atom::from("inputs"),
+                key: Ident::from("inputs"),
                 value: inputs_array,
                 quoted: false,
             });
@@ -904,7 +904,7 @@ fn create_host_directives_feature_arg<'a>(
         if !hd.outputs.is_empty() {
             let outputs_array = create_host_directive_mappings_array(allocator, &hd.outputs);
             entries.push(LiteralMapEntry {
-                key: Atom::from("outputs"),
+                key: Ident::from("outputs"),
                 value: outputs_array,
                 quoted: false,
             });
@@ -930,7 +930,7 @@ fn create_host_directives_feature_arg<'a>(
 /// `createHostDirectivesMappingArray` in `view/compiler.ts`.
 pub(crate) fn create_host_directive_mappings_array<'a>(
     allocator: &'a Allocator,
-    mappings: &[(Atom<'a>, Atom<'a>)],
+    mappings: &[(Ident<'a>, Ident<'a>)],
 ) -> OutputExpression<'a> {
     let mut entries = Vec::with_capacity_in(mappings.len() * 2, allocator);
 
@@ -961,16 +961,16 @@ mod tests {
     fn test_compile_simple_directive() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("MyDirective"),
+            name: Ident::from("MyDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[myDir]")),
+            selector: Some(Ident::from("[myDir]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -999,22 +999,22 @@ mod tests {
     fn test_compile_directive_with_inputs_outputs() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
             &allocator,
         ));
 
         let mut inputs = Vec::new_in(&allocator);
-        inputs.push(R3InputMetadata::simple(Atom::from("myInput")));
+        inputs.push(R3InputMetadata::simple(Ident::from("myInput")));
 
         let mut outputs = Vec::new_in(&allocator);
-        outputs.push((Atom::from("myOutput"), Atom::from("myOutput")));
+        outputs.push((Ident::from("myOutput"), Ident::from("myOutput")));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("TestDirective"),
+            name: Ident::from("TestDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[test]")),
+            selector: Some(Ident::from("[test]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1044,7 +1044,7 @@ mod tests {
         // Test: Simple input (same name, no transform) -> just string
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
-        inputs.push(R3InputMetadata::simple(Atom::from("value")));
+        inputs.push(R3InputMetadata::simple(Ident::from("value")));
 
         let result = create_inputs_literal(&allocator, &inputs);
         let emitter = JsEmitter::new();
@@ -1062,8 +1062,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("count"),
-            binding_property_name: Atom::from("itemCount"),
+            class_property_name: Ident::from("count"),
+            binding_property_name: Ident::from("itemCount"),
             required: false,
             is_signal: false,
             transform_function: None,
@@ -1088,12 +1088,12 @@ mod tests {
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
         let transform_fn = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("booleanAttribute"), source_span: None },
+            ReadVarExpr { name: Ident::from("booleanAttribute"), source_span: None },
             &allocator,
         ));
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("disabled"),
-            binding_property_name: Atom::from("disabled"),
+            class_property_name: Ident::from("disabled"),
+            binding_property_name: Ident::from("disabled"),
             required: false,
             is_signal: false,
             transform_function: Some(transform_fn),
@@ -1117,8 +1117,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("border"),
-            binding_property_name: Atom::from("border"),
+            class_property_name: Ident::from("border"),
+            binding_property_name: Ident::from("border"),
             required: false,
             is_signal: true,
             transform_function: None,
@@ -1149,8 +1149,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("borderWidth"),
-            binding_property_name: Atom::from("border"),
+            class_property_name: Ident::from("borderWidth"),
+            binding_property_name: Ident::from("border"),
             required: false,
             is_signal: true,
             transform_function: None,
@@ -1175,12 +1175,12 @@ mod tests {
         let allocator = Allocator::default();
         let mut inputs = Vec::new_in(&allocator);
         let transform_fn = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("toNumber"), source_span: None },
+            ReadVarExpr { name: Ident::from("toNumber"), source_span: None },
             &allocator,
         ));
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("count"),
-            binding_property_name: Atom::from("count"),
+            class_property_name: Ident::from("count"),
+            binding_property_name: Ident::from("count"),
             required: false,
             is_signal: true,
             transform_function: Some(transform_fn),
@@ -1205,12 +1205,12 @@ mod tests {
         let mut inputs = Vec::new_in(&allocator);
 
         // Simple input (flags = 0, uses string format)
-        inputs.push(R3InputMetadata::simple(Atom::from("simple")));
+        inputs.push(R3InputMetadata::simple(Ident::from("simple")));
 
         // Signal input (flags = 1)
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("signalInput"),
-            binding_property_name: Atom::from("signalInput"),
+            class_property_name: Ident::from("signalInput"),
+            binding_property_name: Ident::from("signalInput"),
             required: false,
             is_signal: true,
             transform_function: None,
@@ -1218,12 +1218,12 @@ mod tests {
 
         // Transform input (flags = 2)
         let transform_fn = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("booleanAttribute"), source_span: None },
+            ReadVarExpr { name: Ident::from("booleanAttribute"), source_span: None },
             &allocator,
         ));
         inputs.push(R3InputMetadata {
-            class_property_name: Atom::from("boolInput"),
-            binding_property_name: Atom::from("boolInput"),
+            class_property_name: Ident::from("boolInput"),
+            binding_property_name: Ident::from("boolInput"),
             required: false,
             is_signal: false,
             transform_function: Some(transform_fn),
@@ -1258,16 +1258,16 @@ mod tests {
     fn test_compile_directive_with_features() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("FeatureDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("FeatureDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("FeatureDirective"),
+            name: Ident::from("FeatureDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[feature]")),
+            selector: Some(Ident::from("[feature]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1296,20 +1296,20 @@ mod tests {
     fn test_compile_directive_with_export_as() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ExportDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("ExportDirective"), source_span: None },
             &allocator,
         ));
 
         let mut export_as = Vec::new_in(&allocator);
-        export_as.push(Atom::from("myExport"));
-        export_as.push(Atom::from("otherExport"));
+        export_as.push(Ident::from("myExport"));
+        export_as.push(Ident::from("otherExport"));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("ExportDirective"),
+            name: Ident::from("ExportDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[export]")),
+            selector: Some(Ident::from("[export]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1340,16 +1340,16 @@ mod tests {
         // This was a bug where the selector was being kept as a single string ["ng-template[body]"]
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("BodyTemplateDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("BodyTemplateDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("BodyTemplateDirective"),
+            name: Ident::from("BodyTemplateDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("ng-template[body]")),
+            selector: Some(Ident::from("ng-template[body]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1395,16 +1395,16 @@ mod tests {
         // (8 = CLASS flag)
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("PrimaryButtonDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("PrimaryButtonDirective"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("PrimaryButtonDirective"),
+            name: Ident::from("PrimaryButtonDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("button.primary")),
+            selector: Some(Ident::from("button.primary")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1440,17 +1440,17 @@ mod tests {
         // ["publicName", "internalName"], NOT objects {publicName: "internalName"}
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TooltipTrigger"), source_span: None },
+            ReadVarExpr { name: Ident::from("TooltipTrigger"), source_span: None },
             &allocator,
         ));
 
         let directive_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("BrnTooltipTrigger"), source_span: None },
+            ReadVarExpr { name: Ident::from("BrnTooltipTrigger"), source_span: None },
             &allocator,
         ));
 
         let mut host_directive_inputs = Vec::new_in(&allocator);
-        host_directive_inputs.push((Atom::from("uTooltip"), Atom::from("brnTooltipTrigger")));
+        host_directive_inputs.push((Ident::from("uTooltip"), Ident::from("brnTooltipTrigger")));
 
         let mut host_directives = Vec::new_in(&allocator);
         host_directives.push(R3HostDirectiveMetadata {
@@ -1461,11 +1461,11 @@ mod tests {
         });
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("TooltipTrigger"),
+            name: Ident::from("TooltipTrigger"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[uTooltip]")),
+            selector: Some(Ident::from("[uTooltip]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1505,17 +1505,17 @@ mod tests {
         // Issue #67: output mappings must also be flat arrays
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyDirective"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyDirective"), source_span: None },
             &allocator,
         ));
 
         let directive_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ClickTracker"), source_span: None },
+            ReadVarExpr { name: Ident::from("ClickTracker"), source_span: None },
             &allocator,
         ));
 
         let mut host_directive_outputs = Vec::new_in(&allocator);
-        host_directive_outputs.push((Atom::from("clicked"), Atom::from("trackClick")));
+        host_directive_outputs.push((Ident::from("clicked"), Ident::from("trackClick")));
 
         let mut host_directives = Vec::new_in(&allocator);
         host_directives.push(R3HostDirectiveMetadata {
@@ -1526,11 +1526,11 @@ mod tests {
         });
 
         let metadata = R3DirectiveMetadata {
-            name: Atom::from("MyDirective"),
+            name: Ident::from("MyDirective"),
             r#type: type_expr,
             type_argument_count: 0,
             deps: None,
-            selector: Some(Atom::from("[myDir]")),
+            selector: Some(Ident::from("[myDir]")),
             queries: Vec::new_in(&allocator),
             view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(&allocator),
@@ -1563,8 +1563,8 @@ mod tests {
     fn test_create_inputs_literal_quotes_dotted_key() {
         let allocator = Allocator::default();
         let inputs = vec![R3InputMetadata {
-            class_property_name: Atom::from("fxFlexAlign.xs"),
-            binding_property_name: Atom::from("fxFlexAlign.xs"),
+            class_property_name: Ident::from("fxFlexAlign.xs"),
+            binding_property_name: Ident::from("fxFlexAlign.xs"),
             required: false,
             is_signal: false,
             transform_function: None,
@@ -1582,8 +1582,8 @@ mod tests {
     fn test_create_inputs_literal_quotes_hyphenated_key() {
         let allocator = Allocator::default();
         let inputs = vec![R3InputMetadata {
-            class_property_name: Atom::from("fxFlexAlign.lt-sm"),
-            binding_property_name: Atom::from("fxFlexAlign.lt-sm"),
+            class_property_name: Ident::from("fxFlexAlign.lt-sm"),
+            binding_property_name: Ident::from("fxFlexAlign.lt-sm"),
             required: false,
             is_signal: false,
             transform_function: None,
@@ -1601,8 +1601,8 @@ mod tests {
     fn test_create_inputs_literal_no_quotes_for_simple_identifier() {
         let allocator = Allocator::default();
         let inputs = vec![R3InputMetadata {
-            class_property_name: Atom::from("fxFlexAlign"),
-            binding_property_name: Atom::from("fxFlexAlign"),
+            class_property_name: Ident::from("fxFlexAlign"),
+            binding_property_name: Ident::from("fxFlexAlign"),
             required: false,
             is_signal: false,
             transform_function: None,
@@ -1625,7 +1625,7 @@ mod tests {
     #[test]
     fn test_create_outputs_literal_quotes_dotted_key() {
         let allocator = Allocator::default();
-        let outputs = vec![(Atom::from("activate.xs"), Atom::from("activateXs"))];
+        let outputs = vec![(Ident::from("activate.xs"), Ident::from("activateXs"))];
         let expr = create_outputs_literal(&allocator, &outputs).unwrap();
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&expr);
@@ -1638,7 +1638,7 @@ mod tests {
     #[test]
     fn test_create_outputs_literal_no_quotes_for_simple_identifier() {
         let allocator = Allocator::default();
-        let outputs = vec![(Atom::from("activate"), Atom::from("activate"))];
+        let outputs = vec![(Ident::from("activate"), Ident::from("activate"))];
         let expr = create_outputs_literal(&allocator, &outputs).unwrap();
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&expr);

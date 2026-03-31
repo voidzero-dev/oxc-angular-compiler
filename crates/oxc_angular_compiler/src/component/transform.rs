@@ -14,7 +14,7 @@ use oxc_ast::ast::{
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
-use oxc_span::{Atom, GetSpan, SourceType, Span};
+use oxc_span::{Ident, GetSpan, SourceType, Span};
 use rustc_hash::FxHashMap;
 
 use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};
@@ -404,7 +404,7 @@ pub struct CompiledComponent<'a> {
 #[derive(Debug, Clone)]
 pub struct ImportInfo<'a> {
     /// The source module path (e.g., "@angular/core", "./services").
-    pub source_module: Atom<'a>,
+    pub source_module: Ident<'a>,
     /// Whether this is a named import that can be reused with bare name.
     /// True for: `import { AuthService } from "module"`
     /// False for: `import * as core from "module"` (namespace imports)
@@ -419,7 +419,7 @@ pub struct ImportInfo<'a> {
 ///
 /// Used to look up where a constructor dependency token was imported from
 /// and whether it can be reused with a bare name or requires namespace prefix.
-pub type ImportMap<'a> = FxHashMap<Atom<'a>, ImportInfo<'a>>;
+pub type ImportMap<'a> = FxHashMap<Ident<'a>, ImportInfo<'a>>;
 
 /// Build an import map from the program's import declarations.
 ///
@@ -476,7 +476,7 @@ pub fn build_import_map<'a>(
                     // or aliased: `import { AuthService as Auth } from "module"`
                     // We use the local name as the key
                     // Named imports CAN be reused with bare name
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Type-only if the declaration is `import type { ... }` or the specifier
                     // is `import { type X }` (inline type specifier)
@@ -486,8 +486,8 @@ pub fn build_import_map<'a>(
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -497,13 +497,13 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                     // Default import: `import DefaultService from "module"`
                     // Default imports CAN be reused with bare name
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -517,13 +517,13 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
                     // Namespace import: `import * as core from "module"`
                     // Namespace imports CANNOT be reused with bare name for individual symbols
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -1740,7 +1740,7 @@ pub fn transform_angular_file(
                                     let type_expr = crate::output::ast::OutputExpression::ReadVar(
                                         oxc_allocator::Box::new_in(
                                             ReadVarExpr {
-                                                name: Atom::from(class_name.as_str()),
+                                                name: Ident::from(class_name.as_str()),
                                                 source_span: None,
                                             },
                                             allocator,
@@ -2389,7 +2389,7 @@ fn compile_component_full<'a>(
 
     // Stage 3-5: Ingest and compile
     // Build ingest options from metadata and transform options
-    let component_name_atom = Atom::from_in(metadata.class_name.as_str(), allocator);
+    let component_name_atom = Ident::from_in(metadata.class_name.as_str(), allocator);
 
     // OXC is a single-file compiler, equivalent to Angular's local compilation mode.
     // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
@@ -2413,9 +2413,9 @@ fn compile_component_full<'a>(
 
     // Build relative paths for debug locations
     let relative_template_path =
-        if enable_debug_locations { Some(Atom::from_in(file_path, allocator)) } else { None };
+        if enable_debug_locations { Some(Ident::from_in(file_path, allocator)) } else { None };
 
-    let relative_context_file_path = Some(Atom::from_in(file_path, allocator));
+    let relative_context_file_path = Some(Ident::from_in(file_path, allocator));
 
     let ingest_options = IngestOptions {
         mode,
@@ -2566,11 +2566,11 @@ fn compile_component_full<'a>(
         let mut hmr_meta = HmrMetadata::new(
             component_type,
             metadata.class_name.clone(),
-            Atom::from_in(file_path, allocator),
+            Ident::from_in(file_path, allocator),
         );
 
         // Add the @angular/core namespace dependency (i0)
-        hmr_meta.add_namespace_dependency(Atom::from("@angular/core"), Atom::from("i0"));
+        hmr_meta.add_namespace_dependency(Ident::from("@angular/core"), Ident::from("i0"));
 
         // Generate the HMR initializer expression
         let hmr_expr = compile_hmr_initializer(allocator, &hmr_meta);
@@ -2607,7 +2607,7 @@ fn compile_component_full<'a>(
 
         // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
-            .with_file_path(Atom::from_in(file_path, allocator))
+            .with_file_path(Ident::from_in(file_path, allocator))
             .with_line_number(class_line_number);
 
         // Compile to IIFE-wrapped expression
@@ -2677,7 +2677,7 @@ fn resolve_styles<'a>(
             if let Some(style_contents) = resources.styles.get(style_url.as_str()) {
                 // Add all resolved style contents to the metadata styles
                 for style in style_contents {
-                    metadata.styles.push(Atom::from_in(style.as_str(), allocator));
+                    metadata.styles.push(Ident::from_in(style.as_str(), allocator));
                 }
             }
         }
@@ -2751,7 +2751,7 @@ pub fn compile_component_template<'a>(
 
     // Stage 3-5: Ingest and compile
     use oxc_allocator::FromIn;
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component(allocator, component_name_atom, r3_result.nodes);
 
     let compiled = compile_template(&mut job);
@@ -2872,7 +2872,7 @@ pub fn compile_template_to_js_with_options<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -3045,7 +3045,7 @@ pub fn compile_template_for_hmr<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -3203,7 +3203,7 @@ fn compile_component_host_bindings<'a>(
 
     // Get component name and selector
     let component_name = metadata.class_name.clone();
-    let component_selector = metadata.selector.clone().unwrap_or_else(|| Atom::from(""));
+    let component_selector = metadata.selector.clone().unwrap_or_else(|| Ident::from(""));
 
     // Convert HostMetadata to HostBindingInput
     let input = convert_host_metadata_to_input(allocator, host, component_name, component_selector);
@@ -3227,8 +3227,8 @@ fn compile_component_host_bindings<'a>(
 fn convert_host_metadata_to_input<'a>(
     allocator: &'a Allocator,
     host: &HostMetadata<'a>,
-    component_name: Atom<'a>,
-    component_selector: Atom<'a>,
+    component_name: Ident<'a>,
+    component_selector: Ident<'a>,
 ) -> HostBindingInput<'a> {
     use oxc_allocator::FromIn;
 
@@ -3255,11 +3255,11 @@ fn convert_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
 
         properties.push(R3BoundAttribute {
-            name: Atom::from_in(final_name, allocator),
+            name: Ident::from_in(final_name, allocator),
             binding_type,
             security_context: SecurityContext::None,
             value: parse_result.ast,
-            unit: unit.map(|u| Atom::from_in(u, allocator)),
+            unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,
             key_span: empty_span,
             value_span: Some(empty_span),
@@ -3287,10 +3287,10 @@ fn convert_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_event(value_str, empty_span);
 
         events.push(R3BoundEvent {
-            name: Atom::from_in(final_event_name, allocator),
+            name: Ident::from_in(final_event_name, allocator),
             event_type: ParsedEventType::Regular,
             handler: parse_result.ast,
-            target: target.map(|t| Atom::from_in(t, allocator)),
+            target: target.map(|t| Ident::from_in(t, allocator)),
             phase: None,
             source_span: empty_span,
             handler_span: empty_span,
@@ -3300,7 +3300,7 @@ fn convert_host_metadata_to_input<'a>(
 
     // Convert static attributes: "role" -> OutputExpression::Literal
     // This matches TypeScript which uses `o.literal(value)` for host attributes
-    let mut attributes: FxHashMap<Atom<'a>, crate::output::ast::OutputExpression<'a>> =
+    let mut attributes: FxHashMap<Ident<'a>, crate::output::ast::OutputExpression<'a>> =
         FxHashMap::default();
 
     for (key, value) in host.attributes.iter() {
@@ -3326,7 +3326,7 @@ fn convert_host_metadata_to_input<'a>(
             },
             allocator,
         ));
-        attributes.insert(Atom::from("style"), expr);
+        attributes.insert(Ident::from("style"), expr);
     }
 
     if let Some(ref class_attr) = host.class_attr {
@@ -3337,7 +3337,7 @@ fn convert_host_metadata_to_input<'a>(
             },
             allocator,
         ));
-        attributes.insert(Atom::from("class"), expr);
+        attributes.insert(Ident::from("class"), expr);
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }
@@ -3401,30 +3401,30 @@ fn convert_host_metadata_input_to_host_metadata<'a>(
 ) -> HostMetadata<'a> {
     use oxc_allocator::FromIn;
 
-    let mut properties: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut properties: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.properties {
         properties
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
-    let mut attributes: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut attributes: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.attributes {
         attributes
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
-    let mut listeners: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut listeners: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.listeners {
         listeners
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
     HostMetadata {
         properties,
         attributes,
         listeners,
-        class_attr: input.class_attr.as_ref().map(|s| Atom::from_in(s.as_str(), allocator)),
-        style_attr: input.style_attr.as_ref().map(|s| Atom::from_in(s.as_str(), allocator)),
+        class_attr: input.class_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
+        style_attr: input.style_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
     }
 }
 
@@ -3460,7 +3460,7 @@ fn pool_selector_attrs<'a>(
     for attr in selector_attrs {
         attr_entries.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Atom::from_in(attr.as_str(), allocator)),
+                value: LiteralValue::String(Ident::from_in(attr.as_str(), allocator)),
                 source_span: None,
             },
             allocator,
@@ -3507,9 +3507,9 @@ fn compile_host_bindings_from_input<'a>(
     let host = convert_host_metadata_input_to_host_metadata(allocator, host_input);
 
     // Get component name and selector as atoms
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let component_selector =
-        selector.map(|s| Atom::from_in(s, allocator)).unwrap_or_else(|| Atom::from(""));
+        selector.map(|s| Ident::from_in(s, allocator)).unwrap_or_else(|| Ident::from(""));
 
     // Convert to HostBindingInput and compile
     let input =
@@ -3672,7 +3672,7 @@ pub fn compile_template_for_linker<'a>(
         angular_version: None,
     };
 
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -5023,7 +5023,7 @@ export class AppModule {}
             build_import_map(&allocator, &parser_ret.program.body, None);
         assert_eq!(
             import_map_without_resolved
-                .get(&Atom::from("AriaDisableDirective"))
+                .get(&Ident::from("AriaDisableDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("../a11y")
         );
@@ -5041,7 +5041,7 @@ export class AppModule {}
         // AriaDisableDirective should have the resolved path
         assert_eq!(
             import_map_with_resolved
-                .get(&Atom::from("AriaDisableDirective"))
+                .get(&Ident::from("AriaDisableDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("../a11y/aria-disable.directive"),
             "AriaDisableDirective should use resolved path"
@@ -5050,7 +5050,7 @@ export class AppModule {}
         // OtherDirective should still use the original import path (not in resolved_imports)
         assert_eq!(
             import_map_with_resolved
-                .get(&Atom::from("OtherDirective"))
+                .get(&Ident::from("OtherDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("./other"),
             "OtherDirective should use original import path"

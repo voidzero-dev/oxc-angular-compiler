@@ -1,7 +1,7 @@
 //! Miscellaneous statement generation (listener, animation, pipe, projection, etc.).
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_span::Ident;
 
 use crate::ir::enums::AnimationKind;
 use crate::output::ast::{
@@ -55,11 +55,11 @@ impl GlobalEventTarget {
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_listener_stmt_with_handler<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     event_target: Option<GlobalEventTarget>,
     use_capture: bool,
-    handler_fn_name: Option<&Atom<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -72,7 +72,7 @@ pub fn create_listener_stmt_with_handler<'a>(
     // Handler function: function name($event) { ... } or function name() { ... }
     let mut params = OxcVec::new_in(allocator);
     if consumes_dollar_event {
-        params.push(FnParam { name: Atom::from("$event") });
+        params.push(FnParam { name: Ident::from("$event") });
     }
 
     let handler_fn = OutputExpression::Function(Box::new_in(
@@ -94,14 +94,14 @@ pub fn create_listener_stmt_with_handler<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         crate::output::ast::ReadVarExpr {
-                            name: Atom::from("i0"),
+                            name: Ident::from("i0"),
                             source_span: None,
                         },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(target.resolver_instruction()),
+                name: Ident::from(target.resolver_instruction()),
                 optional: false,
                 source_span: None,
             },
@@ -135,10 +135,10 @@ pub fn create_listener_stmt_with_handler<'a>(
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_dom_listener_stmt_with_handler<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     event_target: Option<GlobalEventTarget>,
-    handler_fn_name: Option<&Atom<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -151,7 +151,7 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
     // Handler function: function name($event) { ... } or function name() { ... }
     let mut params = OxcVec::new_in(allocator);
     if consumes_dollar_event {
-        params.push(FnParam { name: Atom::from("$event") });
+        params.push(FnParam { name: Ident::from("$event") });
     }
 
     let handler_fn = OutputExpression::Function(Box::new_in(
@@ -173,14 +173,14 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         crate::output::ast::ReadVarExpr {
-                            name: Atom::from("i0"),
+                            name: Ident::from("i0"),
                             source_span: None,
                         },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(target.resolver_instruction()),
+                name: Ident::from(target.resolver_instruction()),
                 optional: false,
                 source_span: None,
             },
@@ -196,9 +196,9 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
 /// The `handler_fn_name` parameter sets the name of the handler function expression.
 pub fn create_two_way_listener_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
-    handler_fn_name: Option<&Atom<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     // Event name (typically "{property}Change")
@@ -210,7 +210,7 @@ pub fn create_two_way_listener_stmt<'a>(
     // Handler function: function name($event) { ... }
     // Two-way listeners always consume $event since they need the new value
     let mut params = OxcVec::new_in(allocator);
-    params.push(FnParam { name: Atom::from("$event") });
+    params.push(FnParam { name: Ident::from("$event") });
 
     let handler_fn = OutputExpression::Function(Box::new_in(
         FunctionExpr {
@@ -236,10 +236,10 @@ pub fn create_two_way_listener_stmt<'a>(
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_animation_listener_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     phase: crate::ir::enums::AnimationKind,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
-    handler_fn_name: Option<&Atom<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -252,14 +252,14 @@ pub fn create_animation_listener_stmt<'a>(
     };
     let full_name = allocator.alloc_str(&format!("@{}.{}", name.as_str(), phase_str));
     args.push(OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from(full_name)), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from(full_name)), source_span: None },
         allocator,
     )));
 
     // Handler function: function name($event) { ... } or function name() { ... }
     let mut params = OxcVec::new_in(allocator);
     if consumes_dollar_event {
-        params.push(FnParam { name: Atom::from("$event") });
+        params.push(FnParam { name: Ident::from("$event") });
     }
 
     let handler_fn = OutputExpression::Function(Box::new_in(
@@ -300,7 +300,7 @@ pub fn create_animation_string_stmt<'a>(
 /// It emits `syntheticHostProperty(name, value)`.
 pub fn create_animation_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -308,7 +308,7 @@ pub fn create_animation_stmt<'a>(
     // Animation name with @ prefix
     let full_name = allocator.alloc_str(&format!("@{}", name.as_str()));
     args.push(OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from(full_name)), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from(full_name)), source_span: None },
         allocator,
     )));
     args.push(value);
@@ -334,7 +334,7 @@ pub fn create_animation_op_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     animation_kind: AnimationKind,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
-    handler_fn_name: Option<&Atom<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
 
@@ -363,7 +363,7 @@ pub fn create_animation_op_stmt<'a>(
 /// Creates an animation binding call statement.
 pub fn create_animation_binding_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -387,7 +387,7 @@ pub fn create_animation_binding_stmt<'a>(
 pub fn create_control_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     value: OutputExpression<'a>,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(value);
@@ -438,7 +438,7 @@ pub fn create_enable_bindings_stmt<'a>(
 pub fn create_pipe_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(OutputExpression::Literal(Box::new_in(
