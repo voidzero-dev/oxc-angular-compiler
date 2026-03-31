@@ -24,9 +24,14 @@ const LINKER_DECLARATION_PREFIX = '\u0275\u0275ngDeclare'
 // Skip these packages - they don't need linking
 const SKIP_REGEX = /[\\/]@angular[\\/](?:compiler|core)[\\/]/
 
-// Match JS files in node_modules (Angular FESM bundles)
-// Allows optional query strings (?v=...) that Vite appends to module IDs
-const NODE_MODULES_JS_REGEX = /node_modules[\\/].*\.[cm]?js(?:\?.*)?$/
+// Broad filter for the transform hook — deliberately simple so that every
+// Vite/Rolldown version can evaluate it.  Precise extension + query-string
+// checks are done inside the handler.
+const NODE_MODULES_JS_REGEX = /node_modules/
+
+// Precise check run inside the handler: matches .js / .mjs / .cjs with an
+// optional Vite query string (?v=…) and works on both Unix and Windows paths.
+const JS_EXT_REGEX = /\.[cm]?js(?:\?.*)?$/
 
 /**
  * Run the OXC Rust linker on the given code.
@@ -97,9 +102,18 @@ export function angularLinkerPlugin(): Plugin {
     transform: {
       filter: {
         id: NODE_MODULES_JS_REGEX,
-        code: LINKER_DECLARATION_PREFIX,
       },
       async handler(code, id) {
+        // Precise extension check (covers .js, .mjs, .cjs with optional ?v=… query)
+        if (!JS_EXT_REGEX.test(id)) {
+          return
+        }
+
+        // Quick check: skip files without partial declarations
+        if (!code.includes(LINKER_DECLARATION_PREFIX)) {
+          return
+        }
+
         // Skip packages that don't need linking
         if (SKIP_REGEX.test(id)) {
           return

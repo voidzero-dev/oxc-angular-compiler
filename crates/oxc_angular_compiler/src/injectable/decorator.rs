@@ -230,12 +230,12 @@ pub fn extract_injectable_metadata<'a>(
         _ => return None,
     };
 
-    // If no arguments, return basic metadata with default providedIn: 'root'
+    // If no arguments, return basic metadata with no providedIn
     if call_expr.arguments.is_empty() {
         return Some(InjectableMetadata {
             class_name,
             class_span,
-            provided_in: Some(ProvidedInValue::Root),
+            provided_in: None,
             use_class: None,
             use_factory: None,
             use_value: None,
@@ -250,8 +250,8 @@ pub fn extract_injectable_metadata<'a>(
         _ => return None,
     };
 
-    // Extract providedIn (default to 'root' if not specified)
-    let provided_in = extract_provided_in(allocator, config_obj).or(Some(ProvidedInValue::Root));
+    // Extract providedIn (None if not specified)
+    let provided_in = extract_provided_in(allocator, config_obj);
 
     // Extract useClass
     let use_class = extract_use_class(allocator, config_obj);
@@ -681,8 +681,8 @@ mod tests {
         assert!(metadata.is_some());
         let metadata = metadata.unwrap();
         assert_eq!(metadata.class_name.as_str(), "MyService");
-        // Default to 'root' when not specified (Angular's default behavior)
-        assert!(matches!(metadata.provided_in, Some(ProvidedInValue::Root)));
+        // No providedIn when not specified
+        assert!(metadata.provided_in.is_none());
     }
 
     #[test]
@@ -715,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_extract_injectable_with_empty_object() {
-        // @Injectable({}) should default to providedIn: 'root'
+        // @Injectable({}) should have no providedIn
         let allocator = Allocator::default();
         let source = r#"
             @Injectable({})
@@ -726,8 +726,8 @@ mod tests {
         assert!(metadata.is_some());
         let metadata = metadata.unwrap();
         assert_eq!(metadata.class_name.as_str(), "MyService");
-        // Default to 'root' when providedIn is not specified in the object
-        assert!(matches!(metadata.provided_in, Some(ProvidedInValue::Root)));
+        // No providedIn when not specified in the object
+        assert!(metadata.provided_in.is_none());
     }
 
     #[test]

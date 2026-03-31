@@ -577,6 +577,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // gated by componentIds, which are only populated for client transforms.
           if (watchMode && viteServer) {
             const watchFn = (viteServer as any).__angularWatchTemplate
+
+            // Prune stale entries: if this component previously referenced
+            // different resources (e.g., templateUrl was renamed), remove the
+            // old reverse mappings so handleHotUpdate no longer swallows those files.
+            // Re-add pruned files to Vite's watcher so they can be processed as
+            // normal assets if used elsewhere (e.g., as a global stylesheet).
+            const newDeps = new Set(dependencies.map(normalizePath))
+            for (const [resource, owner] of resourceToComponent) {
+              if (owner === actualId && !newDeps.has(resource)) {
+                resourceToComponent.delete(resource)
+                viteServer.watcher.add(resource)
+              }
+            }
+
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
@@ -640,13 +654,24 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           ctx.modules.map((m) => m.id).join(', '),
         )
 
-        // Template/style files are handled by our custom fs.watch in configureServer.
-        // We dynamically unwatch them from Vite's watcher during transform, so they shouldn't
-        // normally trigger handleHotUpdate. If they do appear here (e.g., file not yet transformed
-        // or from another plugin), return [] to prevent Vite's default handling.
+        // Component resource files (templates/styles referenced via templateUrl/styleUrls)
+        // are handled by our custom fs.watch in configureServer. We dynamically unwatch them
+        // from Vite's watcher during transform, so they shouldn't normally trigger handleHotUpdate.
+        // If they do appear here (e.g., file not yet transformed or from another plugin),
+        // return [] to prevent Vite's default handling.
+        //
+        // However, non-component files (e.g., global stylesheets imported in main.ts) are NOT
+        // managed by our custom watcher and must flow through Vite's normal HMR pipeline so that
+        // PostCSS/Tailwind and other plugins can process them correctly.
         if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
-          debugHmr('ignoring resource file in handleHotUpdate (handled by custom watcher)')
-          return []
+          const normalizedFile = normalizePath(ctx.file)
+          if (resourceToComponent.has(normalizedFile)) {
+            debugHmr(
+              'ignoring component resource file in handleHotUpdate (handled by custom watcher)',
+            )
+            return []
+          }
+          debugHmr('letting non-component resource file through to Vite HMR: %s', normalizedFile)
         }
 
         // Handle component file changes
