@@ -1,0 +1,25 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable } from "@angular/core";
+import { __decorate } from "tslib";
+function Log() {
+	return function(t, k, d) {};
+}
+function Memoize() {
+	return function(t, k, d) {};
+}
+function Validate() {
+	return function(t, k) {};
+}
+let MyService = class MyService {
+	compute() {
+		return 42;
+	}
+	name = "";
+};
+__decorate([Log(), Memoize()], MyService.prototype, "compute", null);
+__decorate([Validate(), Log()], MyService.prototype, "name", void 0);
+MyService = __decorate([Injectable()], MyService);
+export { MyService };

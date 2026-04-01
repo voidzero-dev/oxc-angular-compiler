@@ -1,0 +1,26 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Directive, Input, Output, EventEmitter } from "@angular/core";
+import { __decorate } from "tslib";
+function Required() {
+	return function(t, k) {};
+}
+function Throttle(ms) {
+	return function(t, k, d) {};
+}
+let FieldDirective = class FieldDirective {
+	value = "";
+	valueChange = new EventEmitter();
+	onChange() {}
+	static propDecorators = {
+		value: [{ type: Input }],
+		valueChange: [{ type: Output }]
+	};
+};
+__decorate([Required()], FieldDirective.prototype, "value", void 0);
+__decorate([Throttle(300)], FieldDirective.prototype, "valueChange", void 0);
+__decorate([Throttle(100)], FieldDirective.prototype, "onChange", null);
+FieldDirective = __decorate([Directive({ selector: "[appField]" })], FieldDirective);
+export { FieldDirective };

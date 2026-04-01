@@ -1094,6 +1094,33 @@ pub fn collect_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::V
     }
 }
 
+/// Collect ALL decorator spans from class members (properties, methods, accessors),
+/// regardless of whether they are Angular-specific or not.
+///
+/// This is used when lowering a class that has Angular decorators: since the class
+/// declaration is converted to a class expression, ALL member decorators must be
+/// removed (decorators are not valid on class expressions in TypeScript).
+pub fn collect_all_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+    for element in &class.body.body {
+        let decorators = match element {
+            ClassElement::PropertyDefinition(prop) => &prop.decorators,
+            ClassElement::MethodDefinition(method) => {
+                // Skip constructor - it's handled separately
+                if method.kind == MethodDefinitionKind::Constructor {
+                    continue;
+                }
+                &method.decorators
+            }
+            ClassElement::AccessorProperty(accessor) => &accessor.decorators,
+            _ => continue,
+        };
+
+        for decorator in decorators {
+            spans.push(decorator.span);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

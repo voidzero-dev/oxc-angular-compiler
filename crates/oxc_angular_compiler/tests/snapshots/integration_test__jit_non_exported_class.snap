@@ -1,0 +1,16 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable } from "@angular/core";
+import { __decorate } from "tslib";
+function Singleton() {
+	return function(t) {
+		return t;
+	};
+}
+let InternalService = class InternalService {
+	getInstance() {}
+};
+__decorate([Singleton()], InternalService.prototype, "getInstance", null);
+InternalService = __decorate([Singleton(), Injectable()], InternalService);

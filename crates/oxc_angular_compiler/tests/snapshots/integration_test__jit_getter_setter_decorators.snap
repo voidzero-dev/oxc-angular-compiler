@@ -1,0 +1,29 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Directive, Input } from "@angular/core";
+import { __decorate } from "tslib";
+function Validate() {
+	return function(t, k, d) {};
+}
+function Transform() {
+	return function(t, k, d) {};
+}
+let FieldDirective = class FieldDirective {
+	_value = "";
+	get value() {
+		return this._value;
+	}
+	set value(v) {
+		this._value = v;
+	}
+	get computed() {
+		return this._value.toUpperCase();
+	}
+	static propDecorators = { value: [{ type: Input }] };
+};
+__decorate([Validate()], FieldDirective.prototype, "value", null);
+__decorate([Transform()], FieldDirective.prototype, "computed", null);
+FieldDirective = __decorate([Directive({ selector: "[appField]" })], FieldDirective);
+export { FieldDirective };
