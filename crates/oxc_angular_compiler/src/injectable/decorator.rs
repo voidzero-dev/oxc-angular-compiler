@@ -252,7 +252,7 @@ pub fn extract_injectable_metadata<'a>(
     };
 
     // Extract providedIn (None if not specified)
-    let provided_in = extract_provided_in(allocator, config_obj);
+    let provided_in = extract_provided_in(allocator, config_obj, source_text);
 
     // Extract useClass
     let use_class = extract_use_class(allocator, config_obj, source_text);
@@ -303,12 +303,13 @@ fn get_property_key_name<'a>(key: &'a PropertyKey<'a>) -> Option<Ident<'a>> {
 fn extract_provided_in<'a>(
     allocator: &'a Allocator,
     config_obj: &'a oxc_ast::ast::ObjectExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<ProvidedInValue<'a>> {
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "providedIn" {
-                    return parse_provided_in_value(allocator, &prop.value);
+                    return parse_provided_in_value(allocator, &prop.value, source_text);
                 }
             }
         }
@@ -319,6 +320,7 @@ fn extract_provided_in<'a>(
 fn parse_provided_in_value<'a>(
     allocator: &'a Allocator,
     expr: &'a Expression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<ProvidedInValue<'a>> {
     match expr {
         Expression::StringLiteral(s) => match s.value.as_str() {
@@ -331,7 +333,7 @@ fn parse_provided_in_value<'a>(
         _ => {
             // Check for forwardRef
             let (expression, is_forward_ref) =
-                extract_forward_ref_or_expression(allocator, expr, None)?;
+                extract_forward_ref_or_expression(allocator, expr, source_text)?;
             Some(ProvidedInValue::Module { expression, is_forward_ref })
         }
     }

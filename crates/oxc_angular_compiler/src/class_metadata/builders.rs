@@ -123,6 +123,7 @@ pub fn build_ctor_params_metadata<'a>(
     constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
@@ -164,7 +165,8 @@ pub fn build_ctor_params_metadata<'a>(
         // Extract decorators from the parameter
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
-            let decorators_array = build_decorator_metadata_array(allocator, &param_decorators, None);
+            let decorators_array =
+                build_decorator_metadata_array(allocator, &param_decorators, source_text);
             map_entries.push(LiteralMapEntry {
                 key: Ident::from("decorators"),
                 value: decorators_array,
@@ -206,6 +208,7 @@ pub fn build_ctor_params_metadata<'a>(
 pub fn build_prop_decorators_metadata<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     const ANGULAR_PROP_DECORATORS: &[&str] = &[
         "Input",
@@ -252,7 +255,8 @@ pub fn build_prop_decorators_metadata<'a>(
         }
 
         // Build decorators array for this property
-        let decorators_array = build_decorator_metadata_array(allocator, &angular_decorators, None);
+        let decorators_array =
+            build_decorator_metadata_array(allocator, &angular_decorators, source_text);
 
         prop_entries.push(LiteralMapEntry {
             key: prop_name,

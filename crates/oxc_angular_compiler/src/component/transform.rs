@@ -1771,9 +1771,12 @@ pub fn transform_angular_file(
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
                                             &import_map,
+                                            Some(source),
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
-                                            allocator, class,
+                                            allocator,
+                                            class,
+                                            Some(source),
                                         ),
                                     };
 

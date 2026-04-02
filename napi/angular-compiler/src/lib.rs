@@ -1974,7 +1974,8 @@ pub fn compile_class_metadata_sync(
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
     let decorator_ref = decorator;
-    let decorators_expr = core_build_decorator_metadata_array(&allocator, &[decorator_ref], Some(&source));
+    let decorators_expr =
+        core_build_decorator_metadata_array(&allocator, &[decorator_ref], Some(&source));
 
     // Build constructor parameters metadata
     // This standalone API doesn't have full transform pipeline context (constructor deps
@@ -1988,10 +1989,12 @@ pub fn compile_class_metadata_sync(
         None,
         &mut namespace_registry,
         &empty_import_map,
+        Some(&source),
     );
 
     // Build property decorators metadata
-    let prop_decorators_expr = core_build_prop_decorators_metadata(&allocator, class);
+    let prop_decorators_expr =
+        core_build_prop_decorators_metadata(&allocator, class, Some(&source));
 
     // Create R3ClassMetadata
     let metadata = R3ClassMetadata {
