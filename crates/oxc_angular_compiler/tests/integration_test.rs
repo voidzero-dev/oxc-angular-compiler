@@ -9379,3 +9379,60 @@ export class TestComponent {
         result.code
     );
 }
+
+#[test]
+fn test_private_fields_not_stripped() {
+    // JavaScript private fields (#foo) are real runtime declarations, not TypeScript
+    // type annotations. Even without an initializer, #foo declares a private slot
+    // on the class and must NOT be stripped. Stripping them causes rolldown to panic
+    // because this.#foo references remain but the declaration is gone.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'test', template: '' })
+export class TestComponent {
+    #privateUninitialized: string;
+    #privateInitialized = 'hello';
+    publicUninitialized: string;
+    publicInitialized = 'world';
+
+    method() {
+        console.log(this.#privateUninitialized);
+    }
+}
+"#;
+    let options = ComponentTransformOptions {
+        strip_uninitialized_fields: true,
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Private fields must NOT be stripped (they are JS runtime syntax).
+    // Check for the field DECLARATION (not just any reference like this.#foo in methods).
+    // A private field declaration looks like "    #privateUninitialized;" on its own line.
+    assert!(
+        result.code.contains("    #privateUninitialized"),
+        "Uninitialized private field declaration must be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("#privateInitialized = 'hello'"),
+        "Initialized private field must be preserved. Got:\n{}",
+        result.code
+    );
+    // Public uninitialized field SHOULD be stripped (TS type annotation)
+    assert!(
+        !result.code.contains("publicUninitialized"),
+        "Public uninitialized field should be stripped. Got:\n{}",
+        result.code
+    );
+    // Public initialized field must be preserved
+    assert!(
+        result.code.contains("publicInitialized = 'world'"),
+        "Public initialized field must be preserved. Got:\n{}",
+        result.code
+    );
+}

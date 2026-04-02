@@ -2350,6 +2350,12 @@ pub fn transform_angular_file(
                     if prop.r#static {
                         continue;
                     }
+                    // Skip private fields (#foo) — these are JS runtime syntax,
+                    // not TS type annotations. They declare a private slot on
+                    // the class and must be preserved even without an initializer.
+                    if matches!(prop.key, PropertyKey::PrivateIdentifier(_)) {
+                        continue;
+                    }
                     // Strip if: no initializer (value is None) OR has `declare` keyword
                     if prop.value.is_none() || prop.declare {
                         let field_span = prop.span;
