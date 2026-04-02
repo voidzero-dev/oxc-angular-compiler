@@ -698,18 +698,33 @@ fn make_raw_source<'a>(
 
 /// Strip TypeScript type annotations from an expression source string.
 ///
-/// Wraps the expression in a minimal program (`0,(expr)`), parses as TypeScript,
-/// runs the TypeScript transformer to strip types, and codegens to JavaScript.
-/// Returns the original source if stripping fails.
+/// Fast path: tries parsing as ESM JavaScript first. If the expression is
+/// already valid JS (no type annotations), returns it as-is without running
+/// the heavier semantic/transform/codegen pipeline.
+///
+/// Slow path: if JS parsing fails (likely due to TS syntax), wraps the
+/// expression, parses as TypeScript module, strips types via transformer,
+/// and codegens to JavaScript.
 fn strip_expression_types(expr_source: &str) -> String {
     use std::path::Path;
 
+    // Fast path: try parsing as JS module. If it succeeds, the expression
+    // is already valid JavaScript — return as-is without transformation.
+    {
+        let allocator = oxc_allocator::Allocator::default();
+        let wrapped = format!("0,({expr_source})");
+        let source_type = oxc_span::SourceType::mjs();
+        let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
+        if !parser_ret.panicked && parser_ret.errors.is_empty() {
+            return expr_source.to_string();
+        }
+    }
+
+    // Slow path: expression contains TypeScript syntax — run full pipeline.
     let allocator = oxc_allocator::Allocator::default();
-    // Use comma operator + parens to create a valid single expression statement.
-    // This handles expressions that would be ambiguous at statement level
-    // (e.g., arrow functions, object literals).
     let wrapped = format!("0,({expr_source})");
-    let source_type = oxc_span::SourceType::ts();
+    // Use module TypeScript so import.meta and ESM syntax are valid.
+    let source_type = oxc_span::SourceType::ts().with_module(true);
     let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
 
     if parser_ret.panicked {
@@ -725,14 +740,13 @@ fn strip_expression_types(expr_source: &str) -> String {
         ..Default::default()
     };
     let transformer =
-        oxc_transformer::Transformer::new(&allocator, Path::new("_.ts"), &transform_options);
+        oxc_transformer::Transformer::new(&allocator, Path::new("_.mts"), &transform_options);
     transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
 
     let codegen_ret = oxc_codegen::Codegen::new().with_source_text(&wrapped).build(&program);
 
     // Strip the wrapper: codegen produces "0, (expr);\n" → extract "expr"
     let code = codegen_ret.code.trim_end();
-    // The codegen may format as "0, (expr);" or "0, (expr);\n"
     if let Some(rest) = code.strip_prefix("0, (").or_else(|| code.strip_prefix("0,(")) {
         if let Some(inner) = rest.strip_suffix(");") {
             return inner.to_string();
