@@ -1,6 +1,5 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
-assertion_line: 6295
 expression: result.code
 ---
 import { Component, signal } from "@angular/core";
@@ -11,7 +10,6 @@ import { __decorate } from "tslib";
 import __NG_CLI_RESOURCE__0 from "angular:jit:template:file;./app.html";
 import __NG_CLI_RESOURCE__1 from "angular:jit:style:file;./app.css";
 let App = class App {
-	titleService;
 	title = signal("app");
 	constructor(titleService) {
 		this.titleService = titleService;

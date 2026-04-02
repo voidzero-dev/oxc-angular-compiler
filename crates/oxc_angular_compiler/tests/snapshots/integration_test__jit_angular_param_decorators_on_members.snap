@@ -8,8 +8,6 @@ function Custom() {
 	return function(t, k) {};
 }
 let MyService = class MyService {
-	token;
-	optionalDep;
 	customProp = "";
 };
 __decorate([Custom()], MyService.prototype, "customProp", void 0);

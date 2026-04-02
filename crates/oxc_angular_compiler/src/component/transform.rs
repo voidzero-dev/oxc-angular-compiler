@@ -9,8 +9,9 @@ use std::path::Path;
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, Declaration, ExportDefaultDeclarationKind, Expression,
-    ImportDeclarationSpecifier, ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
+    Argument, ArrayExpressionElement, ClassElement, Declaration, ExportDefaultDeclarationKind,
+    Expression, ImportDeclarationSpecifier, ImportOrExportKind, ObjectPropertyKind, PropertyKey,
+    Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -182,6 +183,17 @@ pub struct TransformOptions {
     /// This runs after Angular style encapsulation, so it applies to the same
     /// final CSS strings that are embedded in component definitions.
     pub minify_component_styles: bool,
+
+    /// Strip uninitialized class fields (matching `useDefineForClassFields: false` behavior).
+    ///
+    /// When true, class fields without an explicit initializer (`= ...`) are removed
+    /// from the output. This matches TypeScript's behavior when `useDefineForClassFields`
+    /// is `false` (Angular's default), where such fields are type-only declarations.
+    ///
+    /// Static fields and fields with initializers are always preserved.
+    ///
+    /// Default: true (Angular projects always use `useDefineForClassFields: false`)
+    pub strip_uninitialized_fields: bool,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -232,6 +244,7 @@ impl Default for TransformOptions {
             // Class metadata for TestBed support (disabled by default)
             emit_class_metadata: false,
             minify_component_styles: false,
+            strip_uninitialized_fields: true,
         }
     }
 }
@@ -1215,7 +1228,12 @@ fn build_jit_decorator_text(
 ///
 /// This runs as a post-pass after JIT text-edits, converting TypeScript → JavaScript.
 /// It handles abstract members, type annotations, parameter properties, etc.
-fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
+fn strip_typescript(
+    allocator: &Allocator,
+    path: &str,
+    code: &str,
+    strip_uninitialized_fields: bool,
+) -> String {
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let parser_ret = Parser::new(allocator, code, source_type).parse();
     if parser_ret.panicked {
@@ -1227,8 +1245,11 @@ fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
     let semantic_ret =
         oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
 
-    let ts_options =
-        oxc_transformer::TypeScriptOptions { only_remove_type_imports: true, ..Default::default() };
+    let ts_options = oxc_transformer::TypeScriptOptions {
+        only_remove_type_imports: true,
+        remove_class_fields_without_initializer: strip_uninitialized_fields,
+        ..Default::default()
+    };
 
     let transform_options =
         oxc_transformer::TransformOptions { typescript: ts_options, ..Default::default() };
@@ -1560,7 +1581,8 @@ fn transform_angular_file_jit(
     }
 
     // 5. Strip TypeScript syntax from JIT output
-    result.code = strip_typescript(allocator, path, &result.code);
+    result.code =
+        strip_typescript(allocator, path, &result.code, options.strip_uninitialized_fields);
 
     result
 }
@@ -2300,6 +2322,50 @@ pub fn transform_angular_file(
         }
     }
 
+    // 4b. Strip uninitialized class fields (useDefineForClassFields: false behavior).
+    // This must process ALL classes, not just Angular-decorated ones, because
+    // legacy decorators (@Select, @Dispatch) set up prototype getters that get
+    // shadowed by _defineProperty(this, "field", void 0) when fields aren't stripped.
+    let mut uninitialized_field_spans: Vec<Span> = Vec::new();
+    if options.strip_uninitialized_fields {
+        for stmt in &parser_ret.program.body {
+            let class = match stmt {
+                Statement::ClassDeclaration(class) => Some(class.as_ref()),
+                Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                    ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                        Some(class.as_ref())
+                    }
+                    _ => None,
+                },
+                Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let Some(class) = class else { continue };
+            for element in &class.body.body {
+                if let ClassElement::PropertyDefinition(prop) = element {
+                    // Skip static fields — they follow different rules
+                    if prop.r#static {
+                        continue;
+                    }
+                    // Strip if: no initializer (value is None) OR has `declare` keyword
+                    if prop.value.is_none() || prop.declare {
+                        let field_span = prop.span;
+                        // Remove any decorator spans that fall within this field span
+                        // to avoid overlapping edits (which cause byte boundary panics).
+                        decorator_spans_to_remove.retain(|dec_span| {
+                            !(dec_span.start >= field_span.start
+                                && dec_span.end <= field_span.end)
+                        });
+                        uninitialized_field_spans.push(field_span);
+                    }
+                }
+            }
+        }
+    }
+
     // 5. Generate output code using span-based edits from the original AST.
     // All edits reference positions in the original source and are applied in one pass.
 
@@ -2351,6 +2417,21 @@ pub fn transform_angular_file(
 
     // Decorator removal edits
     for span in &decorator_spans_to_remove {
+        let mut end = span.end as usize;
+        let bytes = source.as_bytes();
+        while end < bytes.len() {
+            let c = bytes[end];
+            if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+        edits.push(Edit::delete(span.start, end as u32));
+    }
+
+    // Uninitialized field removal edits
+    for span in &uninitialized_field_spans {
         let mut end = span.end as usize;
         let bytes = source.as_bytes();
         while end < bytes.len() {

@@ -834,6 +834,13 @@ export interface TransformOptions {
    */
   minifyComponentStyles?: boolean
   /**
+   * Strip uninitialized class fields (matching `useDefineForClassFields: false` behavior).
+   *
+   * When true (default), class fields without initializers are removed,
+   * matching TypeScript's `useDefineForClassFields: false` behavior.
+   */
+  stripUninitializedFields?: boolean
+  /**
    * Resolved import paths for host directives and other imports.
    *
    * Maps local identifier name (e.g., "AriaDisableDirective") to the resolved

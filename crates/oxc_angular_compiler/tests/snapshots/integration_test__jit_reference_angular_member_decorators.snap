@@ -6,11 +6,8 @@ import { Injectable, Inject, Optional, Input, Output, ViewChild, HostListener, H
 import { __decorate } from "tslib";
 let MyService = class MyService {
 	myInput = "";
-	myOutput;
-	myViewChild;
 	isActive = false;
 	onClick(event) {}
-	myContent;
 	constructor(token, optService) {
 		this.token = token;
 		this.optService = optService;
