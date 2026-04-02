@@ -2326,7 +2326,18 @@ pub fn transform_angular_file(
     // This must process ALL classes, not just Angular-decorated ones, because
     // legacy decorators (@Select, @Dispatch) set up prototype getters that get
     // shadowed by _defineProperty(this, "field", void 0) when fields aren't stripped.
+    //
+    // For fields with non-Angular decorators, we also emit __decorate() calls on
+    // the prototype so the decorator can set up its getter/value (matching tsc).
+    struct StrippedFieldDecorate {
+        class_name: String,
+        class_body_end: u32,
+        member_name: String,
+        decorator_texts: std::vec::Vec<String>,
+    }
     let mut uninitialized_field_spans: Vec<Span> = Vec::new();
+    let mut stripped_field_decorates: std::vec::Vec<StrippedFieldDecorate> =
+        std::vec::Vec::new();
     if options.strip_uninitialized_fields {
         for stmt in &parser_ret.program.body {
             let class = match stmt {
@@ -2344,6 +2355,9 @@ pub fn transform_angular_file(
                 _ => None,
             };
             let Some(class) = class else { continue };
+            let class_name = class.id.as_ref().map(|id| id.name.to_string());
+            let class_body_end = class.body.span.end;
+
             for element in &class.body.body {
                 if let ClassElement::PropertyDefinition(prop) = element {
                     // Skip static fields — they follow different rules
@@ -2366,6 +2380,54 @@ pub fn transform_angular_file(
                                 && dec_span.end <= field_span.end)
                         });
                         uninitialized_field_spans.push(field_span);
+
+                        // If the field has non-Angular decorators, collect them for
+                        // __decorate() emission after the class.
+                        if !prop.decorators.is_empty() {
+                            let member_name = match &prop.key {
+                                PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+                                _ => continue,
+                            };
+                            let mut non_angular_texts: std::vec::Vec<String> =
+                                std::vec::Vec::new();
+                            for decorator in &prop.decorators {
+                                // Extract decorator name to check if it's Angular
+                                let dec_name = match &decorator.expression {
+                                    Expression::CallExpression(call) => match &call.callee {
+                                        Expression::Identifier(id) => {
+                                            Some(id.name.as_str())
+                                        }
+                                        Expression::StaticMemberExpression(m) => {
+                                            Some(m.property.name.as_str())
+                                        }
+                                        _ => None,
+                                    },
+                                    Expression::Identifier(id) => Some(id.name.as_str()),
+                                    _ => None,
+                                };
+                                // Only emit __decorate for non-Angular decorators
+                                if let Some(name) = dec_name {
+                                    if !ANGULAR_DECORATOR_NAMES.contains(&name) {
+                                        let expr_span = decorator.expression.span();
+                                        non_angular_texts.push(
+                                            source[expr_span.start as usize
+                                                ..expr_span.end as usize]
+                                                .to_string(),
+                                        );
+                                    }
+                                }
+                            }
+                            if !non_angular_texts.is_empty() {
+                                if let Some(ref cn) = class_name {
+                                    stripped_field_decorates.push(StrippedFieldDecorate {
+                                        class_name: cn.clone(),
+                                        class_body_end,
+                                        member_name,
+                                        decorator_texts: non_angular_texts,
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2449,6 +2511,27 @@ pub fn transform_angular_file(
             }
         }
         edits.push(Edit::delete(span.start, end as u32));
+    }
+
+    // Emit __decorate() calls for non-Angular decorators on stripped fields.
+    // These go after the class body, matching tsc's output pattern.
+    if !stripped_field_decorates.is_empty() {
+        // Add tslib import if not already present
+        if !source.contains("__decorate") {
+            edits.push(
+                Edit::insert(0, "import { __decorate } from \"tslib\";\n".to_string())
+                    .with_priority(10),
+            );
+        }
+        for entry in &stripped_field_decorates {
+            let decorate_call = format!(
+                "\n__decorate([{}], {}.prototype, \"{}\", void 0);",
+                entry.decorator_texts.join(", "),
+                entry.class_name,
+                entry.member_name,
+            );
+            edits.push(Edit::insert(entry.class_body_end, decorate_call));
+        }
     }
 
     if let Some(edit) = ns_edit {
