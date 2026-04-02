@@ -180,6 +180,7 @@ impl<'a> NgModuleMetadata<'a> {
 pub fn extract_ng_module_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<NgModuleMetadata<'a>> {
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
@@ -235,7 +236,8 @@ pub fn extract_ng_module_metadata<'a>(
                     // Also store the raw imports expression for ɵinj generation.
                     // This preserves call expressions like StoreModule.forRoot(...)
                     // and spread elements that are dropped by extract_reference_array.
-                    metadata.raw_imports_expr = convert_oxc_expression(allocator, &prop.value);
+                    metadata.raw_imports_expr =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "exports" => {
                     let (identifiers, has_forward_refs) =
@@ -246,7 +248,8 @@ pub fn extract_ng_module_metadata<'a>(
                     }
                 }
                 "providers" => {
-                    metadata.providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.providers =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "bootstrap" => {
                     let (identifiers, has_forward_refs) =
@@ -571,7 +574,7 @@ mod tests {
             };
 
             if let Some(class) = class {
-                if let Some(metadata) = extract_ng_module_metadata(&allocator, class) {
+                if let Some(metadata) = extract_ng_module_metadata(&allocator, class, Some(code)) {
                     found_metadata = Some(metadata);
                     break;
                 }

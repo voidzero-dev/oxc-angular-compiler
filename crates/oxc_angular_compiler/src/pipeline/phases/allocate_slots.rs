@@ -768,7 +768,8 @@ fn propagate_slots_to_expressions(
             | OutputExpression::External(_)
             | OutputExpression::ReadVar(_)
             | OutputExpression::RegularExpressionLiteral(_)
-            | OutputExpression::WrappedNode(_) => {}
+            | OutputExpression::WrappedNode(_)
+            | OutputExpression::RawSource(_) => {}
         }
     }
 

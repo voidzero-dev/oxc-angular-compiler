@@ -769,7 +769,8 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
         if let Some(class) = class {
             // Extract metadata from @Component decorator
             // Use implicit_standalone=true (v19+ default) since it doesn't affect URL extraction
-            if let Some(metadata) = extract_component_metadata(&allocator, class, true, &import_map)
+            if let Some(metadata) =
+                extract_component_metadata(&allocator, class, true, &import_map, Some(&source))
             {
                 // Collect template URL
                 if let Some(template_url) = &metadata.template_url {
@@ -1225,7 +1226,9 @@ pub fn extract_pipe_metadata_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) = extract_pipe_metadata(&allocator, class, implicit_standalone) {
+            if let Some(metadata) =
+                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
+            {
                 return Some(ExtractedPipeMetadata {
                     class_name: metadata.class_name.to_string(),
                     span_start: metadata.class_span.start,
@@ -1300,7 +1303,9 @@ pub fn compile_pipe_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) = extract_pipe_metadata(&allocator, class, implicit_standalone) {
+            if let Some(metadata) =
+                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
+            {
                 // Create type expression for the pipe class
                 use oxc_allocator::Box;
                 use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
@@ -1522,9 +1527,13 @@ pub fn extract_component_metadata_sync(
 
         if let Some(class) = class {
             // Extract metadata from @Component decorator
-            if let Some(metadata) =
-                extract_component_metadata(&allocator, class, implicit_standalone, &import_map)
-            {
+            if let Some(metadata) = extract_component_metadata(
+                &allocator,
+                class,
+                implicit_standalone,
+                &import_map,
+                Some(&source),
+            ) {
                 // Convert encapsulation to string
                 let encapsulation = match metadata.encapsulation {
                     RustViewEncapsulation::Emulated => "Emulated",
@@ -1588,7 +1597,7 @@ pub fn extract_component_metadata_sync(
                 let animations = metadata.animations.as_ref().map(|e| emitter.emit_expression(e));
 
                 // Extract inputs from @Input decorators
-                let rust_inputs = extract_input_metadata(&allocator, class);
+                let rust_inputs = extract_input_metadata(&allocator, class, Some(&source));
                 let inputs: Option<Vec<ExtractedInputMetadata>> = if rust_inputs.is_empty() {
                     None
                 } else {
@@ -1642,7 +1651,7 @@ pub fn extract_component_metadata_sync(
                 }
 
                 // Extract view queries from @ViewChild/@ViewChildren decorators
-                let rust_view_queries = extract_view_queries(&allocator, class);
+                let rust_view_queries = extract_view_queries(&allocator, class, Some(&source));
                 let view_queries: Option<Vec<ExtractedQueryMetadata>> =
                     if rust_view_queries.is_empty() {
                         None
@@ -1663,7 +1672,8 @@ pub fn extract_component_metadata_sync(
                     };
 
                 // Extract content queries from @ContentChild/@ContentChildren decorators
-                let rust_content_queries = extract_content_queries(&allocator, class);
+                let rust_content_queries =
+                    extract_content_queries(&allocator, class, Some(&source));
                 let queries: Option<Vec<ExtractedQueryMetadata>> =
                     if rust_content_queries.is_empty() {
                         None
@@ -1965,7 +1975,8 @@ pub fn compile_class_metadata_sync(
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
     let decorator_ref = decorator;
-    let decorators_expr = core_build_decorator_metadata_array(&allocator, &[decorator_ref]);
+    let decorators_expr =
+        core_build_decorator_metadata_array(&allocator, &[decorator_ref], Some(&source));
 
     // Build constructor parameters metadata
     // This standalone API doesn't have full transform pipeline context (constructor deps
@@ -1979,10 +1990,12 @@ pub fn compile_class_metadata_sync(
         None,
         &mut namespace_registry,
         &empty_import_map,
+        Some(&source),
     );
 
     // Build property decorators metadata
-    let prop_decorators_expr = core_build_prop_decorators_metadata(&allocator, class);
+    let prop_decorators_expr =
+        core_build_prop_decorators_metadata(&allocator, class, Some(&source));
 
     // Create R3ClassMetadata
     let metadata = R3ClassMetadata {

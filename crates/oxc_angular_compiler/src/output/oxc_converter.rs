@@ -16,15 +16,15 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Expression, ObjectPropertyKind, PropertyKey,
     UnaryOperator as OxcUnaryOperator,
 };
-use oxc_span::Ident;
+use oxc_span::{Ident, Span};
 
 use super::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, CommaExpr,
     ConditionalExpr, FnParam, InstantiateExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
     LiteralMapEntry, LiteralMapExpr, LiteralValue, NotExpr, OutputExpression, OutputStatement,
-    ParenthesizedExpr, ReadKeyExpr, ReadPropExpr, ReadVarExpr, ReturnStatement, SpreadElementExpr,
-    TemplateLiteralElement, TemplateLiteralExpr, TypeofExpr, UnaryOperator, UnaryOperatorExpr,
-    VoidExpr,
+    ParenthesizedExpr, RawSourceExpr, ReadKeyExpr, ReadPropExpr, ReadVarExpr, ReturnStatement,
+    SpreadElementExpr, TemplateLiteralElement, TemplateLiteralExpr, TypeofExpr, UnaryOperator,
+    UnaryOperatorExpr, VoidExpr,
 };
 
 // ============================================================================
@@ -39,12 +39,16 @@ use super::ast::{
 /// # Arguments
 /// * `allocator` - The allocator for creating new nodes
 /// * `expr` - The OXC expression to convert
+/// * `source_text` - Optional source text for falling back to raw source when
+///   complex expressions (e.g., block-body arrow functions with unsupported
+///   statement types) cannot be fully represented in the output AST.
 ///
 /// # Returns
 /// `Some(OutputExpression)` if conversion succeeded, `None` otherwise.
 pub fn convert_oxc_expression<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     match expr {
         // Literals
@@ -78,25 +82,30 @@ pub fn convert_oxc_expression<'a>(
         ))),
 
         // Array expressions
-        Expression::ArrayExpression(arr) => convert_array_expression(allocator, arr),
+        Expression::ArrayExpression(arr) => convert_array_expression(allocator, arr, source_text),
 
         // Object expressions
-        Expression::ObjectExpression(obj) => convert_object_expression(allocator, obj),
+        Expression::ObjectExpression(obj) => convert_object_expression(allocator, obj, source_text),
 
         // Call expressions
-        Expression::CallExpression(call) => convert_call_expression(allocator, call),
+        Expression::CallExpression(call) => convert_call_expression(allocator, call, source_text),
 
         // New expressions
-        Expression::NewExpression(new_expr) => convert_new_expression(allocator, new_expr),
+        Expression::NewExpression(new_expr) => {
+            convert_new_expression(allocator, new_expr, source_text)
+        }
 
         // Arrow function expressions
         Expression::ArrowFunctionExpression(arrow) => {
-            convert_arrow_function_expression(allocator, arrow)
+            convert_arrow_function_expression(allocator, arrow, source_text)
         }
+
+        // Function expressions - fall back to raw source if available
+        Expression::FunctionExpression(func) => make_raw_source(allocator, source_text, func.span),
 
         // Member expressions
         Expression::StaticMemberExpression(member) => {
-            let receiver = convert_oxc_expression(allocator, &member.object)?;
+            let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, allocator),
@@ -109,8 +118,8 @@ pub fn convert_oxc_expression<'a>(
         }
 
         Expression::ComputedMemberExpression(member) => {
-            let receiver = convert_oxc_expression(allocator, &member.object)?;
-            let index = convert_oxc_expression(allocator, &member.expression)?;
+            let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
+            let index = convert_oxc_expression(allocator, &member.expression, source_text)?;
             Some(OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
                     receiver: Box::new_in(receiver, allocator),
@@ -123,12 +132,14 @@ pub fn convert_oxc_expression<'a>(
         }
 
         // Chain expression (optional chaining)
-        Expression::ChainExpression(chain) => convert_chain_element(allocator, &chain.expression),
+        Expression::ChainExpression(chain) => {
+            convert_chain_element(allocator, &chain.expression, source_text)
+        }
 
         // Binary expressions
         Expression::BinaryExpression(bin) => {
-            let lhs = convert_oxc_expression(allocator, &bin.left)?;
-            let rhs = convert_oxc_expression(allocator, &bin.right)?;
+            let lhs = convert_oxc_expression(allocator, &bin.left, source_text)?;
+            let rhs = convert_oxc_expression(allocator, &bin.right, source_text)?;
             let operator = convert_oxc_binary_operator(bin.operator)?;
             Some(OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -143,8 +154,8 @@ pub fn convert_oxc_expression<'a>(
 
         // Logical expressions (&&, ||, ??)
         Expression::LogicalExpression(logical) => {
-            let lhs = convert_oxc_expression(allocator, &logical.left)?;
-            let rhs = convert_oxc_expression(allocator, &logical.right)?;
+            let lhs = convert_oxc_expression(allocator, &logical.left, source_text)?;
+            let rhs = convert_oxc_expression(allocator, &logical.right, source_text)?;
             let operator = match logical.operator {
                 oxc_ast::ast::LogicalOperator::And => BinaryOperator::And,
                 oxc_ast::ast::LogicalOperator::Or => BinaryOperator::Or,
@@ -162,13 +173,15 @@ pub fn convert_oxc_expression<'a>(
         }
 
         // Unary expressions
-        Expression::UnaryExpression(unary) => convert_unary_expression(allocator, unary),
+        Expression::UnaryExpression(unary) => {
+            convert_unary_expression(allocator, unary, source_text)
+        }
 
         // Conditional expressions (ternary)
         Expression::ConditionalExpression(cond) => {
-            let condition = convert_oxc_expression(allocator, &cond.test)?;
-            let true_case = convert_oxc_expression(allocator, &cond.consequent)?;
-            let false_case = convert_oxc_expression(allocator, &cond.alternate)?;
+            let condition = convert_oxc_expression(allocator, &cond.test, source_text)?;
+            let true_case = convert_oxc_expression(allocator, &cond.consequent, source_text)?;
+            let false_case = convert_oxc_expression(allocator, &cond.alternate, source_text)?;
             Some(OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
                     condition: Box::new_in(condition, allocator),
@@ -181,11 +194,11 @@ pub fn convert_oxc_expression<'a>(
         }
 
         // Template literals
-        Expression::TemplateLiteral(tpl) => convert_template_literal(allocator, tpl),
+        Expression::TemplateLiteral(tpl) => convert_template_literal(allocator, tpl, source_text),
 
         // Parenthesized expressions
         Expression::ParenthesizedExpression(paren) => {
-            let inner = convert_oxc_expression(allocator, &paren.expression)?;
+            let inner = convert_oxc_expression(allocator, &paren.expression, source_text)?;
             Some(OutputExpression::Parenthesized(Box::new_in(
                 ParenthesizedExpr { expr: Box::new_in(inner, allocator), source_span: None },
                 allocator,
@@ -196,7 +209,7 @@ pub fn convert_oxc_expression<'a>(
         Expression::SequenceExpression(seq) => {
             let mut parts = OxcVec::with_capacity_in(seq.expressions.len(), allocator);
             for expr in &seq.expressions {
-                parts.push(convert_oxc_expression(allocator, expr)?);
+                parts.push(convert_oxc_expression(allocator, expr, source_text)?);
             }
             Some(OutputExpression::Comma(Box::new_in(
                 CommaExpr { parts, source_span: None },
@@ -212,18 +225,20 @@ pub fn convert_oxc_expression<'a>(
 
         // TypeScript type expressions - unwrap the inner expression
         // These don't affect runtime behavior, just compile-time type checking
-        Expression::TSAsExpression(ts_as) => convert_oxc_expression(allocator, &ts_as.expression),
+        Expression::TSAsExpression(ts_as) => {
+            convert_oxc_expression(allocator, &ts_as.expression, source_text)
+        }
         Expression::TSTypeAssertion(ts_assert) => {
-            convert_oxc_expression(allocator, &ts_assert.expression)
+            convert_oxc_expression(allocator, &ts_assert.expression, source_text)
         }
         Expression::TSSatisfiesExpression(ts_satisfies) => {
-            convert_oxc_expression(allocator, &ts_satisfies.expression)
+            convert_oxc_expression(allocator, &ts_satisfies.expression, source_text)
         }
         Expression::TSNonNullExpression(ts_non_null) => {
-            convert_oxc_expression(allocator, &ts_non_null.expression)
+            convert_oxc_expression(allocator, &ts_non_null.expression, source_text)
         }
         Expression::TSInstantiationExpression(ts_inst) => {
-            convert_oxc_expression(allocator, &ts_inst.expression)
+            convert_oxc_expression(allocator, &ts_inst.expression, source_text)
         }
 
         // Unsupported expressions - return None
@@ -239,6 +254,7 @@ pub fn convert_oxc_expression<'a>(
 fn convert_array_expression<'a>(
     allocator: &'a Allocator,
     arr: &oxc_ast::ast::ArrayExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     let mut entries = OxcVec::with_capacity_in(arr.elements.len(), allocator);
 
@@ -246,7 +262,7 @@ fn convert_array_expression<'a>(
         match element {
             ArrayExpressionElement::SpreadElement(spread) => {
                 // Convert the inner expression and wrap it in SpreadElement
-                let inner_expr = convert_oxc_expression(allocator, &spread.argument)?;
+                let inner_expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
                 let spread_expr = OutputExpression::SpreadElement(Box::new_in(
                     SpreadElementExpr {
                         expr: Box::new_in(inner_expr, allocator),
@@ -266,7 +282,7 @@ fn convert_array_expression<'a>(
             _ => {
                 // Regular expression element
                 let expr_ref = element.to_expression();
-                let converted = convert_oxc_expression(allocator, expr_ref)?;
+                let converted = convert_oxc_expression(allocator, expr_ref, source_text)?;
                 entries.push(converted);
             }
         }
@@ -282,6 +298,7 @@ fn convert_array_expression<'a>(
 fn convert_object_expression<'a>(
     allocator: &'a Allocator,
     obj: &oxc_ast::ast::ObjectExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     let mut entries = OxcVec::with_capacity_in(obj.properties.len(), allocator);
 
@@ -304,7 +321,7 @@ fn convert_object_expression<'a>(
                 };
 
                 // Convert the value
-                let value = convert_oxc_expression(allocator, &p.value)?;
+                let value = convert_oxc_expression(allocator, &p.value, source_text)?;
 
                 entries.push(LiteralMapEntry { key, value, quoted });
             }
@@ -326,8 +343,9 @@ fn convert_object_expression<'a>(
 fn convert_call_expression<'a>(
     allocator: &'a Allocator,
     call: &oxc_ast::ast::CallExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
-    convert_call_expression_with_optional(allocator, call, call.optional)
+    convert_call_expression_with_optional(allocator, call, call.optional, source_text)
 }
 
 /// Convert an OXC call expression to an OutputExpression with explicit optional flag.
@@ -335,9 +353,10 @@ fn convert_call_expression_with_optional<'a>(
     allocator: &'a Allocator,
     call: &oxc_ast::ast::CallExpression<'a>,
     optional: bool,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert the callee
-    let fn_expr = convert_oxc_expression(allocator, &call.callee)?;
+    let fn_expr = convert_oxc_expression(allocator, &call.callee, source_text)?;
 
     // Convert arguments
     let mut args = OxcVec::with_capacity_in(call.arguments.len(), allocator);
@@ -345,12 +364,12 @@ fn convert_call_expression_with_optional<'a>(
         match arg {
             Argument::SpreadElement(spread) => {
                 // Handle spread arguments
-                let expr = convert_oxc_expression(allocator, &spread.argument)?;
+                let expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
                 args.push(expr);
             }
             _ => {
                 let expr = arg.to_expression();
-                let converted = convert_oxc_expression(allocator, expr)?;
+                let converted = convert_oxc_expression(allocator, expr, source_text)?;
                 args.push(converted);
             }
         }
@@ -372,21 +391,22 @@ fn convert_call_expression_with_optional<'a>(
 fn convert_new_expression<'a>(
     allocator: &'a Allocator,
     new_expr: &oxc_ast::ast::NewExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert the callee (class expression)
-    let class_expr = convert_oxc_expression(allocator, &new_expr.callee)?;
+    let class_expr = convert_oxc_expression(allocator, &new_expr.callee, source_text)?;
 
     // Convert arguments
     let mut args = OxcVec::with_capacity_in(new_expr.arguments.len(), allocator);
     for arg in &new_expr.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
-                let expr = convert_oxc_expression(allocator, &spread.argument)?;
+                let expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
                 args.push(expr);
             }
             _ => {
                 let expr = arg.to_expression();
-                let converted = convert_oxc_expression(allocator, expr)?;
+                let converted = convert_oxc_expression(allocator, expr, source_text)?;
                 args.push(converted);
             }
         }
@@ -402,6 +422,7 @@ fn convert_new_expression<'a>(
 fn convert_arrow_function_expression<'a>(
     allocator: &'a Allocator,
     arrow: &oxc_ast::ast::ArrowFunctionExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert parameters
     let mut params = OxcVec::with_capacity_in(arrow.params.items.len(), allocator);
@@ -410,8 +431,8 @@ fn convert_arrow_function_expression<'a>(
         if let BindingPattern::BindingIdentifier(id) = &param.pattern {
             params.push(FnParam { name: id.name.clone().into() });
         } else {
-            // Complex patterns not supported
-            return None;
+            // Complex patterns not supported — fall back to raw source if available
+            return make_raw_source(allocator, source_text, arrow.span);
         }
     }
 
@@ -420,17 +441,29 @@ fn convert_arrow_function_expression<'a>(
         // Expression body: () => expr
         let expr_body = arrow.body.statements.first()?;
         if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = expr_body {
-            let converted = convert_oxc_expression(allocator, &expr_stmt.expression)?;
-            ArrowFunctionBody::Expression(Box::new_in(converted, allocator))
+            match convert_oxc_expression(allocator, &expr_stmt.expression, source_text) {
+                Some(converted) => ArrowFunctionBody::Expression(Box::new_in(converted, allocator)),
+                None => {
+                    // Unsupported expression (e.g., await, yield, class) —
+                    // fall back to raw source for the entire arrow
+                    return make_raw_source(allocator, source_text, arrow.span);
+                }
+            }
         } else {
             return None;
         }
     } else {
         // Block body: () => { ... }
+        // If any statement cannot be converted, fall back to raw source to avoid
+        // silently dropping statements (which corrupts the function body).
         let mut statements = OxcVec::with_capacity_in(arrow.body.statements.len(), allocator);
         for stmt in &arrow.body.statements {
-            if let Some(output_stmt) = convert_statement(allocator, stmt) {
-                statements.push(output_stmt);
+            match convert_statement(allocator, stmt, source_text) {
+                Some(output_stmt) => statements.push(output_stmt),
+                None => {
+                    // Unsupported statement type — fall back to raw source
+                    return make_raw_source(allocator, source_text, arrow.span);
+                }
             }
         }
         ArrowFunctionBody::Statements(statements)
@@ -443,9 +476,14 @@ fn convert_arrow_function_expression<'a>(
 }
 
 /// Convert an OXC statement to an OutputStatement (limited support).
+///
+/// Returns `None` for unsupported statement types (e.g., variable declarations,
+/// if/else, for loops, try/catch, etc.). The caller should fall back to raw
+/// source preservation when this returns `None`.
 fn convert_statement<'a>(
     allocator: &'a Allocator,
     stmt: &oxc_ast::ast::Statement<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputStatement<'a>> {
     match stmt {
         oxc_ast::ast::Statement::ReturnStatement(ret) => {
@@ -453,7 +491,7 @@ fn convert_statement<'a>(
             let value = ret
                 .argument
                 .as_ref()
-                .and_then(|expr| convert_oxc_expression(allocator, expr))
+                .and_then(|expr| convert_oxc_expression(allocator, expr, source_text))
                 .unwrap_or_else(|| {
                     OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Undefined, source_span: None },
@@ -466,13 +504,13 @@ fn convert_statement<'a>(
             )))
         }
         oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) => {
-            let expr = convert_oxc_expression(allocator, &expr_stmt.expression)?;
+            let expr = convert_oxc_expression(allocator, &expr_stmt.expression, source_text)?;
             Some(OutputStatement::Expression(Box::new_in(
                 super::ast::ExpressionStatement { expr, source_span: None },
                 allocator,
             )))
         }
-        // Other statement types not supported for now
+        // Other statement types not supported — caller should fall back to raw source
         _ => None,
     }
 }
@@ -481,8 +519,9 @@ fn convert_statement<'a>(
 fn convert_unary_expression<'a>(
     allocator: &'a Allocator,
     unary: &oxc_ast::ast::UnaryExpression<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
-    let expr = convert_oxc_expression(allocator, &unary.argument)?;
+    let expr = convert_oxc_expression(allocator, &unary.argument, source_text)?;
 
     match unary.operator {
         OxcUnaryOperator::LogicalNot => Some(OutputExpression::Not(Box::new_in(
@@ -524,6 +563,7 @@ fn convert_unary_expression<'a>(
 fn convert_template_literal<'a>(
     allocator: &'a Allocator,
     tpl: &oxc_ast::ast::TemplateLiteral<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert quasis to template literal elements
     let mut elements = OxcVec::with_capacity_in(tpl.quasis.len(), allocator);
@@ -545,7 +585,7 @@ fn convert_template_literal<'a>(
     // Convert expressions
     let mut expressions = OxcVec::with_capacity_in(tpl.expressions.len(), allocator);
     for expr in &tpl.expressions {
-        expressions.push(convert_oxc_expression(allocator, expr)?);
+        expressions.push(convert_oxc_expression(allocator, expr, source_text)?);
     }
 
     Some(OutputExpression::TemplateLiteral(Box::new_in(
@@ -561,21 +601,22 @@ fn convert_template_literal<'a>(
 fn convert_chain_element<'a>(
     allocator: &'a Allocator,
     element: &oxc_ast::ast::ChainElement<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     use oxc_ast::ast::ChainElement;
 
     match element {
         ChainElement::CallExpression(call) => {
             // For call expressions within a chain, the optional flag is already set on the call
-            convert_call_expression_with_optional(allocator, call, call.optional)
+            convert_call_expression_with_optional(allocator, call, call.optional, source_text)
         }
         ChainElement::TSNonNullExpression(ts_non_null) => {
             // TypeScript non-null assertion (!) - just convert the inner expression
-            convert_oxc_expression(allocator, &ts_non_null.expression)
+            convert_oxc_expression(allocator, &ts_non_null.expression, source_text)
         }
         ChainElement::ComputedMemberExpression(member) => {
-            let receiver = convert_oxc_expression(allocator, &member.object)?;
-            let index = convert_oxc_expression(allocator, &member.expression)?;
+            let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
+            let index = convert_oxc_expression(allocator, &member.expression, source_text)?;
             Some(OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
                     receiver: Box::new_in(receiver, allocator),
@@ -587,7 +628,7 @@ fn convert_chain_element<'a>(
             )))
         }
         ChainElement::StaticMemberExpression(member) => {
-            let receiver = convert_oxc_expression(allocator, &member.object)?;
+            let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, allocator),
@@ -634,6 +675,88 @@ fn convert_oxc_binary_operator(op: oxc_ast::ast::BinaryOperator) -> Option<Binar
     }
 }
 
+/// Create a `RawSource` expression from source text and span.
+///
+/// The source text is the original TypeScript source, so this function
+/// strips TypeScript type annotations by parsing, transforming, and
+/// re-generating the expression as JavaScript.
+///
+/// Returns `None` if `source_text` is not available.
+fn make_raw_source<'a>(
+    allocator: &'a Allocator,
+    source_text: Option<&'a str>,
+    span: Span,
+) -> Option<OutputExpression<'a>> {
+    let source = source_text?;
+    let raw = &source[span.start as usize..span.end as usize];
+    let js = strip_expression_types(raw);
+    Some(OutputExpression::RawSource(Box::new_in(
+        RawSourceExpr { source: Ident::from(allocator.alloc_str(&js)), source_span: None },
+        allocator,
+    )))
+}
+
+/// Strip TypeScript type annotations from an expression source string.
+///
+/// Fast path: tries parsing as ESM JavaScript first. If the expression is
+/// already valid JS (no type annotations), returns it as-is without running
+/// the heavier semantic/transform/codegen pipeline.
+///
+/// Slow path: if JS parsing fails (likely due to TS syntax), wraps the
+/// expression, parses as TypeScript module, strips types via transformer,
+/// and codegens to JavaScript.
+fn strip_expression_types(expr_source: &str) -> String {
+    use std::path::Path;
+
+    // Fast path: try parsing as JS module. If it succeeds, the expression
+    // is already valid JavaScript — return as-is without transformation.
+    {
+        let allocator = oxc_allocator::Allocator::default();
+        let wrapped = format!("0,({expr_source})");
+        let source_type = oxc_span::SourceType::mjs();
+        let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
+        if !parser_ret.panicked && parser_ret.errors.is_empty() {
+            return expr_source.to_string();
+        }
+    }
+
+    // Slow path: expression contains TypeScript syntax — run full pipeline.
+    let allocator = oxc_allocator::Allocator::default();
+    let wrapped = format!("0,({expr_source})");
+    // Use module TypeScript so import.meta and ESM syntax are valid.
+    let source_type = oxc_span::SourceType::ts().with_module(true);
+    let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
+
+    if parser_ret.panicked {
+        return expr_source.to_string();
+    }
+
+    let mut program = parser_ret.program;
+    let semantic_ret =
+        oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
+
+    let transform_options = oxc_transformer::TransformOptions {
+        typescript: oxc_transformer::TypeScriptOptions::default(),
+        ..Default::default()
+    };
+    let transformer =
+        oxc_transformer::Transformer::new(&allocator, Path::new("_.mts"), &transform_options);
+    transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
+
+    let codegen_ret = oxc_codegen::Codegen::new().with_source_text(&wrapped).build(&program);
+
+    // Strip the wrapper: codegen produces "0, (expr);\n" → extract "expr"
+    let code = codegen_ret.code.trim_end();
+    if let Some(rest) = code.strip_prefix("0, (").or_else(|| code.strip_prefix("0,(")) {
+        if let Some(inner) = rest.strip_suffix(");") {
+            return inner.to_string();
+        }
+    }
+
+    // Fallback: return original
+    expr_source.to_string()
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -655,7 +778,7 @@ mod tests {
     fn test_convert_string_literal() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, r#""hello""#);
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::Literal(lit)) = result {
             assert!(matches!(lit.value, LiteralValue::String(_)));
@@ -668,7 +791,7 @@ mod tests {
     fn test_convert_number_literal() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "42");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::Literal(lit)) = result {
             if let LiteralValue::Number(n) = lit.value {
@@ -685,7 +808,7 @@ mod tests {
     fn test_convert_identifier() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "myVar");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::ReadVar(var)) = result {
             assert_eq!(var.name.as_str(), "myVar");
@@ -698,7 +821,7 @@ mod tests {
     fn test_convert_array_expression() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "[1, 2, 3]");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::LiteralArray(arr)) = result {
             assert_eq!(arr.entries.len(), 3);
@@ -711,7 +834,7 @@ mod tests {
     fn test_convert_object_expression() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "{ a: 1, b: 2 }");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::LiteralMap(map)) = result {
             assert_eq!(map.entries.len(), 2);
@@ -724,7 +847,7 @@ mod tests {
     fn test_convert_call_expression() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "foo(1, 2)");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::InvokeFunction(call)) = result {
             assert_eq!(call.args.len(), 2);
@@ -737,7 +860,7 @@ mod tests {
     fn test_convert_member_expression() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "obj.prop");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::ReadProp(prop)) = result {
             assert_eq!(prop.name.as_str(), "prop");
@@ -750,7 +873,7 @@ mod tests {
     fn test_convert_spread_in_array() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "[...arr, 1, 2]");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::LiteralArray(arr)) = result {
             assert_eq!(arr.entries.len(), 3);
@@ -775,7 +898,7 @@ mod tests {
     fn test_convert_multiple_spreads_in_array() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "[...a, ...b, c]");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::LiteralArray(arr)) = result {
             assert_eq!(arr.entries.len(), 3);
@@ -793,7 +916,7 @@ mod tests {
     fn test_convert_optional_chaining_property() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "obj?.prop");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::ReadProp(prop)) = result {
             assert_eq!(prop.name.as_str(), "prop");
@@ -807,7 +930,7 @@ mod tests {
     fn test_convert_optional_chaining_computed() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "obj?.[key]");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::ReadKey(key)) = result {
             assert!(key.optional, "Expected optional to be true for ?.[");
@@ -820,7 +943,7 @@ mod tests {
     fn test_convert_optional_chaining_call() {
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "fn?.()");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some());
         if let Some(OutputExpression::InvokeFunction(call)) = result {
             assert!(call.optional, "Expected optional to be true for ?.()");
@@ -834,7 +957,7 @@ mod tests {
         // Test a longer optional chain like: val?.trim().toLowerCase()
         let allocator = Allocator::default();
         let expr = parse_expression(&allocator, "val?.trim().toLowerCase()");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some(), "Failed to convert optional chain expression");
 
         // The expression structure is:
@@ -855,7 +978,147 @@ mod tests {
         let source_type = SourceType::ts();
         let parser = Parser::new(&allocator, "(val) => val?.trim().toLowerCase()", source_type);
         let expr = parser.parse_expression().expect("Failed to parse expression");
-        let result = convert_oxc_expression(&allocator, &expr);
+        let result = convert_oxc_expression(&allocator, &expr, None);
         assert!(result.is_some(), "Failed to convert arrow function with optional chain");
+    }
+
+    #[test]
+    fn test_block_body_arrow_with_unsupported_stmts_without_source_text() {
+        // Without source_text, a block-body arrow with unsupported statements returns None
+        let allocator = Allocator::default();
+        let source = "() => { const x = 1; return x; }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, None);
+        // Without source_text, conversion fails (returns None) because
+        // the const declaration cannot be represented
+        assert!(result.is_none(), "Should return None without source_text for unsupported stmts");
+    }
+
+    #[test]
+    fn test_block_body_arrow_with_unsupported_stmts_with_source_text() {
+        // With source_text, a block-body arrow with unsupported statements falls back to RawSource
+        let allocator = Allocator::default();
+        let source = "() => { const x = 1; return x; }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some(), "Should succeed with source_text");
+        if let Some(OutputExpression::RawSource(raw)) = result {
+            let raw_str = raw.source.as_str();
+            assert!(
+                raw_str.contains("const x = 1") && raw_str.contains("return x"),
+                "Should preserve the arrow function body. Got: {raw_str}"
+            );
+        } else {
+            panic!("Expected RawSource expression, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_block_body_arrow_with_if_statement() {
+        // The exact case from the issue: useFactory with if/const
+        let allocator = Allocator::default();
+        let source = "() => { const config = inject(AppConfig); if (config.useMock) { return new MockService(); } return new RealService(config); }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some(), "Should succeed with source_text for complex arrow");
+        assert!(
+            matches!(result, Some(OutputExpression::RawSource(_))),
+            "Should be RawSource for arrow with if statement"
+        );
+    }
+
+    #[test]
+    fn test_block_body_arrow_with_only_return_still_converts() {
+        // A block-body arrow with only return and expression statements should still
+        // convert normally (not fall back to RawSource)
+        let allocator = Allocator::default();
+        let source = "() => { return 42; }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some());
+        // Should NOT be RawSource since return statements are supported
+        assert!(
+            matches!(result, Some(OutputExpression::ArrowFunction(_))),
+            "Should be ArrowFunction, not RawSource, for simple block body"
+        );
+    }
+
+    #[test]
+    fn test_function_expression_falls_back_to_raw_source() {
+        // Function expressions should fall back to RawSource
+        let allocator = Allocator::default();
+        let source = "function() { return 42; }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some(), "Should succeed with source_text for function expression");
+        if let Some(OutputExpression::RawSource(raw)) = result {
+            let raw_str = raw.source.as_str();
+            assert!(
+                raw_str.contains("function()") && raw_str.contains("return 42"),
+                "Should preserve function expression. Got: {raw_str}"
+            );
+        } else {
+            panic!("Expected RawSource expression for function expression");
+        }
+    }
+
+    #[test]
+    fn test_function_expression_without_source_text_returns_none() {
+        // Function expressions without source_text return None
+        let allocator = Allocator::default();
+        let source = "function() { return 42; }";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, None);
+        assert!(result.is_none(), "Should return None without source_text");
+    }
+
+    #[test]
+    fn test_expression_body_arrow_unaffected_by_source_text() {
+        // Expression-body arrows should still work normally
+        let allocator = Allocator::default();
+        let source = "() => 42";
+        let expr = parse_expression(&allocator, source);
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some());
+        assert!(
+            matches!(result, Some(OutputExpression::ArrowFunction(_))),
+            "Expression-body arrow should still be ArrowFunction"
+        );
+    }
+
+    #[test]
+    fn test_raw_source_strips_typescript_types() {
+        // RawSource should strip TypeScript type annotations to produce valid JS
+        let allocator = Allocator::default();
+        // Parse as TypeScript (not mjs) to include type annotations
+        let source_type = SourceType::ts();
+        let source =
+            "(dep: SomeType) => { const x: MyType = dep.getValue(); return new Service(x); }";
+        let parser = Parser::new(&allocator, source, source_type);
+        let expr = parser.parse_expression().expect("Failed to parse expression");
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some(), "Should succeed with source_text for typed arrow");
+        if let Some(OutputExpression::RawSource(raw)) = result {
+            let raw_str = raw.source.as_str();
+            // Type annotations should be stripped
+            assert!(
+                !raw_str.contains(": SomeType") && !raw_str.contains(": MyType"),
+                "TypeScript type annotations should be stripped. Got: {raw_str}"
+            );
+            // But the actual code should be preserved
+            assert!(
+                raw_str.contains("dep.getValue()") && raw_str.contains("return new Service(x)"),
+                "JavaScript code should be preserved. Got: {raw_str}"
+            );
+        } else {
+            panic!("Expected RawSource expression, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_strip_expression_types_basic() {
+        let result = strip_expression_types("(x: number) => x + 1");
+        assert!(!result.contains(": number"), "Should strip type annotation. Got: {result}");
+        assert!(result.contains("=> x + 1"), "Should preserve expression. Got: {result}");
     }
 }

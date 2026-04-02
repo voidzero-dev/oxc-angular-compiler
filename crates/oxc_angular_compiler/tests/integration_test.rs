@@ -7879,3 +7879,128 @@ export class MyComponent {
 
     insta::assert_snapshot!("host_directives_with_host_aliases", result.code);
 }
+
+// =============================================================================
+// Issue #203: useFactory with block-body functions silently dropped in providers
+// =============================================================================
+
+#[test]
+fn test_use_factory_block_body_arrow_preserved() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: () => {
+                const config = inject(AppConfig);
+                if (config.useMock) {
+                    return new MockService();
+                }
+                return new RealService(config);
+            }
+        }
+    ]
+})
+export class MyComponent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert_eq!(result.component_count, 1);
+
+    // The key assertion: the block-body arrow function should be preserved intact.
+    // Before the fix, `const config = inject(AppConfig)` and `if (config.useMock) { ... }`
+    // were silently dropped, leaving only `return new RealService(config)`.
+    assert!(
+        result.code.contains("const config = inject(AppConfig)"),
+        "Block-body arrow: const declaration should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("if (config.useMock)"),
+        "Block-body arrow: if statement should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("return new MockService()"),
+        "Block-body arrow: return inside if should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("return new RealService(config)"),
+        "Block-body arrow: final return should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_use_factory_expression_body_arrow_still_works() {
+    // Verify that expression-body arrows (which already worked) are not regressed
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: () => new RealService(inject(AppConfig))
+        }
+    ]
+})
+export class MyComponent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("new RealService(inject(AppConfig))"),
+        "Expression-body arrow should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_providers_with_function_expression_preserved() {
+    // function() expressions should also be preserved
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: function() { return new RealService(); }
+        }
+    ]
+})
+export class MyComponent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("function()"),
+        "function expression should be preserved. Got:\n{}",
+        result.code
+    );
+}
