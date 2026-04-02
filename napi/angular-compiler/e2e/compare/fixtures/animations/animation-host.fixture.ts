@@ -139,4 +139,26 @@ export class AnimationParamsComponent {
     `.trim(),
     expectedFeatures: ['ɵɵsyntheticHostProperty'],
   },
+  {
+    name: 'animation-directive-host-property-trigger',
+    category: 'animations',
+    description: 'Animation trigger binding in directive host property',
+    className: 'SlideDirective',
+    type: 'full-transform',
+    sourceCode: `
+import { Directive } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
+
+@Directive({
+  selector: '[appSlide]',
+  host: {
+    '[@slideIn]': 'animationState',
+  }
+})
+export class SlideDirective {
+  animationState = 'active';
+}
+    `.trim(),
+    expectedFeatures: ['ɵɵsyntheticHostProperty'],
+  },
 ]

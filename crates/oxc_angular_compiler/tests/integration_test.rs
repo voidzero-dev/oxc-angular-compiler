@@ -2341,6 +2341,42 @@ export class SlideComponent {
     );
 }
 
+#[test]
+fn test_directive_host_animation_trigger_binding() {
+    // Directive with animation trigger in host property should emit ɵɵsyntheticHostProperty
+    let source = r#"
+import { Directive } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
+
+@Directive({
+    selector: '[appSlide]',
+    host: {
+        '[@slideIn]': 'animationState',
+    }
+})
+export class SlideDirective {
+    animationState = 'active';
+}
+"#;
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "slide.directive.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Should have ɵɵsyntheticHostProperty in the hostBindings update block
+    assert!(
+        code.contains(r#"syntheticHostProperty("@slideIn""#),
+        "Expected syntheticHostProperty with @slideIn name for directive.\nGot:\n{code}"
+    );
+
+    // Should NOT use regular hostProperty for animation triggers
+    assert!(
+        !code.contains(r#"hostProperty("@slideIn""#),
+        "Should not use hostProperty for animation triggers.\nGot:\n{code}"
+    );
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where

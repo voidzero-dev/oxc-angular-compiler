@@ -743,6 +743,9 @@ fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
         }
     } else if let Some(rest) = name.strip_prefix("attr.") {
         (BindingType::Attribute, rest, None)
+    } else if name.starts_with('@') {
+        // Animation binding like @triggerName
+        (BindingType::Animation, name, None)
     } else {
         (BindingType::Property, name, None)
     }
