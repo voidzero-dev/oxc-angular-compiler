@@ -77,6 +77,7 @@ pub fn extract_directive_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
+    source_text: Option<&'a str>,
 ) -> Option<R3DirectiveMetadata<'a>> {
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
@@ -142,7 +143,9 @@ pub fn extract_directive_metadata<'a>(
                         }
                     }
                     "providers" => {
-                        if let Some(providers) = convert_oxc_expression(allocator, &prop.value) {
+                        if let Some(providers) =
+                            convert_oxc_expression(allocator, &prop.value, source_text)
+                        {
                             builder = builder.providers(providers);
                         }
                     }
@@ -180,7 +183,7 @@ pub fn extract_directive_metadata<'a>(
     // Extract constructor dependencies for factory generation
     // This enables proper DI for directive constructors
     // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts
-    let constructor_deps = extract_constructor_deps(allocator, class, has_superclass);
+    let constructor_deps = extract_constructor_deps(allocator, class, has_superclass, source_text);
     if let Some(deps) = constructor_deps {
         builder = builder.deps(deps);
     }
@@ -252,6 +255,7 @@ fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     has_superclass: bool,
+    source_text: Option<&'a str>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
     let constructor = class.body.body.iter().find_map(|element| {
@@ -270,7 +274,7 @@ fn extract_constructor_deps<'a>(
             let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
 
             for param in &params.items {
-                let dep = extract_param_dependency(allocator, param);
+                let dep = extract_param_dependency(allocator, param, source_text);
                 deps.push(dep);
             }
 
@@ -290,6 +294,7 @@ fn extract_constructor_deps<'a>(
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
+    source_text: Option<&'a str>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
     let mut optional = false;
@@ -306,7 +311,8 @@ fn extract_param_dependency<'a>(
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(arg) = call.arguments.first() {
-                            inject_token = convert_oxc_expression(allocator, arg.to_expression());
+                            inject_token =
+                                convert_oxc_expression(allocator, arg.to_expression(), source_text);
                         }
                     }
                 }
@@ -885,7 +891,7 @@ mod tests {
 
             if let Some(class) = class {
                 if let Some(metadata) =
-                    extract_directive_metadata(&allocator, class, implicit_standalone)
+                    extract_directive_metadata(&allocator, class, implicit_standalone, Some(code))
                 {
                     found_metadata = Some(metadata);
                     break;

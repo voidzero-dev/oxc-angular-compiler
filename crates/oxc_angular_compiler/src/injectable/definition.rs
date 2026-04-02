@@ -368,7 +368,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Verify deps are extracted
@@ -424,7 +424,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Verify no deps (no constructor)
@@ -469,7 +469,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Generate definition

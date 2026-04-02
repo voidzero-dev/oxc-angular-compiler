@@ -769,7 +769,8 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
         if let Some(class) = class {
             // Extract metadata from @Component decorator
             // Use implicit_standalone=true (v19+ default) since it doesn't affect URL extraction
-            if let Some(metadata) = extract_component_metadata(&allocator, class, true, &import_map)
+            if let Some(metadata) =
+                extract_component_metadata(&allocator, class, true, &import_map, Some(&source))
             {
                 // Collect template URL
                 if let Some(template_url) = &metadata.template_url {
@@ -1225,7 +1226,9 @@ pub fn extract_pipe_metadata_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) = extract_pipe_metadata(&allocator, class, implicit_standalone) {
+            if let Some(metadata) =
+                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
+            {
                 return Some(ExtractedPipeMetadata {
                     class_name: metadata.class_name.to_string(),
                     span_start: metadata.class_span.start,
@@ -1300,7 +1303,9 @@ pub fn compile_pipe_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) = extract_pipe_metadata(&allocator, class, implicit_standalone) {
+            if let Some(metadata) =
+                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
+            {
                 // Create type expression for the pipe class
                 use oxc_allocator::Box;
                 use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
@@ -1522,9 +1527,13 @@ pub fn extract_component_metadata_sync(
 
         if let Some(class) = class {
             // Extract metadata from @Component decorator
-            if let Some(metadata) =
-                extract_component_metadata(&allocator, class, implicit_standalone, &import_map)
-            {
+            if let Some(metadata) = extract_component_metadata(
+                &allocator,
+                class,
+                implicit_standalone,
+                &import_map,
+                Some(&source),
+            ) {
                 // Convert encapsulation to string
                 let encapsulation = match metadata.encapsulation {
                     RustViewEncapsulation::Emulated => "Emulated",

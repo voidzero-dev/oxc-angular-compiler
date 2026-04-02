@@ -355,6 +355,7 @@ fn get_source_span(expr: &OutputExpression<'_>) -> Option<Span> {
         OutputExpression::WrappedNode(e) => e.source_span,
         OutputExpression::WrappedIrNode(e) => e.source_span,
         OutputExpression::SpreadElement(e) => e.source_span,
+        OutputExpression::RawSource(e) => e.source_span,
     }
 }
 
@@ -874,6 +875,9 @@ impl JsEmitter {
             OutputExpression::SpreadElement(e) => {
                 ctx.print("...");
                 self.visit_expression(&e.expr, ctx);
+            }
+            OutputExpression::RawSource(e) => {
+                ctx.print(&e.source);
             }
         }
     }

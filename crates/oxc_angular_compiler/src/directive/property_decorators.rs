@@ -183,7 +183,7 @@ fn parse_input_config<'a>(
                             config.required = extract_boolean_value(&prop.value).unwrap_or(false);
                         }
                         "transform" => {
-                            config.transform = convert_oxc_expression(allocator, &prop.value);
+                            config.transform = convert_oxc_expression(allocator, &prop.value, None);
                         }
                         _ => {}
                     }
@@ -779,7 +779,7 @@ fn parse_query_config<'a>(
             let expr = first_arg.to_expression();
             // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
             let unwrapped_expr = try_unwrap_forward_ref(expr).unwrap_or(expr);
-            if let Some(output_expr) = convert_oxc_expression(allocator, unwrapped_expr) {
+            if let Some(output_expr) = convert_oxc_expression(allocator, unwrapped_expr, None) {
                 config.predicate = Some(QueryPredicate::Type(output_expr));
             }
         }
@@ -799,7 +799,7 @@ fn parse_query_config<'a>(
                             config.is_static = extract_boolean_value(&prop.value).unwrap_or(false);
                         }
                         "read" => {
-                            config.read = convert_oxc_expression(allocator, &prop.value);
+                            config.read = convert_oxc_expression(allocator, &prop.value, None);
                         }
                         "descendants" => {
                             // Use the decorator-specific default if not explicitly set
@@ -941,7 +941,7 @@ fn try_parse_signal_query<'a>(
             let expr = predicate_arg.to_expression();
             // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
             let unwrapped_expr = try_unwrap_forward_ref(expr).unwrap_or(expr);
-            let output_expr = convert_oxc_expression(allocator, unwrapped_expr)?;
+            let output_expr = convert_oxc_expression(allocator, unwrapped_expr, None)?;
             QueryPredicate::Type(output_expr)
         }
     };
@@ -960,7 +960,7 @@ fn try_parse_signal_query<'a>(
 
                     match key_name.as_str() {
                         "read" => {
-                            read = convert_oxc_expression(allocator, &prop.value);
+                            read = convert_oxc_expression(allocator, &prop.value, None);
                         }
                         "descendants" => {
                             descendants = extract_boolean_value(&prop.value).unwrap_or(descendants);

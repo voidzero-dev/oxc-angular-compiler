@@ -107,6 +107,7 @@ pub fn extract_pipe_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
+    _source_text: Option<&'a str>,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
@@ -395,7 +396,7 @@ mod tests {
 
             if let Some(class) = class {
                 if let Some(metadata) =
-                    extract_pipe_metadata(&allocator, class, implicit_standalone)
+                    extract_pipe_metadata(&allocator, class, implicit_standalone, Some(code))
                 {
                     found_metadata = Some(metadata);
                     break;

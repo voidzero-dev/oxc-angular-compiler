@@ -38,7 +38,7 @@ pub fn build_decorator_metadata_array<'a>(
                 ))),
                 Expression::StaticMemberExpression(member) => {
                     // Handle namespaced decorators like ng.Component
-                    convert_oxc_expression(allocator, &member.object).map(|receiver| {
+                    convert_oxc_expression(allocator, &member.object, None).map(|receiver| {
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(receiver, allocator),
@@ -77,7 +77,7 @@ pub fn build_decorator_metadata_array<'a>(
             let mut args = AllocVec::new_in(allocator);
             for arg in &call.arguments {
                 let expr = arg.to_expression();
-                if let Some(converted) = convert_oxc_expression(allocator, expr) {
+                if let Some(converted) = convert_oxc_expression(allocator, expr, None) {
                     args.push(converted);
                 }
             }

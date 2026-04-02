@@ -3095,7 +3095,8 @@ fn transform_expressions_in_output_expression<'a, F>(
         | OutputExpression::LocalizedString(_)
         | OutputExpression::WrappedNode(_)
         | OutputExpression::DynamicImport(_)
-        | OutputExpression::RegularExpressionLiteral(_) => {}
+        | OutputExpression::RegularExpressionLiteral(_)
+        | OutputExpression::RawSource(_) => {}
     }
 }
 
