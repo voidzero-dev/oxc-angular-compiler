@@ -2299,6 +2299,48 @@ fn test_animate_enter_and_leave_together() {
     );
 }
 
+#[test]
+fn test_host_animation_trigger_binding() {
+    // Component with animation trigger in host property should emit ɵɵsyntheticHostProperty
+    let source = r#"
+import { Component } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
+
+@Component({
+    selector: 'app-slide',
+    template: '<ng-content></ng-content>',
+    animations: [trigger('slideIn', [transition(':enter', [style({ width: 0 }), animate('200ms')])])],
+    host: {
+        '[@slideIn]': 'animationState',
+    }
+})
+export class SlideComponent {
+    animationState = 'active';
+}
+"#;
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "slide.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Should have ɵɵsyntheticHostProperty in the hostBindings update block
+    assert!(
+        code.contains("syntheticHostProperty"),
+        "Expected ɵɵsyntheticHostProperty for host animation trigger.\nGot:\n{code}"
+    );
+    assert!(
+        code.contains(r#"syntheticHostProperty("@slideIn""#),
+        "Expected syntheticHostProperty with @slideIn name.\nGot:\n{code}"
+    );
+
+    // Should NOT have ɵɵanimateEnter/ɵɵanimateLeave for [@trigger] bindings
+    assert!(
+        !code.contains("animateEnter") && !code.contains("animateLeave"),
+        "Host [@trigger] bindings should not use animateEnter/animateLeave.\nGot:\n{code}"
+    );
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where

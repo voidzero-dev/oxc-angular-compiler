@@ -273,19 +273,23 @@ fn create_placeholder_expression<'a>(
 pub fn convert_animations_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
 
-    // First pass: collect all AnimationBindingOp pointers
+    // First pass: collect all AnimationBindingOp pointers that need conversion.
+    // Skip AnimationBindingKind::Value ops — these are [@trigger] host bindings that
+    // should remain in the update list and be reified as ɵɵsyntheticHostProperty.
+    // Only AnimationBindingKind::String ops (animate.enter/animate.leave) are converted.
     let binding_ptrs: Vec<std::ptr::NonNull<UpdateOp<'_>>> = {
         let mut ptrs = Vec::new();
         for op in job.root.update.iter() {
-            if matches!(op, UpdateOp::AnimationBinding(_)) {
-                ptrs.push(std::ptr::NonNull::from(op));
+            if let UpdateOp::AnimationBinding(binding) = op {
+                if matches!(binding.kind, AnimationBindingKind::String) {
+                    ptrs.push(std::ptr::NonNull::from(op));
+                }
             }
         }
         ptrs
     };
 
-    // Second pass: process each AnimationBindingOp
-    let mut animations_to_create: Vec<AnimationInfo<'_>> = Vec::new();
+    // Second pass: process each AnimationBindingOp (String kind only)
     let mut strings_to_create: Vec<AnimationStringInfo<'_>> = Vec::new();
 
     for ptr in binding_ptrs {
@@ -295,7 +299,6 @@ pub fn convert_animations_for_host(job: &mut HostBindingCompilationJob<'_>) {
             let target = binding.target;
             let source_span = binding.base.source_span;
             let name = binding.name.clone();
-            let kind = binding.kind;
             let animation_kind = get_animation_kind(name.as_str());
 
             // Extract expression by replacing with placeholder
@@ -316,63 +319,17 @@ pub fn convert_animations_for_host(job: &mut HostBindingCompilationJob<'_>) {
             // SAFETY: ptr was obtained from this list
             unsafe { job.root.update.remove(ptr) };
 
-            match kind {
-                AnimationBindingKind::String => {
-                    strings_to_create.push(AnimationStringInfo {
-                        target,
-                        name,
-                        animation_kind,
-                        expression,
-                        source_span,
-                    });
-                }
-                AnimationBindingKind::Value => {
-                    // Create handler_ops with a return statement containing the expression
-                    let mut handler_ops = OxcVec::new_in(allocator);
-
-                    let wrapped_expr = OutputExpression::WrappedIrNode(Box::new_in(
-                        WrappedIrExpr { node: expression, source_span },
-                        allocator,
-                    ));
-
-                    let return_stmt = OutputStatement::Return(Box::new_in(
-                        ReturnStatement { value: wrapped_expr, source_span: None },
-                        allocator,
-                    ));
-
-                    handler_ops.push(UpdateOp::Statement(StatementOp {
-                        base: UpdateOpBase { source_span, ..Default::default() },
-                        statement: return_stmt,
-                    }));
-
-                    animations_to_create.push(AnimationInfo {
-                        target,
-                        name,
-                        animation_kind,
-                        handler_ops,
-                        source_span,
-                    });
-                }
-            }
+            strings_to_create.push(AnimationStringInfo {
+                target,
+                name,
+                animation_kind,
+                expression,
+                source_span,
+            });
         }
     }
 
-    // Third pass: add Animation CreateOps to create list
-    // Host bindings don't have element targets, so we just push to the create list
-    for info in animations_to_create {
-        job.root.create.push(CreateOp::Animation(AnimationOp {
-            base: CreateOpBase { source_span: info.source_span, ..Default::default() },
-            target: info.target,
-            name: info.name,
-            animation_kind: info.animation_kind,
-            handler_ops: info.handler_ops,
-            handler_fn_name: None,
-            i18n_message: None,
-            security_context: SecurityContext::None,
-            sanitizer: None,
-        }));
-    }
-
+    // Third pass: add AnimationString CreateOps to create list
     for info in strings_to_create {
         job.root.create.push(CreateOp::AnimationString(AnimationStringOp {
             base: CreateOpBase { source_span: info.source_span, ..Default::default() },
