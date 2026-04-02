@@ -1974,7 +1974,7 @@ pub fn compile_class_metadata_sync(
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
     let decorator_ref = decorator;
-    let decorators_expr = core_build_decorator_metadata_array(&allocator, &[decorator_ref]);
+    let decorators_expr = core_build_decorator_metadata_array(&allocator, &[decorator_ref], Some(&source));
 
     // Build constructor parameters metadata
     // This standalone API doesn't have full transform pipeline context (constructor deps

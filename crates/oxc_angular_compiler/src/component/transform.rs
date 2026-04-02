@@ -1763,6 +1763,7 @@ pub fn transform_angular_file(
                                         decorators: build_decorator_metadata_array(
                                             allocator,
                                             &[decorator],
+                                            Some(source),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,

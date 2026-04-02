@@ -23,6 +23,7 @@ use crate::output::oxc_converter::convert_oxc_expression;
 pub fn build_decorator_metadata_array<'a>(
     allocator: &'a Allocator,
     decorators: &[&Decorator<'a>],
+    source_text: Option<&'a str>,
 ) -> OutputExpression<'a> {
     let mut decorator_entries = AllocVec::new_in(allocator);
 
@@ -38,7 +39,7 @@ pub fn build_decorator_metadata_array<'a>(
                 ))),
                 Expression::StaticMemberExpression(member) => {
                     // Handle namespaced decorators like ng.Component
-                    convert_oxc_expression(allocator, &member.object, None).map(|receiver| {
+                    convert_oxc_expression(allocator, &member.object, source_text).map(|receiver| {
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(receiver, allocator),
@@ -77,7 +78,7 @@ pub fn build_decorator_metadata_array<'a>(
             let mut args = AllocVec::new_in(allocator);
             for arg in &call.arguments {
                 let expr = arg.to_expression();
-                if let Some(converted) = convert_oxc_expression(allocator, expr, None) {
+                if let Some(converted) = convert_oxc_expression(allocator, expr, source_text) {
                     args.push(converted);
                 }
             }
@@ -163,7 +164,7 @@ pub fn build_ctor_params_metadata<'a>(
         // Extract decorators from the parameter
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
-            let decorators_array = build_decorator_metadata_array(allocator, &param_decorators);
+            let decorators_array = build_decorator_metadata_array(allocator, &param_decorators, None);
             map_entries.push(LiteralMapEntry {
                 key: Ident::from("decorators"),
                 value: decorators_array,
@@ -251,7 +252,7 @@ pub fn build_prop_decorators_metadata<'a>(
         }
 
         // Build decorators array for this property
-        let decorators_array = build_decorator_metadata_array(allocator, &angular_decorators);
+        let decorators_array = build_decorator_metadata_array(allocator, &angular_decorators, None);
 
         prop_entries.push(LiteralMapEntry {
             key: prop_name,
