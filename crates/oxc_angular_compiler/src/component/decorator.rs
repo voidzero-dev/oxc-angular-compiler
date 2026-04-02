@@ -241,7 +241,7 @@ pub fn extract_component_metadata<'a>(
         extract_constructor_deps(allocator, class, import_map, has_superclass);
 
     // Extract inputs from @Input decorators on class members
-    metadata.inputs = extract_input_metadata(allocator, class);
+    metadata.inputs = extract_input_metadata(allocator, class, source_text);
 
     // Extract outputs from @Output decorators on class members
     metadata.outputs = extract_output_metadata(allocator, class);

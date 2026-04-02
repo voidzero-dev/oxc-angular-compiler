@@ -1636,11 +1636,11 @@ pub fn transform_angular_file(
                     let template = allocator.alloc_str(&template_string);
                     // 4.5 Extract view queries from the class (for @ViewChild/@ViewChildren)
                     // These need to be passed to compile_component_full so predicates can be pooled
-                    let view_queries = extract_view_queries(allocator, class);
+                    let view_queries = extract_view_queries(allocator, class, Some(source));
 
                     // 4.6 Extract content queries from the class (for @ContentChild/@ContentChildren)
                     // Signal-based queries (contentChild(), contentChildren()) are also detected here
-                    let content_queries = extract_content_queries(allocator, class);
+                    let content_queries = extract_content_queries(allocator, class, Some(source));
 
                     // Collect content query property names for .d.ts generation
                     // (before content_queries is moved into compile_component_full)

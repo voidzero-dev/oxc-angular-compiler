@@ -167,7 +167,7 @@ pub fn extract_directive_metadata<'a>(
     }
 
     // Extract @Input/@Output/@HostBinding/@HostListener from class members
-    builder = builder.extract_from_class(allocator, class);
+    builder = builder.extract_from_class(allocator, class, source_text);
 
     // Detect if ngOnChanges lifecycle hook is implemented
     // Similar to Angular's: const usesOnChanges = members.some(member => ...)

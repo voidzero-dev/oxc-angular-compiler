@@ -1597,7 +1597,7 @@ pub fn extract_component_metadata_sync(
                 let animations = metadata.animations.as_ref().map(|e| emitter.emit_expression(e));
 
                 // Extract inputs from @Input decorators
-                let rust_inputs = extract_input_metadata(&allocator, class);
+                let rust_inputs = extract_input_metadata(&allocator, class, Some(&source));
                 let inputs: Option<Vec<ExtractedInputMetadata>> = if rust_inputs.is_empty() {
                     None
                 } else {
@@ -1651,7 +1651,7 @@ pub fn extract_component_metadata_sync(
                 }
 
                 // Extract view queries from @ViewChild/@ViewChildren decorators
-                let rust_view_queries = extract_view_queries(&allocator, class);
+                let rust_view_queries = extract_view_queries(&allocator, class, Some(&source));
                 let view_queries: Option<Vec<ExtractedQueryMetadata>> =
                     if rust_view_queries.is_empty() {
                         None
@@ -1672,7 +1672,8 @@ pub fn extract_component_metadata_sync(
                     };
 
                 // Extract content queries from @ContentChild/@ContentChildren decorators
-                let rust_content_queries = extract_content_queries(&allocator, class);
+                let rust_content_queries =
+                    extract_content_queries(&allocator, class, Some(&source));
                 let queries: Option<Vec<ExtractedQueryMetadata>> =
                     if rust_content_queries.is_empty() {
                         None

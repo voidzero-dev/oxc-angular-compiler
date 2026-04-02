@@ -441,8 +441,14 @@ fn convert_arrow_function_expression<'a>(
         // Expression body: () => expr
         let expr_body = arrow.body.statements.first()?;
         if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = expr_body {
-            let converted = convert_oxc_expression(allocator, &expr_stmt.expression, source_text)?;
-            ArrowFunctionBody::Expression(Box::new_in(converted, allocator))
+            match convert_oxc_expression(allocator, &expr_stmt.expression, source_text) {
+                Some(converted) => ArrowFunctionBody::Expression(Box::new_in(converted, allocator)),
+                None => {
+                    // Unsupported expression (e.g., await, yield, class) —
+                    // fall back to raw source for the entire arrow
+                    return make_raw_source(allocator, source_text, arrow.span);
+                }
+            }
         } else {
             return None;
         }
@@ -671,6 +677,10 @@ fn convert_oxc_binary_operator(op: oxc_ast::ast::BinaryOperator) -> Option<Binar
 
 /// Create a `RawSource` expression from source text and span.
 ///
+/// The source text is the original TypeScript source, so this function
+/// strips TypeScript type annotations by parsing, transforming, and
+/// re-generating the expression as JavaScript.
+///
 /// Returns `None` if `source_text` is not available.
 fn make_raw_source<'a>(
     allocator: &'a Allocator,
@@ -679,10 +689,58 @@ fn make_raw_source<'a>(
 ) -> Option<OutputExpression<'a>> {
     let source = source_text?;
     let raw = &source[span.start as usize..span.end as usize];
+    let js = strip_expression_types(raw);
     Some(OutputExpression::RawSource(Box::new_in(
-        RawSourceExpr { source: Ident::from(allocator.alloc_str(raw)), source_span: None },
+        RawSourceExpr { source: Ident::from(allocator.alloc_str(&js)), source_span: None },
         allocator,
     )))
+}
+
+/// Strip TypeScript type annotations from an expression source string.
+///
+/// Wraps the expression in a minimal program (`0,(expr)`), parses as TypeScript,
+/// runs the TypeScript transformer to strip types, and codegens to JavaScript.
+/// Returns the original source if stripping fails.
+fn strip_expression_types(expr_source: &str) -> String {
+    use std::path::Path;
+
+    let allocator = oxc_allocator::Allocator::default();
+    // Use comma operator + parens to create a valid single expression statement.
+    // This handles expressions that would be ambiguous at statement level
+    // (e.g., arrow functions, object literals).
+    let wrapped = format!("0,({expr_source})");
+    let source_type = oxc_span::SourceType::ts();
+    let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
+
+    if parser_ret.panicked {
+        return expr_source.to_string();
+    }
+
+    let mut program = parser_ret.program;
+    let semantic_ret =
+        oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
+
+    let transform_options = oxc_transformer::TransformOptions {
+        typescript: oxc_transformer::TypeScriptOptions::default(),
+        ..Default::default()
+    };
+    let transformer =
+        oxc_transformer::Transformer::new(&allocator, Path::new("_.ts"), &transform_options);
+    transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
+
+    let codegen_ret = oxc_codegen::Codegen::new().with_source_text(&wrapped).build(&program);
+
+    // Strip the wrapper: codegen produces "0, (expr);\n" → extract "expr"
+    let code = codegen_ret.code.trim_end();
+    // The codegen may format as "0, (expr);" or "0, (expr);\n"
+    if let Some(rest) = code.strip_prefix("0, (").or_else(|| code.strip_prefix("0,(")) {
+        if let Some(inner) = rest.strip_suffix(");") {
+            return inner.to_string();
+        }
+    }
+
+    // Fallback: return original
+    expr_source.to_string()
 }
 
 // ============================================================================
@@ -931,10 +989,10 @@ mod tests {
         let result = convert_oxc_expression(&allocator, &expr, Some(source));
         assert!(result.is_some(), "Should succeed with source_text");
         if let Some(OutputExpression::RawSource(raw)) = result {
-            assert_eq!(
-                raw.source.as_str(),
-                "() => { const x = 1; return x; }",
-                "Should preserve the full arrow function source"
+            let raw_str = raw.source.as_str();
+            assert!(
+                raw_str.contains("const x = 1") && raw_str.contains("return x"),
+                "Should preserve the arrow function body. Got: {raw_str}"
             );
         } else {
             panic!("Expected RawSource expression, got {result:?}");
@@ -980,7 +1038,11 @@ mod tests {
         let result = convert_oxc_expression(&allocator, &expr, Some(source));
         assert!(result.is_some(), "Should succeed with source_text for function expression");
         if let Some(OutputExpression::RawSource(raw)) = result {
-            assert_eq!(raw.source.as_str(), "function() { return 42; }");
+            let raw_str = raw.source.as_str();
+            assert!(
+                raw_str.contains("function()") && raw_str.contains("return 42"),
+                "Should preserve function expression. Got: {raw_str}"
+            );
         } else {
             panic!("Expected RawSource expression for function expression");
         }
@@ -1008,5 +1070,41 @@ mod tests {
             matches!(result, Some(OutputExpression::ArrowFunction(_))),
             "Expression-body arrow should still be ArrowFunction"
         );
+    }
+
+    #[test]
+    fn test_raw_source_strips_typescript_types() {
+        // RawSource should strip TypeScript type annotations to produce valid JS
+        let allocator = Allocator::default();
+        // Parse as TypeScript (not mjs) to include type annotations
+        let source_type = SourceType::ts();
+        let source =
+            "(dep: SomeType) => { const x: MyType = dep.getValue(); return new Service(x); }";
+        let parser = Parser::new(&allocator, source, source_type);
+        let expr = parser.parse_expression().expect("Failed to parse expression");
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        assert!(result.is_some(), "Should succeed with source_text for typed arrow");
+        if let Some(OutputExpression::RawSource(raw)) = result {
+            let raw_str = raw.source.as_str();
+            // Type annotations should be stripped
+            assert!(
+                !raw_str.contains(": SomeType") && !raw_str.contains(": MyType"),
+                "TypeScript type annotations should be stripped. Got: {raw_str}"
+            );
+            // But the actual code should be preserved
+            assert!(
+                raw_str.contains("dep.getValue()") && raw_str.contains("return new Service(x)"),
+                "JavaScript code should be preserved. Got: {raw_str}"
+            );
+        } else {
+            panic!("Expected RawSource expression, got {result:?}");
+        }
+    }
+
+    #[test]
+    fn test_strip_expression_types_basic() {
+        let result = strip_expression_types("(x: number) => x + 1");
+        assert!(!result.contains(": number"), "Should strip type annotation. Got: {result}");
+        assert!(result.contains("=> x + 1"), "Should preserve expression. Got: {result}");
     }
 }
