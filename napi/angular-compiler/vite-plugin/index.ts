@@ -8,7 +8,7 @@
  * - Hot Module Replacement (HMR)
  */
 
-import { watch } from 'node:fs'
+import { watch, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { ServerResponse } from 'node:http'
 import { dirname, resolve } from 'node:path'
@@ -193,6 +193,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
   // Track component files with pending HMR updates (set by fs.watch, checked by HMR endpoint)
   const pendingHmrUpdates = new Set<string>()
+
+  // Cache inline template content per .ts file for detecting template-only changes
+  const inlineTemplateCache = new Map<string, string>()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -622,6 +625,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               componentIds.set(actualId, className)
               debugHmr('registered: %s -> %s', actualId, className)
             }
+
+            // Cache inline template content for detecting template-only changes in handleHotUpdate
+            const inlineTemplate = extractInlineTemplate(code)
+            if (inlineTemplate !== null) {
+              inlineTemplateCache.set(actualId, inlineTemplate)
+            }
           }
 
           return {
@@ -667,6 +676,57 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           if (pendingHmrUpdates.has(ctx.file)) {
             debugHmr('skipping full reload — pending HMR update from template/style change')
             return []
+          }
+
+          // Check if only the inline template changed — if so, use HMR instead of full reload.
+          // For external templates this is handled by fs.watch, but inline templates are part
+          // of the .ts file and need explicit diffing.
+          const cachedTemplate = inlineTemplateCache.get(ctx.file)
+          if (cachedTemplate !== undefined) {
+            let newContent: string
+            try {
+              newContent = readFileSync(ctx.file, 'utf-8')
+            } catch {
+              newContent = ''
+            }
+            const newTemplate = extractInlineTemplate(newContent)
+
+            if (newTemplate !== null && newTemplate !== cachedTemplate) {
+              // Template changed — check if ONLY the template changed
+              const TMPL_RE = /template\s*:\s*`([\s\S]*?)`/
+              const newWithout = newContent.replace(TMPL_RE, 'template: ``')
+              const oldReconstructed = newContent
+                .replace(newTemplate, cachedTemplate)
+                .replace(TMPL_RE, 'template: ``')
+
+              if (newWithout === oldReconstructed) {
+                debugHmr('inline template-only change detected, using HMR for %s', ctx.file)
+
+                // Update cache
+                inlineTemplateCache.set(ctx.file, newTemplate)
+
+                // Mark as pending so the HMR endpoint serves the update module
+                pendingHmrUpdates.add(ctx.file)
+
+                // Invalidate Vite's module graph
+                const componentModule = ctx.server.moduleGraph.getModuleById(ctx.file)
+                if (componentModule) {
+                  ctx.server.moduleGraph.invalidateModule(componentModule)
+                }
+
+                // Send HMR event (same as external template changes)
+                const className = componentIds.get(ctx.file)
+                const componentId = `${ctx.file}@${className}`
+                const encodedId = encodeURIComponent(componentId)
+                ctx.server.ws.send({
+                  type: 'custom',
+                  event: 'angular:component-update',
+                  data: { id: encodedId, timestamp: Date.now() },
+                })
+
+                return []
+              }
+            }
           }
 
           debugHmr('triggering full reload for component file change')
