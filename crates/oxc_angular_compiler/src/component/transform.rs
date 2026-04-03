@@ -2336,16 +2336,13 @@ pub fn transform_angular_file(
         decorator_texts: std::vec::Vec<String>,
     }
     let mut uninitialized_field_spans: Vec<Span> = Vec::new();
-    let mut stripped_field_decorates: std::vec::Vec<StrippedFieldDecorate> =
-        std::vec::Vec::new();
+    let mut stripped_field_decorates: std::vec::Vec<StrippedFieldDecorate> = std::vec::Vec::new();
     if options.strip_uninitialized_fields {
         for stmt in &parser_ret.program.body {
             let class = match stmt {
                 Statement::ClassDeclaration(class) => Some(class.as_ref()),
                 Statement::ExportDefaultDeclaration(export) => match &export.declaration {
-                    ExportDefaultDeclarationKind::ClassDeclaration(class) => {
-                        Some(class.as_ref())
-                    }
+                    ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
                 Statement::ExportNamedDeclaration(export) => match &export.declaration {
@@ -2376,8 +2373,7 @@ pub fn transform_angular_file(
                         // Remove any decorator spans that fall within this field span
                         // to avoid overlapping edits (which cause byte boundary panics).
                         decorator_spans_to_remove.retain(|dec_span| {
-                            !(dec_span.start >= field_span.start
-                                && dec_span.end <= field_span.end)
+                            !(dec_span.start >= field_span.start && dec_span.end <= field_span.end)
                         });
                         uninitialized_field_spans.push(field_span);
 
@@ -2388,15 +2384,12 @@ pub fn transform_angular_file(
                                 PropertyKey::StaticIdentifier(id) => id.name.to_string(),
                                 _ => continue,
                             };
-                            let mut non_angular_texts: std::vec::Vec<String> =
-                                std::vec::Vec::new();
+                            let mut non_angular_texts: std::vec::Vec<String> = std::vec::Vec::new();
                             for decorator in &prop.decorators {
                                 // Extract decorator name to check if it's Angular
                                 let dec_name = match &decorator.expression {
                                     Expression::CallExpression(call) => match &call.callee {
-                                        Expression::Identifier(id) => {
-                                            Some(id.name.as_str())
-                                        }
+                                        Expression::Identifier(id) => Some(id.name.as_str()),
                                         Expression::StaticMemberExpression(m) => {
                                             Some(m.property.name.as_str())
                                         }
@@ -2410,8 +2403,8 @@ pub fn transform_angular_file(
                                     if !ANGULAR_DECORATOR_NAMES.contains(&name) {
                                         let expr_span = decorator.expression.span();
                                         non_angular_texts.push(
-                                            source[expr_span.start as usize
-                                                ..expr_span.end as usize]
+                                            source
+                                                [expr_span.start as usize..expr_span.end as usize]
                                                 .to_string(),
                                         );
                                     }

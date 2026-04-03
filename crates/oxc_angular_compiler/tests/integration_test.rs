@@ -9124,10 +9124,8 @@ export class TestComponent {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -9163,10 +9161,8 @@ export class TestComponent {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -9194,12 +9190,9 @@ class MyClass {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
-    let result =
-        transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     assert!(
         result.code.contains("static label"),
@@ -9228,12 +9221,9 @@ class MyClass {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
-    let result =
-        transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     assert!(
         !result.code.contains("declare") && !result.code.contains("name"),
@@ -9260,18 +9250,27 @@ class MyClass {
     str = 'hello';
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
-    let result =
-        transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     assert!(result.code.contains("items = []"), "items should be preserved. Got:\n{}", result.code);
-    assert!(result.code.contains("callback = () => {}"), "callback should be preserved. Got:\n{}", result.code);
-    assert!(result.code.contains("flag = false"), "flag should be preserved. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("callback = () => {}"),
+        "callback should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("flag = false"),
+        "flag should be preserved. Got:\n{}",
+        result.code
+    );
     assert!(result.code.contains("ref = null"), "ref should be preserved. Got:\n{}", result.code);
-    assert!(result.code.contains("str = 'hello'"), "str should be preserved. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("str = 'hello'"),
+        "str should be preserved. Got:\n{}",
+        result.code
+    );
 }
 
 #[test]
@@ -9284,12 +9283,9 @@ class MyClass {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: false,
-        ..Default::default()
-    };
-    let result =
-        transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: false, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     assert!(
         result.code.contains("name"),
@@ -9318,10 +9314,8 @@ export class TestComponent {
     count = 0;
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
@@ -9413,10 +9407,8 @@ export class TestComponent {
     }
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -9470,10 +9462,8 @@ export class TestComponent {
     }
 }
 "#;
-    let options = ComponentTransformOptions {
-        strip_uninitialized_fields: true,
-        ..Default::default()
-    };
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
