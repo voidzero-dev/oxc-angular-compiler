@@ -46,8 +46,6 @@ export class ParameterPropertyComponent {
 }
     `.trim(),
     expectedFeatures: ['ɵɵdefineComponent'],
-    // Skip because class field declarations are a known cosmetic difference
-    // that doesn't affect runtime behavior
     skip: true,
     skipReason:
       'Known cosmetic difference: TypeScript emits explicit field declarations for parameter properties with useDefineForClassFields:true, OXC does not. Both are functionally equivalent.',
@@ -89,7 +87,6 @@ export class ClassFieldInitializerComponent {
 }
     `.trim(),
     expectedFeatures: ['ɵɵdefineComponent'],
-    // Skip because class field declarations are a known cosmetic difference
     skip: true,
     skipReason:
       'Known cosmetic difference: TypeScript emits explicit field declarations for parameter properties with useDefineForClassFields:true, OXC does not. Both are functionally equivalent.',
