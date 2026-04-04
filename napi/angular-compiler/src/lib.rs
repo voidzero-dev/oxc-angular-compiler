@@ -196,6 +196,12 @@ pub struct TransformOptions {
     /// final CSS strings that are embedded in generated component definitions.
     pub minify_component_styles: Option<bool>,
 
+    /// Strip uninitialized class fields (matching `useDefineForClassFields: false` behavior).
+    ///
+    /// When true (default), class fields without initializers are removed,
+    /// matching TypeScript's `useDefineForClassFields: false` behavior.
+    pub strip_uninitialized_fields: Option<bool>,
+
     /// Resolved import paths for host directives and other imports.
     ///
     /// Maps local identifier name (e.g., "AriaDisableDirective") to the resolved
@@ -238,6 +244,7 @@ impl From<TransformOptions> for RustTransformOptions {
             // Class metadata for TestBed support
             emit_class_metadata: options.emit_class_metadata.unwrap_or(false),
             minify_component_styles: options.minify_component_styles.unwrap_or(false),
+            strip_uninitialized_fields: options.strip_uninitialized_fields.unwrap_or(true),
         }
     }
 }

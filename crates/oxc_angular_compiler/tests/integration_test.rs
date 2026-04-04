@@ -9183,3 +9183,421 @@ export class MyComponent {}
         result.code
     );
 }
+
+// =============================================================================
+// Strip uninitialized class fields (useDefineForClassFields: false)
+// =============================================================================
+
+#[test]
+fn test_strip_uninitialized_class_fields() {
+    // When useDefineForClassFields is false (Angular default), uninitialized fields
+    // are type-only declarations and should produce no JavaScript output.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-test', template: '<div></div>' })
+export class TestComponent {
+    name: string;
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Uninitialized field should be stripped
+    assert!(
+        !result.code.contains("name;") && !result.code.contains("name:"),
+        "Uninitialized field 'name' should be stripped. Got:\n{}",
+        result.code
+    );
+    // Initialized field should be preserved
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field 'count' should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_strip_uninitialized_fields_non_angular_class() {
+    // Non-Angular classes should also have uninitialized fields stripped.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+class PolicyStore {
+    allPolicies$: Observable<Policy[]>;
+    initialized = false;
+}
+
+@Component({ selector: 'app-test', template: '<div></div>' })
+export class TestComponent {
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        !result.code.contains("allPolicies$"),
+        "Uninitialized field 'allPolicies$' should be stripped. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("initialized = false"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_static_fields_not_stripped() {
+    // Static uninitialized fields should NOT be stripped.
+    let allocator = Allocator::default();
+    let source = r#"
+class MyClass {
+    static label: string;
+    name: string;
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+
+    assert!(
+        result.code.contains("static label"),
+        "Static uninitialized field should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("\n    name"),
+        "Instance uninitialized field should be stripped. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_declare_fields_stripped() {
+    // Fields with the `declare` keyword should always be stripped.
+    let allocator = Allocator::default();
+    let source = r#"
+class MyClass {
+    declare name: string;
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+
+    assert!(
+        !result.code.contains("declare") && !result.code.contains("name"),
+        "Declare field should be stripped. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_initialized_fields_preserved() {
+    // All forms of initialized fields must be preserved.
+    let allocator = Allocator::default();
+    let source = r#"
+class MyClass {
+    items = [];
+    callback = () => {};
+    flag = false;
+    ref = null;
+    str = 'hello';
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+
+    assert!(result.code.contains("items = []"), "items should be preserved. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("callback = () => {}"),
+        "callback should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("flag = false"),
+        "flag should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("ref = null"), "ref should be preserved. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("str = 'hello'"),
+        "str should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_strip_uninitialized_fields_disabled() {
+    // When the option is false, uninitialized fields should be preserved.
+    let allocator = Allocator::default();
+    let source = r#"
+class MyClass {
+    name: string;
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: false, ..Default::default() };
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+
+    assert!(
+        result.code.contains("name"),
+        "With option disabled, uninitialized field should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_strip_decorated_uninitialized_field() {
+    // Fields with non-Angular decorators and no initializer should be fully stripped.
+    // This is the @Select/@Dispatch scenario from the bug report.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-test', template: '<div></div>' })
+export class TestComponent {
+    @Select(SecurityOverviewState.filters) filters$: Observable<any>;
+    @Dispatch() clearChartsData = () => new ClearChartsData();
+    count = 0;
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+
+    // The uninitialized @Select field should be stripped from the class body
+    assert!(
+        !result.code.contains("    filters$"),
+        "Uninitialized @Select field declaration should be stripped from class body. Got:\n{}",
+        result.code
+    );
+    // But a __decorate call should be emitted for the @Select decorator
+    assert!(
+        result.code.contains("__decorate([Select(SecurityOverviewState.filters)]"),
+        "__decorate call should be emitted for @Select decorator. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("TestComponent.prototype, \"filters$\", void 0"),
+        "__decorate should target prototype. Got:\n{}",
+        result.code
+    );
+    // Initialized @Dispatch field should be preserved
+    assert!(
+        result.code.contains("clearChartsData"),
+        "Initialized @Dispatch field should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_strip_fields_jit_mode() {
+    // JIT mode should also strip uninitialized fields.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'app-test', template: '<div></div>' })
+export class TestComponent {
+    name: string;
+    count = 0;
+}
+"#;
+    let options = ComponentTransformOptions {
+        jit: true,
+        strip_uninitialized_fields: true,
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Uninitialized field should be stripped
+    assert!(
+        !result.code.contains("name;") && !result.code.contains("name:"),
+        "Uninitialized field 'name' should be stripped in JIT mode. Got:\n{}",
+        result.code
+    );
+    // Initialized field should be preserved
+    assert!(
+        result.code.contains("count = 0"),
+        "Initialized field 'count' should be preserved in JIT mode. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_private_fields_not_stripped() {
+    // JavaScript private fields (#foo) are real runtime declarations, not TypeScript
+    // type annotations. Even without an initializer, #foo declares a private slot
+    // on the class and must NOT be stripped. Stripping them causes rolldown to panic
+    // because this.#foo references remain but the declaration is gone.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'test', template: '' })
+export class TestComponent {
+    #privateUninitialized: string;
+    #privateInitialized = 'hello';
+    publicUninitialized: string;
+    publicInitialized = 'world';
+
+    method() {
+        console.log(this.#privateUninitialized);
+    }
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Private fields must NOT be stripped (they are JS runtime syntax).
+    // Check for the field DECLARATION (not just any reference like this.#foo in methods).
+    // A private field declaration looks like "    #privateUninitialized;" on its own line.
+    assert!(
+        result.code.contains("    #privateUninitialized"),
+        "Uninitialized private field declaration must be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("#privateInitialized = 'hello'"),
+        "Initialized private field must be preserved. Got:\n{}",
+        result.code
+    );
+    // Public uninitialized field SHOULD be stripped (TS type annotation)
+    assert!(
+        !result.code.contains("publicUninitialized"),
+        "Public uninitialized field should be stripped. Got:\n{}",
+        result.code
+    );
+    // Public initialized field must be preserved
+    assert!(
+        result.code.contains("publicInitialized = 'world'"),
+        "Public initialized field must be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_strip_decorated_field_emits_decorate_call() {
+    // When an uninitialized field has a non-Angular decorator (@Select, @Dispatch, etc.),
+    // the field declaration must be stripped but a __decorate() call must be emitted
+    // on the prototype so the decorator can set up its getter/value.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 'test', template: '' })
+export class TestComponent {
+    uninitialized: string;
+    @Select('someSelector') selectedValue$: Observable<any>;
+    @Dispatch() doAction = () => ({ type: 'ACTION' });
+    initialized = 'hello';
+    #privateField: string;
+
+    method() {
+        console.log(this.selectedValue$);
+    }
+}
+"#;
+    let options =
+        ComponentTransformOptions { strip_uninitialized_fields: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The @Select field should be stripped from class body
+    // (check it's not declared as a field — but references in methods are fine)
+    assert!(
+        !result.code.contains("    selectedValue$"),
+        "Uninitialized @Select field should be stripped from class body. Got:\n{}",
+        result.code
+    );
+
+    // A __decorate call should be emitted for the @Select decorator
+    assert!(
+        result.code.contains("__decorate([Select('someSelector')]"),
+        "__decorate call should be emitted for @Select decorator. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("TestComponent.prototype, \"selectedValue$\", void 0"),
+        "__decorate should target prototype with void 0 descriptor. Got:\n{}",
+        result.code
+    );
+
+    // tslib import should be present
+    assert!(
+        result.code.contains("import { __decorate } from \"tslib\""),
+        "Should import __decorate from tslib. Got:\n{}",
+        result.code
+    );
+
+    // Initialized @Dispatch field should be preserved in class body
+    assert!(
+        result.code.contains("doAction"),
+        "Initialized @Dispatch field should be preserved. Got:\n{}",
+        result.code
+    );
+
+    // Plain uninitialized field should be stripped entirely (no __decorate)
+    assert!(
+        !result.code.contains("uninitialized"),
+        "Plain uninitialized field should be stripped. Got:\n{}",
+        result.code
+    );
+
+    // Private field should be preserved
+    assert!(
+        result.code.contains("    #privateField"),
+        "Private field should be preserved. Got:\n{}",
+        result.code
+    );
+
+    // Initialized plain field should be preserved
+    assert!(
+        result.code.contains("initialized = 'hello'"),
+        "Initialized field should be preserved. Got:\n{}",
+        result.code
+    );
+}
