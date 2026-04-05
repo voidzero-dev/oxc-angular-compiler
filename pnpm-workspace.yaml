@@ -7,8 +7,8 @@ packages:
 
 catalog:
   '@napi-rs/cli': 3.6.0
-  '@oxc-node/cli': 0.0.35
-  '@oxc-node/core': 0.0.35
+  '@oxc-node/cli': 0.1.0
+  '@oxc-node/core': 0.1.0
   '@tailwindcss/vite': 4.2.2
   '@types/node': 24.1.0
   tsdown: 0.21.7
