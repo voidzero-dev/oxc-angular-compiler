@@ -37,8 +37,8 @@ catalogs:
       specifier: 6.0.2
       version: 6.0.2
     vite:
-      specifier: 8.0.3
-      version: 8.0.3
+      specifier: 8.0.5
+      version: 8.0.5
     vitest:
       specifier: 4.1.2
       version: 4.1.2
@@ -92,10 +92,10 @@ importers:
         version: 6.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+        version: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
       vitest:
         specifier: 'catalog:'
-        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
 
   napi/angular-compiler/benchmarks/bitwarden:
     dependencies:
@@ -183,16 +183,16 @@ importers:
         version: 6.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+        version: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
       vite-plugin-top-level-await:
         specifier: ^1.6.0
-        version: 1.6.0(rollup@4.60.1)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 1.6.0(rollup@4.60.1)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
       vite-plugin-wasm:
         specifier: ^3.5.0
-        version: 3.6.0(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 3.6.0(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
       vite-tsconfig-paths:
         specifier: ^6.0.3
-        version: 6.1.1(typescript@6.0.2)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 6.1.1(typescript@6.0.2)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
 
   napi/angular-compiler/benchmarks/typedb-web:
     dependencies:
@@ -298,10 +298,10 @@ importers:
         version: 6.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+        version: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
       vite-tsconfig-paths:
         specifier: ^6.0.3
-        version: 6.1.1(typescript@6.0.2)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 6.1.1(typescript@6.0.2)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
 
   napi/angular-compiler/e2e/app:
     dependencies:
@@ -335,7 +335,7 @@ importers:
         version: 6.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+        version: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
 
   napi/angular-compiler/e2e/compare:
     dependencies:
@@ -405,7 +405,7 @@ importers:
         version: 6.0.2
       vitest:
         specifier: 'catalog:'
-        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+        version: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
 
   napi/playground:
     dependencies:
@@ -436,7 +436,7 @@ importers:
     devDependencies:
       '@angular/build':
         specifier: ^21.2.0
-        version: 21.2.6(@angular/compiler-cli@21.2.7(@angular/compiler@21.2.7)(typescript@6.0.2))(@angular/compiler@21.2.7)(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(@angular/platform-browser@21.2.7(@angular/animations@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@angular/common@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(rxjs@7.8.2))(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(chokidar@5.0.0)(jiti@2.6.1)(lightningcss@1.32.0)(postcss@8.5.8)(tailwindcss@4.2.2)(tslib@2.8.1)(tsx@4.21.0)(typescript@6.0.2)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)))
+        version: 21.2.6(@angular/compiler-cli@21.2.7(@angular/compiler@21.2.7)(typescript@6.0.2))(@angular/compiler@21.2.7)(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(@angular/platform-browser@21.2.7(@angular/animations@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@angular/common@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(rxjs@7.8.2))(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(chokidar@5.0.0)(jiti@2.6.1)(lightningcss@1.32.0)(postcss@8.5.8)(tailwindcss@4.2.2)(tslib@2.8.1)(tsx@4.21.0)(typescript@6.0.2)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)))
       '@angular/compiler-cli':
         specifier: ^21.2.0
         version: 21.2.7(@angular/compiler@21.2.7)(typescript@6.0.2)
@@ -445,7 +445,7 @@ importers:
         version: link:../angular-compiler
       '@tailwindcss/vite':
         specifier: 'catalog:'
-        version: 4.2.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
+        version: 4.2.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
       '@types/node':
         specifier: 'catalog:'
         version: 24.1.0
@@ -457,7 +457,7 @@ importers:
         version: 6.0.2
       vite:
         specifier: 'catalog:'
-        version: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
+        version: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
 
 packages:
 
@@ -4562,14 +4562,14 @@ packages:
       yaml:
         optional: true
 
-  vite@8.0.3:
-    resolution: {integrity: sha512-B9ifbFudT1TFhfltfaIPgjo9Z3mDynBTJSUYxTjOQruf/zHH+ezCQKcoqO+h7a9Pw9Nm/OtlXAiGT1axBgwqrQ==}
+  vite@8.0.5:
+    resolution: {integrity: sha512-nmu43Qvq9UopTRfMx2jOYW5l16pb3iDC1JH6yMuPkpVbzK0k+L7dfsEDH4jRgYFmsg0sTAqkojoZgzLMlwHsCQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
       '@types/node': ^20.19.0 || >=22.12.0
       '@vitejs/devtools': ^0.1.0
-      esbuild: ^0.27.0
+      esbuild: ^0.27.0 || ^0.28.0
       jiti: '>=1.21.0'
       less: ^4.0.0
       sass: ^1.70.0
@@ -4719,7 +4719,7 @@ snapshots:
       '@angular/core': 21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)
       tslib: 2.8.1
 
-  '@angular/build@21.2.6(@angular/compiler-cli@21.2.7(@angular/compiler@21.2.7)(typescript@6.0.2))(@angular/compiler@21.2.7)(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(@angular/platform-browser@21.2.7(@angular/animations@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@angular/common@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(rxjs@7.8.2))(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(chokidar@5.0.0)(jiti@2.6.1)(lightningcss@1.32.0)(postcss@8.5.8)(tailwindcss@4.2.2)(tslib@2.8.1)(tsx@4.21.0)(typescript@6.0.2)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)))':
+  '@angular/build@21.2.6(@angular/compiler-cli@21.2.7(@angular/compiler@21.2.7)(typescript@6.0.2))(@angular/compiler@21.2.7)(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(@angular/platform-browser@21.2.7(@angular/animations@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@angular/common@21.2.7(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1))(rxjs@7.8.2))(@angular/core@21.2.7(@angular/compiler@21.2.7)(rxjs@7.8.2)(zone.js@0.16.1)))(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(chokidar@5.0.0)(jiti@2.6.1)(lightningcss@1.32.0)(postcss@8.5.8)(tailwindcss@4.2.2)(tslib@2.8.1)(tsx@4.21.0)(typescript@6.0.2)(vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)))':
     dependencies:
       '@ampproject/remapping': 2.3.0
       '@angular-devkit/architect': 0.2102.6(chokidar@5.0.0)
@@ -4758,7 +4758,7 @@ snapshots:
       lmdb: 3.5.1
       postcss: 8.5.8
       tailwindcss: 4.2.2
-      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
+      vitest: 4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
     transitivePeerDependencies:
       - '@emnapi/core'
       - '@emnapi/runtime'
@@ -6804,12 +6804,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.2.2
       '@tailwindcss/oxide-win32-x64-msvc': 4.2.2
 
-  '@tailwindcss/vite@4.2.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))':
+  '@tailwindcss/vite@4.2.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))':
     dependencies:
       '@tailwindcss/node': 4.2.2
       '@tailwindcss/oxide': 4.2.2
       tailwindcss: 4.2.2
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
 
   '@tybys/wasm-util@0.10.1':
     dependencies:
@@ -6871,22 +6871,22 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))':
+  '@vitest/mocker@4.1.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))':
     dependencies:
       '@vitest/spy': 4.1.2
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
     optional: true
 
-  '@vitest/mocker@4.1.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))':
+  '@vitest/mocker@4.1.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))':
     dependencies:
       '@vitest/spy': 4.1.2
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
 
   '@vitest/pretty-format@4.1.2':
     dependencies:
@@ -8151,27 +8151,27 @@ snapshots:
 
   uuid@10.0.0: {}
 
-  vite-plugin-top-level-await@1.6.0(rollup@4.60.1)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
+  vite-plugin-top-level-await@1.6.0(rollup@4.60.1)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
     dependencies:
       '@rollup/plugin-virtual': 3.0.2(rollup@4.60.1)
       '@swc/core': 1.15.18
       '@swc/wasm': 1.15.18
       uuid: 10.0.0
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
     transitivePeerDependencies:
       - '@swc/helpers'
       - rollup
 
-  vite-plugin-wasm@3.6.0(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
+  vite-plugin-wasm@3.6.0(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
     dependencies:
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
 
-  vite-tsconfig-paths@6.1.1(typescript@6.0.2)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
+  vite-tsconfig-paths@6.1.1(typescript@6.0.2)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
     dependencies:
       debug: 4.4.3
       globrex: 0.1.2
       tsconfck: 3.1.6(typescript@6.0.2)
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
     transitivePeerDependencies:
       - supports-color
       - typescript
@@ -8192,7 +8192,7 @@ snapshots:
       sass: 1.97.3
       tsx: 4.21.0
 
-  vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0):
+  vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@22.19.15)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
@@ -8210,7 +8210,7 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0):
+  vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
@@ -8228,7 +8228,7 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0):
+  vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
@@ -8246,10 +8246,10 @@ snapshots:
       - '@emnapi/core'
       - '@emnapi/runtime'
 
-  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)):
+  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)):
     dependencies:
       '@vitest/expect': 4.1.2
-      '@vitest/mocker': 4.1.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
+      '@vitest/mocker': 4.1.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0))
       '@vitest/pretty-format': 4.1.2
       '@vitest/runner': 4.1.2
       '@vitest/snapshot': 4.1.2
@@ -8266,7 +8266,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.97.3)(tsx@4.21.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
@@ -8275,10 +8275,10 @@ snapshots:
       - msw
     optional: true
 
-  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
+  vitest@4.1.2(@opentelemetry/api@1.9.0)(@types/node@24.1.0)(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)):
     dependencies:
       '@vitest/expect': 4.1.2
-      '@vitest/mocker': 4.1.2(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
+      '@vitest/mocker': 4.1.2(vite@8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0))
       '@vitest/pretty-format': 4.1.2
       '@vitest/runner': 4.1.2
       '@vitest/snapshot': 4.1.2
@@ -8295,7 +8295,7 @@ snapshots:
       tinyexec: 1.0.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.1.0
-      vite: 8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
+      vite: 8.0.5(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@24.1.0)(esbuild@0.27.3)(jiti@2.6.1)(sass@1.99.0)(tsx@4.21.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
