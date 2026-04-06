@@ -120,7 +120,7 @@ miette = { package = "oxc-miette", version = "2.7.0", features = ["fancy-no-sysc
 mimalloc-safe = "0.1.56"
 pico-args = "0.5.0"
 project-root = "0.2.2"
-similar = "2.7.0"
+similar = "3.0.0"
 
 [workspace.metadata.cargo-shear]
 ignored = []
