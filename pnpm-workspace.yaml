@@ -11,7 +11,7 @@ catalog:
   '@oxc-node/core': 0.1.0
   '@tailwindcss/vite': 4.2.2
   '@types/node': 24.1.0
-  tsdown: 0.21.7
+  tsdown: 0.21.8
   typescript: 6.0.2
   vitest: 4.1.4
   oxfmt: 0.44.0
