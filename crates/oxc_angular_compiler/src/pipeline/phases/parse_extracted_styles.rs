@@ -6,7 +6,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/parse_extracted_styles.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashSet;
 
 use crate::ast::expression::{

@@ -21,7 +21,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/binding_specialization.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::{AbsoluteSourceSpan, AngularExpression, EmptyExpr, ParseSpan};

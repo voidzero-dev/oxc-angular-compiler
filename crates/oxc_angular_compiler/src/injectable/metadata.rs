@@ -3,7 +3,7 @@
 //! Ported from Angular's `injectable_compiler_2.ts`.
 
 use oxc_allocator::Vec;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::OutputExpression;

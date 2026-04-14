@@ -14,7 +14,8 @@ use oxc_ast::ast::{
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
-use oxc_span::{GetSpan, Ident, SourceType, Span};
+use oxc_span::{GetSpan, SourceType, Span};
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};

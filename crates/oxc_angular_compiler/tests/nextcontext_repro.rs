@@ -9,7 +9,7 @@ use oxc_angular_compiler::{
     },
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
 };
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let allocator = Allocator::default();

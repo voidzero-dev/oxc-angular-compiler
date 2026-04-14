@@ -1,7 +1,7 @@
 //! IR expression to Output AST conversion.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::{IrExpression, TwoWayBindingSetExpr};

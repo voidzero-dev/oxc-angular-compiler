@@ -33,7 +33,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::{
     FactoryTarget, R3DependencyMetadata, R3FactoryDelegateType, R3FactoryDeps, R3FactoryMetadata,

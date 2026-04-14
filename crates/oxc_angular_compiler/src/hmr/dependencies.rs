@@ -9,7 +9,7 @@
 use std::collections::HashSet;
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::{
     ExternalExpr, OutputExpression, OutputStatement, ReadVarExpr, RecursiveOutputAstVisitor,

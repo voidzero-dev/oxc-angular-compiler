@@ -1269,7 +1269,8 @@ pub fn compile_pipe_sync(
     use oxc_angular_compiler::{R3PipeMetadataBuilder, compile_pipe, extract_pipe_metadata};
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
-    use oxc_span::{Ident, SourceType};
+    use oxc_span::SourceType;
+    use oxc_str::Ident;
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(&file_path).unwrap_or_default();
@@ -1725,7 +1726,7 @@ pub fn extract_component_metadata_sync(
                             metadata
                                 .export_as
                                 .iter()
-                                .map(oxc_span::Ident::as_str)
+                                .map(oxc_str::Ident::as_str)
                                 .collect::<Vec<_>>()
                                 .join(","),
                         )
@@ -1814,7 +1815,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
     use oxc_angular_compiler::output::emitter::JsEmitter;
     use oxc_angular_compiler::{R3InjectorMetadataBuilder, compile_injector};
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     let allocator = Allocator::default();
 
@@ -1915,7 +1916,8 @@ pub fn compile_class_metadata_sync(
     use oxc_angular_compiler::output::emitter::JsEmitter;
     use oxc_ast::ast::{Class, Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
-    use oxc_span::{Ident, SourceType};
+    use oxc_span::SourceType;
+    use oxc_str::Ident;
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(&file_path).unwrap_or_default();
@@ -2157,7 +2159,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
     };
     use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
     use oxc_angular_compiler::output::emitter::JsEmitter;
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     let allocator = Allocator::default();
 

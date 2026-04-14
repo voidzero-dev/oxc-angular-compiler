@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_pipe_compiler.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::R3PipeMetadata;
 use crate::output::ast::{

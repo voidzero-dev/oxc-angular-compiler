@@ -27,7 +27,7 @@
 //! `template/pipeline/src/phases/i18n_const_collection.ts`.
 
 use oxc_allocator::{Box as AllocBox, Vec as AllocVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::i18n::serializer::format_i18n_placeholder_name;
 use crate::output::ast::{

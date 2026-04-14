@@ -4,7 +4,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_i18n_expression_placeholders.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nExpressionFor, I18nParamResolutionTime, I18nParamValueFlags};

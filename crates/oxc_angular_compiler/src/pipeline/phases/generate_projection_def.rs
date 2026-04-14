@@ -9,7 +9,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/generate_projection_def.ts`.
 
 use oxc_allocator::{Box as OxcBox, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 use std::ptr::NonNull;
 
 use crate::ir::ops::{CreateOp, CreateOpBase, ProjectionDefOp, XrefId};

@@ -17,6 +17,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/generate_local_let_references.ts`.
 
 use oxc_allocator::Box;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{SemanticVariableKind, VariableFlags};
@@ -42,7 +43,7 @@ pub fn generate_local_let_references(job: &mut ComponentCompilationJob<'_>) {
                 None => continue,
             };
 
-            let mut names: FxHashMap<XrefId, oxc_span::Ident<'_>> = FxHashMap::default();
+            let mut names: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
             for op in view.create.iter() {
                 if let CreateOp::DeclareLet(let_decl) = op {
                     names.insert(let_decl.xref, let_decl.name.clone());
@@ -85,7 +86,7 @@ pub fn generate_local_let_references(job: &mut ComponentCompilationJob<'_>) {
                     let declared_name = let_names
                         .get(&store_let.target)
                         .cloned()
-                        .unwrap_or_else(|| oxc_span::Ident::from(""));
+                        .unwrap_or_else(|| Ident::from(""));
 
                     // Create a new Variable op with StoreLetExpr as the initializer
                     let store_let_expr = IrExpression::StoreLet(Box::new_in(

@@ -7,7 +7,8 @@
 //! and `template/pipeline/src/conversion.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, BinaryOperator as AstBinaryOperator, LiteralMapKey,

@@ -11,7 +11,7 @@
 
 use oxc_allocator::Box;
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::AngularExpression;

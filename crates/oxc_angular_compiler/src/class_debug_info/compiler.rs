@@ -6,7 +6,7 @@
 //! - `setClassDebugInfo(type, { className, filePath?, lineNumber?, forbidOrphanRendering? })`
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::R3ClassDebugInfo;
 use crate::output::ast::{

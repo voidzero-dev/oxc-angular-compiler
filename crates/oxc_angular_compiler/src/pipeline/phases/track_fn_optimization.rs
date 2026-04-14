@@ -9,7 +9,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/track_fn_optimization.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::expression::{
     IrExpression, TrackContextExpr, VisitorContextFlag, transform_expressions_in_expression,

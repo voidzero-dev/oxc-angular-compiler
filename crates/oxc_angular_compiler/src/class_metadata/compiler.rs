@@ -7,7 +7,7 @@
 //! - `setClassMetadataAsync(type, resolver, callback)` for deferred dependencies
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::{R3ClassMetadata, R3DeferPerComponentDependency};
 use crate::output::ast::{

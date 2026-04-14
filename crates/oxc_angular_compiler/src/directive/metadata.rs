@@ -4,7 +4,7 @@
 
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::Class;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::OutputExpression;

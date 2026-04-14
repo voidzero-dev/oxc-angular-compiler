@@ -34,7 +34,7 @@
 use std::cell::RefCell;
 
 use oxc_allocator::Allocator;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ir::expression::{

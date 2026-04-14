@@ -18,7 +18,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/remove_illegal_let_references.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, LiteralPrimitive, LiteralValue, ParseSpan,

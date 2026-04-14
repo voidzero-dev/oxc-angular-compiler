@@ -6,7 +6,7 @@
 //! Ported from Angular's `packages/compiler/src/render3/r3_hmr_compiler.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::dependencies::HmrMetadata;
 use crate::output::ast::{

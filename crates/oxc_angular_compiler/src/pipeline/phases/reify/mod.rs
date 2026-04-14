@@ -15,7 +15,7 @@ mod utils;
 
 use oxc_allocator::{Box, Vec as OxcVec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::AngularExpression;

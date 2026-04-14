@@ -16,7 +16,7 @@
 
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::compilation::{
     CTX_REF, ComponentCompilationJob, DeferBlockDepsEmitMode, DeferMetadata,

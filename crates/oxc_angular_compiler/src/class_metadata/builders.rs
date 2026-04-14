@@ -8,7 +8,7 @@ use oxc_ast::ast::{
     Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind, PropertyKey,
     TSType, TSTypeName,
 };
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::output::ast::{

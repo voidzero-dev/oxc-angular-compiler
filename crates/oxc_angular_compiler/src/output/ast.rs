@@ -6,7 +6,8 @@
 //! Ported from Angular's `output/output_ast.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ir::expression::IrExpression;
 

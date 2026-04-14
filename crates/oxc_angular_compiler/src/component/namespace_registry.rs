@@ -1,5 +1,5 @@
 use oxc_allocator::{Allocator, FromIn};
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 /// Registry for assigning namespace aliases to imported modules.

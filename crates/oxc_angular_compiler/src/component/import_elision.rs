@@ -41,7 +41,7 @@ use oxc_ast::ast::{
     Program, Statement, TSType,
 };
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashSet;
 
 use crate::optimizer::Edit;

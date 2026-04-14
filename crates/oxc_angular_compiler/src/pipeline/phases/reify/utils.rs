@@ -1,7 +1,7 @@
 //! Shared utilities for the reify phase.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::{
     ExpressionStatement, InvokeFunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,

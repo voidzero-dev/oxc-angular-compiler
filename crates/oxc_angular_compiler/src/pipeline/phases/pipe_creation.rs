@@ -15,6 +15,8 @@
 use std::collections::HashSet;
 use std::ptr::NonNull;
 
+use oxc_str::Ident;
+
 use crate::ir::enums::{CompatibilityMode, OpKind};
 use crate::ir::expression::{IrExpression, SlotHandle};
 use crate::ir::ops::{CreateOp, CreateOpBase, Op, PipeOp, XrefId};
@@ -212,7 +214,7 @@ struct PipeInfo<'a> {
     /// This is preserved from the expression to match Angular's behavior.
     target_slot: SlotHandle,
     /// Pipe name.
-    name: oxc_span::Ident<'a>,
+    name: Ident<'a>,
     /// Number of arguments (including the input expression).
     num_args: u32,
     /// Target element xref (for compatibility mode insertion ordering).

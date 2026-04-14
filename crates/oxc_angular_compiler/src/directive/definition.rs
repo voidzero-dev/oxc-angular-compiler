@@ -193,7 +193,7 @@ mod tests {
     use crate::output::ast::ReadVarExpr;
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Box;
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     fn create_test_metadata<'a>(allocator: &'a Allocator) -> R3DirectiveMetadata<'a> {
         let type_expr = OutputExpression::ReadVar(Box::new_in(

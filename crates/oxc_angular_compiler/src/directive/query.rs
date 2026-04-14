@@ -6,7 +6,7 @@
 //! in directive definitions.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::{QueryPredicate, R3QueryMetadata};
 use crate::output::ast::{

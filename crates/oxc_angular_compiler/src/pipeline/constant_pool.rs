@@ -6,7 +6,7 @@
 //! Ported from Angular's `constant_pool.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::expression::IrExpression;

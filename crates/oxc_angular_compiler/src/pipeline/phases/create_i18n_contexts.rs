@@ -11,7 +11,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/create_i18n_contexts.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::I18nContextKind;

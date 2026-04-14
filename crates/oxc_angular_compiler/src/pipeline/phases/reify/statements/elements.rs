@@ -1,7 +1,7 @@
 //! Element, container, template, and text statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::{
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,

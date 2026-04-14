@@ -8,7 +8,8 @@
 //! Ported from Angular's `render3/r3_control_flow.ts`.
 
 use oxc_allocator::{Allocator, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{ASTWithSource, AngularExpression};
 use crate::ast::html::HtmlBlockParameter;

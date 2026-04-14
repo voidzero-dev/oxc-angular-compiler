@@ -7,7 +7,7 @@
 //! `core.ts` parseSelectorToR3Selector function.
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::{LiteralExpr, LiteralValue, OutputExpression};
 

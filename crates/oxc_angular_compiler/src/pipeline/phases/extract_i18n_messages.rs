@@ -7,7 +7,7 @@
 
 use std::ptr::NonNull;
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nContextKind, I18nParamValueFlags};

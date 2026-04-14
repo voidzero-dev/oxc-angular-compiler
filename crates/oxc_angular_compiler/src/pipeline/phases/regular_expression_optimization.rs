@@ -7,7 +7,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/regular_expression_optimization.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::IrExpression;
@@ -86,7 +86,7 @@ pub fn optimize_regular_expressions(job: &mut ComponentCompilationJob<'_>) {
 }
 
 /// Check if regex flags contain the global flag.
-fn is_global_regex(flags: Option<&oxc_span::Ident<'_>>) -> bool {
+fn is_global_regex(flags: Option<&Ident<'_>>) -> bool {
     flags.map_or(false, |f| f.contains('g'))
 }
 

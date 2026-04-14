@@ -16,7 +16,8 @@
 use std::sync::Arc;
 
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::ast::{
     ArrowFunctionBody, BinaryOperator, DeclareVarStmt, DynamicImportUrl, FnParam, LeadingComment,
@@ -1397,7 +1398,7 @@ mod tests {
     use super::*;
     use crate::output::ast::{LiteralExpr, LiteralValue, ReadVarExpr};
     use oxc_allocator::{Allocator, Box};
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     #[test]
     fn test_emit_literal_null() {
@@ -1768,7 +1769,7 @@ mod tests {
     #[test]
     fn test_emit_jsdoc_comment() {
         use super::super::ast::{DeclareVarStmt, JsDocComment, LeadingComment, StmtModifier};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
 
@@ -1796,7 +1797,7 @@ mod tests {
     #[test]
     fn test_emit_jsdoc_with_suppress() {
         use super::super::ast::{DeclareVarStmt, JsDocComment, LeadingComment, StmtModifier};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
 
@@ -1824,7 +1825,7 @@ mod tests {
     #[test]
     fn test_emit_single_line_comment() {
         use super::super::ast::{DeclareVarStmt, LeadingComment, StmtModifier};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
 
@@ -1847,7 +1848,7 @@ mod tests {
     #[test]
     fn test_emit_multi_line_comment() {
         use super::super::ast::{DeclareVarStmt, LeadingComment, StmtModifier};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
 
@@ -1871,7 +1872,7 @@ mod tests {
     #[test]
     fn test_emit_multi_line_comment_with_asterisk() {
         use super::super::ast::{DeclareVarStmt, LeadingComment, StmtModifier};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
 
@@ -1900,7 +1901,7 @@ mod tests {
     fn test_emit_conditional_expression() {
         use super::super::ast::{ConditionalExpr, LiteralExpr, LiteralValue, ReadVarExpr};
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -1940,7 +1941,7 @@ mod tests {
             BinaryOperatorExpr, ConditionalExpr, LiteralExpr, LiteralValue, ReadVarExpr,
         };
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -2126,7 +2127,7 @@ mod tests {
     fn test_emit_nullish_coalescing_with_logical_and_on_left() {
         use super::super::ast::BinaryOperatorExpr;
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -2176,7 +2177,7 @@ mod tests {
     fn test_emit_nullish_coalescing_with_logical_or_on_right() {
         use super::super::ast::BinaryOperatorExpr;
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -2226,7 +2227,7 @@ mod tests {
     fn test_emit_logical_and_with_nullish_coalescing_on_left() {
         use super::super::ast::BinaryOperatorExpr;
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -2276,7 +2277,7 @@ mod tests {
     fn test_emit_nullish_coalescing_with_conditional_on_left() {
         use super::super::ast::{BinaryOperatorExpr, ConditionalExpr};
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();
@@ -2600,7 +2601,7 @@ mod tests {
     fn test_emit_empty_declare_function_body() {
         use super::super::ast::{DeclareFunctionStmt, StmtModifier};
         use oxc_allocator::{Allocator, Box};
-        use oxc_span::Ident;
+        use oxc_str::Ident;
 
         let emitter = JsEmitter::new();
         let alloc = Allocator::default();

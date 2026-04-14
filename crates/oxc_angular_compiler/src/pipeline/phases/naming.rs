@@ -11,7 +11,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/naming.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{BindingKind, SemanticVariableKind};
@@ -1149,7 +1149,7 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
 
     // Generate the function name for the host binding function
     let fn_name = format!("{}_{}", component_name, job.fn_suffix);
-    job.root.fn_name = Some(oxc_span::Ident::from(allocator.alloc_str(&fn_name)));
+    job.root.fn_name = Some(Ident::from(allocator.alloc_str(&fn_name)));
 
     // Name listener handlers in create ops
     // Host listeners need names like: ComponentName_click_HostBindingHandler
@@ -1188,7 +1188,7 @@ mod tests {
     use crate::ir::expression::{IrExpression, NextContextExpr};
     use crate::ir::ops::{UpdateVariableOp, XrefId};
     use oxc_allocator::{Allocator, Box as AllocBox};
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     /// Helper: create an `UpdateVariableOp` representing a NextContext-based
     /// context variable for the given `view_xref`.  The variable starts with

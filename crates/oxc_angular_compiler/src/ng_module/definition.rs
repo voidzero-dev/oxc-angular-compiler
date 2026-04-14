@@ -335,7 +335,7 @@ mod tests {
     use crate::ng_module::metadata::{R3NgModuleMetadataBuilder, R3Reference, R3SelectorScopeMode};
     use crate::output::ast::ReadVarExpr;
     use oxc_allocator::Box;
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     #[test]
     fn test_generate_simple_ng_module_definition() {

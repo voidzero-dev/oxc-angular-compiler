@@ -1,7 +1,7 @@
 //! Miscellaneous statement generation (listener, animation, pipe, projection, etc.).
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::enums::AnimationKind;
 use crate::output::ast::{

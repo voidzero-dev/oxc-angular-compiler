@@ -1247,6 +1247,7 @@ dependencies = [
  "oxc_semantic",
  "oxc_sourcemap",
  "oxc_span",
+ "oxc_str",
  "oxc_transformer",
  "pathdiff",
  "rustc-hash",
@@ -1268,6 +1269,7 @@ dependencies = [
  "oxc_napi",
  "oxc_parser",
  "oxc_span",
+ "oxc_str",
 ]
 
 [[package]]
@@ -1280,6 +1282,7 @@ dependencies = [
  "oxc_ast_visit",
  "oxc_parser",
  "oxc_span",
+ "oxc_str",
  "pico-args",
  "project-root",
  "serde",

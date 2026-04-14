@@ -2,7 +2,7 @@
 //!
 //! Ported from Angular's `render3/r3_class_debug_info_compiler.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::OutputExpression;
 

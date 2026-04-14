@@ -5,7 +5,7 @@
 //! Ported from Angular's `expression_parser/lexer.ts`.
 
 use oxc_allocator::{Allocator, FromIn};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::util::chars;
 

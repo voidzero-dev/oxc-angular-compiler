@@ -96,6 +96,7 @@ oxc_parser = "0.125"
 oxc_semantic = "0.125"
 oxc_span = "0.125"
 oxc_sourcemap = "6.0.1"
+oxc_str = "0.125"
 oxc_transformer = "0.125"
 oxc_codegen = "0.125"
 

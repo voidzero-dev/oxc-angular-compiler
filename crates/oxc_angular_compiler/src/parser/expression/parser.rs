@@ -5,7 +5,7 @@
 //! Ported from Angular's `expression_parser/parser.ts`.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::expression::{
     ASTWithSource, AbsoluteSourceSpan, AngularExpression, ArrowFunction, ArrowFunctionParameter,

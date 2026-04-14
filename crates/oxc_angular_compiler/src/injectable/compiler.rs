@@ -12,7 +12,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::{InjectableProvider, ProvidedIn, R3InjectableMetadata};
 use crate::factory::{

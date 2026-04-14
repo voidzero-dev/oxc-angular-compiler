@@ -209,7 +209,7 @@ mod tests {
     use crate::output::emitter::JsEmitter;
     use crate::pipe::metadata::R3PipeMetadataBuilder;
     use oxc_allocator::Box;
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     #[test]
     fn test_generate_pure_pipe_definition() {

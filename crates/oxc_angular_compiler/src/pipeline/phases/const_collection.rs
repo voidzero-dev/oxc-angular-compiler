@@ -10,7 +10,7 @@
 
 use oxc_allocator::Vec as OxcVec;
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use oxc_allocator::Box;

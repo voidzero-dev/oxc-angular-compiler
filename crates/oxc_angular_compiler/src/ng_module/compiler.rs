@@ -14,7 +14,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::metadata::{R3NgModuleMetadata, R3Reference};
 use crate::output::ast::{

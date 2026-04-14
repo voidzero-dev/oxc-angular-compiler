@@ -4,7 +4,8 @@
 //! ported from Angular's `ml_parser/ast.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::expression::AngularExpression;
 

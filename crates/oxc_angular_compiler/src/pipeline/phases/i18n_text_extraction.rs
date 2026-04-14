@@ -9,7 +9,7 @@
 
 use std::ptr::NonNull;
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nExpressionFor, I18nParamResolutionTime};
@@ -264,7 +264,7 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
                         expression: oxc_allocator::Box::new_in(expr.clone_in(allocator), allocator),
                         resolution_time,
                         usage: I18nExpressionFor::I18nText,
-                        name: oxc_span::Ident::from(""),
+                        name: Ident::from(""),
                         i18n_placeholder,
                         icu_placeholder: info.icu_placeholder_xref,
                     }));
@@ -309,7 +309,7 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
                     ),
                     resolution_time,
                     usage: I18nExpressionFor::I18nText,
-                    name: oxc_span::Ident::from(""),
+                    name: Ident::from(""),
                     i18n_placeholder: None,
                     icu_placeholder: info.icu_placeholder_xref,
                 }));

@@ -1,7 +1,7 @@
 //! @defer block statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::enums::{DeferOpModifierKind, DeferTriggerKind};
 use crate::output::ast::{

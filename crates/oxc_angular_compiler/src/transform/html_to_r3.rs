@@ -6,7 +6,8 @@
 //! Ported from Angular's `render3/r3_template_transform.ts`.
 
 use oxc_allocator::{Allocator, Box, FromIn, HashMap, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::expression::{
@@ -703,7 +704,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Transform selectorless directives from HTML AST
         // For components, tag_name may be None (e.g., `<MyComp>`), in which case we use empty string
         // which matches TypeScript's behavior where elementName can be null.
-        let element_name = component.tag_name.as_ref().map_or("", oxc_span::Ident::as_str);
+        let element_name = component.tag_name.as_ref().map_or("", Ident::as_str);
         let directives = self.transform_directives(&component.directives, element_name);
 
         // Validate selectorless references

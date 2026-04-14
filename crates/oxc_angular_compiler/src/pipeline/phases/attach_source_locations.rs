@@ -7,7 +7,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/attach_source_locations.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::ops::{CreateOp, CreateOpBase, SourceLocationOp, XrefId};
 use crate::pipeline::compilation::ComponentCompilationJob;

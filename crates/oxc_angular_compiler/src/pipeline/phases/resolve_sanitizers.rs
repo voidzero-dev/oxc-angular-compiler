@@ -6,7 +6,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_sanitizers.ts`.
 
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::r3::SecurityContext;
 use crate::ir::ops::{CreateOp, UpdateOp};

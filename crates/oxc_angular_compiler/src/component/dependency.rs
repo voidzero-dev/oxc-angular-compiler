@@ -9,7 +9,7 @@
 //! Ported from: `packages/compiler/src/render3/r3_factory.ts`
 
 use oxc_allocator::{Allocator, Box, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use super::namespace_registry::NamespaceRegistry;
 use crate::output::ast::{

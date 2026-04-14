@@ -17,7 +17,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/generate_variables.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::enums::{SemanticVariableKind, VariableFlags};
 use crate::ir::expression::{

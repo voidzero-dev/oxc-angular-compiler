@@ -8,7 +8,7 @@
 use std::ptr::NonNull;
 
 use oxc_allocator::Vec as ArenaVec;
-use oxc_span::Ident;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::i18n::serializer::format_i18n_placeholder_name;
@@ -898,7 +898,7 @@ mod tests {
     use crate::output::ast::{LiteralExpr, OutputExpression, ReadVarExpr};
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Allocator;
-    use oxc_span::Ident;
+    use oxc_str::Ident;
 
     #[test]
     fn test_wrap_with_postprocess_uses_namespace_prefix() {

@@ -16,7 +16,8 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Expression, ObjectPropertyKind, PropertyKey,
     UnaryOperator as OxcUnaryOperator,
 };
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, CommaExpr,

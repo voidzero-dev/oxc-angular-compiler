@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_factory.ts`.
 
 use oxc_allocator::Vec;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::output::ast::OutputExpression;
 

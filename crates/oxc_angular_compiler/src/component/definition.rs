@@ -13,7 +13,7 @@
 //! - Inject dependencies
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec as OxcVec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::r3::Identifiers;
 

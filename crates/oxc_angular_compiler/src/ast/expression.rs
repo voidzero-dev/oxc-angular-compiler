@@ -11,7 +11,8 @@
 //! - No bitwise operators
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 /// A span within the expression source.
 #[derive(Debug, Clone, Copy)]

@@ -7,7 +7,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/track_variables.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::{

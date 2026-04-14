@@ -7,7 +7,8 @@
 use std::sync::Arc;
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::html::{
     BlockType, HtmlAttribute, HtmlBlock, HtmlBlockParameter, HtmlComment, HtmlDirective,

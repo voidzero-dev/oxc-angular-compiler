@@ -9,7 +9,8 @@
 use indexmap::IndexMap;
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 use rustc_hash::{FxBuildHasher, FxHashMap};
 
 use crate::AngularVersion;

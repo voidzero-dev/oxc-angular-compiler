@@ -10,7 +10,7 @@
 //! Ported from Angular's `ml_parser/html_whitespaces.ts`.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ast::html::{
     HtmlAttribute, HtmlBlock, HtmlBlockParameter, HtmlComment, HtmlComponent, HtmlDirective,

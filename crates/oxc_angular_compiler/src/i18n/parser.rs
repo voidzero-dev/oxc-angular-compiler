@@ -834,7 +834,7 @@ mod tests {
     use crate::ast::html::HtmlText;
     use crate::util::ParseSourceFile;
     use oxc_allocator::{Allocator, Box, Vec as AllocVec};
-    use oxc_span::Ident;
+    use oxc_str::Ident;
     use std::sync::Arc;
 
     #[test]

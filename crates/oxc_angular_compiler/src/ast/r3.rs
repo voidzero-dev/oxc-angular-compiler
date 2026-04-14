@@ -6,7 +6,8 @@
 //! Ported from Angular's `render3/r3_ast.ts`.
 
 use oxc_allocator::{Allocator, Box, HashMap, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{ASTWithSource, AngularExpression, BindingType, ParsedEventType};
 use crate::i18n::serializer::format_i18n_placeholder_name;

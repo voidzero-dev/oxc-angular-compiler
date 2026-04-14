@@ -15,7 +15,7 @@ use crate::output::ast::{
 };
 use crate::r3::{Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
 use oxc_allocator::Box;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 use crate::ir::ops::XrefId;
 

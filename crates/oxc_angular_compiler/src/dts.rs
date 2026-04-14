@@ -18,6 +18,7 @@ use crate::directive::{R3DirectiveMetadata, R3InputMetadata};
 use crate::injectable::InjectableMetadata;
 use crate::ng_module::NgModuleMetadata;
 use crate::pipe::PipeMetadata;
+use oxc_str::Ident;
 
 /// A `.d.ts` type declaration for an Angular class.
 ///
@@ -578,7 +579,7 @@ fn generate_input_map_type(inputs: &[R3InputMetadata]) -> String {
 /// Generate the output map type.
 ///
 /// Produces: `{ "clicked": "clicked"; "valueChanged": "onChange"; }`
-fn generate_output_map_type(outputs: &[(oxc_span::Ident, oxc_span::Ident)]) -> String {
+fn generate_output_map_type(outputs: &[(Ident, Ident)]) -> String {
     if outputs.is_empty() {
         return "{}".to_string();
     }
@@ -762,7 +763,7 @@ mod tests {
 
     #[test]
     fn test_generate_output_map_type_empty() {
-        let outputs: Vec<(oxc_span::Ident, oxc_span::Ident)> = vec![];
+        let outputs: Vec<(Ident, Ident)> = vec![];
         assert_eq!(generate_output_map_type(&outputs), "{}");
     }
 }

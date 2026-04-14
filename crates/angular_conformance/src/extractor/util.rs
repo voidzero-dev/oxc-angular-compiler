@@ -54,7 +54,7 @@ impl SpecExtractor {
                     let parts: Vec<&str> = lit
                         .quasis
                         .iter()
-                        .filter_map(|q| q.value.cooked.as_ref().map(oxc_span::Str::as_str))
+                        .filter_map(|q| q.value.cooked.as_ref().map(oxc_str::Str::as_str))
                         .collect();
                     Some(parts.join(""))
                 }

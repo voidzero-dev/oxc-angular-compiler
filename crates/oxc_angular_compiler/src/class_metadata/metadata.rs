@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_class_metadata_compiler.ts` and `view/api.ts`.
 
 use crate::output::ast::OutputExpression;
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 /// Metadata of a class which captures the original Angular decorators.
 ///

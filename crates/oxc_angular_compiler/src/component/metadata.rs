@@ -3,7 +3,8 @@
 //! This module defines the metadata extracted from `@Component` decorators.
 
 use oxc_allocator::Vec;
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::dependency::R3DependencyMetadata;
 use crate::directive::R3InputMetadata;

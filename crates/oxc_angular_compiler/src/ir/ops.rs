@@ -10,7 +10,8 @@
 use std::ptr::NonNull;
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Ident, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::enums::{
     AnimationBindingKind, AnimationKind, BindingKind, DeferOpModifierKind, DeferTriggerKind,

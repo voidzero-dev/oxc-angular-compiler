@@ -13,7 +13,7 @@ use oxc_angular_compiler::{
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
     transform_angular_file,
 };
-use oxc_span::Ident;
+use oxc_str::Ident;
 
 /// Compiles an Angular template to JavaScript.
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
