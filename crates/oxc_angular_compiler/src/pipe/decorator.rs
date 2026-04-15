@@ -14,6 +14,7 @@ use oxc_str::Ident;
 use super::metadata::R3PipeMetadata;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
+use crate::output::oxc_converter::convert_oxc_expression;
 
 /// Extracted pipe metadata from a `@Pipe` decorator.
 ///
@@ -264,16 +265,26 @@ fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
 ) -> R3DependencyMetadata<'a> {
-    // Extract flags from decorators
+    // Extract flags and @Inject token from decorators
     let mut optional = false;
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
+    let mut inject_token: Option<OutputExpression<'a>> = None;
     let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name(&decorator.expression) {
             match name.as_str() {
+                "Inject" => {
+                    // @Inject(TOKEN) - extract the token
+                    if let Expression::CallExpression(call) = &decorator.expression {
+                        if let Some(arg) = call.arguments.first() {
+                            inject_token =
+                                convert_oxc_expression(allocator, arg.to_expression(), None);
+                        }
+                    }
+                }
                 "Optional" => optional = true,
                 "SkipSelf" => skip_self = true,
                 "Self" => self_ = true,
@@ -291,8 +302,9 @@ fn extract_param_dependency<'a>(
         }
     }
 
-    // Extract the token (type annotation or parameter name)
-    let token = extract_param_token(allocator, param);
+    // 1. If @Inject(TOKEN) is present, use TOKEN
+    // 2. Otherwise fall back to the type annotation
+    let token = inject_token.or_else(|| extract_param_token(allocator, param));
 
     // Handle @Attribute decorator
     if let Some(attr_name) = attribute_name {
