@@ -377,26 +377,11 @@ pub fn create_animation_binding_stmt<'a>(
 
 /// Creates a control binding call statement (ɵɵcontrol).
 ///
-/// The control instruction takes:
-/// - expression: The expression to evaluate for the control value
-/// - name: The property name as a string literal
-/// - sanitizer: Optional sanitizer (only if not null)
-///
-/// Note: Unlike property() which takes (name, expression), control() takes (expression, name).
-/// Ported from Angular's `control()` in `instruction.ts` lines 598-614.
-pub fn create_control_stmt<'a>(
-    allocator: &'a oxc_allocator::Allocator,
-    value: OutputExpression<'a>,
-    name: &Ident<'a>,
-) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
-    args.push(value);
-    args.push(OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
-    )));
-    // Note: sanitizer would be pushed here if not null, but it's always null for ControlOp
-    create_instruction_call_stmt(allocator, Identifiers::CONTROL, args)
+/// Angular's control update instruction takes no arguments. The `[formField]`
+/// value is written through the regular property instruction, and `ɵɵcontrol()`
+/// performs the form-control synchronization work separately.
+pub fn create_control_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
+    create_instruction_call_stmt(allocator, Identifiers::CONTROL, OxcVec::new_in(allocator))
 }
 
 /// Creates an ɵɵprojectionDef() call statement from a pre-built R3 def expression.

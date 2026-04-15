@@ -237,25 +237,6 @@ fn process_view_attributes<'a>(
                     };
                     extracted_attrs.push((twp_op.target, extracted));
                 }
-                UpdateOp::Control(control_op) => {
-                    // Control bindings (e.g. [field]="...") also generate extracted
-                    // attributes for directive matching, similar to Property bindings.
-                    // Ported from Angular's attribute_extraction.ts lines 58-73.
-                    let extracted = ExtractedAttributeOp {
-                        base: CreateOpBase::default(),
-                        target: control_op.target,
-                        binding_kind: BindingKind::Property,
-                        namespace: None,
-                        name: control_op.name.clone(),
-                        value: None, // Control bindings don't copy the expression
-                        security_context: control_op.security_context,
-                        truthy_expression: false,
-                        i18n_context: None,
-                        i18n_message: None,
-                        trusted_value_fn: None, // Set by resolve_sanitizers phase
-                    };
-                    extracted_attrs.push((control_op.target, extracted));
-                }
                 // StyleProp and ClassProp bindings:
                 // In Angular TypeScript, these are only extracted in compatibility mode
                 // (TemplateDefinitionBuilder) when the expression is empty. We don't support

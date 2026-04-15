@@ -1073,10 +1073,7 @@ fn reify_update_op<'a>(
             let expr = convert_ir_expression(allocator, &anim.expression, expressions, root_xref);
             Some(create_animation_binding_stmt(allocator, &anim.name, expr))
         }
-        UpdateOp::Control(ctrl) => {
-            let expr = convert_ir_expression(allocator, &ctrl.expression, expressions, root_xref);
-            Some(create_control_stmt(allocator, expr, &ctrl.name))
-        }
+        UpdateOp::Control(_) => Some(create_control_stmt(allocator)),
         UpdateOp::Variable(var) => {
             // Emit variable declaration with initializer for update phase
             // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts

@@ -16,7 +16,7 @@
 //! Special cases:
 //! - `ngNonBindable` attribute: marks element and removes binding
 //! - `animate.*` attributes: convert to animation bindings
-//! - `field` property: convert to control binding
+//! - `formField` property: emit both a regular property binding and a control binding
 //!
 //! Ported from Angular's `template/pipeline/src/phases/binding_specialization.ts`.
 
@@ -301,20 +301,35 @@ fn specialize_in_view<'a>(
                             cursor.replace_current(new_op);
                         }
                     } else if name.as_str() == "formField" {
-                        // Check for special "formField" property (control binding)
+                        // [formField] still binds as a regular property, but Angular also emits
+                        // a separate control instruction after the property update.
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(
                                 &mut binding.expression,
                                 create_placeholder_expression(allocator),
                             );
-                            let new_op = UpdateOp::Control(ControlOp {
+                            let property_op = UpdateOp::Property(PropertyOp {
                                 base: UpdateOpBase { source_span, ..Default::default() },
                                 target,
                                 name: binding.name.clone(),
                                 expression,
+                                is_host: false, // Template mode
+                                security_context,
+                                sanitizer: None,
+                                is_structural: false,
+                                i18n_context: None,
+                                i18n_message: binding.i18n_message,
+                                binding_kind,
+                            });
+                            let control_op = UpdateOp::Control(ControlOp {
+                                base: UpdateOpBase { source_span, ..Default::default() },
+                                target,
+                                name: binding.name.clone(),
+                                expression: create_placeholder_expression(allocator),
                                 security_context,
                             });
-                            cursor.replace_current(new_op);
+                            cursor.replace_current(property_op);
+                            cursor.insert_after(control_op);
                         }
                     } else {
                         // Regular property binding
