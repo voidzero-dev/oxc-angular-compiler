@@ -1,0 +1,7 @@
+---
+source: crates/oxc_angular_compiler/tests/linker_test.rs
+expression: result.code
+---
+import * as i0 from "@angular/core";
+export class FormField {}
+FormField.ɵdir = i0.ɵɵdefineDirective({ type: FormField, selectors: [["", "formField", ""]], inputs: { field: [1, "formField", "field"] }, signals: true, features: [i0.ɵɵControlFeature("formField")] });

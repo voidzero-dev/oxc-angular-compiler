@@ -1630,7 +1630,8 @@ fn build_queries(
 /// - `hostDirectives: [...]` → `ns.ɵɵHostDirectivesFeature([...])`
 /// - `usesInheritance: true` → `ns.ɵɵInheritDefinitionFeature`
 /// - `usesOnChanges: true` → `ns.ɵɵNgOnChangesFeature`
-/// Order is important: ProvidersFeature → HostDirectivesFeature → InheritDefinitionFeature → NgOnChangesFeature
+/// - `controlCreate: { passThroughInput }` → `ns.ɵɵControlFeature(passThroughInput)`
+/// Order is important: ProvidersFeature → HostDirectivesFeature → InheritDefinitionFeature → NgOnChangesFeature → ControlFeature
 /// (see packages/compiler/src/render3/view/compiler.ts:119-161)
 fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option<String> {
     let mut features: Vec<String> = Vec::new();
@@ -1664,6 +1665,17 @@ fn build_features(meta: &ObjectExpression<'_>, source: &str, ns: &str) -> Option
     // 4. NgOnChangesFeature
     if get_bool_property(meta, "usesOnChanges") == Some(true) {
         features.push(format!("{ns}.\u{0275}\u{0275}NgOnChangesFeature"));
+    }
+
+    // 5. ControlFeature — for signal form directives declaring controlCreate
+    //    `controlCreate: { passThroughInput: "formField" | null }`
+    //    emits `ɵɵControlFeature("formField")` or `ɵɵControlFeature(null)`
+    if let Some(control_create) = get_object_property(meta, "controlCreate") {
+        let pass_through = match get_string_property(control_create, "passThroughInput") {
+            Some(s) => format!("\"{s}\""),
+            None => "null".to_string(),
+        };
+        features.push(format!("{ns}.\u{0275}\u{0275}ControlFeature({pass_through})"));
     }
 
     if features.is_empty() { None } else { Some(format!("[{}]", features.join(", "))) }
