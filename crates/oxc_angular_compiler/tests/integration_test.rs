@@ -9312,3 +9312,132 @@ export class MyComponent {}
         result.code
     );
 }
+
+// =============================================================================
+// Regression: @Inject(TOKEN) on pipe constructor parameters
+// =============================================================================
+// The `extract_param_dependency` function in `pipe/decorator.rs` previously did
+// not handle the `@Inject(TOKEN)` decorator, so the token was silently taken
+// from the TypeScript type annotation instead. When the type was an interface
+// (erased at runtime) this left the DI token undefined, which Angular 20's
+// `assertDefined(token)` guard rejects immediately. See commit b2dd390.
+
+/// `@Inject(TOKEN)` on a pipe constructor param must produce a factory that
+/// injects the TOKEN identifier, not the erased type annotation.
+#[test]
+fn test_pipe_factory_uses_inject_token_over_interface_type() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform, Inject, InjectionToken } from '@angular/core';
+
+export interface Config {
+    locale: string;
+}
+
+export const CONFIG = new InjectionToken<Config>('CONFIG');
+
+@Pipe({ name: 'localized', standalone: true })
+export class LocalizedPipe implements PipeTransform {
+    constructor(@Inject(CONFIG) private config: Config) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "localized.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    // Factory must inject CONFIG (the @Inject token), not Config (the interface type).
+    assert!(
+        factory_section.contains("CONFIG"),
+        "Pipe factory should inject the @Inject(CONFIG) token. Factory:\n{factory_section}"
+    );
+    assert!(
+        !factory_section.contains("directiveInject(Config)")
+            && !factory_section.contains("ɵɵinject(Config)"),
+        "Pipe factory must NOT inject the erased interface type 'Config'. Factory:\n{factory_section}"
+    );
+}
+
+/// When `@Inject(TOKEN)` is used alongside modifier decorators (`@Optional`,
+/// `@SkipSelf`), the factory must still pick up the TOKEN and forward the
+/// correct DI flags.
+#[test]
+fn test_pipe_factory_inject_token_with_optional_skip_self() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform, Inject, Optional, SkipSelf, InjectionToken } from '@angular/core';
+
+export const MY_TOKEN = new InjectionToken<string>('MY_TOKEN');
+
+@Pipe({ name: 'tagged', standalone: true })
+export class TaggedPipe implements PipeTransform {
+    constructor(
+        @Optional() @SkipSelf() @Inject(MY_TOKEN) private tag: string | null,
+    ) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "tagged.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    // MY_TOKEN must be present in the factory as the DI token.
+    assert!(
+        factory_section.contains("directiveInject(MY_TOKEN"),
+        "Pipe factory should inject MY_TOKEN. Factory:\n{factory_section}"
+    );
+
+    // The DI flag bitmask must include Optional (8) | SkipSelf (4). Angular's
+    // pipe compilation also ORs in ForPipe (16), yielding 28. We only require
+    // that both Optional and SkipSelf bits are set.
+    let flags = factory_section
+        .split("directiveInject(MY_TOKEN,")
+        .nth(1)
+        .and_then(|s| s.split(')').next())
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .expect("Factory should encode numeric DI flags");
+    assert!(
+        flags & 8 != 0 && flags & 4 != 0,
+        "Pipe factory flags should include Optional (8) and SkipSelf (4). Got: {flags}. Factory:\n{factory_section}"
+    );
+}
+
+/// Without `@Inject`, the factory must still fall back to the type annotation
+/// so that plain class-typed dependencies continue to resolve correctly.
+#[test]
+fn test_pipe_factory_without_inject_still_uses_type_annotation() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform } from '@angular/core';
+
+export class Logger {
+    log(msg: string): void {}
+}
+
+@Pipe({ name: 'logged', standalone: true })
+export class LoggedPipe implements PipeTransform {
+    constructor(private logger: Logger) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "logged.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    assert!(
+        factory_section.contains("Logger"),
+        "Pipe factory should fall back to the type annotation (Logger). Factory:\n{factory_section}"
+    );
+}
