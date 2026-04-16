@@ -6,7 +6,7 @@ packages:
   - 'napi/angular-compiler/benchmarks/*'
 
 catalog:
-  '@napi-rs/cli': 3.6.1
+  '@napi-rs/cli': 3.6.2
   '@oxc-node/cli': 0.1.0
   '@oxc-node/core': 0.1.0
   '@tailwindcss/vite': 4.2.2
