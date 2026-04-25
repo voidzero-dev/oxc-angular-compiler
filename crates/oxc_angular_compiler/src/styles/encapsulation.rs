@@ -1133,15 +1133,15 @@ fn find_pseudo_function_before(before_hc: &str) -> (String, usize) {
 /// Returns the index of the closing paren (exclusive).
 fn find_matching_paren(s: &str, start: usize) -> Option<usize> {
     let mut depth = 1;
-    let chars: Vec<char> = s[start..].chars().collect();
+    let bytes = s.as_bytes();
 
-    for (i, c) in chars.iter().enumerate() {
-        match c {
-            '(' => depth += 1,
-            ')' => {
+    for i in start..bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(start + i);
+                    return Some(i);
                 }
             }
             _ => {}
@@ -2073,7 +2073,7 @@ fn try_scope_pseudo_function_with_context(
     // Find all pseudo-function parts
     let mut pseudo_parts: Vec<String> = Vec::new();
     let mut last_end = 0;
-    let chars: Vec<char> = trimmed.chars().collect();
+    let bytes = trimmed.as_bytes();
 
     let mut search_from = 0;
     while let Some(mat) = find_where_or_is(trimmed, search_from) {
@@ -2091,13 +2091,13 @@ fn try_scope_pseudo_function_with_context(
 
         // Find the matching closing paren
         let paren_start = mat.end;
-        let mut paren_depth = 1;
+        let mut paren_depth: u32 = 1;
         let mut paren_end = paren_start;
 
-        for i in paren_start..trimmed.len() {
-            match chars[i] {
-                '(' => paren_depth += 1,
-                ')' => {
+        for i in paren_start..bytes.len() {
+            match bytes[i] {
+                b'(' => paren_depth += 1,
+                b')' => {
                     paren_depth -= 1;
                     if paren_depth == 0 {
                         paren_end = i;
@@ -2243,14 +2243,15 @@ fn contains_host_attr_at_top_level(selector: &str, host_attr: &str) -> bool {
 /// Returns pairs of (selector_part, combinator_with_spaces).
 fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
     let mut result = Vec::new();
-    let chars: Vec<char> = selector.chars().collect();
-    let mut start = 0;
-    let mut i = 0;
+    let char_indices: Vec<(usize, char)> = selector.char_indices().collect();
+    let mut start = 0_usize; // byte index into selector
+    let mut i = 0_usize; // index into char_indices
     let mut paren_depth: u32 = 0;
     let mut bracket_depth: u32 = 0;
 
-    while i < chars.len() {
-        match chars[i] {
+    while i < char_indices.len() {
+        let (byte_pos, ch) = char_indices[i];
+        match ch {
             '(' => paren_depth += 1,
             ')' => paren_depth = paren_depth.saturating_sub(1),
             '[' => bracket_depth += 1,
@@ -2259,9 +2260,10 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
                 // A space following an escaped hex value and followed by another hex character
                 // (ie: ".\fc ber" for ".über") is not a separator between 2 selectors
                 // Check: if the part ends with an escape placeholder AND next char is hex
-                let part = &selector[start..i];
-                let next_char_is_hex =
-                    i + 1 < chars.len() && chars[i] == ' ' && chars[i + 1].is_ascii_hexdigit();
+                let part = &selector[start..byte_pos];
+                let next_char_is_hex = i + 1 < char_indices.len()
+                    && ch == ' '
+                    && char_indices[i + 1].1.is_ascii_hexdigit();
                 let part_ends_with_esc_placeholder = part.contains("__esc-ph-");
 
                 if next_char_is_hex && part_ends_with_esc_placeholder {
@@ -2271,19 +2273,23 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
                 }
 
                 // Found a potential combinator
-                let part_end = i;
+                let part_end = byte_pos;
 
                 // Collect the combinator (may include spaces around it)
-                let combinator_start = i;
-                while i < chars.len()
-                    && (chars[i] == ' ' || chars[i] == '>' || chars[i] == '+' || chars[i] == '~')
-                {
+                let combinator_start = byte_pos;
+                while i < char_indices.len() && matches!(char_indices[i].1, ' ' | '>' | '+' | '~') {
                     i += 1;
                 }
 
+                let combinator_end =
+                    if i < char_indices.len() { char_indices[i].0 } else { selector.len() };
+
                 // Always push the part, even if empty (to preserve leading combinators)
-                result.push((&selector[start..part_end], &selector[combinator_start..i]));
-                start = i;
+                result.push((
+                    &selector[start..part_end],
+                    &selector[combinator_start..combinator_end],
+                ));
+                start = combinator_end;
                 continue;
             }
             _ => {}
@@ -2460,16 +2466,20 @@ fn scope_after_host_with_context(selector: &str, ctx: &mut ScopingContext) -> St
 
 /// Find the start position of a pseudo-element (::).
 fn find_pseudo_element_start(s: &str) -> Option<usize> {
+    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
     let mut i = 0;
-    let chars: Vec<char> = s.chars().collect();
     let mut in_brackets: u32 = 0;
 
-    while i < chars.len() {
-        match chars[i] {
+    while i < char_indices.len() {
+        let (byte_pos, ch) = char_indices[i];
+        match ch {
             '[' => in_brackets += 1,
             ']' => in_brackets = in_brackets.saturating_sub(1),
-            ':' if in_brackets == 0 && i + 1 < chars.len() && chars[i + 1] == ':' => {
-                return Some(i);
+            ':' if in_brackets == 0
+                && i + 1 < char_indices.len()
+                && char_indices[i + 1].1 == ':' =>
+            {
+                return Some(byte_pos);
             }
             _ => {}
         }
@@ -2481,20 +2491,21 @@ fn find_pseudo_element_start(s: &str) -> Option<usize> {
 /// Find the start position of a pseudo-class (:), including pseudo-functions.
 /// The caller decides how to handle pseudo-functions vs regular pseudo-classes.
 fn find_pseudo_class_start(s: &str) -> Option<usize> {
+    let char_indices: Vec<(usize, char)> = s.char_indices().collect();
     let mut i = 0;
-    let chars: Vec<char> = s.chars().collect();
     let mut in_brackets: u32 = 0;
 
-    while i < chars.len() {
-        match chars[i] {
+    while i < char_indices.len() {
+        let (byte_pos, ch) = char_indices[i];
+        match ch {
             '[' => in_brackets += 1,
             ']' => in_brackets = in_brackets.saturating_sub(1),
             ':' if in_brackets == 0 => {
                 // Check it's not :: (pseudo-element) - those are handled separately
-                if i + 1 < chars.len() && chars[i + 1] == ':' {
+                if i + 1 < char_indices.len() && char_indices[i + 1].1 == ':' {
                     return None;
                 }
-                return Some(i);
+                return Some(byte_pos);
             }
             _ => {}
         }
@@ -3428,6 +3439,52 @@ mod tests {
             result.len() < 50_000,
             "Output should not explode exponentially. Got {} bytes",
             result.len()
+        );
+    }
+
+    #[test]
+    fn test_multibyte_utf8_in_selector() {
+        // Selectors with multibyte UTF-8 characters (e.g. attribute selectors with
+        // non-ASCII values) must not panic from byte/char index mismatch.
+        let result = shim_css_text(r#"[data-label="ÄÖÜ"] .child { color: red; }"#, "contenta", "");
+        assert!(
+            result.contains("[contenta]"),
+            "Should scope selectors containing multibyte UTF-8. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_multibyte_utf8_pseudo_element() {
+        // Pseudo-elements on selectors with multibyte characters must not panic.
+        let result = shim_css_text(r#"[title="café"]::before { content: ""; }"#, "contenta", "");
+        assert!(
+            result.contains("[contenta]"),
+            "Should scope pseudo-elements with multibyte UTF-8. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_multibyte_utf8_pseudo_class() {
+        // Pseudo-classes on selectors with multibyte characters must not panic.
+        let result = shim_css_text(r#".naïve:hover { color: blue; }"#, "contenta", "");
+        assert!(
+            result.contains("[contenta]"),
+            "Should scope pseudo-classes with multibyte UTF-8. Got: {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_multibyte_utf8_combinator_split() {
+        // Combinators between selectors with multibyte characters must not panic.
+        let result =
+            shim_css_text(r#".über > .straße + .café ~ .naïve { color: green; }"#, "contenta", "");
+        assert!(
+            result.contains("[contenta]"),
+            "Should handle combinators with multibyte UTF-8 selectors. Got: {}",
+            result
         );
     }
 }
