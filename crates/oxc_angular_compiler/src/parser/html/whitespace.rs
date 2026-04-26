@@ -10,7 +10,7 @@
 //! Ported from Angular's `ml_parser/html_whitespaces.ts`.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ast::html::{
     HtmlAttribute, HtmlBlock, HtmlBlockParameter, HtmlComment, HtmlComponent, HtmlDirective,
@@ -473,7 +473,7 @@ impl<'a> WhitespaceVisitor<'a> {
             // Process tokens
             let tokens = self.process_tokens(&text.tokens, context);
 
-            let value_atom = Atom::from_in(value.as_str(), self.allocator);
+            let value_atom = Ident::from_in(value.as_str(), self.allocator);
             Some(HtmlNode::Text(Box::new_in(
                 HtmlText {
                     value: value_atom,
@@ -514,7 +514,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 }
 
                 let mut parts = Vec::with_capacity_in(1, self.allocator);
-                parts.push(Atom::from_in(processed.as_str(), self.allocator));
+                parts.push(Ident::from_in(processed.as_str(), self.allocator));
 
                 result.push(InterpolatedToken {
                     token_type: token.token_type,

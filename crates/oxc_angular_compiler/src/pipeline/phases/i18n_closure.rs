@@ -27,7 +27,7 @@
 //! `template/pipeline/src/phases/i18n_const_collection.ts`.
 
 use oxc_allocator::{Box as AllocBox, Vec as AllocVec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::i18n::serializer::format_i18n_placeholder_name;
 use crate::output::ast::{
@@ -59,7 +59,7 @@ pub fn create_closure_mode_guard<'a>(
         TypeofExpr {
             expr: AllocBox::new_in(
                 OutputExpression::ReadVar(AllocBox::new_in(
-                    ReadVarExpr { name: Atom::from(NG_I18N_CLOSURE_MODE), source_span: None },
+                    ReadVarExpr { name: Ident::from(NG_I18N_CLOSURE_MODE), source_span: None },
                     allocator,
                 )),
                 allocator,
@@ -71,7 +71,7 @@ pub fn create_closure_mode_guard<'a>(
 
     // "undefined"
     let undefined_literal = OutputExpression::Literal(AllocBox::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from("undefined")), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from("undefined")), source_span: None },
         allocator,
     ));
 
@@ -88,7 +88,7 @@ pub fn create_closure_mode_guard<'a>(
 
     // ngI18nClosureMode
     let closure_mode_var = OutputExpression::ReadVar(AllocBox::new_in(
-        ReadVarExpr { name: Atom::from(NG_I18N_CLOSURE_MODE), source_span: None },
+        ReadVarExpr { name: Ident::from(NG_I18N_CLOSURE_MODE), source_span: None },
         allocator,
     ));
 
@@ -107,14 +107,14 @@ pub fn create_closure_mode_guard<'a>(
 /// I18n message metadata for JSDoc comments.
 pub struct I18nMessageMeta<'a> {
     /// Message description for translators.
-    pub description: Option<Atom<'a>>,
+    pub description: Option<Ident<'a>>,
     /// Message meaning for disambiguation.
-    pub meaning: Option<Atom<'a>>,
+    pub meaning: Option<Ident<'a>>,
 }
 
 impl<'a> I18nMessageMeta<'a> {
     /// Creates a new I18n message metadata.
-    pub fn new(description: Option<Atom<'a>>, meaning: Option<Atom<'a>>) -> Self {
+    pub fn new(description: Option<Ident<'a>>, meaning: Option<Ident<'a>>) -> Self {
         Self { description, meaning }
     }
 }
@@ -135,14 +135,14 @@ pub fn create_i18n_jsdoc<'a>(
     allocator: &'a oxc_allocator::Allocator,
     meta: &I18nMessageMeta<'a>,
 ) -> LeadingComment<'a> {
-    // Convert Option<Atom> to Option<Atom> with arena allocation
+    // Convert Option<Ident> to Option<Ident> with arena allocation
     let desc = meta.description.as_ref().map(|d| {
         let s = allocator.alloc_str(d.as_str());
-        Atom::from(s)
+        Ident::from(s)
     });
     let meaning = meta.meaning.as_ref().map(|m| {
         let s = allocator.alloc_str(m.as_str());
-        Atom::from(s)
+        Ident::from(s)
     });
 
     // Suppress msgDescriptions warning if no description is provided
@@ -168,8 +168,8 @@ pub fn create_i18n_jsdoc<'a>(
 /// ```
 pub fn create_goog_get_msg_statements<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    i18n_var_name: &Atom<'a>,
-    closure_var_name: &Atom<'a>,
+    i18n_var_name: &Ident<'a>,
+    closure_var_name: &Ident<'a>,
     message_string: &str,
     params: &[(String, String)],
     meta: Option<&I18nMessageMeta<'a>>,
@@ -182,7 +182,7 @@ pub fn create_goog_get_msg_statements<'a>(
     // First arg: message string with {$placeholder} format
     let message_str = allocator.alloc_str(message_string);
     goog_args.push(OutputExpression::Literal(AllocBox::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from(message_str)), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from(message_str)), source_span: None },
         allocator,
     )));
 
@@ -195,10 +195,10 @@ pub fn create_goog_get_msg_statements<'a>(
             let key_str = allocator.alloc_str(&formatted_name);
             let value_str = allocator.alloc_str(value);
             entries.push(LiteralMapEntry {
-                key: Atom::from(key_str),
+                key: Ident::from(key_str),
                 value: OutputExpression::Literal(AllocBox::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from(value_str)),
+                        value: LiteralValue::String(Ident::from(value_str)),
                         source_span: None,
                     },
                     allocator,
@@ -214,13 +214,13 @@ pub fn create_goog_get_msg_statements<'a>(
 
     // goog.getMsg reference
     let goog_var = OutputExpression::ReadVar(AllocBox::new_in(
-        ReadVarExpr { name: Atom::from("goog"), source_span: None },
+        ReadVarExpr { name: Ident::from("goog"), source_span: None },
         allocator,
     ));
     let goog_get_msg = OutputExpression::ReadProp(AllocBox::new_in(
         ReadPropExpr {
             receiver: AllocBox::new_in(goog_var, allocator),
-            name: Atom::from("getMsg"),
+            name: Ident::from("getMsg"),
             optional: false,
             source_span: None,
         },
@@ -288,7 +288,7 @@ pub fn create_goog_get_msg_statements<'a>(
 /// ```
 pub fn create_localize_statements<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    i18n_var_name: &Atom<'a>,
+    i18n_var_name: &Ident<'a>,
     localized_expr: OutputExpression<'a>,
 ) -> AllocVec<'a, OutputStatement<'a>> {
     let mut statements = AllocVec::new_in(allocator);
@@ -333,8 +333,8 @@ pub fn create_localize_statements<'a>(
 /// ```
 pub fn create_translation_declaration<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    i18n_var_name: Atom<'a>,
-    closure_var_name: Atom<'a>,
+    i18n_var_name: Ident<'a>,
+    closure_var_name: Ident<'a>,
     message_for_closure: &str,
     params: &[(String, String)],
     localized_expr: OutputExpression<'a>,

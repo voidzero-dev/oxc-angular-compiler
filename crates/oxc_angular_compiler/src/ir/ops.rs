@@ -10,7 +10,8 @@
 use std::ptr::NonNull;
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::enums::{
     AnimationBindingKind, AnimationKind, BindingKind, DeferOpModifierKind, DeferTriggerKind,
@@ -58,20 +59,20 @@ pub enum I18nSlotHandle {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct I18nPlaceholder<'a> {
     /// The placeholder name for the opening tag (e.g., "START_TAG_DIV").
-    pub start_name: Atom<'a>,
+    pub start_name: Ident<'a>,
     /// The placeholder name for the closing tag (e.g., "CLOSE_TAG_DIV").
     /// `None` for self-closing/void elements.
-    pub close_name: Option<Atom<'a>>,
+    pub close_name: Option<Ident<'a>>,
 }
 
 impl<'a> I18nPlaceholder<'a> {
     /// Creates a new I18nPlaceholder.
-    pub fn new(start_name: Atom<'a>, close_name: Option<Atom<'a>>) -> Self {
+    pub fn new(start_name: Ident<'a>, close_name: Option<Ident<'a>>) -> Self {
         Self { start_name, close_name }
     }
 
     /// Creates a placeholder for a self-closing/void element.
-    pub fn self_closing(start_name: Atom<'a>) -> Self {
+    pub fn self_closing(start_name: Ident<'a>) -> Self {
         Self { start_name, close_name: None }
     }
 }
@@ -658,13 +659,13 @@ pub struct ElementStartOp<'a> {
     /// Cross-reference ID.
     pub xref: XrefId,
     /// Element tag name.
-    pub tag: Atom<'a>,
+    pub tag: Ident<'a>,
     /// Assigned slot.
     pub slot: Option<SlotId>,
     /// Namespace.
     pub namespace: Namespace,
     /// Attribute namespace (e.g., "xlink" for SVG).
-    pub attribute_namespace: Option<Atom<'a>>,
+    pub attribute_namespace: Option<Ident<'a>>,
     /// Local references attached to this element.
     pub local_refs: Vec<'a, LocalRef<'a>>,
     /// Index into the consts array for local refs.
@@ -686,13 +687,13 @@ pub struct ElementOp<'a> {
     /// Cross-reference ID.
     pub xref: XrefId,
     /// Element tag name.
-    pub tag: Atom<'a>,
+    pub tag: Ident<'a>,
     /// Assigned slot.
     pub slot: Option<SlotId>,
     /// Namespace.
     pub namespace: Namespace,
     /// Attribute namespace.
-    pub attribute_namespace: Option<Atom<'a>>,
+    pub attribute_namespace: Option<Ident<'a>>,
     /// Local references.
     pub local_refs: Vec<'a, LocalRef<'a>>,
     /// Index into the consts array for local refs.
@@ -728,15 +729,15 @@ pub struct TemplateOp<'a> {
     pub slot: Option<SlotId>,
     /// HTML tag name for this template element.
     /// Used for content projection matching (e.g., `<ng-template>` vs `<div *ngIf="...">`).
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// Namespace.
     pub namespace: Namespace,
     /// Template kind.
     pub template_kind: TemplateKind,
     /// Function name suffix.
-    pub fn_name_suffix: Option<Atom<'a>>,
+    pub fn_name_suffix: Option<Ident<'a>>,
     /// Block of the template.
-    pub block: Option<Atom<'a>>,
+    pub block: Option<Ident<'a>>,
     /// Decl count for structural directive compatibility.
     pub decl_count: Option<u32>,
     /// The number of binding variable slots used by this template.
@@ -847,9 +848,9 @@ pub struct ConditionalOp<'a> {
     /// Template kind.
     pub template_kind: TemplateKind,
     /// Function name suffix.
-    pub fn_name_suffix: Atom<'a>,
+    pub fn_name_suffix: Ident<'a>,
     /// HTML tag name (for content projection).
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// The number of declaration slots used by this conditional.
     /// Set by allocate_slots phase.
     pub decls: Option<u32>,
@@ -888,9 +889,9 @@ pub struct ConditionalBranchCreateOp<'a> {
     /// Template kind.
     pub template_kind: TemplateKind,
     /// Function name suffix.
-    pub fn_name_suffix: Atom<'a>,
+    pub fn_name_suffix: Ident<'a>,
     /// HTML tag name (for content projection).
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// The number of declaration slots used by this branch.
     /// Set by allocate_slots phase.
     pub decls: Option<u32>,
@@ -931,11 +932,11 @@ pub struct TextOp<'a> {
     /// Assigned slot.
     pub slot: Option<SlotId>,
     /// Static text value.
-    pub initial_value: Atom<'a>,
+    pub initial_value: Ident<'a>,
     /// I18n placeholder.
-    pub i18n_placeholder: Option<Atom<'a>>,
+    pub i18n_placeholder: Option<Ident<'a>>,
     /// ICU placeholder (for text inside ICU expressions).
-    pub icu_placeholder: Option<Atom<'a>>,
+    pub icu_placeholder: Option<Ident<'a>>,
 }
 
 /// Declare an event listener.
@@ -948,25 +949,25 @@ pub struct ListenerOp<'a> {
     /// Slot to target.
     pub target_slot: SlotId,
     /// Tag name of the element on which this listener is placed. Null for host bindings.
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// Whether this listener is from a host binding.
     pub host_listener: bool,
     /// Event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Handler expression (the expression to execute on event).
     pub handler_expression: Option<Box<'a, crate::ir::expression::IrExpression<'a>>>,
     /// Handler operations (legacy, for complex handlers).
     pub handler_ops: Vec<'a, UpdateOp<'a>>,
     /// Function name.
-    pub handler_fn_name: Option<Atom<'a>>,
+    pub handler_fn_name: Option<Ident<'a>>,
     /// Consume functions.
-    pub consume_fn_name: Option<Atom<'a>>,
+    pub consume_fn_name: Option<Ident<'a>>,
     /// Whether this is an animation listener.
     pub is_animation_listener: bool,
     /// Animation phase.
     pub animation_phase: Option<AnimationKind>,
     /// Event target (window, document, body).
-    pub event_target: Option<Atom<'a>>,
+    pub event_target: Option<Ident<'a>>,
     /// Whether this listener uses $event.
     pub consumes_dollar_event: bool,
 }
@@ -981,7 +982,7 @@ pub struct PipeOp<'a> {
     /// Assigned slot.
     pub slot: Option<SlotId>,
     /// Pipe name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Number of arguments.
     pub num_args: u32,
 }
@@ -1033,7 +1034,7 @@ pub struct DeferOp<'a> {
     /// Corresponds to `ownResolverFn` in Angular TS.
     pub own_resolver_fn: Option<OutputExpression<'a>>,
     /// SSR unique ID.
-    pub ssr_unique_id: Option<Atom<'a>>,
+    pub ssr_unique_id: Option<Ident<'a>>,
     /// Defer block flags (e.g., HasHydrateTriggers = 1).
     /// Corresponds to `flags` in Angular TS's DeferOp.
     pub flags: Option<u32>,
@@ -1060,7 +1061,7 @@ pub struct DeferOnOp<'a> {
     /// -1 means starting from placeholder, 0 means same view as defer owner.
     pub target_slot_view_steps: Option<i32>,
     /// Target name for local ref targeting.
-    pub target_name: Option<Atom<'a>>,
+    pub target_name: Option<Ident<'a>>,
     /// Timer delay.
     pub delay: Option<f64>,
     /// Viewport options (for viewport trigger).
@@ -1101,18 +1102,18 @@ pub struct I18nMessageOp<'a> {
     pub i18n_block: Option<XrefId>,
     /// Message placeholder for ICU sub-messages.
     /// Only set for ICU placeholder messages (extracted from parent).
-    pub message_placeholder: Option<Atom<'a>>,
+    pub message_placeholder: Option<Ident<'a>>,
     /// Message ID.
-    pub message_id: Option<Atom<'a>>,
+    pub message_id: Option<Ident<'a>>,
     /// Custom message ID.
-    pub custom_id: Option<Atom<'a>>,
+    pub custom_id: Option<Ident<'a>>,
     /// Message meaning.
-    pub meaning: Option<Atom<'a>>,
+    pub meaning: Option<Ident<'a>>,
     /// Message description.
-    pub description: Option<Atom<'a>>,
+    pub description: Option<Ident<'a>>,
     /// The serialized message string for goog.getMsg and $localize.
     /// Contains the message text with placeholder markers like "{$interpolation}".
-    pub message_string: Option<Atom<'a>>,
+    pub message_string: Option<Ident<'a>>,
     /// Whether message needs postprocessing (has params with multiple values).
     pub needs_postprocessing: bool,
     /// Sub-messages.
@@ -1156,7 +1157,7 @@ pub struct ProjectionOp<'a> {
     /// I18n placeholder data (start_name and close_name for ng-content).
     pub i18n_placeholder: Option<I18nPlaceholder<'a>>,
     /// Selector attribute.
-    pub selector: Option<Atom<'a>>,
+    pub selector: Option<Ident<'a>>,
     /// Fallback template.
     pub fallback: Option<XrefId>,
     /// I18n placeholder data for fallback view.
@@ -1181,7 +1182,7 @@ pub struct RepeaterCreateOp<'a> {
     /// Track function.
     pub track: Box<'a, IrExpression<'a>>,
     /// Track function name.
-    pub track_fn_name: Option<Atom<'a>>,
+    pub track_fn_name: Option<Ident<'a>>,
     /// Some kinds of expressions (e.g. safe reads or nullish coalescing) require additional ops
     /// in order to work. This list keeps track of those ops, if they're necessary.
     /// Set by track_fn_optimization phase when the track expression cannot be optimized.
@@ -1206,12 +1207,12 @@ pub struct RepeaterCreateOp<'a> {
     /// Var names for template.
     pub var_names: RepeaterVarNames<'a>,
     /// HTML tag name (for content projection).
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// Const index for attributes (for content projection).
     /// Set by const_collection phase.
     pub attributes: Option<u32>,
     /// HTML tag name for empty view (for content projection).
-    pub empty_tag: Option<Atom<'a>>,
+    pub empty_tag: Option<Ident<'a>>,
     /// Const index for empty view attributes (for content projection).
     /// Set by const_collection phase.
     pub empty_attributes: Option<u32>,
@@ -1225,20 +1226,20 @@ pub struct RepeaterCreateOp<'a> {
 #[derive(Debug)]
 pub struct RepeaterVarNames<'a> {
     /// Alias for the item ($implicit).
-    pub item: Option<Atom<'a>>,
+    pub item: Option<Ident<'a>>,
     /// Alias for $count.
-    pub count: Option<Atom<'a>>,
+    pub count: Option<Ident<'a>>,
     /// Aliases for $index (can be multiple, e.g. `let i = $index, j = $index`).
     /// Angular stores these in a `Set<string>`.
-    pub index: Vec<'a, Atom<'a>>,
+    pub index: Vec<'a, Ident<'a>>,
     /// Alias for $first.
-    pub first: Option<Atom<'a>>,
+    pub first: Option<Ident<'a>>,
     /// Alias for $last.
-    pub last: Option<Atom<'a>>,
+    pub last: Option<Ident<'a>>,
     /// Alias for $even.
-    pub even: Option<Atom<'a>>,
+    pub even: Option<Ident<'a>>,
     /// Alias for $odd.
-    pub odd: Option<Atom<'a>>,
+    pub odd: Option<Ident<'a>>,
 }
 
 /// Initialize a @let slot.
@@ -1251,7 +1252,7 @@ pub struct DeclareLetOp<'a> {
     /// Assigned slot.
     pub slot: Option<SlotId>,
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// Start an i18n block.
@@ -1325,7 +1326,7 @@ pub struct IcuStartOp<'a> {
     /// Message instance ID for metadata lookup.
     pub message: Option<u32>,
     /// ICU placeholder.
-    pub icu_placeholder: Option<Atom<'a>>,
+    pub icu_placeholder: Option<Ident<'a>>,
 }
 
 /// End an ICU expression.
@@ -1352,20 +1353,20 @@ pub struct I18nContextOp<'a> {
     /// Maps placeholder names to lists of param values.
     pub params: oxc_allocator::HashMap<
         'a,
-        Atom<'a>,
+        Ident<'a>,
         oxc_allocator::Vec<'a, super::i18n_params::I18nParamValue>,
     >,
     /// Post-processing params map for ICU expressions.
     /// These are processed after the main params during message generation.
     pub postprocessing_params: oxc_allocator::HashMap<
         'a,
-        Atom<'a>,
+        Ident<'a>,
         oxc_allocator::Vec<'a, super::i18n_params::I18nParamValue>,
     >,
     /// ICU placeholder literals map.
     /// Maps ICU placeholder names to their formatted string values.
     /// These are string literals like "Hello ${�0�}!" generated from IcuPlaceholderOp.
-    pub icu_placeholder_literals: oxc_allocator::HashMap<'a, Atom<'a>, Atom<'a>>,
+    pub icu_placeholder_literals: oxc_allocator::HashMap<'a, Ident<'a>, Ident<'a>>,
     /// Message instance ID reference (for metadata lookup).
     ///
     /// Stores the i18n message's instance_id (not an XrefId) to look up metadata
@@ -1395,7 +1396,7 @@ pub struct I18nAttributesOp<'a> {
 #[derive(Debug)]
 pub struct I18nAttributeConfig<'a> {
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// I18n message.
     pub message: XrefId,
 }
@@ -1410,7 +1411,7 @@ pub struct VariableOp<'a> {
     /// Variable kind.
     pub kind: SemanticVariableKind,
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Initializer expression.
     pub initializer: Box<'a, IrExpression<'a>>,
     /// Variable flags.
@@ -1434,9 +1435,9 @@ pub struct ExtractedAttributeOp<'a> {
     /// Binding kind.
     pub binding_kind: BindingKind,
     /// Namespace.
-    pub namespace: Option<Atom<'a>>,
+    pub namespace: Option<Ident<'a>>,
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Attribute value.
     pub value: Option<Box<'a, IrExpression<'a>>>,
     /// Security context.
@@ -1453,7 +1454,7 @@ pub struct ExtractedAttributeOp<'a> {
     /// i18n context.
     pub i18n_context: Option<XrefId>,
     /// Trusted value function for security-sensitive constant attributes.
-    pub trusted_value_fn: Option<Atom<'a>>,
+    pub trusted_value_fn: Option<Ident<'a>>,
 }
 
 /// Source location for debugging.
@@ -1464,7 +1465,7 @@ pub struct SourceLocationOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Template URL.
-    pub template_url: Atom<'a>,
+    pub template_url: Ident<'a>,
     /// Line number.
     pub line: u32,
     /// Column number.
@@ -1507,7 +1508,7 @@ pub struct InterpolateTextOp<'a> {
     /// Interpolation expression.
     pub interpolation: Box<'a, IrExpression<'a>>,
     /// I18n placeholder.
-    pub i18n_placeholder: Option<Atom<'a>>,
+    pub i18n_placeholder: Option<Ident<'a>>,
 }
 
 /// Bind to an element property.
@@ -1518,7 +1519,7 @@ pub struct PropertyOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Whether this is a host binding.
@@ -1526,7 +1527,7 @@ pub struct PropertyOp<'a> {
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.
-    pub sanitizer: Option<Atom<'a>>,
+    pub sanitizer: Option<Ident<'a>>,
     /// Whether property should be updated structurally.
     pub is_structural: bool,
     /// I18n context.
@@ -1547,11 +1548,11 @@ pub struct StylePropOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Style name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Unit suffix.
-    pub unit: Option<Atom<'a>>,
+    pub unit: Option<Ident<'a>>,
 }
 
 /// Bind to a class property.
@@ -1562,7 +1563,7 @@ pub struct ClassPropOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Class name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
 }
@@ -1608,15 +1609,15 @@ pub struct AttributeOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Namespace.
-    pub namespace: Option<Atom<'a>>,
+    pub namespace: Option<Ident<'a>>,
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.
-    pub sanitizer: Option<Atom<'a>>,
+    pub sanitizer: Option<Ident<'a>>,
     /// I18n context.
     pub i18n_context: Option<XrefId>,
     /// I18n message instance ID.
@@ -1645,7 +1646,7 @@ pub struct DomPropertyOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Whether this is a host binding.
@@ -1653,7 +1654,7 @@ pub struct DomPropertyOp<'a> {
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.
-    pub sanitizer: Option<Atom<'a>>,
+    pub sanitizer: Option<Ident<'a>>,
     /// Binding kind (for animation handling).
     pub binding_kind: BindingKind,
 }
@@ -1679,13 +1680,13 @@ pub struct TwoWayPropertyOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.
-    pub sanitizer: Option<Atom<'a>>,
+    pub sanitizer: Option<Ident<'a>>,
 }
 
 /// Two-way listener (CREATE op).
@@ -1698,13 +1699,13 @@ pub struct TwoWayListenerOp<'a> {
     /// Target slot.
     pub target_slot: SlotId,
     /// Tag name of the element on which this listener is placed.
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// Event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Handler operations.
     pub handler_ops: Vec<'a, UpdateOp<'a>>,
     /// Function name.
-    pub handler_fn_name: Option<Atom<'a>>,
+    pub handler_fn_name: Option<Ident<'a>>,
 }
 
 /// Store @let value.
@@ -1717,7 +1718,7 @@ pub struct StoreLetOp<'a> {
     /// Target slot.
     pub target_slot: SlotId,
     /// Name that the user set when declaring the `@let`.
-    pub declared_name: Atom<'a>,
+    pub declared_name: Ident<'a>,
     /// Value expression.
     pub value: Box<'a, IrExpression<'a>>,
 }
@@ -1766,10 +1767,10 @@ pub struct I18nExpressionOp<'a> {
     /// Expression usage.
     pub usage: I18nExpressionFor,
     /// Attribute name (for attribute bindings).
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// I18n placeholder name associated with this expression.
     /// This can be None if the expression is part of an ICU placeholder.
-    pub i18n_placeholder: Option<Atom<'a>>,
+    pub i18n_placeholder: Option<Ident<'a>>,
     /// Reference to ICU placeholder op if this expression is part of an ICU.
     pub icu_placeholder: Option<XrefId>,
 }
@@ -1798,10 +1799,10 @@ pub struct IcuPlaceholderOp<'a> {
     /// Cross-reference ID.
     pub xref: XrefId,
     /// Placeholder name in the ICU expression.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Static string segments to be combined with expression placeholders.
     /// Works like interpolation: strings.len() == expression_placeholders.len() + 1
-    pub strings: oxc_allocator::Vec<'a, Atom<'a>>,
+    pub strings: oxc_allocator::Vec<'a, Ident<'a>>,
     /// Expression placeholders collected from I18nExpression ops.
     /// These are combined with strings to form the full placeholder value.
     pub expression_placeholders: oxc_allocator::Vec<'a, super::i18n_params::I18nParamValue>,
@@ -1817,11 +1818,11 @@ pub struct BindingOp<'a> {
     /// Binding kind.
     pub kind: BindingKind,
     /// Binding name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Unit suffix.
-    pub unit: Option<Atom<'a>>,
+    pub unit: Option<Ident<'a>>,
     /// Security context.
     pub security_context: SecurityContext,
     /// I18n message instance ID.
@@ -1851,13 +1852,13 @@ pub struct AnimationOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Animation name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Animation kind (enter or leave).
     pub animation_kind: AnimationKind,
     /// Handler operations (contains the expression as a return statement).
     pub handler_ops: Vec<'a, UpdateOp<'a>>,
     /// Function name for the handler.
-    pub handler_fn_name: Option<Atom<'a>>,
+    pub handler_fn_name: Option<Ident<'a>>,
     /// I18n message instance ID.
     ///
     /// Stores the i18n message's instance_id for dedup, not an XrefId.
@@ -1865,7 +1866,7 @@ pub struct AnimationOp<'a> {
     /// Security context.
     pub security_context: SecurityContext,
     /// Sanitizer function.
-    pub sanitizer: Option<Atom<'a>>,
+    pub sanitizer: Option<Ident<'a>>,
 }
 
 /// Animation string binding (CREATE op).
@@ -1876,7 +1877,7 @@ pub struct AnimationStringOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Animation name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Animation kind (enter or leave).
     pub animation_kind: AnimationKind,
     /// Expression.
@@ -1891,7 +1892,7 @@ pub struct AnimationBindingOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Animation name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Binding kind.
@@ -1908,15 +1909,15 @@ pub struct AnimationListenerOp<'a> {
     /// Target slot.
     pub target_slot: SlotId,
     /// Tag name of the element on which this listener is placed. Null for host bindings.
-    pub tag: Option<Atom<'a>>,
+    pub tag: Option<Ident<'a>>,
     /// Whether this listener is from a host binding.
     pub host_listener: bool,
     /// Event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Handler operations.
     pub handler_ops: Vec<'a, UpdateOp<'a>>,
     /// Function name.
-    pub handler_fn_name: Option<Atom<'a>>,
+    pub handler_fn_name: Option<Ident<'a>>,
     /// Animation phase.
     pub phase: AnimationKind,
     /// Whether this listener uses $event.
@@ -1933,7 +1934,7 @@ pub struct UpdateVariableOp<'a> {
     /// Variable kind.
     pub kind: SemanticVariableKind,
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Initializer expression.
     pub initializer: Box<'a, IrExpression<'a>>,
     /// Variable flags.
@@ -1955,7 +1956,7 @@ pub struct ControlOp<'a> {
     /// Target element.
     pub target: XrefId,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Expression.
     pub expression: Box<'a, IrExpression<'a>>,
     /// Security context.
@@ -1984,7 +1985,7 @@ pub struct StatementOp<'a> {
 #[derive(Debug)]
 pub struct LocalRef<'a> {
     /// Reference name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Target directive/component.
-    pub target: Atom<'a>,
+    pub target: Ident<'a>,
 }

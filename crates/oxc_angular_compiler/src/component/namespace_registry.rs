@@ -1,5 +1,5 @@
 use oxc_allocator::{Allocator, FromIn};
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 /// Registry for assigning namespace aliases to imported modules.
@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 /// - i1, i2, i3... are assigned to other modules in order of first reference
 pub struct NamespaceRegistry<'a> {
     /// Map of module_path -> namespace alias
-    modules: FxHashMap<Atom<'a>, Atom<'a>>,
+    modules: FxHashMap<Ident<'a>, Ident<'a>>,
     /// Counter for next alias index (starts at 1, since i0 is reserved for @angular/core)
     next_index: usize,
     /// The allocator for creating atoms
@@ -27,18 +27,18 @@ impl<'a> NamespaceRegistry<'a> {
             allocator,
         };
         // Pre-register @angular/core as i0
-        registry.modules.insert(Atom::from("@angular/core"), Atom::from("i0"));
+        registry.modules.insert(Ident::from("@angular/core"), Ident::from("i0"));
         registry
     }
 
     /// Get the namespace alias for a module, assigning one if not yet assigned.
-    pub fn get_or_assign(&mut self, module_path: &Atom<'a>) -> Atom<'a> {
+    pub fn get_or_assign(&mut self, module_path: &Ident<'a>) -> Ident<'a> {
         if let Some(alias) = self.modules.get(module_path) {
             return alias.clone();
         }
 
         // Assign new alias
-        let alias = Atom::from_in(format!("i{}", self.next_index).as_str(), self.allocator);
+        let alias = Ident::from_in(format!("i{}", self.next_index).as_str(), self.allocator);
         self.next_index += 1;
         self.modules.insert(module_path.clone(), alias.clone());
         alias
@@ -46,14 +46,14 @@ impl<'a> NamespaceRegistry<'a> {
 
     /// Get all registered modules and their aliases.
     /// Returns in a deterministic order (sorted by alias).
-    pub fn get_all_modules(&self) -> Vec<(&Atom<'a>, &Atom<'a>)> {
+    pub fn get_all_modules(&self) -> Vec<(&Ident<'a>, &Ident<'a>)> {
         let mut entries: Vec<_> = self.modules.iter().collect();
         entries.sort_by_key(|(_, alias)| alias.as_str());
         entries
     }
 
     /// Check if a module has been registered.
-    pub fn has_module(&self, module_path: &Atom<'a>) -> bool {
+    pub fn has_module(&self, module_path: &Ident<'a>) -> bool {
         self.modules.contains_key(module_path)
     }
 
@@ -112,7 +112,7 @@ mod tests {
         let allocator = Allocator::default();
         let mut registry = NamespaceRegistry::new(&allocator);
 
-        let core_alias = registry.get_or_assign(&Atom::from("@angular/core"));
+        let core_alias = registry.get_or_assign(&Ident::from("@angular/core"));
         assert_eq!(core_alias.as_str(), "i0");
     }
 
@@ -121,9 +121,9 @@ mod tests {
         let allocator = Allocator::default();
         let mut registry = NamespaceRegistry::new(&allocator);
 
-        let forms_alias = registry.get_or_assign(&Atom::from("@angular/forms"));
-        let router_alias = registry.get_or_assign(&Atom::from("@angular/router"));
-        let http_alias = registry.get_or_assign(&Atom::from("@angular/common/http"));
+        let forms_alias = registry.get_or_assign(&Ident::from("@angular/forms"));
+        let router_alias = registry.get_or_assign(&Ident::from("@angular/router"));
+        let http_alias = registry.get_or_assign(&Ident::from("@angular/common/http"));
 
         assert_eq!(forms_alias.as_str(), "i1");
         assert_eq!(router_alias.as_str(), "i2");
@@ -135,8 +135,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut registry = NamespaceRegistry::new(&allocator);
 
-        let first = registry.get_or_assign(&Atom::from("@angular/forms"));
-        let second = registry.get_or_assign(&Atom::from("@angular/forms"));
+        let first = registry.get_or_assign(&Ident::from("@angular/forms"));
+        let second = registry.get_or_assign(&Ident::from("@angular/forms"));
 
         assert_eq!(first.as_str(), second.as_str());
         assert_eq!(first.as_str(), "i1");
@@ -148,14 +148,14 @@ mod tests {
         let mut registry = NamespaceRegistry::new(&allocator);
 
         // @angular/core is pre-registered
-        assert!(registry.has_module(&Atom::from("@angular/core")));
+        assert!(registry.has_module(&Ident::from("@angular/core")));
 
         // Not yet registered
-        assert!(!registry.has_module(&Atom::from("@angular/forms")));
+        assert!(!registry.has_module(&Ident::from("@angular/forms")));
 
         // Register it
-        registry.get_or_assign(&Atom::from("@angular/forms"));
-        assert!(registry.has_module(&Atom::from("@angular/forms")));
+        registry.get_or_assign(&Ident::from("@angular/forms"));
+        assert!(registry.has_module(&Ident::from("@angular/forms")));
     }
 
     #[test]
@@ -163,8 +163,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut registry = NamespaceRegistry::new(&allocator);
 
-        registry.get_or_assign(&Atom::from("@angular/router"));
-        registry.get_or_assign(&Atom::from("@angular/forms"));
+        registry.get_or_assign(&Ident::from("@angular/router"));
+        registry.get_or_assign(&Ident::from("@angular/forms"));
 
         let all_modules = registry.get_all_modules();
 
@@ -184,15 +184,15 @@ mod tests {
         let mut registry = NamespaceRegistry::new(&allocator);
 
         // Register other modules first
-        registry.get_or_assign(&Atom::from("@angular/forms"));
-        registry.get_or_assign(&Atom::from("@angular/router"));
+        registry.get_or_assign(&Ident::from("@angular/forms"));
+        registry.get_or_assign(&Ident::from("@angular/router"));
 
         // @angular/core should still be i0
-        let core_alias = registry.get_or_assign(&Atom::from("@angular/core"));
+        let core_alias = registry.get_or_assign(&Ident::from("@angular/core"));
         assert_eq!(core_alias.as_str(), "i0");
 
         // Next module should be i3
-        let http_alias = registry.get_or_assign(&Atom::from("@angular/common/http"));
+        let http_alias = registry.get_or_assign(&Ident::from("@angular/common/http"));
         assert_eq!(http_alias.as_str(), "i3");
     }
 
@@ -201,8 +201,8 @@ mod tests {
         let allocator = Allocator::default();
         let mut registry = NamespaceRegistry::new(&allocator);
 
-        registry.get_or_assign(&Atom::from("@angular/router"));
-        registry.get_or_assign(&Atom::from("@bitwarden/common/auth/abstractions/auth.service"));
+        registry.get_or_assign(&Ident::from("@angular/router"));
+        registry.get_or_assign(&Ident::from("@bitwarden/common/auth/abstractions/auth.service"));
 
         let imports = registry.generate_import_statements();
 
@@ -232,23 +232,23 @@ import * as i2 from '@bitwarden/common/auth/abstractions/auth.service';
         let mut registry2 = NamespaceRegistry::new(&allocator);
 
         // Registry 1 has @angular/router as i1
-        registry1.get_or_assign(&Atom::from("@angular/router"));
+        registry1.get_or_assign(&Ident::from("@angular/router"));
 
         // Registry 2 has @angular/forms as i1, @angular/common as i2
-        registry2.get_or_assign(&Atom::from("@angular/forms"));
-        registry2.get_or_assign(&Atom::from("@angular/common"));
+        registry2.get_or_assign(&Ident::from("@angular/forms"));
+        registry2.get_or_assign(&Ident::from("@angular/common"));
 
         // Merge registry2 into registry1
         registry1.merge_from(&registry2);
 
         // registry1 should now have all modules
-        assert!(registry1.has_module(&Atom::from("@angular/core")));
-        assert!(registry1.has_module(&Atom::from("@angular/router")));
-        assert!(registry1.has_module(&Atom::from("@angular/forms")));
-        assert!(registry1.has_module(&Atom::from("@angular/common")));
+        assert!(registry1.has_module(&Ident::from("@angular/core")));
+        assert!(registry1.has_module(&Ident::from("@angular/router")));
+        assert!(registry1.has_module(&Ident::from("@angular/forms")));
+        assert!(registry1.has_module(&Ident::from("@angular/common")));
 
         // New module should get next available index
-        let http_alias = registry1.get_or_assign(&Atom::from("@angular/common/http"));
+        let http_alias = registry1.get_or_assign(&Ident::from("@angular/common/http"));
         assert_eq!(http_alias.as_str(), "i3");
     }
 }

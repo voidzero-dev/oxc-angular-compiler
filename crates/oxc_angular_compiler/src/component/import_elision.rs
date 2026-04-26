@@ -41,7 +41,7 @@ use oxc_ast::ast::{
     Program, Statement, TSType,
 };
 use oxc_semantic::{Semantic, SemanticBuilder, SymbolFlags};
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashSet;
 
 use crate::optimizer::Edit;
@@ -55,7 +55,7 @@ const PARAM_DECORATORS: &[&str] = &["Inject", "Optional", "Self", "SkipSelf", "H
 /// Analyzer for determining which imports are type-only and can be elided.
 pub struct ImportElisionAnalyzer<'a> {
     /// Set of import specifier local names that should be removed (type-only).
-    type_only_specifiers: FxHashSet<Atom<'a>>,
+    type_only_specifiers: FxHashSet<Ident<'a>>,
 }
 
 impl<'a> ImportElisionAnalyzer<'a> {
@@ -98,7 +98,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                             continue;
                         }
 
-                        let name: Atom<'a> = spec.local.name.clone().into();
+                        let name: Ident<'a> = spec.local.name.clone().into();
 
                         // Check if this import has only type references
                         if Self::is_type_only_import(&spec.local, semantic) {
@@ -110,7 +110,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         }
                     }
                     ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
-                        let name: Atom<'a> = spec.local.name.clone().into();
+                        let name: Ident<'a> = spec.local.name.clone().into();
 
                         if Self::is_type_only_import(&spec.local, semantic) {
                             type_only_specifiers.insert(name.clone());
@@ -145,7 +145,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Computed property keys like `[fromEmail]` in type literals reference runtime values,
     /// even when they appear in type contexts. TypeScript considers these as value references
     /// and preserves their imports.
-    fn collect_computed_property_key_idents(program: &'a Program<'a>) -> FxHashSet<Atom<'a>> {
+    fn collect_computed_property_key_idents(program: &'a Program<'a>) -> FxHashSet<Ident<'a>> {
         let mut result = FxHashSet::default();
 
         for stmt in &program.body {
@@ -158,7 +158,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Walk a statement collecting computed property key identifiers from type annotations.
     fn collect_computed_keys_from_statement(
         stmt: &'a Statement<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match stmt {
             Statement::ClassDeclaration(class) => {
@@ -185,7 +185,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Walk class members collecting computed property key identifiers from type annotations.
     fn collect_computed_keys_from_class(
         class: &'a oxc_ast::ast::Class<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         for element in &class.body.body {
             if let ClassElement::PropertyDefinition(prop) = element {
@@ -200,7 +200,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Recursively walk a TypeScript type collecting computed property key identifiers.
     fn collect_computed_keys_from_ts_type(
         ts_type: &'a TSType<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match ts_type {
             TSType::TSTypeLiteral(type_lit) => {
@@ -256,7 +256,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Collect identifier names from an expression (for computed property keys).
     fn collect_idents_from_expr(
         expr: &'a oxc_ast::ast::PropertyKey<'a>,
-        result: &mut FxHashSet<Atom<'a>>,
+        result: &mut FxHashSet<Ident<'a>>,
     ) {
         match expr {
             oxc_ast::ast::PropertyKey::StaticIdentifier(_) => {
@@ -272,7 +272,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     }
 
     /// Collect identifier names from an expression.
-    fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Atom<'a>>) {
+    fn collect_idents_from_expression(expr: &'a Expression<'a>, result: &mut FxHashSet<Ident<'a>>) {
         match expr {
             Expression::Identifier(id) => {
                 result.insert(id.name.clone().into());
@@ -641,11 +641,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
 
     /// Check if a specifier name should be elided (removed).
     pub fn should_elide(&self, name: &str) -> bool {
-        self.type_only_specifiers.contains(name)
+        self.type_only_specifiers.contains(&Ident::from(name))
     }
 
     /// Get the set of type-only specifier names.
-    pub fn type_only_specifiers(&self) -> &FxHashSet<Atom<'a>> {
+    pub fn type_only_specifiers(&self) -> &FxHashSet<Ident<'a>> {
         &self.type_only_specifiers
     }
 
@@ -704,7 +704,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     let local_name = &spec.local.name;
 
                     // Skip if already marked as type-only by semantic analysis
-                    if analyzer.type_only_specifiers.contains(local_name.as_str()) {
+                    if analyzer.type_only_specifiers.contains(local_name) {
                         continue;
                     }
 
@@ -726,6 +726,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
 /// Returns edits that remove type-only import specifiers from the source.
 /// Entire import declarations are removed if all their specifiers are type-only,
 /// or if the import has no specifiers at all (`import {} from 'module'`).
+/// Type-only export declarations (`export type { X }`, `export { type X }`) are also removed.
 pub fn import_elision_edits<'a>(
     source: &str,
     program: &Program<'a>,
@@ -741,7 +742,21 @@ pub fn import_elision_edits<'a>(
         false
     });
 
-    if !analyzer.has_type_only_imports() && !has_empty_imports {
+    // Check if there are type-only exports that need removal
+    let has_type_only_exports = program.body.iter().any(|stmt| {
+        if let Statement::ExportNamedDeclaration(export_decl) = stmt {
+            if export_decl.source.is_some() || export_decl.declaration.is_some() {
+                return export_decl.export_kind.is_type();
+            }
+            if export_decl.export_kind.is_type() {
+                return true;
+            }
+            return export_decl.specifiers.iter().any(|spec| spec.export_kind.is_type());
+        }
+        false
+    });
+
+    if !analyzer.has_type_only_imports() && !has_empty_imports && !has_type_only_exports {
         return Vec::new();
     }
 
@@ -853,6 +868,79 @@ pub fn import_elision_edits<'a>(
             }
 
             edits.push(Edit::replace(start as u32, end as u32, new_import));
+        }
+    }
+
+    // Process type-only export declarations
+    for stmt in &program.body {
+        let Statement::ExportNamedDeclaration(export_decl) = stmt else {
+            continue;
+        };
+
+        // Skip exports with declarations (e.g. `export class X {}`)
+        if export_decl.declaration.is_some() {
+            continue;
+        }
+
+        if export_decl.export_kind.is_type() {
+            // `export type { X }` or `export type { X } from './foo'` — remove entirely
+            let start = export_decl.span.start as usize;
+            let mut end = export_decl.span.end as usize;
+            let bytes = source.as_bytes();
+            while end < bytes.len() && (bytes[end] == b'\n' || bytes[end] == b'\r') {
+                end += 1;
+            }
+            edits.push(Edit::delete(start as u32, end as u32));
+            continue;
+        }
+
+        // Check for individual type-only specifiers (`export { type X, Y }`)
+        let (type_specs, value_specs): (Vec<_>, Vec<_>) =
+            export_decl.specifiers.iter().partition(|spec| spec.export_kind.is_type());
+
+        if type_specs.is_empty() {
+            continue;
+        }
+
+        let start = export_decl.span.start as usize;
+        let mut end = export_decl.span.end as usize;
+        let bytes = source.as_bytes();
+        while end < bytes.len() && (bytes[end] == b'\n' || bytes[end] == b'\r') {
+            end += 1;
+        }
+
+        if value_specs.is_empty() {
+            // All specifiers are type-only — remove entire statement
+            edits.push(Edit::delete(start as u32, end as u32));
+        } else {
+            // Partial removal — reconstruct with only value specifiers
+            let mut named_specifiers: Vec<String> = Vec::new();
+            for spec in &value_specs {
+                let local_name = spec.local.name().as_str();
+                let exported_name = spec.exported.name().as_str();
+                if local_name == exported_name {
+                    named_specifiers.push(local_name.to_string());
+                } else {
+                    named_specifiers.push(format!("{local_name} as {exported_name}"));
+                }
+            }
+
+            let mut new_export = String::from("export { ");
+            new_export.push_str(&named_specifiers.join(", "));
+            new_export.push_str(" }");
+
+            if let Some(source_lit) = &export_decl.source {
+                new_export.push_str(" from \"");
+                new_export.push_str(source_lit.value.as_str());
+                new_export.push('"');
+            }
+            new_export.push(';');
+
+            if end > export_decl.span.end as usize {
+                new_export.push('\n');
+            }
+
+            edits.push(Edit::replace(start as u32, end as u32, new_export));
         }
     }
 
@@ -1987,6 +2075,99 @@ class UsersTableComponent {}
         assert!(
             !filtered.contains("@cu/teams-pulse/types"),
             "Empty import `import {{}} from '@cu/teams-pulse/types'` should be removed.\nFiltered:\n{}",
+            filtered
+        );
+    }
+
+    #[test]
+    fn test_export_type_with_import_both_removed() {
+        let source = r#"
+import { Config } from './config';
+export type { Config };
+"#;
+        let filtered = filter_source(source);
+        assert!(
+            !filtered.contains("Config"),
+            "Both import and export type should be removed.\nFiltered:\n{}",
+            filtered
+        );
+        assert!(
+            !filtered.contains("export"),
+            "export type declaration should be removed.\nFiltered:\n{}",
+            filtered
+        );
+    }
+
+    #[test]
+    fn test_export_type_multiple_specifiers_removed() {
+        let source = r#"
+import { Foo, Bar } from './types';
+export type { Foo, Bar };
+"#;
+        let filtered = filter_source(source);
+        assert!(!filtered.contains("Foo"), "Foo should be removed.\nFiltered:\n{}", filtered);
+        assert!(!filtered.contains("Bar"), "Bar should be removed.\nFiltered:\n{}", filtered);
+    }
+
+    #[test]
+    fn test_export_mixed_type_and_value_specifiers() {
+        let source = r#"
+import { Component } from '@angular/core';
+import { Foo, Bar } from './types';
+export { type Foo, Bar };
+
+@Component({ selector: 'test' })
+class TestComponent {
+    value = Bar;
+}
+"#;
+        let filtered = filter_source(source);
+        // type Foo should be removed, Bar should remain
+        assert!(
+            !filtered.contains("Foo"),
+            "type-only Foo should be removed from export.\nFiltered:\n{}",
+            filtered
+        );
+        assert!(
+            filtered.contains("export { Bar }"),
+            "Value export Bar should remain.\nFiltered:\n{}",
+            filtered
+        );
+    }
+
+    #[test]
+    fn test_export_type_with_source_removed() {
+        let source = r#"
+import { Component } from '@angular/core';
+export type { Config } from './config';
+
+@Component({ selector: 'test' })
+class TestComponent {}
+"#;
+        let filtered = filter_source(source);
+        assert!(
+            !filtered.contains("Config"),
+            "export type with source should be removed.\nFiltered:\n{}",
+            filtered
+        );
+    }
+
+    #[test]
+    fn test_value_export_not_affected() {
+        let source = r#"
+import { Component } from '@angular/core';
+import { helper } from './utils';
+export { helper };
+
+@Component({ selector: 'test' })
+class TestComponent {
+    value = helper();
+}
+"#;
+        let filtered = filter_source(source);
+        assert!(
+            filtered.contains("export { helper }"),
+            "Value export should not be affected.\nFiltered:\n{}",
             filtered
         );
     }

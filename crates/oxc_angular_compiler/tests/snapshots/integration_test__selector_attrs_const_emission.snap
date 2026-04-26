@@ -24,5 +24,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:BadgeComponent,selecto
 }
 (() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(BadgeComponent,
-      {className:"BadgeComponent",filePath:"badge.component.ts",lineNumber:1}));
+      {className:"BadgeComponent",filePath:"badge.component.ts",lineNumber:9}));
 })();

@@ -7,7 +7,7 @@
 //! `core.ts` parseSelectorToR3Selector function.
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::output::ast::{LiteralExpr, LiteralValue, OutputExpression};
 
@@ -441,7 +441,7 @@ pub fn r3_selector_to_output_expr<'a>(
             R3SelectorElement::String(s) => {
                 result.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
                     LiteralExpr {
-                        value: LiteralValue::String(Atom::from(allocator.alloc_str(s))),
+                        value: LiteralValue::String(Ident::from(allocator.alloc_str(s))),
                         source_span: None,
                     },
                     allocator,

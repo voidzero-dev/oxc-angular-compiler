@@ -1,0 +1,19 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable } from "@angular/core";
+import { State, Action, Selector } from "@ngxs/store";
+import { __decorate } from "tslib";
+let AnimalsState = class AnimalsState {
+	static getAnimals(state) {
+		return state;
+	}
+	addAnimal(ctx, action) {}
+};
+__decorate([Action({ type: "AddAnimal" })], AnimalsState.prototype, "addAnimal", null);
+__decorate([Selector()], AnimalsState, "getAnimals", null);
+AnimalsState = __decorate([State({
+	name: "animals",
+	defaults: []
+}), Injectable()], AnimalsState);

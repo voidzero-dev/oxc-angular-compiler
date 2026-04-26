@@ -292,7 +292,8 @@ fn get_slot_dependency_from_output_expr(expr: &OutputExpression<'_>) -> Option<X
         | OutputExpression::ArrowFunction(_)
         | OutputExpression::Instantiate(_)
         | OutputExpression::DynamicImport(_)
-        | OutputExpression::LocalizedString(_) => None,
+        | OutputExpression::LocalizedString(_)
+        | OutputExpression::RawSource(_) => None,
     }
 }
 

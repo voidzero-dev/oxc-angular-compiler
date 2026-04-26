@@ -11,7 +11,7 @@
 
 use oxc_allocator::Box;
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::AngularExpression;
@@ -81,13 +81,13 @@ pub fn resolve_names(job: &mut ComponentCompilationJob<'_>) {
 /// take precedence over other variables with the same name.
 #[derive(Default, Clone)]
 struct ScopeMaps<'a> {
-    scope: FxHashMap<Atom<'a>, XrefId>,
-    local_definitions: FxHashMap<Atom<'a>, XrefId>,
+    scope: FxHashMap<Ident<'a>, XrefId>,
+    local_definitions: FxHashMap<Ident<'a>, XrefId>,
 }
 
 impl<'a> ScopeMaps<'a> {
     /// Look up a name, checking local definitions first (they take precedence).
-    fn get(&self, name: &Atom<'a>) -> Option<&XrefId> {
+    fn get(&self, name: &Ident<'a>) -> Option<&XrefId> {
         self.local_definitions.get(name).or_else(|| self.scope.get(name))
     }
 }

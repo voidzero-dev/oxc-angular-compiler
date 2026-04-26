@@ -16,7 +16,7 @@
 
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use super::compilation::{
     CTX_REF, ComponentCompilationJob, DeferBlockDepsEmitMode, DeferMetadata,
@@ -67,7 +67,7 @@ pub struct IngestOptions<'a> {
     /// Relative path to the context file for i18n suffix generation.
     ///
     /// Used to generate unique, file-based variable names for i18n translations.
-    pub relative_context_file_path: Option<Atom<'a>>,
+    pub relative_context_file_path: Option<Ident<'a>>,
 
     /// Whether to use external message IDs in i18n variable names.
     ///
@@ -83,7 +83,7 @@ pub struct IngestOptions<'a> {
     pub defer_block_deps_emit_mode: DeferBlockDepsEmitMode,
 
     /// Relative path to the template file for source location debugging.
-    pub relative_template_path: Option<Atom<'a>>,
+    pub relative_template_path: Option<Ident<'a>>,
 
     /// Whether to enable debug source locations.
     ///
@@ -635,7 +635,7 @@ fn convert_interpolation_to_ir<'a>(
 fn convert_interpolation_to_ir_with_i18n_placeholders<'a>(
     job: &mut ComponentCompilationJob<'a>,
     expr: AngularExpression<'a>,
-    i18n_placeholders: Vec<'a, Atom<'a>>,
+    i18n_placeholders: Vec<'a, Ident<'a>>,
 ) -> Box<'a, IrExpression<'a>> {
     let allocator = job.allocator;
 
@@ -678,7 +678,7 @@ fn convert_interpolation_to_ir_with_i18n_placeholders<'a>(
 /// `ingest_component_with_options` directly.
 pub fn ingest_component<'a>(
     allocator: &'a Allocator,
-    component_name: Atom<'a>,
+    component_name: Ident<'a>,
     template: Vec<'a, R3Node<'a>>,
 ) -> ComponentCompilationJob<'a> {
     ingest_component_with_options(allocator, component_name, template, IngestOptions::default())
@@ -703,7 +703,7 @@ pub fn ingest_component<'a>(
 /// A `ComponentCompilationJob` ready for transformation phases.
 pub fn ingest_component_with_options<'a>(
     allocator: &'a Allocator,
-    component_name: Atom<'a>,
+    component_name: Ident<'a>,
     template: Vec<'a, R3Node<'a>>,
     options: IngestOptions<'a>,
 ) -> ComponentCompilationJob<'a> {
@@ -814,7 +814,7 @@ fn ingest_text<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: XrefId,
     text: R3Text<'a>,
-    icu_placeholder: Option<Atom<'a>>,
+    icu_placeholder: Option<Ident<'a>>,
 ) {
     let xref = job.allocate_xref_id();
 
@@ -840,7 +840,7 @@ fn ingest_bound_text<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: XrefId,
     bound_text: R3BoundText<'a>,
-    icu_placeholder: Option<Atom<'a>>,
+    icu_placeholder: Option<Ident<'a>>,
 ) {
     let allocator = job.allocator;
     let xref = job.allocate_xref_id();
@@ -850,7 +850,7 @@ fn ingest_bound_text<'a>(
         base: CreateOpBase { source_span: Some(bound_text.source_span), ..Default::default() },
         xref,
         slot: None,
-        initial_value: Atom::from(""),
+        initial_value: Ident::from(""),
         i18n_placeholder: None,
         icu_placeholder,
     });
@@ -861,7 +861,7 @@ fn ingest_bound_text<'a>(
 
     // Extract i18n placeholders from the bound text's i18n metadata
     // Ported from Angular's ingestBoundText (ingest.ts lines 485-495)
-    let i18n_placeholders: Vec<'_, Atom<'_>> = match &bound_text.i18n {
+    let i18n_placeholders: Vec<'_, Ident<'_>> = match &bound_text.i18n {
         Some(I18nMeta::Node(I18nNode::Container(container))) => {
             let mut placeholders = Vec::new_in(allocator);
             for child in container.children.iter() {
@@ -947,7 +947,7 @@ fn ingest_icu<'a>(job: &mut ComponentCompilationJob<'a>, view_xref: XrefId, icu:
     }
 
     // Process vars (bound text expressions)
-    // In Rust, vars is typed as HashMap<Atom, R3BoundText> so no runtime check needed
+    // In Rust, vars is typed as HashMap<Ident, R3BoundText> so no runtime check needed
     for (placeholder_name, bound_text) in icu.vars {
         ingest_bound_text(job, view_xref, bound_text, Some(placeholder_name));
     }
@@ -1033,8 +1033,8 @@ fn ingest_element<'a>(
     let namespace = namespace_for_key(namespace_key);
 
     // Allocate the stripped element name in the arena
-    let tag: Atom<'a> = if namespace_key.is_some() {
-        Atom::from(allocator.alloc_str(element_name))
+    let tag: Ident<'a> = if namespace_key.is_some() {
+        Ident::from(allocator.alloc_str(element_name))
     } else {
         element.name.clone()
     };
@@ -1373,8 +1373,8 @@ fn ingest_static_attributes_with_i18n<'a>(
 
         // Split namespace from attribute name (e.g., `:xmlns:xlink` → namespace="xmlns", name="xlink")
         let (ns, local_name) = split_ns_name(name.as_str());
-        let namespace = ns.map(|n| Atom::from(n));
-        let local_name = Atom::from(local_name);
+        let namespace = ns.map(|n| Ident::from(n));
+        let local_name = Ident::from(local_name);
 
         let extracted = ExtractedAttributeOp {
             base: CreateOpBase::default(),
@@ -1415,8 +1415,8 @@ fn ingest_single_static_attribute<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: XrefId,
     element_xref: XrefId,
-    name: Atom<'a>,
-    value: Atom<'a>,
+    name: Ident<'a>,
+    value: Ident<'a>,
     is_structural_template_attribute: bool,
 ) {
     use crate::output::ast::{LiteralExpr, LiteralValue, OutputExpression};
@@ -1453,8 +1453,8 @@ fn ingest_single_static_attribute<'a>(
         // For regular (non-structural) attributes, create ExtractedAttributeOp directly
         // Split namespace from attribute name (e.g., `:xmlns:xlink` → namespace="xmlns", name="xlink")
         let (ns, local_name) = split_ns_name(name.as_str());
-        let namespace = ns.map(|n| Atom::from(n));
-        let local_name = Atom::from(local_name);
+        let namespace = ns.map(|n| Ident::from(n));
+        let local_name = Ident::from(local_name);
 
         let extracted = ExtractedAttributeOp {
             base: CreateOpBase::default(),
@@ -1481,7 +1481,7 @@ fn ingest_bindings_owned<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: XrefId,
     element_xref: XrefId,
-    tag: Option<Atom<'a>>,
+    tag: Option<Ident<'a>>,
     inputs: Vec<'a, R3BoundAttribute<'a>>,
     outputs: Vec<'a, R3BoundEvent<'a>>,
 ) {
@@ -1620,7 +1620,7 @@ fn ingest_listener_owned<'a>(
     job: &mut ComponentCompilationJob<'a>,
     view_xref: XrefId,
     element_xref: XrefId,
-    tag: Option<Atom<'a>>,
+    tag: Option<Ident<'a>>,
     output: R3BoundEvent<'a>,
 ) {
     let allocator = job.allocator;
@@ -1677,7 +1677,7 @@ fn ingest_listener_owned<'a>(
 
         // Create $event reference
         let event_ref = IrExpression::LexicalRead(Box::new_in(
-            LexicalReadExpr { name: Atom::from("$event"), source_span: None },
+            LexicalReadExpr { name: Ident::from("$event"), source_span: None },
             allocator,
         ));
 
@@ -1816,7 +1816,7 @@ fn ingest_listener_owned<'a>(
 
 /// Checks if a template is an explicit `<ng-template>` (as opposed to a structural directive).
 /// Ported from Angular's `isPlainTemplate` in `ingest.ts`.
-fn is_plain_template(tag_name: &Option<Atom>) -> bool {
+fn is_plain_template(tag_name: &Option<Ident>) -> bool {
     tag_name.as_ref().map_or(false, |tag| tag.as_str() == NG_TEMPLATE_TAG_NAME)
 }
 
@@ -1961,12 +1961,12 @@ fn ingest_template<'a>(
     // `tagName` for HTML. The sanitizeIdentifier function later replaces non-word chars with `_`.
     let fn_name_suffix = tag_name_without_namespace.map(|stripped_tag| {
         let suffix = prefix_with_namespace(stripped_tag, namespace);
-        Atom::from(allocator.alloc_str(&suffix))
+        Ident::from(allocator.alloc_str(&suffix))
     });
 
     // Build the tag atom from the stripped tag name (without namespace prefix).
     // TypeScript passes `tagNameWithoutNamespace` to createTemplateOp (line 367).
-    let tag = tag_name_without_namespace.map(|s| Atom::from(allocator.alloc_str(s)));
+    let tag = tag_name_without_namespace.map(|s| Ident::from(allocator.alloc_str(s)));
 
     // Convert references to local refs - needed for template op creation
     let local_refs = ingest_references_owned(allocator, references);
@@ -2177,7 +2177,7 @@ fn ingest_template<'a>(
     // NOTE: This happens AFTER children are ingested, matching Angular's order.
     for variable in variables {
         let context_value = if variable.value.is_empty() {
-            Atom::from("$implicit")
+            Ident::from("$implicit")
         } else {
             variable.value.clone()
         };
@@ -2354,7 +2354,7 @@ fn ingest_if_block<'a>(
             if let Some(view) = job.view_mut(branch_view_xref) {
                 view.context_variables.push(ContextVariable {
                     name: alias.name.clone(),
-                    value: Atom::from(CTX_REF),
+                    value: Ident::from(CTX_REF),
                     xref: branch_view_xref,
                 });
             }
@@ -2383,7 +2383,7 @@ fn ingest_if_block<'a>(
 
         // fn_name_suffix is hardcoded to "Conditional" without namespace prefix
         // This matches Angular's ingestIfBlock which passes 'Conditional' directly
-        let fn_name_suffix = Atom::from("Conditional");
+        let fn_name_suffix = Ident::from("Conditional");
 
         // Create the appropriate CREATE op
         // Namespace is always HTML for control flow blocks, matching Angular's hardcoded ir.Namespace.HTML
@@ -2500,13 +2500,13 @@ fn ingest_for_block<'a>(
 
     // Create unique names for $index and $count that are suffixed with the view xref
     // to disambiguate nested @for loops. This matches Angular's TemplateDefinitionBuilder pattern.
-    let index_name: Atom<'a> = {
+    let index_name: Ident<'a> = {
         let s = allocator.alloc_str(&format!("ɵ$index_{}", body_xref.0));
-        Atom::from(s)
+        Ident::from(s)
     };
-    let count_name: Atom<'a> = {
+    let count_name: Ident<'a> = {
         let s = allocator.alloc_str(&format!("ɵ$count_{}", body_xref.0));
-        Atom::from(s)
+        Ident::from(s)
     };
 
     // Collect context variables and aliases for the body view
@@ -2516,7 +2516,7 @@ fn ingest_for_block<'a>(
     // Add the item variable (maps to $implicit in the context)
     context_variables.push(ContextVariable {
         name: for_block.item.name.clone(),
-        value: Atom::from("$implicit"),
+        value: Ident::from("$implicit"),
         xref: body_xref,
     });
 
@@ -2556,7 +2556,7 @@ fn ingest_for_block<'a>(
                 // This is the implicit $index variable (name and value are both $index)
                 // Add both $index and the unique indexed name to context
                 context_variables.push(ContextVariable {
-                    name: Atom::from("$index"),
+                    name: Ident::from("$index"),
                     value: var.value.clone(),
                     xref: body_xref,
                 });
@@ -2570,7 +2570,7 @@ fn ingest_for_block<'a>(
                 // This is the implicit $count variable (name and value are both $count)
                 // Add both $count and the unique counted name to context
                 context_variables.push(ContextVariable {
-                    name: Atom::from("$count"),
+                    name: Ident::from("$count"),
                     value: var.value.clone(),
                     xref: body_xref,
                 });
@@ -2720,8 +2720,8 @@ fn ingest_for_block<'a>(
 fn get_computed_for_loop_variable_expression<'a>(
     allocator: &'a Allocator,
     value: &str,
-    index_name: &Atom<'a>,
-    count_name: &Atom<'a>,
+    index_name: &Ident<'a>,
+    count_name: &Ident<'a>,
     diagnostics: &mut std::vec::Vec<OxcDiagnostic>,
 ) -> Result<IrExpression<'a>, ()> {
     match value {
@@ -2797,7 +2797,7 @@ fn get_computed_for_loop_variable_expression<'a>(
 }
 
 /// Helper: create a LexicalRead expression
-fn create_lexical_read<'a>(allocator: &'a Allocator, name: &Atom<'a>) -> IrExpression<'a> {
+fn create_lexical_read<'a>(allocator: &'a Allocator, name: &Ident<'a>) -> IrExpression<'a> {
     IrExpression::LexicalRead(Box::new_in(
         LexicalReadExpr { name: name.clone(), source_span: None },
         allocator,
@@ -2822,7 +2822,7 @@ fn create_number_literal<'a>(allocator: &'a Allocator, value: f64) -> IrExpressi
 }
 
 /// Helper: create a string literal as an AST expression wrapped in IR
-fn create_string_literal_atom<'a>(allocator: &'a Allocator, value: Atom<'a>) -> IrExpression<'a> {
+fn create_string_literal_atom<'a>(allocator: &'a Allocator, value: Ident<'a>) -> IrExpression<'a> {
     use crate::ast::expression::{AbsoluteSourceSpan, LiteralPrimitive, LiteralValue, ParseSpan};
 
     IrExpression::Ast(Box::new_in(
@@ -2967,7 +2967,7 @@ fn ingest_switch_block<'a>(
 
         // fn_name_suffix is hardcoded to "Case" without namespace prefix
         // This matches Angular's ingestSwitchBlock which passes 'Case' directly
-        let fn_name_suffix = Atom::from("Case");
+        let fn_name_suffix = Ident::from("Case");
 
         // Create the appropriate CREATE op
         // Namespace is always HTML for control flow blocks, matching Angular's hardcoded ir.Namespace.HTML
@@ -3099,7 +3099,7 @@ fn ingest_defer_view<'a>(
     // This TemplateOp will be reified to a `ɵɵdomTemplate()` call.
     // IMPORTANT: In Angular, TemplateOp.xref IS the embedded view's xref (secondaryView.xref).
     // We use the same pattern here so that defer_resolve_targets can find elements by view xref.
-    let fn_name_suffix = Some(Atom::from(job.allocator.alloc_str(&format!("Defer{suffix}"))));
+    let fn_name_suffix = Some(Ident::from(job.allocator.alloc_str(&format!("Defer{suffix}"))));
 
     // Convert i18n metadata to placeholder, matching Angular's ingestDeferView which passes
     // i18nMeta through to createTemplateOp. This enables propagate_i18n_blocks to wrap the
@@ -3573,14 +3573,14 @@ fn ingest_references_owned<'a>(
 /// It mirrors Angular TypeScript's `HostBindingInput` interface in `ingest.ts`.
 pub struct HostBindingInput<'a> {
     /// Name of the component/directive.
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// CSS selector of the component/directive.
-    pub component_selector: Atom<'a>,
+    pub component_selector: Ident<'a>,
     /// Host property bindings (`[prop]="expr"`).
     pub properties: Vec<'a, R3BoundAttribute<'a>>,
     /// Static host attributes (`attr="value"`).
     /// Uses OutputExpression to match TypeScript's `{[key: string]: o.Expression}`.
-    pub attributes: FxHashMap<Atom<'a>, crate::output::ast::OutputExpression<'a>>,
+    pub attributes: FxHashMap<Ident<'a>, crate::output::ast::OutputExpression<'a>>,
     /// Host event bindings (`(event)="handler"`).
     pub events: Vec<'a, R3BoundEvent<'a>>,
 }
@@ -3996,7 +3996,7 @@ fn ingest_host_dom_property<'a>(
     let (binding_kind, name) = if property.name.starts_with("attr.") {
         // Handle `attr.` prefix
         let stripped = &property.name[5..];
-        (BindingKind::Attribute, Atom::from(allocator.alloc_str(stripped)))
+        (BindingKind::Attribute, Ident::from(allocator.alloc_str(stripped)))
     } else {
         let kind = match property.binding_type {
             BindingType::Property => BindingKind::Property,
@@ -4096,7 +4096,7 @@ fn extract_element_from_selector(selector: &str) -> Option<String> {
 /// Uses OutputExpression directly to match TypeScript's `o.Expression` parameter.
 fn ingest_host_attribute<'a>(
     job: &mut HostBindingCompilationJob<'a>,
-    name: Atom<'a>,
+    name: Ident<'a>,
     value: crate::output::ast::OutputExpression<'a>,
 ) {
     use crate::ir::expression::IrExpression;
@@ -4298,7 +4298,7 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
     parent_xref: XrefId,
     xref: XrefId,
     children: &'b [R3Node<'a>],
-) -> Option<Atom<'a>> {
+) -> Option<Ident<'a>> {
     // Find the single root element or template
     let mut root: Option<RootNodeRef<'a, 'b>> = None;
 
@@ -4484,12 +4484,12 @@ impl<'a, 'b> RootNodeRef<'a, 'b> {
         }
     }
 
-    fn tag_name(&self) -> Atom<'a> {
+    fn tag_name(&self) -> Ident<'a> {
         match self {
             RootNodeRef::Element(elem) => elem.name.clone(),
             RootNodeRef::Template(tmpl) => {
                 // Template should have a tag_name since we checked for it
-                tmpl.tag_name.clone().unwrap_or_else(|| Atom::from(""))
+                tmpl.tag_name.clone().unwrap_or_else(|| Ident::from(""))
             }
         }
     }
@@ -4514,12 +4514,12 @@ mod tests {
         let unexpected_i18n = I18nMeta::Message(I18nMessage {
             instance_id: 0,
             nodes: Vec::new_in(&allocator),
-            meaning: Atom::from(""),
-            description: Atom::from(""),
-            custom_id: Atom::from(""),
-            id: Atom::from(""),
+            meaning: Ident::from(""),
+            description: Ident::from(""),
+            custom_id: Ident::from(""),
+            id: Ident::from(""),
             legacy_ids: Vec::new_in(&allocator),
-            message_string: Atom::from(""),
+            message_string: Ident::from(""),
         });
 
         let result = convert_i18n_meta_to_placeholder(
@@ -4559,8 +4559,8 @@ mod tests {
     fn get_computed_for_loop_variable_expression_returns_err_for_unknown_var() {
         let allocator = Allocator::default();
         let mut diagnostics = std::vec::Vec::new();
-        let index_name = Atom::from("ɵ$index_0");
-        let count_name = Atom::from("ɵ$count_0");
+        let index_name = Ident::from("ɵ$index_0");
+        let count_name = Ident::from("ɵ$count_0");
 
         let result = get_computed_for_loop_variable_expression(
             &allocator,
@@ -4583,8 +4583,8 @@ mod tests {
     #[test]
     fn get_computed_for_loop_variable_expression_returns_ok_for_known_vars() {
         let allocator = Allocator::default();
-        let index_name = Atom::from("ɵ$index_0");
-        let count_name = Atom::from("ɵ$count_0");
+        let index_name = Ident::from("ɵ$index_0");
+        let count_name = Ident::from("ɵ$count_0");
 
         for var in &["$index", "$count", "$first", "$last", "$even", "$odd"] {
             let mut diagnostics = std::vec::Vec::new();

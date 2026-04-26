@@ -5,7 +5,7 @@
 //! Ported from Angular's `expression_parser/lexer.ts`.
 
 use oxc_allocator::{Allocator, FromIn};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::util::chars;
 
@@ -72,7 +72,7 @@ pub struct Token<'a> {
     /// The numeric value (for Number tokens).
     pub num_value: f64,
     /// The string value (for String/Identifier tokens).
-    pub str_value: Atom<'a>,
+    pub str_value: Ident<'a>,
     /// The string token kind (for String/Template tokens).
     pub str_kind: StringTokenKind,
 }
@@ -84,7 +84,7 @@ impl<'a> Token<'a> {
         index: u32,
         end: u32,
         num_value: f64,
-        str_value: Atom<'a>,
+        str_value: Ident<'a>,
         str_kind: StringTokenKind,
     ) -> Self {
         Self { token_type, index, end, num_value, str_value, str_kind }
@@ -97,7 +97,7 @@ impl<'a> Token<'a> {
             index,
             end,
             code as u32 as f64,
-            Atom::from_in(String::from(code), allocator),
+            Ident::from_in(String::from(code), allocator),
             StringTokenKind::Plain,
         )
     }
@@ -109,7 +109,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -121,7 +121,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -133,7 +133,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -145,7 +145,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -157,7 +157,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -169,7 +169,7 @@ impl<'a> Token<'a> {
             index,
             end,
             value,
-            Atom::from_in("", allocator),
+            Ident::from_in("", allocator),
             StringTokenKind::Plain,
         )
     }
@@ -181,7 +181,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(message, allocator),
+            Ident::from_in(message, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -198,7 +198,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::TemplateLiteralEnd,
         )
     }
@@ -210,7 +210,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::TemplateLiteralPart,
         )
     }
@@ -222,7 +222,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::TemplateLiteralPart,
         )
     }
@@ -234,7 +234,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::TemplateLiteralEnd,
         )
     }
@@ -246,7 +246,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }
@@ -258,7 +258,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Atom::from_in(text, allocator),
+            Ident::from_in(text, allocator),
             StringTokenKind::Plain,
         )
     }

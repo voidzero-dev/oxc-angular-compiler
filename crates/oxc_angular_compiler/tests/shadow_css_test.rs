@@ -290,6 +290,56 @@ fn test_handle_curly_braces_in_quoted_content() {
     assert_css_eq!(shim(css, "contenta"), expected);
 }
 
+#[test]
+fn test_unicode_in_content_property() {
+    // Issue #191: unicode characters in :after CSS content property
+    // Raw CSS escape sequence (as from inline styles)
+    let css = r".test-div:after { content: '\2022'; }";
+    assert_css_eq!(shim(css, "contenta"), r".test-div[contenta]:after { content: '\2022'; }");
+
+    // After Sass compilation - Sass converts \2022 to actual bullet char
+    let css = ".test-div:after { content: \"\u{2022}\"; }";
+    assert_css_eq!(shim(css, "contenta"), ".test-div[contenta]:after { content:\"\u{2022}\"; }");
+}
+
+#[test]
+fn test_multibyte_utf8_preserved_in_css_values() {
+    // Various multi-byte UTF-8 characters in CSS content property
+    // 2-byte: ¢ (U+00A2), © (U+00A9)
+    let css = ".a:after { content: \"\u{00A2}\u{00A9}\"; }";
+    let result = shim(css, "contenta");
+    assert!(result.contains("\u{00A2}\u{00A9}"), "2-byte UTF-8 chars corrupted: {result}");
+
+    // 3-byte: • (U+2022), — (U+2014), → (U+2192)
+    let css = ".a:after { content: \"\u{2022}\u{2014}\u{2192}\"; }";
+    let result = shim(css, "contenta");
+    assert!(result.contains("\u{2022}\u{2014}\u{2192}"), "3-byte UTF-8 chars corrupted: {result}");
+
+    // 4-byte: 😀 (U+1F600)
+    let css = ".a:after { content: \"\u{1F600}\"; }";
+    let result = shim(css, "contenta");
+    assert!(result.contains('\u{1F600}'), "4-byte UTF-8 char corrupted: {result}");
+
+    // Non-ASCII in selector (e.g. class name with accented chars)
+    let css = ".caf\u{00E9} { color: red; }";
+    let result = shim(css, "contenta");
+    assert!(result.contains("caf\u{00E9}"), "Non-ASCII in selector corrupted: {result}");
+}
+
+#[test]
+fn test_finalize_preserves_unicode() {
+    use oxc_angular_compiler::styles::finalize_component_style;
+    // Full pipeline with Sass-compiled CSS containing actual bullet character
+    let css = ".test:after { content: \"\u{2022}\"; }";
+    let result = finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true);
+    assert!(result.contains('\u{2022}'), "Bullet lost in full pipeline: {result}");
+
+    // With @charset prefix from Sass
+    let css = "@charset \"UTF-8\";\n.test:after { content: \"\u{2022}\"; }";
+    let result = finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true);
+    assert!(result.contains('\u{2022}'), "Bullet lost with @charset: {result}");
+}
+
 // ============================================================================
 // Playground CSS Test (real-world case)
 // ============================================================================
@@ -910,4 +960,57 @@ fn test_sidebar_row_layout_full_css_regression() {
     let result = shim_with_host(css, "contenta", "hosta");
     println!("Result length: {}", result.len());
     assert!(!result.is_empty());
+}
+
+// ============================================================================
+// Regression: CSS comments before first selector must not break scoping
+// ============================================================================
+
+#[test]
+fn test_scope_first_selector_after_comment_with_space() {
+    // Comment followed by space then selector
+    let css = "/* comment */ .foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_comment_with_newline() {
+    // Comment followed by newline then selector (the SCSS @import case)
+    let css = "/* comment */\n.container { border-radius: 2px; }\n.container .tabs-group { width: 100%; }";
+    let expected = ".container[contenta] { border-radius: 2px; }\n.container[contenta] .tabs-group[contenta] { width: 100%; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_multiline_comment() {
+    // Multi-line comment followed by selector
+    let css = "/* multi\nline\ncomment */\n.root { padding: 16px; }\n.root .child { color: red; }";
+    let expected =
+        ".root[contenta] { padding: 16px; }\n.root[contenta] .child[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_first_selector_after_multiple_comments() {
+    // Multiple comments before first selector
+    let css = "/* comment 1 */ /* comment 2 */ .foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_newline_as_descendant_combinator() {
+    // Newline between selectors is a valid CSS descendant combinator
+    let css = ".foo\n.bar { color: red; }";
+    let expected = ".foo[contenta] .bar[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_host_pseudo_with_newline_combinator() {
+    // :host with pseudo-selector followed by newline combinator to child
+    let css = ":host(:hover)\n.child { color: red; }";
+    let expected = "[hosta]:hover .child[contenta] { color: red; }";
+    assert_css_eq!(shim_with_host(css, "contenta", "hosta"), expected);
 }

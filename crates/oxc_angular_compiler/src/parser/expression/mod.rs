@@ -19,6 +19,7 @@ pub use simple_checker::*;
 
 use oxc_allocator::Allocator;
 use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, TemplateBinding, TemplateBindingIdentifier,
@@ -223,7 +224,7 @@ impl<'a> BindingParser<'a> {
     ) -> TemplateBindingParseResult<'a> {
         let parser = Parser::with_offset(self.allocator, template_value, value_span.start);
         let key_identifier = TemplateBindingIdentifier {
-            source: oxc_span::Atom::from(template_key),
+            source: Ident::from(template_key),
             span: AbsoluteSourceSpan::new(key_span.start, key_span.end),
         };
         parser.parse_template_bindings(key_identifier)

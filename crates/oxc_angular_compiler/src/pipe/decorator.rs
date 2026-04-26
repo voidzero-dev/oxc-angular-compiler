@@ -8,11 +8,13 @@ use oxc_ast::ast::{
     Argument, Class, ClassElement, Decorator, Expression, MethodDefinitionKind, ObjectPropertyKind,
     PropertyKey,
 };
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::metadata::R3PipeMetadata;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
+use crate::output::oxc_converter::convert_oxc_expression;
 
 /// Extracted pipe metadata from a `@Pipe` decorator.
 ///
@@ -21,13 +23,13 @@ use crate::output::ast::{OutputExpression, ReadVarExpr};
 #[derive(Debug)]
 pub struct PipeMetadata<'a> {
     /// The name of the pipe class.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// Span of the class declaration.
     pub class_span: Span,
 
     /// The pipe name used in templates (from `@Pipe({name: '...'})`).
-    pub pipe_name: Option<Atom<'a>>,
+    pub pipe_name: Option<Ident<'a>>,
 
     /// Whether the pipe is pure (default: true).
     /// Pure pipes only transform when inputs change.
@@ -46,7 +48,7 @@ impl<'a> PipeMetadata<'a> {
     /// Create a new PipeMetadata with defaults.
     pub fn new(
         _allocator: &'a Allocator,
-        class_name: Atom<'a>,
+        class_name: Ident<'a>,
         class_span: Span,
         implicit_standalone: bool,
     ) -> Self {
@@ -107,9 +109,10 @@ pub fn extract_pipe_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
+    _source_text: Option<&'a str>,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
-    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
+    let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Pipe decorator
@@ -200,20 +203,20 @@ fn is_pipe_call(callee: &Expression<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -222,7 +225,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
-        Expression::BooleanLiteral(lit) => Some(lit.value),
+        Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }
@@ -262,16 +265,26 @@ fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
 ) -> R3DependencyMetadata<'a> {
-    // Extract flags from decorators
+    // Extract flags and @Inject token from decorators
     let mut optional = false;
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
-    let mut attribute_name: Option<Atom<'a>> = None;
+    let mut inject_token: Option<OutputExpression<'a>> = None;
+    let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name(&decorator.expression) {
             match name.as_str() {
+                "Inject" => {
+                    // @Inject(TOKEN) - extract the token
+                    if let Expression::CallExpression(call) = &decorator.expression {
+                        if let Some(arg) = call.arguments.first() {
+                            inject_token =
+                                convert_oxc_expression(allocator, arg.to_expression(), None);
+                        }
+                    }
+                }
                 "Optional" => optional = true,
                 "SkipSelf" => skip_self = true,
                 "Self" => self_ = true,
@@ -280,7 +293,7 @@ fn extract_param_dependency<'a>(
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone());
+                            attribute_name = Some(s.value.clone().into());
                         }
                     }
                 }
@@ -289,8 +302,9 @@ fn extract_param_dependency<'a>(
         }
     }
 
-    // Extract the token (type annotation or parameter name)
-    let token = extract_param_token(allocator, param);
+    // 1. If @Inject(TOKEN) is present, use TOKEN
+    // 2. Otherwise fall back to the type annotation
+    let token = inject_token.or_else(|| extract_param_token(allocator, param));
 
     // Handle @Attribute decorator
     if let Some(attr_name) = attribute_name {
@@ -314,7 +328,7 @@ fn extract_param_dependency<'a>(
 }
 
 /// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
+fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
     match expr {
         // @Optional
         Expression::Identifier(id) => Some(id.name.clone().into()),
@@ -342,7 +356,7 @@ fn extract_param_token<'a>(
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
-        let type_name: Atom<'a> = match &type_ref.type_name {
+        let type_name: Ident<'a> = match &type_ref.type_name {
             oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
@@ -395,7 +409,7 @@ mod tests {
 
             if let Some(class) = class {
                 if let Some(metadata) =
-                    extract_pipe_metadata(&allocator, class, implicit_standalone)
+                    extract_pipe_metadata(&allocator, class, implicit_standalone, Some(code))
                 {
                     found_metadata = Some(metadata);
                     break;

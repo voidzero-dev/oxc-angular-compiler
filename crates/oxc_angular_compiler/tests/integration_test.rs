@@ -13,7 +13,7 @@ use oxc_angular_compiler::{
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
     transform_angular_file,
 };
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 /// Compiles an Angular template to JavaScript.
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
@@ -55,12 +55,12 @@ fn compile_template_to_js_with_version(
         let options = IngestOptions { angular_version: Some(version), ..Default::default() };
         ingest_component_with_options(
             &allocator,
-            Atom::from(component_name),
+            Ident::from(component_name),
             r3_result.nodes,
             options,
         )
     } else {
-        ingest_component(&allocator, Atom::from(component_name), r3_result.nodes)
+        ingest_component(&allocator, Ident::from(component_name), r3_result.nodes)
     };
 
     // Stage 4-5: Transform and emit
@@ -504,7 +504,7 @@ fn test_defer_block() {
 #[test]
 fn test_defer_inside_i18n() {
     let js = compile_template_to_js(
-        r#"<div i18n>
+        r"<div i18n>
   Content:
   @defer (when isLoaded) {
     before<span>middle</span>after
@@ -515,7 +515,7 @@ fn test_defer_inside_i18n() {
   } @error {
     before<h1>error</h1>after
   }
-</div>"#,
+</div>",
         "MyApp",
     );
 
@@ -914,13 +914,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should contain ["ngFor", "ngForOf"] in that order
     // This is emitted under the Template marker (4) in the attribute array
@@ -975,13 +969,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1037,13 +1025,7 @@ export class ExternalComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -1186,6 +1168,130 @@ fn test_nested_for_with_outer_scope_track() {
         "TestComponent",
     );
     insta::assert_snapshot!("nested_for_with_outer_scope_track", js);
+}
+
+/// Tests that `track prefix() + item.id` generates a regular function (not arrow function).
+/// When a binary expression in track contains a component method call, the generated
+/// track function must use `function` declaration to properly bind `this`.
+#[test]
+fn test_for_track_binary_with_component_method() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track prefix() + item.id) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    // Must generate a regular function, not an arrow function, because prefix() needs `this`
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with binary operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        js.contains("this.prefix()"),
+        "Track function should use 'this.prefix()' for component method access. Output:\n{js}"
+    );
+    // Must NOT be an arrow function (arrow functions don't bind `this`)
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function (const _forTrack = ...) for track expressions that reference component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_binary_with_component_method", js);
+}
+
+/// Tests that nullish coalescing (??) in track with component method generates a regular function.
+/// This is the exact pattern from the original bug report: `track item.prefix ?? defaultPrefix()`
+#[test]
+fn test_for_track_nullish_coalescing_with_component_method() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track item.prefix ?? defaultPrefix()) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ?? operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function for track with ?? referencing component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_nullish_coalescing_with_component_method", js);
+}
+
+/// Tests that ternary in track with component method generates a regular function.
+#[test]
+fn test_for_track_ternary_with_component_method() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track useId() ? item.id : item.name) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ternary containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function for track with ternary referencing component members. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_ternary_with_component_method", js);
+}
+
+/// Tests that a complex track expression with multiple component references and binary operators
+/// generates a regular function. Mirrors the original bug: `(tag.queryPrefix ?? queryPrefix()) + '.' + tag.key`
+#[test]
+fn test_for_track_complex_binary_with_nullish_coalescing() {
+    let js = compile_template_to_js(
+        r"@for (tag of visibleTags(); track (tag.queryPrefix ?? queryPrefix()) + '.' + tag.key) { <span>{{ tag.key }}</span> }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Complex track with ?? and + containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function. Output:\n{js}"
+    );
+    assert!(
+        js.contains("this.queryPrefix()"),
+        "Track function should use 'this.queryPrefix()' for component method access. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_complex_binary_with_nullish_coalescing", js);
+}
+
+/// Tests that a track expression with only item property reads in binary operators
+/// correctly generates an arrow function (no component context needed).
+#[test]
+fn test_for_track_binary_without_component_context() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track item.type + ':' + item.id) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    // This should be an arrow function since no component members are referenced
+    assert!(
+        js.contains("const _forTrack"),
+        "Track with binary operator using only item properties should generate an arrow function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("function _forTrack"),
+        "Should NOT generate a regular function when no component members are referenced. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_binary_without_component_context", js);
+}
+
+/// Tests that negation (!) in track with component method generates a regular function.
+#[test]
+fn test_for_track_not_with_component_method() {
+    let js = compile_template_to_js(
+        r"@for (item of items; track !isDisabled()) { <div>{{item.name}}</div> }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("function _forTrack"),
+        "Track with ! operator containing component method should generate a regular function. Output:\n{js}"
+    );
+    assert!(
+        !js.contains("const _forTrack"),
+        "Should NOT generate an arrow function. Output:\n{js}"
+    );
+    insta::assert_snapshot!("for_track_not_with_component_method", js);
 }
 
 #[test]
@@ -1397,7 +1503,7 @@ fn test_pipe_in_binary_with_safe_property_read() {
     // TypeScript Angular compiler produces: (tmp = pipeBind(...) || fallback) == null ? null : tmp.prop
     // Without the fix, OXC duplicates the pipe call in both the guard and the access expression.
     let js = compile_template_to_js(
-        r#"<div>{{ ((data$ | async) || fallback)?.name }}</div>"#,
+        r"<div>{{ ((data$ | async) || fallback)?.name }}</div>",
         "TestComponent",
     );
     insta::assert_snapshot!("pipe_in_binary_with_safe_property_read", js);
@@ -1463,13 +1569,7 @@ import { Component } from '@angular/core';
 export class StyledComponent {}
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "styled.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "styled.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1506,13 +1606,8 @@ import { Component } from '@angular/core';
 export class MultiStyledComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-styled.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "multi-styled.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors());
@@ -1541,7 +1636,8 @@ export class StyledComponent {}
     let mut options = ComponentTransformOptions::default();
     options.minify_component_styles = true;
 
-    let result = transform_angular_file(&allocator, "styled.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "styled.component.ts", source, Some(&options), None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1565,13 +1661,7 @@ import { Component } from '@angular/core';
 export class NoStylesComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "no-styles.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "no-styles.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors());
@@ -1750,13 +1840,7 @@ import { Component } from '@angular/core';
 export class BadgeComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "badge.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "badge.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1825,13 +1909,7 @@ export class SecondComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -1932,13 +2010,7 @@ export class GridComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "grid.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "grid.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1, "Should compile the component");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2008,13 +2080,7 @@ import { Component } from '@angular/core';
 export class MenuComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "menu.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "menu.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2044,13 +2110,7 @@ import { Component } from '@angular/core';
 export class MultiMenuComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-menu.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi-menu.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2089,13 +2149,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2148,13 +2202,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert_eq!(result.component_count, 1);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2251,6 +2299,84 @@ fn test_animate_enter_and_leave_together() {
     );
 }
 
+#[test]
+fn test_host_animation_trigger_binding() {
+    // Component with animation trigger in host property should emit ɵɵsyntheticHostProperty
+    let source = r"
+import { Component } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
+
+@Component({
+    selector: 'app-slide',
+    template: '<ng-content></ng-content>',
+    animations: [trigger('slideIn', [transition(':enter', [style({ width: 0 }), animate('200ms')])])],
+    host: {
+        '[@slideIn]': 'animationState',
+    }
+})
+export class SlideComponent {
+    animationState = 'active';
+}
+";
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "slide.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Should have ɵɵsyntheticHostProperty in the hostBindings update block
+    assert!(
+        code.contains("syntheticHostProperty"),
+        "Expected ɵɵsyntheticHostProperty for host animation trigger.\nGot:\n{code}"
+    );
+    assert!(
+        code.contains(r#"syntheticHostProperty("@slideIn""#),
+        "Expected syntheticHostProperty with @slideIn name.\nGot:\n{code}"
+    );
+
+    // Should NOT have ɵɵanimateEnter/ɵɵanimateLeave for [@trigger] bindings
+    assert!(
+        !code.contains("animateEnter") && !code.contains("animateLeave"),
+        "Host [@trigger] bindings should not use animateEnter/animateLeave.\nGot:\n{code}"
+    );
+}
+
+#[test]
+fn test_directive_host_animation_trigger_binding() {
+    // Directive with animation trigger in host property should emit ɵɵsyntheticHostProperty
+    let source = r"
+import { Directive } from '@angular/core';
+import { trigger, transition, style, animate } from '@angular/animations';
+
+@Directive({
+    selector: '[appSlide]',
+    host: {
+        '[@slideIn]': 'animationState',
+    }
+})
+export class SlideDirective {
+    animationState = 'active';
+}
+";
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "slide.directive.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // Should have ɵɵsyntheticHostProperty in the hostBindings update block
+    assert!(
+        code.contains(r#"syntheticHostProperty("@slideIn""#),
+        "Expected syntheticHostProperty with @slideIn name for directive.\nGot:\n{code}"
+    );
+
+    // Should NOT use regular hostProperty for animation triggers
+    assert!(
+        !code.contains(r#"hostProperty("@slideIn""#),
+        "Should not use hostProperty for animation triggers.\nGot:\n{code}"
+    );
+}
+
 /// Test that multiple components with host bindings in the same file have unique constant names.
 ///
 /// This test simulates the real-world scenario from Material Angular's fab.ts where
@@ -2290,13 +2416,7 @@ export class MatFabButton {
 export class MatMiniFabButton {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2387,13 +2507,7 @@ export class MatMiniFabButton {{
 "
     );
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        &source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", &source, None, None);
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2495,13 +2609,7 @@ export class MatMiniFabButton {
 
     let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
 
-    let result = transform_angular_file(
-        &allocator,
-        "fab.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        Some(&resources),
-    );
+    let result = transform_angular_file(&allocator, "fab.ts", source, None, Some(&resources));
 
     assert_eq!(result.component_count, 2, "Should compile both components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2587,13 +2695,7 @@ export class MatDrawerContainer {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "drawer.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "drawer.ts", source, None, None);
 
     assert_eq!(result.component_count, 3, "Should compile all three components");
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
@@ -2661,13 +2763,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2723,13 +2819,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2785,13 +2875,7 @@ export class BitLabelComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -2868,13 +2952,7 @@ export class TestComponent {
 }
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -3059,8 +3137,7 @@ import { Component } from '@angular/core';
 export class SvgInSwitchCaseComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Verify that conditionalCreate uses ":svg:svg" not just "svg"
     assert!(
@@ -3122,13 +3199,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     eprintln!("OUTPUT:\n{}", result.code);
@@ -3153,6 +3224,147 @@ export class TestComponent {
     assert!(
         has_both_in_same_const,
         "Both 'formField' and 'open' should appear in the same consts entry. Output:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_form_field_emits_property_and_zero_arg_control() {
+    let js = compile_template_to_js(r#"<input [formField]="myField">"#, "TestComponent");
+
+    assert!(
+        js.contains(r#"ɵɵproperty("formField""#),
+        "[formField] should emit a regular ɵɵproperty(\"formField\", ...). Got:\n{js}"
+    );
+
+    assert!(
+        js.contains("ɵɵcontrol();"),
+        "[formField] should emit zero-arg ɵɵcontrol(). Got:\n{js}"
+    );
+
+    assert!(
+        !js.contains(r#"ɵɵcontrol(ctx.myField,"formField")"#),
+        "[formField] should not emit legacy ɵɵcontrol(value, \"formField\"). Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_form_field_maintains_mixed_property_order() {
+    let js = compile_template_to_js(
+        r#"<input type="radio" [formField]="value" [value]="'foo'" id="radio" /><input type="radio" [value]="'foo'" [formField]="value" id="radio" />"#,
+        "TestComponent",
+    );
+
+    let compact: String = js.chars().filter(|c| !c.is_whitespace()).collect();
+    let first_binding = r#"i0.ɵɵproperty("formField",ctx.value)("value","foo");i0.ɵɵcontrol();"#;
+    let second_binding = r#"i0.ɵɵproperty("value","foo")("formField",ctx.value);i0.ɵɵcontrol();"#;
+
+    assert!(
+        compact.contains(first_binding),
+        "Expected first radio input to keep [formField] before [value]. Got:\n{js}"
+    );
+    assert!(
+        compact.contains(second_binding),
+        "Expected second radio input to keep [value] before [formField]. Got:\n{js}"
+    );
+    assert!(
+        compact.find(first_binding) < compact.find(second_binding),
+        "Expected first radio binding sequence to appear before the second. Got:\n{js}"
+    );
+}
+
+#[test]
+fn test_form_field_extracted_consts_preserve_binding_order() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, input } from '@angular/core';
+
+@Directive({ selector: '[formField]' })
+export class FormField {
+    readonly formField = input<string>();
+}
+
+@Component({
+    selector: 'test-comp',
+    template: `
+      <input
+          type="radio"
+          [formField]="value"
+          [value]="'foo'"
+          id="radio"
+        />
+
+        <input
+          type="radio"
+          [value]="'foo'"
+          [formField]="value"
+          id="radio"
+        />
+    `,
+    imports: [FormField],
+    standalone: true,
+})
+export class TestComponent {
+    value = 'foo';
+}
+"#;
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains(
+            r#"consts:[["type","radio","id","radio",3,"formField","value"],["type","radio","id","radio",3,"value","formField"]]"#
+        ),
+        "Extracted const bindings should preserve per-element source order. Output:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_form_field_does_not_inflate_vars_count() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, Directive, input } from '@angular/core';
+
+@Directive({ selector: '[formField]' })
+export class FormField {
+    readonly formField = input<string>();
+}
+
+@Component({
+    selector: 'test-comp',
+    template: `
+      <input
+          type="radio"
+          [formField]="value"
+          [value]="'foo'"
+          id="radio"
+        />
+
+        <input
+          type="radio"
+          [value]="'foo'"
+          [formField]="value"
+          id="radio"
+        />
+    `,
+    imports: [FormField],
+    standalone: true,
+})
+export class TestComponent {
+    value = 'foo';
+}
+"#;
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("decls:2,vars:4,consts:"),
+        "[formField] should not inflate vars beyond Angular's control fixture count. Output:\n{}",
         result.code
     );
 }
@@ -3370,13 +3582,8 @@ export class DashboardBoxComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "dashboard-box.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "dashboard-box.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -3626,8 +3833,7 @@ export class TestComponent {
 ";
 
     // OXC always uses Full mode (elementStart, not domElementStart)
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Should use elementStart (Full mode), NOT domElementStart (DomOnly mode)
     assert!(
@@ -3665,8 +3871,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -3696,8 +3901,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // Non-standalone should always use Full mode
     assert!(
@@ -3914,7 +4118,7 @@ export class TestComponent {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     // Should use Full mode (elementStart), NOT DomOnly (domElementStart)
     assert!(
@@ -3951,7 +4155,7 @@ export class TestComponent {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
 
     // Implicit standalone + empty imports should still use Full mode
     assert!(
@@ -3984,8 +4188,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4006,7 +4209,7 @@ export class TestComponent {}
 #[test]
 fn test_dom_only_mode_not_used_for_standalone_with_pipe_only_imports() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { AsyncPipe } from '@angular/common';
 
@@ -4019,10 +4222,9 @@ import { AsyncPipe } from '@angular/common';
 export class TestComponent {
   data$ = null;
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4043,7 +4245,7 @@ export class TestComponent {
 #[test]
 fn test_dom_only_mode_not_used_for_standalone_with_multiple_pipe_imports() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { AsyncPipe, DatePipe, SlicePipe } from '@angular/common';
 
@@ -4054,10 +4256,9 @@ import { AsyncPipe, DatePipe, SlicePipe } from '@angular/common';
   template: `<div>Hello</div>`
 })
 export class TestComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     // OXC in local compilation mode: always Full mode for component templates
     assert!(
@@ -4076,7 +4277,7 @@ export class TestComponent {}
 #[test]
 fn test_full_mode_used_for_standalone_with_mixed_imports() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Directive } from '@angular/core';
 import { AsyncPipe } from '@angular/common';
 
@@ -4090,10 +4291,9 @@ export class HighlightDirective {}
   template: `<div>Hello</div>`
 })
 export class TestComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
 
     assert!(
         result.code.contains("ɵɵelementStart"),
@@ -4162,13 +4362,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // Pure property bindings keep Bindings marker (3), NOT I18n marker (6).
     // The i18n marker on a property binding is a no-op for directive matching.
@@ -4200,13 +4394,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should contain [6,"heading"] (AttributeMarker.I18n = 6)
     // because the interpolated attribute has an i18n message (i18n-heading).
@@ -4253,13 +4441,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     // The consts array should NOT contain [6,"cuTooltip"] because [cuTooltip]="expr"
     // is a pure property binding, not an interpolated attribute.
@@ -4283,7 +4465,7 @@ export class TestComponent {
 #[test]
 fn test_i18n_expression_ordering_with_pipes() {
     let js = compile_template_to_js(
-        r#"<span i18n>{{ a }} and {{ b }} and {{ c }} and {{ b | uppercase }}</span>"#,
+        r"<span i18n>{{ a }} and {{ b }} and {{ c }} and {{ b | uppercase }}</span>",
         "TestComponent",
     );
 
@@ -4307,7 +4489,7 @@ fn test_i18n_expression_ordering_with_pipes() {
 #[test]
 fn test_i18n_expression_ordering_icu_plural_with_pipe() {
     let js = compile_template_to_js(
-        r#"<div i18n>{{ name }} {count, plural, =1 {({{ amount }} credits x 1 user)} other {({{ amount }} credits x {{ count | number }} users)}}</div>"#,
+        r"<div i18n>{{ name }} {count, plural, =1 {({{ amount }} credits x 1 user)} other {({{ amount }} credits x {{ count | number }} users)}}</div>",
         "TestComponent",
     );
 
@@ -4404,7 +4586,7 @@ fn test_for_index_xref_with_i18n_attribute_binding() {
 #[test]
 fn test_set_class_metadata_uses_namespace_for_imported_ctor_params() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { SomeService } from './some.service';
 
@@ -4416,14 +4598,15 @@ import { SomeService } from './some.service';
 export class TestComponent {
     constructor(private svc: SomeService) {}
 }
-"#;
+";
 
     let options = ComponentTransformOptions {
         emit_class_metadata: true,
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4438,13 +4621,11 @@ export class TestComponent {
     // the imported SomeService: `{type:i1.SomeService}` not `{type:SomeService}`
     assert!(
         metadata_section.contains("i1.SomeService"),
-        "setClassMetadata ctor_parameters should use namespace-prefixed type (i1.SomeService) for imported constructor parameter. Metadata section:\n{}",
-        metadata_section
+        "setClassMetadata ctor_parameters should use namespace-prefixed type (i1.SomeService) for imported constructor parameter. Metadata section:\n{metadata_section}"
     );
     assert!(
         !metadata_section.contains("type:SomeService}"),
-        "setClassMetadata should NOT use bare type name for imported types. Metadata section:\n{}",
-        metadata_section
+        "setClassMetadata should NOT use bare type name for imported types. Metadata section:\n{metadata_section}"
     );
 }
 
@@ -4461,7 +4642,7 @@ export class TestComponent {
 #[test]
 fn test_set_class_metadata_namespace_with_inject_decorator() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Inject, Optional, SkipSelf } from '@angular/core';
 import { SomeService } from './some.service';
 
@@ -4475,14 +4656,15 @@ export class TestComponent {
         @Optional() @SkipSelf() @Inject(SomeService) private svc: SomeService
     ) {}
 }
-"#;
+";
 
     let options = ComponentTransformOptions {
         emit_class_metadata: true,
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4497,8 +4679,7 @@ export class TestComponent {
     // because the type annotation is erased by TypeScript
     assert!(
         metadata_section.contains("i1.SomeService"),
-        "setClassMetadata should use namespace-prefixed type even with @Inject. Metadata section:\n{}",
-        metadata_section
+        "setClassMetadata should use namespace-prefixed type even with @Inject. Metadata section:\n{metadata_section}"
     );
 }
 
@@ -4508,7 +4689,7 @@ export class TestComponent {
 #[test]
 fn test_set_class_metadata_inject_differs_from_type() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Inject } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 
@@ -4520,14 +4701,15 @@ import { DOCUMENT } from '@angular/common';
 export class TestComponent {
     constructor(@Inject(DOCUMENT) private doc: Document) {}
 }
-"#;
+";
 
     let options = ComponentTransformOptions {
         emit_class_metadata: true,
         ..ComponentTransformOptions::default()
     };
 
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -4541,14 +4723,12 @@ export class TestComponent {
     // even though the @Inject token (DOCUMENT) is from @angular/common
     assert!(
         metadata_section.contains("type:Document"),
-        "setClassMetadata should use bare type for globals when @Inject token differs. Metadata section:\n{}",
-        metadata_section
+        "setClassMetadata should use bare type for globals when @Inject token differs. Metadata section:\n{metadata_section}"
     );
     // Should NOT add namespace prefix for Document
     assert!(
         !metadata_section.contains("i1.Document"),
-        "setClassMetadata should NOT namespace-prefix global types. Metadata section:\n{}",
-        metadata_section
+        "setClassMetadata should NOT namespace-prefix global types. Metadata section:\n{metadata_section}"
     );
 }
 
@@ -4580,13 +4760,7 @@ import { Component } from '@angular/core';
 export class IconComponent {}
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "icon.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "icon.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -4631,13 +4805,7 @@ export class IconComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "icon.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "icon.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -4683,13 +4851,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
     let code = &result.code;
     eprintln!("OUTPUT:\n{code}");
@@ -4782,7 +4944,7 @@ fn test_pipe_in_binary_with_safe_nav_chain() {
 #[test]
 fn test_i18n_nested_icu_with_interpolations_inside_elements() {
     let js = compile_template_to_js(
-        r#"<span i18n>{count, plural, =1 {<strong>{{ name }}</strong> was deleted from {nestedCount, plural, =1 {<strong>{{ category }}</strong>} other {<strong>{{ category }}</strong> and {{ extra }} more}}} other {{{ count }} items deleted}}</span>"#,
+        r"<span i18n>{count, plural, =1 {<strong>{{ name }}</strong> was deleted from {nestedCount, plural, =1 {<strong>{{ category }}</strong>} other {<strong>{{ category }}</strong> and {{ extra }} more}}} other {{{ count }} items deleted}}</span>",
         "TestComponent",
     );
 
@@ -4893,7 +5055,7 @@ fn test_directive_factory_deps_use_namespace_prefixed_tokens() {
     let allocator = Allocator::default();
 
     // Simulate the ClickUp pattern: a directive injecting services from multiple modules
-    let source = r#"
+    let source = r"
 import { Directive } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { ToastService } from './toast.service';
@@ -4908,13 +5070,13 @@ export class ToastPositionHelperDirective {
         private toastService: ToastService,
     ) {}
 }
-"#;
+";
 
     let result = transform_angular_file(
         &allocator,
         "toast-position-helper.directive.ts",
         source,
-        &ComponentTransformOptions::default(),
+        None,
         None,
     );
 
@@ -4957,7 +5119,7 @@ export class ToastPositionHelperDirective {
 fn test_directive_multiple_deps_different_modules_correct_namespaces() {
     let allocator = Allocator::default();
 
-    let source = r#"
+    let source = r"
 import { Directive, ElementRef } from '@angular/core';
 import { Router } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -4975,15 +5137,9 @@ export class MultiDepDirective {
         private fb: FormBuilder,
     ) {}
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "multi-dep.directive.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "multi-dep.directive.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5035,7 +5191,7 @@ fn test_i18n_icu_postprocess_uses_namespace_prefix() {
 
     // An ICU plural with sub-messages triggers ɵɵi18nPostprocess.
     // This is the pattern from ClickUp's ChatBotTriggerComponent.
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -5047,15 +5203,10 @@ export class ChatBotTriggerComponent {
     count = 0;
     name = '';
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "chatbot-trigger.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "chatbot-trigger.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5095,7 +5246,7 @@ fn test_multiple_view_queries_emit_separate_statements() {
     let allocator = Allocator::default();
 
     // Reproduce the ClickUp LoginFormComponent pattern: multiple @ViewChild decorators
-    let source = r#"
+    let source = r"
 import { Component, ViewChild, ElementRef } from '@angular/core';
 
 @Component({
@@ -5107,15 +5258,9 @@ export class LoginFormComponent {
     @ViewChild('passwordInput') passwordInput: ElementRef;
     @ViewChild('submitBtn') submitBtn: ElementRef;
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "login-form.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "login-form.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5168,7 +5313,7 @@ export class LoginFormComponent {
 fn test_multiple_content_queries_emit_separate_statements() {
     let allocator = Allocator::default();
 
-    let source = r#"
+    let source = r"
 import { Component, ContentChild, ContentChildren, QueryList, TemplateRef } from '@angular/core';
 
 @Component({
@@ -5180,15 +5325,9 @@ export class TabsComponent {
     @ContentChildren('tab') tabs: QueryList<TemplateRef<any>>;
     @ContentChild('footer') footer: TemplateRef<any>;
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "tabs.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "tabs.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5237,7 +5376,7 @@ export class TabsComponent {
 fn test_mixed_signal_and_decorator_view_queries_separate_statements() {
     let allocator = Allocator::default();
 
-    let source = r#"
+    let source = r"
 import { Component, ViewChild, viewChild, viewChildren, ElementRef } from '@angular/core';
 
 @Component({
@@ -5249,15 +5388,9 @@ export class MixedQueryComponent {
     b = viewChildren<ElementRef>('b');
     @ViewChild('c') c: ElementRef;
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "mixed-query.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "mixed-query.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5306,7 +5439,7 @@ fn test_for_loop_multiple_index_aliases_in_track() {
     // while a bug in OXC previously stored only the last alias (overwriting earlier ones).
     // Reference: Angular's ingest.ts uses `indexVarNames = new Set<string>()` and `.add()`.
     let js = compile_template_to_js(
-        r#"@for (item of items; track i + j; let i = $index, j = $index) { {{item}} }"#,
+        r"@for (item of items; track i + j; let i = $index, j = $index) { {{item}} }",
         "TestComponent",
     );
     // The track function should rewrite both `i` and `j` to `$index`.
@@ -5438,18 +5571,17 @@ fn test_switch_default_first_preserves_source_order() {
     );
 
     // Case_0 should be the default (Other), NOT reordered
-    assert!(js.contains("Case_0_Template"), "Expected Case_0_Template in output. Got:\n{}", js);
+    assert!(js.contains("Case_0_Template"), "Expected Case_0_Template in output. Got:\n{js}");
     let case0_start = js.find("Case_0_Template").unwrap();
     let case0_body = &js[case0_start..case0_start + 200];
     assert!(
         case0_body.contains("Other"),
-        "Case_0 should render 'Other' (default in source order). Got:\n{}",
-        js
+        "Case_0 should render 'Other' (default in source order). Got:\n{js}"
     );
 
     // Conditional ternary: default slot (0) should be the fallback base
     // Expected: (tmp === 1) ? 1 : (tmp === 2) ? 2 : 0
-    assert!(js.contains("2: 0)"), "Ternary fallback should be slot 0 (default). Got:\n{}", js);
+    assert!(js.contains("2: 0)"), "Ternary fallback should be slot 0 (default). Got:\n{js}");
 }
 
 // ============================================================================
@@ -5465,20 +5597,15 @@ fn test_field_property_not_control_binding() {
     let js = compile_template_to_js(r#"<cu-comp [field]="myField"></cu-comp>"#, "TestComponent");
 
     // Should NOT have controlCreate
-    assert!(
-        !js.contains("controlCreate"),
-        "[field] should NOT produce controlCreate. Got:\n{}",
-        js
-    );
+    assert!(!js.contains("controlCreate"), "[field] should NOT produce controlCreate. Got:\n{js}");
 
     // Should NOT have control() call
-    assert!(!js.contains("ɵɵcontrol("), "[field] should NOT produce ɵɵcontrol(). Got:\n{}", js);
+    assert!(!js.contains("ɵɵcontrol("), "[field] should NOT produce ɵɵcontrol(). Got:\n{js}");
 
     // Should have regular property binding
     assert!(
         js.contains(r#"ɵɵproperty("field""#),
-        "[field] should produce regular ɵɵproperty(\"field\", ...). Got:\n{}",
-        js
+        "[field] should produce regular ɵɵproperty(\"field\", ...). Got:\n{js}"
     );
 }
 
@@ -5506,13 +5633,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5548,13 +5669,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5589,13 +5704,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5621,7 +5730,7 @@ fn test_unicode_text_not_escaped() {
     // Unicode characters like en-dash should be emitted as raw UTF-8, not escaped.
     // Angular's TypeScript emitter does NOT escape non-ASCII printable characters.
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -5630,15 +5739,9 @@ import { Component } from '@angular/core';
     standalone: true,
 })
 export class TestComponent {}
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5665,13 +5768,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 ";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5713,13 +5810,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5768,13 +5859,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5833,13 +5918,7 @@ export class TestComponent {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -5921,7 +6000,7 @@ fn test_host_binding_pure_function_declarations_emitted() {
 #[test]
 fn test_standalone_component_omits_standalone_field() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -5930,10 +6009,11 @@ import { Component } from '@angular/core';
   template: '<div>test</div>'
 })
 export class TestComponent {}
-"#;
+";
 
     let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -5949,7 +6029,7 @@ export class TestComponent {}
 #[test]
 fn test_non_standalone_component_emits_standalone_false() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -5958,10 +6038,9 @@ import { Component } from '@angular/core';
   template: '<div>legacy</div>'
 })
 export class LegacyComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -5992,7 +6071,8 @@ export class ImplicitStandaloneComponent {}
 "#;
 
     let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let normalized = result.code.replace([' ', '\n', '\t'], "");
@@ -6013,7 +6093,7 @@ fn test_jit_component_with_inline_template() {
     // When jit: true, the compiler should NOT compile templates.
     // Instead, it should keep the decorator and downlevel it using __decorate.
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6022,10 +6102,11 @@ import { Component } from '@angular/core';
     standalone: true,
 })
 export class AppComponent {}
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have __decorate import from tslib
@@ -6064,7 +6145,7 @@ fn test_jit_component_with_template_url() {
     // When jit: true and templateUrl is used, it should be replaced with
     // an import from angular:jit:template:file;./path
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6073,10 +6154,11 @@ import { Component } from '@angular/core';
     standalone: true,
 })
 export class AppComponent {}
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have resource import for template
@@ -6101,7 +6183,7 @@ fn test_jit_component_with_style_url() {
     // When jit: true and styleUrl/styleUrls is used, it should be replaced with
     // imports from angular:jit:style:file;./path
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6110,10 +6192,11 @@ import { Component } from '@angular/core';
     styleUrl: './app.css',
 })
 export class AppComponent {}
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have resource import for style
@@ -6130,7 +6213,7 @@ export class AppComponent {}
 fn test_jit_component_with_constructor_deps() {
     // JIT compilation should generate ctorParameters for constructor dependencies
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { TitleService } from './title.service';
 
@@ -6141,10 +6224,11 @@ import { TitleService } from './title.service';
 export class AppComponent {
     constructor(private titleService: TitleService) {}
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have ctorParameters static property
@@ -6168,7 +6252,7 @@ export class AppComponent {
 fn test_jit_component_class_restructuring() {
     // JIT should restructure: export class X {} → let X = class X {}; X = __decorate([...], X); export { X };
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6178,10 +6262,11 @@ import { Component } from '@angular/core';
 export class AppComponent {
     title = 'app';
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have let declaration
@@ -6205,7 +6290,7 @@ export class AppComponent {
 fn test_jit_directive() {
     // @Directive should also be JIT-transformed with __decorate
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Input } from '@angular/core';
 
 @Directive({
@@ -6215,11 +6300,11 @@ import { Directive, Input } from '@angular/core';
 export class HighlightDirective {
     @Input() color: string = 'yellow';
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
     let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+        transform_angular_file(&allocator, "highlight.directive.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have __decorate with Directive
@@ -6243,7 +6328,7 @@ export class HighlightDirective {
 fn test_jit_full_component_example() {
     // Full example matching the issue #97 scenario
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, signal } from '@angular/core';
 import { RouterOutlet } from '@angular/router';
 import { Lib1 } from 'lib1';
@@ -6263,10 +6348,11 @@ export class App {
         this.title.set(this.titleService.getTitle());
     }
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // Should have all JIT characteristics
@@ -6301,7 +6387,7 @@ fn test_jit_prop_decorators_emitted() {
     // to static propDecorators so Angular's JIT runtime can discover inputs/outputs.
     // Without this, @Input/@Output decorators are silently lost, breaking data binding.
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Input, Output, HostBinding, EventEmitter } from '@angular/core';
 
 @Directive({
@@ -6313,11 +6399,11 @@ export class HighlightDirective {
     @Output() colorChange = new EventEmitter<string>();
     @HostBinding('class.active') isActive = false;
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
     let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+        transform_angular_file(&allocator, "highlight.directive.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // propDecorators must be present — Angular's JIT runtime reads this
@@ -6363,7 +6449,7 @@ fn test_jit_union_type_ctor_params() {
     //
     // See: angular/packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { ServiceA } from './a.service';
 import { ServiceB } from './b.service';
@@ -6377,10 +6463,11 @@ export class TestComponent {
         svcC: ServiceC | null,
     ) {}
 }
-"#;
+";
 
     let options = ComponentTransformOptions { jit: true, ..Default::default() };
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     // `ServiceC | null` resolves correctly (1 non-null type)
@@ -6406,6 +6493,1153 @@ export class TestComponent {
     insta::assert_snapshot!("jit_union_type_ctor_params", result.code);
 }
 
+#[test]
+fn test_jit_abstract_class() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+@Injectable()
+export abstract class BaseProvider {
+    protected abstract get name(): string;
+    protected abstract initialize(): void;
+
+    public greet(): string {
+        return `Hello from ${this.name}`;
+    }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "base.provider.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The abstract keyword should NOT appear before "class" in the output
+    // (JIT converts to class expression which can't be abstract)
+    assert!(
+        !result.code.contains("abstract class"),
+        "JIT output should not contain 'abstract class'. Got:\n{}",
+        result.code
+    );
+
+    // Should have proper class expression
+    assert!(
+        result.code.contains("let BaseProvider = class BaseProvider"),
+        "JIT output should have class expression. Got:\n{}",
+        result.code
+    );
+
+    // Should have __decorate call
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT output should use __decorate. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_abstract_class", result.code);
+}
+
+#[test]
+fn test_jit_non_angular_class_decorators_lowered() {
+    // When a class has both Angular and non-Angular class-level decorators,
+    // ALL decorators must be lowered into the __decorate() call.
+    // Non-Angular decorators left as raw @Decorator syntax on a class expression
+    // cause TS1206 (decorators are not valid on class expressions).
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { State } from '@ngxs/store';
+
+interface TodoStateModel {
+    items: string[];
+}
+
+@State<TodoStateModel>({ name: 'todo', defaults: { items: [] } })
+@Injectable()
+export class TodoState {}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "todo.state.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw @State decorator should remain in the output
+    assert!(
+        !result.code.contains("@State"),
+        "Non-Angular class decorators should be lowered, not left as raw syntax. Got:\n{}",
+        result.code
+    );
+
+    // Both decorators should appear in the __decorate call
+    assert!(
+        result.code.contains("State("),
+        "Non-Angular class decorator State should appear in __decorate call. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("Injectable()"),
+        "Angular class decorator Injectable should appear in __decorate call. Got:\n{}",
+        result.code
+    );
+
+    // Decorator order should be preserved (State before Injectable)
+    let state_pos = result.code.find("State(").unwrap();
+    let injectable_pos = result.code.find("Injectable()").unwrap();
+    assert!(
+        state_pos < injectable_pos,
+        "Decorator order should be preserved (State before Injectable). Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_non_angular_class_decorators", result.code);
+}
+
+#[test]
+fn test_jit_non_angular_method_decorators_lowered() {
+    // Non-Angular method decorators should be lowered to __decorate() calls
+    // on the class prototype (for instance methods) or class itself (for static methods).
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { State, Action, Selector } from '@ngxs/store';
+
+@State({ name: 'todo' })
+@Injectable()
+export class TodoState {
+    @Selector()
+    static todos(state: any): any[] { return state.items; }
+
+    @Action(AddTodo)
+    add(ctx: any, action: any) { ctx.setState(action); }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "todo.state.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw @Selector or @Action decorator should remain
+    assert!(
+        !result.code.contains("@Selector"),
+        "Non-Angular method decorators should be lowered. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("@Action"),
+        "Non-Angular method decorators should be lowered. Got:\n{}",
+        result.code
+    );
+
+    // Static method → __decorate([Selector()], TodoState, "todos", null)
+    assert!(
+        result.code.contains("__decorate([Selector()], TodoState, \"todos\", null)"),
+        "Static method decorator should use class directly (no .prototype). Got:\n{}",
+        result.code
+    );
+
+    // Instance method → __decorate([Action(AddTodo)], TodoState.prototype, "add", null)
+    assert!(
+        result.code.contains("__decorate([Action(AddTodo)], TodoState.prototype, \"add\", null)"),
+        "Instance method decorator should use .prototype. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_non_angular_method_decorators", result.code);
+}
+
+#[test]
+fn test_jit_full_ngxs_example() {
+    // Full example with NGXS-style decorators: @State, @Selector, @Action combined with @Injectable
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { State, Action, Selector, StateContext } from '@ngxs/store';
+
+interface TodoStateModel {
+    items: TodoItem[];
+    filter: string;
+}
+
+interface TodoItem {
+    text: string;
+    done: boolean;
+}
+
+class AddTodo {
+    static readonly type = '[Todo] Add';
+    constructor(public text: string) {}
+}
+
+class ToggleTodo {
+    static readonly type = '[Todo] Toggle';
+    constructor(public index: number) {}
+}
+
+@State<TodoStateModel>({ name: 'todo', defaults: { items: [], filter: 'all' } })
+@Injectable()
+export class TodoState {
+    @Selector()
+    static todos(state: TodoStateModel): TodoItem[] { return state.items; }
+
+    @Selector()
+    static filter(state: TodoStateModel): string { return state.filter; }
+
+    @Action(AddTodo)
+    add(ctx: StateContext<TodoStateModel>, action: AddTodo) { /* ... */ }
+
+    @Action(ToggleTodo)
+    toggle(ctx: StateContext<TodoStateModel>, action: ToggleTodo) { /* ... */ }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "todo.state.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw decorators should remain anywhere
+    assert!(
+        !result.code.contains("@State")
+            && !result.code.contains("@Injectable")
+            && !result.code.contains("@Selector")
+            && !result.code.contains("@Action"),
+        "No raw decorator syntax should remain in output. Got:\n{}",
+        result.code
+    );
+
+    // Member __decorate calls should come before class __decorate
+    let selector_decorate =
+        result.code.find("__decorate([Selector()], TodoState, \"todos\"").unwrap();
+    let class_decorate = result.code.find("TodoState = __decorate(").unwrap();
+    assert!(
+        selector_decorate < class_decorate,
+        "Member decorators should be emitted before class decorator. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_full_ngxs_example", result.code);
+}
+
+#[test]
+fn test_jit_non_angular_property_decorator_uses_void_0() {
+    // TypeScript uses `void 0` (not `null`) as the 4th argument for property decorators
+    // because properties don't have an existing descriptor on the prototype.
+    // Methods use `null` which tells __decorate to call Object.getOwnPropertyDescriptor.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function Validate() { return function(t: any, k: string) {}; }
+function Log(target: any, key: string, desc: PropertyDescriptor) {}
+
+@Injectable()
+export class MyService {
+    @Validate()
+    name: string = '';
+
+    @Log
+    greet() { return 'hello'; }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "my.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Property decorator should use `void 0`
+    assert!(
+        result.code.contains("__decorate([Validate()], MyService.prototype, \"name\", void 0)"),
+        "Property decorator should use `void 0` as 4th arg. Got:\n{}",
+        result.code
+    );
+
+    // Method decorator should use `null`
+    assert!(
+        result.code.contains("__decorate([Log], MyService.prototype, \"greet\", null)"),
+        "Method decorator should use `null` as 4th arg. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_property_decorator_void_0", result.code);
+}
+
+#[test]
+fn test_jit_mixed_angular_and_non_angular_decorators_on_same_member() {
+    // When a member has both Angular and non-Angular decorators, the Angular
+    // decorator goes into propDecorators while the non-Angular one is lowered
+    // to a __decorate() call. Both must be stripped from the class body.
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive, Input, Output, EventEmitter } from '@angular/core';
+
+function Required() { return function(t: any, k: string) {}; }
+function Throttle(ms: number) { return function(t: any, k: string, d: any) {}; }
+
+@Directive({ selector: '[appField]' })
+export class FieldDirective {
+    @Required()
+    @Input()
+    value: string = '';
+
+    @Throttle(300)
+    @Output()
+    valueChange = new EventEmitter<string>();
+
+    @Throttle(100)
+    onChange() {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "field.directive.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw decorators should remain
+    assert!(
+        !result.code.contains("@Required")
+            && !result.code.contains("@Input")
+            && !result.code.contains("@Throttle")
+            && !result.code.contains("@Output"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // Angular decorators should appear in propDecorators
+    assert!(
+        result.code.contains("propDecorators"),
+        "Angular member decorators should be in propDecorators. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: Input"),
+        "propDecorators should contain Input. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: Output"),
+        "propDecorators should contain Output. Got:\n{}",
+        result.code
+    );
+
+    // Non-Angular decorators should be lowered via __decorate()
+    assert!(
+        result
+            .code
+            .contains("__decorate([Required()], FieldDirective.prototype, \"value\", void 0)"),
+        "Non-Angular property decorator should use __decorate with void 0. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains(
+            "__decorate([Throttle(300)], FieldDirective.prototype, \"valueChange\", void 0)"
+        ),
+        "Non-Angular property decorator should use __decorate with void 0. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result
+            .code
+            .contains("__decorate([Throttle(100)], FieldDirective.prototype, \"onChange\", null)"),
+        "Non-Angular method decorator should use __decorate with null. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_mixed_angular_non_angular_same_member", result.code);
+}
+
+#[test]
+fn test_jit_multiple_non_angular_decorators_on_same_member() {
+    // Multiple non-Angular decorators on the same member should all appear
+    // in a single __decorate() call for that member.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function Log() { return function(t: any, k: string, d: any) {}; }
+function Memoize() { return function(t: any, k: string, d: any) {}; }
+function Validate() { return function(t: any, k: string) {}; }
+
+@Injectable()
+export class MyService {
+    @Log()
+    @Memoize()
+    compute() { return 42; }
+
+    @Validate()
+    @Log()
+    name: string = '';
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "my.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Multiple decorators on method should be in single __decorate call, in source order
+    assert!(
+        result
+            .code
+            .contains("__decorate([Log(), Memoize()], MyService.prototype, \"compute\", null)"),
+        "Multiple method decorators should be in one __decorate call. Got:\n{}",
+        result.code
+    );
+
+    // Multiple decorators on property should also be in single __decorate call
+    assert!(
+        result
+            .code
+            .contains("__decorate([Validate(), Log()], MyService.prototype, \"name\", void 0)"),
+        "Multiple property decorators should be in one __decorate call. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_multiple_decorators_same_member", result.code);
+}
+
+#[test]
+fn test_jit_multiple_decorated_classes_in_same_file() {
+    // Multiple Angular-decorated classes in the same file should each get
+    // their own class expression conversion and __decorate calls.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Injectable } from '@angular/core';
+
+function Logger() { return function(t: any) { return t; }; }
+
+@Component({ selector: 'app-foo', template: '<p>foo</p>' })
+export class FooComponent {}
+
+@Logger()
+@Injectable()
+export class FooService {
+    @Logger()
+    doWork() {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "foo.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Both classes should be converted to class expressions
+    assert!(
+        result.code.contains("let FooComponent = class FooComponent"),
+        "FooComponent should be a class expression. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("let FooService = class FooService"),
+        "FooService should be a class expression. Got:\n{}",
+        result.code
+    );
+
+    // Both should have __decorate calls
+    assert!(
+        result.code.contains("FooComponent = __decorate("),
+        "FooComponent should have a __decorate call. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("FooService = __decorate("),
+        "FooService should have a __decorate call. Got:\n{}",
+        result.code
+    );
+
+    // No raw decorators
+    assert!(
+        !result.code.contains("@Component")
+            && !result.code.contains("@Injectable")
+            && !result.code.contains("@Logger"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // FooService should include Logger in its class __decorate
+    let service_decorate_pos = result.code.find("FooService = __decorate(").unwrap();
+    let service_decorate_section = &result.code[service_decorate_pos..];
+    assert!(
+        service_decorate_section.contains("Logger()"),
+        "FooService __decorate should include Logger. Got:\n{}",
+        result.code
+    );
+
+    // FooService member decorator should also be lowered
+    assert!(
+        result.code.contains("__decorate([Logger()], FooService.prototype, \"doWork\", null)"),
+        "FooService method decorator should be lowered. Got:\n{}",
+        result.code
+    );
+
+    // Both should be re-exported
+    assert!(
+        result.code.contains("export { FooComponent }"),
+        "FooComponent should be re-exported. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("export { FooService }"),
+        "FooService should be re-exported. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_multiple_classes_same_file", result.code);
+}
+
+#[test]
+fn test_jit_non_exported_class_with_decorators() {
+    // A non-exported Angular class with non-Angular decorators should still
+    // be lowered but without an export statement.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function Singleton() { return function(t: any) { return t; }; }
+
+@Singleton()
+@Injectable()
+class InternalService {
+    @Singleton()
+    getInstance() {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "internal.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should be converted to class expression
+    assert!(
+        result.code.contains("let InternalService = class InternalService"),
+        "Non-exported class should still be converted. Got:\n{}",
+        result.code
+    );
+
+    // No raw decorators
+    assert!(
+        !result.code.contains("@Singleton") && !result.code.contains("@Injectable"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // Should NOT have an export statement
+    assert!(
+        !result.code.contains("export {") && !result.code.contains("export default"),
+        "Non-exported class should not get an export statement. Got:\n{}",
+        result.code
+    );
+
+    // Both class decorators should be in __decorate
+    assert!(
+        result.code.contains("InternalService = __decorate("),
+        "Should have class __decorate. Got:\n{}",
+        result.code
+    );
+
+    // Member decorator should be lowered
+    assert!(
+        result.code.contains(
+            "__decorate([Singleton()], InternalService.prototype, \"getInstance\", null)"
+        ),
+        "Member decorator should be lowered. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_non_exported_class", result.code);
+}
+
+#[test]
+fn test_jit_default_exported_class_with_decorators() {
+    // A default-exported Angular class with non-Angular decorators should
+    // be lowered with `export default ClassName` at the end.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function Logger() { return function(t: any) { return t; }; }
+
+@Logger()
+@Injectable()
+export default class AppService {
+    @Logger()
+    process() {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "app.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Should be class expression
+    assert!(
+        result.code.contains("let AppService = class AppService"),
+        "Default-exported class should be converted. Got:\n{}",
+        result.code
+    );
+
+    // Should have `export default AppService` (not `export { AppService }`)
+    assert!(
+        result.code.contains("export default AppService"),
+        "Should use export default. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("export { AppService }"),
+        "Should NOT use named export for default export. Got:\n{}",
+        result.code
+    );
+
+    // No raw decorators
+    assert!(
+        !result.code.contains("@Logger") && !result.code.contains("@Injectable"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_default_export_class", result.code);
+}
+
+#[test]
+fn test_jit_getter_setter_decorators() {
+    // Decorators on getter/setter methods should be lowered like regular methods
+    // (using null, not void 0, since they are accessor methods not property fields).
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive, Input } from '@angular/core';
+
+function Validate() { return function(t: any, k: string, d: any) {}; }
+function Transform() { return function(t: any, k: string, d: any) {}; }
+
+@Directive({ selector: '[appField]' })
+export class FieldDirective {
+    private _value = '';
+
+    @Validate()
+    @Input()
+    get value() { return this._value; }
+    set value(v: string) { this._value = v; }
+
+    @Transform()
+    get computed() { return this._value.toUpperCase(); }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "field.directive.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw decorators
+    assert!(
+        !result.code.contains("@Validate")
+            && !result.code.contains("@Input")
+            && !result.code.contains("@Transform"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // Getter decorator should use null (method/accessor, not property)
+    assert!(
+        result.code.contains("__decorate([Validate()], FieldDirective.prototype, \"value\", null)"),
+        "Getter decorator should use null (accessor). Got:\n{}",
+        result.code
+    );
+    assert!(
+        result
+            .code
+            .contains("__decorate([Transform()], FieldDirective.prototype, \"computed\", null)"),
+        "Getter decorator should use null (accessor). Got:\n{}",
+        result.code
+    );
+
+    // Angular decorator should be in propDecorators
+    assert!(
+        result.code.contains("type: Input"),
+        "Angular getter decorator should be in propDecorators. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_getter_setter_decorators", result.code);
+}
+
+#[test]
+fn test_jit_decorator_with_complex_arguments() {
+    // Decorators with complex arguments (objects, arrays, arrow functions,
+    // template literals) should have their argument text preserved verbatim.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function Config(opts: any) { return function(t: any) { return t; }; }
+function Transform(fn: any) { return function(t: any, k: string, d: any) {}; }
+
+@Config({
+    name: 'test',
+    deps: [ServiceA, ServiceB],
+    factory: () => new TestService(),
+})
+@Injectable()
+export class TestService {
+    @Transform((val: string) => val.trim())
+    process() {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // No raw decorators should remain
+    assert!(
+        !result.code.contains("@Config")
+            && !result.code.contains("@Injectable")
+            && !result.code.contains("@Transform"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // Complex arguments should be preserved in the __decorate call
+    assert!(
+        result.code.contains("Config("),
+        "Config decorator with complex args should be in __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("factory: () => new TestService()"),
+        "Arrow function argument should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("deps: [ServiceA, ServiceB]"),
+        "Array argument should be preserved. Got:\n{}",
+        result.code
+    );
+
+    // Method decorator with arrow function arg
+    assert!(
+        result.code.contains("Transform((val) => val.trim())"),
+        "Arrow function in method decorator should be preserved. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_complex_decorator_arguments", result.code);
+}
+
+#[test]
+fn test_jit_angular_param_decorators_not_in_member_decorate() {
+    // Angular parameter decorators (@Inject, @Optional, @Self, @SkipSelf, @Host, @Attribute)
+    // should NOT be emitted in __decorate() calls if they appear on a member.
+    // While these are designed for constructor params, if someone puts them on a member,
+    // they should be treated as Angular decorators (not lowered via __decorate).
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable, Inject, Optional } from '@angular/core';
+
+function Custom() { return function(t: any, k: string) {}; }
+
+@Injectable()
+export class MyService {
+    @Inject('TOKEN')
+    token: any;
+
+    @Optional()
+    optionalDep: any;
+
+    @Custom()
+    customProp: string = '';
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "my.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // @Custom should be lowered via __decorate (it's non-Angular)
+    assert!(
+        result.code.contains("__decorate([Custom()], MyService.prototype, \"customProp\", void 0)"),
+        "Non-Angular decorator should be in __decorate. Got:\n{}",
+        result.code
+    );
+
+    // @Inject and @Optional should NOT appear in __decorate calls for members
+    // They are Angular decorators and should not be treated as non-Angular
+    let member_decorate_calls: Vec<&str> = result
+        .code
+        .lines()
+        .filter(|l| l.contains("__decorate(") && l.contains(".prototype"))
+        .collect();
+    for call in &member_decorate_calls {
+        assert!(
+            !call.contains("Inject(") && !call.contains("Optional()"),
+            "Angular param decorators should not appear in member __decorate calls. Got:\n{call}"
+        );
+    }
+
+    insta::assert_snapshot!("jit_angular_param_decorators_on_members", result.code);
+}
+
+// =========================================================================
+// Reference output comparison tests
+// =========================================================================
+// These tests compare our output against the actual output from Angular's
+// official JIT compiler (@angular/compiler-cli) + TypeScript emit pipeline.
+// Reference outputs were generated by compiling TypeScript files with
+// Angular's downlevel_decorators_transform followed by tsc emit.
+
+#[test]
+fn test_jit_reference_ngxs_animals_state() {
+    // Reference: AnimalsState from Angular's actual JIT output
+    // Non-Angular @State class decorator + @Injectable, with @Selector (static) and @Action (instance)
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { State, Action, Selector } from '@ngxs/store';
+
+@State({
+    name: 'animals',
+    defaults: []
+})
+@Injectable()
+class AnimalsState {
+    @Selector()
+    static getAnimals(state: string[]): string[] {
+        return state;
+    }
+
+    @Action({ type: 'AddAnimal' })
+    addAnimal(ctx: any, action: any): void {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "animals.state.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Angular reference output (from full-compiled-output.js):
+    //   __decorate([Action({type:'AddAnimal'})], AnimalsState.prototype, "addAnimal", null);
+    //   __decorate([Selector()], AnimalsState, "getAnimals", null);
+    //   AnimalsState = __decorate([State({...}), Injectable()], AnimalsState);
+
+    // Instance method → prototype, null
+    assert!(
+        result.code.contains("__decorate([Action({ type: \"AddAnimal\" })], AnimalsState.prototype, \"addAnimal\", null)"),
+        "Instance method should match Angular reference output. Got:\n{}",
+        result.code
+    );
+
+    // Static method → class directly, null
+    assert!(
+        result.code.contains("__decorate([Selector()], AnimalsState, \"getAnimals\", null)"),
+        "Static method should match Angular reference output. Got:\n{}",
+        result.code
+    );
+
+    // Instance __decorate calls should come before static ones (TypeScript ordering)
+    let instance_pos = result.code.find("AnimalsState.prototype").unwrap();
+    let static_pos = result.code.find("AnimalsState, \"getAnimals\"").unwrap();
+    assert!(
+        instance_pos < static_pos,
+        "Instance member __decorate should come before static. Got:\n{}",
+        result.code
+    );
+
+    // Class __decorate should include both State and Injectable in source order
+    let class_decorate = result.code.find("AnimalsState = __decorate(").unwrap();
+    let class_section = &result.code[class_decorate..];
+    assert!(
+        class_section.contains("State(") && class_section.contains("Injectable()"),
+        "Class __decorate should include both decorators. Got:\n{}",
+        result.code
+    );
+
+    // No raw decorators
+    assert!(
+        !result.code.contains("@State")
+            && !result.code.contains("@Injectable")
+            && !result.code.contains("@Selector")
+            && !result.code.contains("@Action"),
+        "No raw decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_reference_animals_state", result.code);
+}
+
+#[test]
+fn test_jit_reference_ordering() {
+    // Reference: OrderTestState from Angular's actual JIT output
+    // Tests that instance members are emitted before static members,
+    // each group in source order. This matches TypeScript's emit behavior.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { State, Action, Selector } from '@ngxs/store';
+
+@State({ name: 'order', defaults: {} })
+@Injectable()
+class OrderTestState {
+    @Action({ type: 'First' })
+    instanceFirst(ctx: any): void {}
+
+    @Selector()
+    static staticSecond(state: any): any { return state; }
+
+    @Action({ type: 'Third' })
+    instanceThird(ctx: any): void {}
+
+    @Selector()
+    static staticFourth(state: any): any { return state; }
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "order.state.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Angular reference output ordering (from decorate-patterns-output.js):
+    //   __decorate([Action({type:'First'})], OrderTestState.prototype, "instanceFirst", null);
+    //   __decorate([Action({type:'Third'})], OrderTestState.prototype, "instanceThird", null);
+    //   __decorate([Selector()], OrderTestState, "staticSecond", null);
+    //   __decorate([Selector()], OrderTestState, "staticFourth", null);
+    //   OrderTestState = __decorate([State({...}), Injectable()], OrderTestState);
+
+    let first_pos = result.code.find("\"instanceFirst\"").unwrap();
+    let third_pos = result.code.find("\"instanceThird\"").unwrap();
+    let second_pos = result.code.find("\"staticSecond\"").unwrap();
+    let fourth_pos = result.code.find("\"staticFourth\"").unwrap();
+    let class_pos = result.code.find("OrderTestState = __decorate(").unwrap();
+
+    // Instance members first (in source order)
+    assert!(first_pos < third_pos, "instanceFirst before instanceThird");
+    // Then static members (in source order)
+    assert!(third_pos < second_pos, "instance group before static group");
+    assert!(second_pos < fourth_pos, "staticSecond before staticFourth");
+    // Class decorator last
+    assert!(fourth_pos < class_pos, "member decorators before class decorator");
+
+    insta::assert_snapshot!("jit_reference_ordering", result.code);
+}
+
+#[test]
+fn test_jit_reference_decorate_patterns() {
+    // Reference: TestDecoratePatternsService from Angular's actual JIT output
+    // Tests property/method/static/getter/setter decorator patterns
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+
+function CustomPropDecorator(): any { return () => {}; }
+function CustomMethodDecorator(): any { return () => {}; }
+
+@Injectable()
+class TestDecoratePatternsService {
+    @CustomPropDecorator()
+    myProp: string = 'hello';
+
+    @CustomMethodDecorator()
+    myMethod(): void {}
+
+    @CustomMethodDecorator()
+    static myStaticMethod(): void {}
+
+    @CustomPropDecorator()
+    get myGetter(): string { return ''; }
+
+    @CustomPropDecorator()
+    set mySetter(val: string) {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "patterns.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Angular reference output (from decorate-patterns-output.js):
+    //   __decorate([CustomPropDecorator()], X.prototype, "myProp", void 0);
+    //   __decorate([CustomMethodDecorator()], X.prototype, "myMethod", null);
+    //   __decorate([CustomPropDecorator()], X.prototype, "myGetter", null);
+    //   __decorate([CustomPropDecorator()], X.prototype, "mySetter", null);
+    //   __decorate([CustomMethodDecorator()], X, "myStaticMethod", null);
+
+    // Property → void 0
+    assert!(
+        result.code.contains("__decorate([CustomPropDecorator()], TestDecoratePatternsService.prototype, \"myProp\", void 0)"),
+        "Property decorator should use void 0 (Angular reference). Got:\n{}",
+        result.code
+    );
+
+    // Method → null
+    assert!(
+        result.code.contains("__decorate([CustomMethodDecorator()], TestDecoratePatternsService.prototype, \"myMethod\", null)"),
+        "Method decorator should use null (Angular reference). Got:\n{}",
+        result.code
+    );
+
+    // Static method → class, null
+    assert!(
+        result.code.contains("__decorate([CustomMethodDecorator()], TestDecoratePatternsService, \"myStaticMethod\", null)"),
+        "Static method should use class directly (Angular reference). Got:\n{}",
+        result.code
+    );
+
+    // Getter → null (accessor, not property)
+    assert!(
+        result.code.contains("__decorate([CustomPropDecorator()], TestDecoratePatternsService.prototype, \"myGetter\", null)"),
+        "Getter should use null (Angular reference). Got:\n{}",
+        result.code
+    );
+
+    // Setter → null (accessor, not property)
+    assert!(
+        result.code.contains("__decorate([CustomPropDecorator()], TestDecoratePatternsService.prototype, \"mySetter\", null)"),
+        "Setter should use null (Angular reference). Got:\n{}",
+        result.code
+    );
+
+    // Ordering: instance members first (myProp, myMethod, myGetter, mySetter), then static
+    let prop_pos = result.code.find("\"myProp\"").unwrap();
+    let method_pos = result.code.find("\"myMethod\"").unwrap();
+    let getter_pos = result.code.find("\"myGetter\"").unwrap();
+    let setter_pos = result.code.find("\"mySetter\"").unwrap();
+    let static_pos = result.code.find("\"myStaticMethod\"").unwrap();
+
+    assert!(prop_pos < static_pos, "instance before static");
+    assert!(method_pos < static_pos, "instance before static");
+    assert!(getter_pos < static_pos, "instance before static");
+    assert!(setter_pos < static_pos, "instance before static");
+
+    insta::assert_snapshot!("jit_reference_decorate_patterns", result.code);
+}
+
+#[test]
+fn test_jit_reference_angular_member_decorators() {
+    // Reference: MyService from Angular's actual JIT output
+    // Angular member decorators go into propDecorators, constructor params into ctorParameters
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable, Inject, Optional, Input, Output, ViewChild, HostListener, HostBinding, ContentChild } from '@angular/core';
+
+@Injectable()
+class MyService {
+    @Input()
+    myInput: string = '';
+
+    @Output()
+    myOutput: any;
+
+    @ViewChild('ref')
+    myViewChild: any;
+
+    @HostBinding('class.active')
+    isActive: boolean = false;
+
+    @HostListener('click', ['$event'])
+    onClick(event: Event): void {}
+
+    @ContentChild('content')
+    myContent: any;
+
+    constructor(
+        @Inject('TOKEN') private token: string,
+        @Optional() private optService: any,
+    ) {}
+
+    normalMethod(): void {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "my.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Angular reference: propDecorators should contain all Angular member decorators
+    // From full-compiled-output.js:
+    //   static propDecorators = {
+    //       myInput: [{ type: Input }],
+    //       myOutput: [{ type: Output }],
+    //       myViewChild: [{ type: ViewChild, args: ['ref',] }],
+    //       isActive: [{ type: HostBinding, args: ['class.active',] }],
+    //       onClick: [{ type: HostListener, args: ['click', ['$event'],] }],
+    //       myContent: [{ type: ContentChild, args: ['content',] }]
+    //   };
+
+    assert!(
+        result.code.contains("propDecorators"),
+        "Should have propDecorators. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("type: Input"), "propDecorators: Input. Got:\n{}", result.code);
+    assert!(result.code.contains("type: Output"), "propDecorators: Output. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("type: ViewChild"),
+        "propDecorators: ViewChild. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: HostBinding"),
+        "propDecorators: HostBinding. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: HostListener"),
+        "propDecorators: HostListener. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("type: ContentChild"),
+        "propDecorators: ContentChild. Got:\n{}",
+        result.code
+    );
+
+    // Angular reference: ctorParameters should contain constructor param types and decorators
+    // From full-compiled-output.js:
+    //   static ctorParameters = () => [
+    //       { type: String, decorators: [{ type: Inject, args: ['TOKEN',] }] },
+    //       { type: undefined, decorators: [{ type: Optional }] }
+    //   ];
+    assert!(
+        result.code.contains("ctorParameters"),
+        "Should have ctorParameters. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("type: Inject"), "ctorParameters: Inject. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("type: Optional"),
+        "ctorParameters: Optional. Got:\n{}",
+        result.code
+    );
+
+    // No raw Angular decorators should remain
+    assert!(
+        !result.code.contains("@Input")
+            && !result.code.contains("@Output")
+            && !result.code.contains("@ViewChild")
+            && !result.code.contains("@HostBinding")
+            && !result.code.contains("@HostListener")
+            && !result.code.contains("@ContentChild")
+            && !result.code.contains("@Inject")
+            && !result.code.contains("@Optional"),
+        "No raw Angular decorator syntax should remain. Got:\n{}",
+        result.code
+    );
+
+    // No __decorate calls for Angular member decorators (they go in propDecorators instead)
+    // Only the class __decorate([Injectable()], ...) should exist
+    let decorate_count = result.code.matches("__decorate(").count();
+    assert!(
+        decorate_count == 1,
+        "Should have exactly 1 __decorate call (class only, not members). Got {} calls:\n{}",
+        decorate_count,
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_reference_angular_member_decorators", result.code);
+}
+
 // =========================================================================
 // Source map tests
 // =========================================================================
@@ -6414,7 +7648,7 @@ export class TestComponent {
 fn test_sourcemap_aot_mode() {
     // Issue #99: transformAngularFile should return a source map when sourcemap: true
     let allocator = Allocator::default();
-    let source = r#"import { Component } from '@angular/core';
+    let source = r"import { Component } from '@angular/core';
 
 @Component({
     selector: 'app-test',
@@ -6423,11 +7657,12 @@ fn test_sourcemap_aot_mode() {
 })
 export class TestComponent {
 }
-"#;
+";
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
 
     assert!(
         result.map.is_some(),
@@ -6451,7 +7686,7 @@ export class TestComponent {
 fn test_sourcemap_jit_mode() {
     // Issue #99: JIT mode should also return a source map when sourcemap: true
     let allocator = Allocator::default();
-    let source = r#"import { Component } from '@angular/core';
+    let source = r"import { Component } from '@angular/core';
 
 @Component({
     selector: 'app-test',
@@ -6460,11 +7695,12 @@ fn test_sourcemap_jit_mode() {
 })
 export class TestComponent {
 }
-"#;
+";
 
     let options = ComponentTransformOptions { sourcemap: true, jit: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "app.component.ts", source, &options, None);
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
 
     assert!(
         result.map.is_some(),
@@ -6480,7 +7716,7 @@ export class TestComponent {
 fn test_sourcemap_disabled_by_default() {
     // When sourcemap is false (default), map should be None
     let allocator = Allocator::default();
-    let source = r#"import { Component } from '@angular/core';
+    let source = r"import { Component } from '@angular/core';
 
 @Component({
     selector: 'app-test',
@@ -6489,15 +7725,9 @@ fn test_sourcemap_disabled_by_default() {
 })
 export class TestComponent {
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "app.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
     assert!(result.map.is_none(), "Source map should be None when sourcemap option is false");
 }
@@ -6506,7 +7736,7 @@ export class TestComponent {
 fn test_sourcemap_with_external_template() {
     // Source map should work with resolved external templates
     let allocator = Allocator::default();
-    let source = r#"import { Component } from '@angular/core';
+    let source = r"import { Component } from '@angular/core';
 
 @Component({
     selector: 'app-test',
@@ -6515,7 +7745,7 @@ fn test_sourcemap_with_external_template() {
 })
 export class TestComponent {
 }
-"#;
+";
 
     let mut templates = std::collections::HashMap::new();
     templates.insert("./app.html".to_string(), "<h1>Hello World</h1>".to_string());
@@ -6523,8 +7753,13 @@ export class TestComponent {
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result =
-        transform_angular_file(&allocator, "app.component.ts", source, &options, Some(&resolved));
+    let result = transform_angular_file(
+        &allocator,
+        "app.component.ts",
+        source,
+        Some(&options),
+        Some(&resolved),
+    );
 
     assert!(
         result.map.is_some(),
@@ -6536,14 +7771,14 @@ export class TestComponent {
 fn test_sourcemap_no_angular_classes() {
     // A file with no Angular classes should still return a source map if requested
     let allocator = Allocator::default();
-    let source = r#"export class PlainService {
+    let source = r"export class PlainService {
     getData() { return 42; }
 }
-"#;
+";
 
     let options = ComponentTransformOptions { sourcemap: true, ..Default::default() };
 
-    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "plain.ts", source, Some(&options), None);
 
     // Even for files with no Angular components, if sourcemap is requested,
     // a trivial identity source map should be returned
@@ -6560,7 +7795,7 @@ fn test_sourcemap_no_angular_classes() {
 #[test]
 fn test_dts_component_basic() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6569,10 +7804,9 @@ import { Component } from '@angular/core';
   template: '<p>Hello</p>'
 })
 export class HelloComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "hello.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "hello.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // Should have exactly one dts declaration
@@ -6607,7 +7841,7 @@ export class HelloComponent {}
 #[test]
 fn test_dts_component_with_inputs_outputs() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Input, Output, EventEmitter } from '@angular/core';
 
 @Component({
@@ -6620,10 +7854,9 @@ export class UserComponent {
   @Input({ required: true, alias: 'userId' }) id!: number;
   @Output() clicked = new EventEmitter<void>();
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "user.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "user.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -6652,7 +7885,7 @@ export class UserComponent {
 #[test]
 fn test_dts_component_non_standalone() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6661,10 +7894,9 @@ import { Component } from '@angular/core';
   template: '<p>Legacy</p>'
 })
 export class LegacyComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "legacy.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "legacy.component.ts", source, None, None);
     assert!(!result.has_errors());
 
     let decl = &result.dts_declarations[0];
@@ -6679,7 +7911,7 @@ export class LegacyComponent {}
 #[test]
 fn test_dts_component_with_export_as() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 
 @Component({
@@ -6689,10 +7921,9 @@ import { Component } from '@angular/core';
   template: '<ng-content></ng-content>'
 })
 export class TooltipComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "tooltip.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "tooltip.component.ts", source, None, None);
     assert!(!result.has_errors());
 
     let decl = &result.dts_declarations[0];
@@ -6706,7 +7937,7 @@ export class TooltipComponent {}
 #[test]
 fn test_dts_directive() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Input, Output, EventEmitter } from '@angular/core';
 
 @Directive({
@@ -6718,11 +7949,9 @@ export class HighlightDirective {
   @Input() color: string = 'yellow';
   @Output() highlighted = new EventEmitter<boolean>();
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result =
-        transform_angular_file(&allocator, "highlight.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "highlight.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6763,7 +7992,7 @@ export class HighlightDirective {
 #[test]
 fn test_dts_pipe() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Pipe, PipeTransform } from '@angular/core';
 
 @Pipe({
@@ -6775,10 +8004,9 @@ export class CapitalizePipe implements PipeTransform {
     return value.charAt(0).toUpperCase() + value.slice(1);
   }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "capitalize.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "capitalize.pipe.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6804,7 +8032,7 @@ export class CapitalizePipe implements PipeTransform {
 #[test]
 fn test_dts_pipe_no_name() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Pipe, PipeTransform } from '@angular/core';
 
 @Pipe({
@@ -6815,10 +8043,9 @@ export class MyPipe implements PipeTransform {
     return value;
   }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "my.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "my.pipe.ts", source, None, None);
 
     assert_eq!(result.dts_declarations.len(), 1);
     let decl = &result.dts_declarations[0];
@@ -6835,7 +8062,7 @@ export class MyPipe implements PipeTransform {
 #[test]
 fn test_dts_ng_module() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { NgModule } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
@@ -6845,10 +8072,9 @@ import { CommonModule } from '@angular/common';
   exports: [MyComponent]
 })
 export class MyModule {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "my.module.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "my.module.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6890,7 +8116,7 @@ export class MyModule {}
 #[test]
 fn test_dts_injectable() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Injectable } from '@angular/core';
 
 @Injectable({
@@ -6899,10 +8125,9 @@ import { Injectable } from '@angular/core';
 export class DataService {
   getData() { return []; }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "data.service.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "data.service.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6927,7 +8152,7 @@ export class DataService {
 #[test]
 fn test_dts_generic_injectable() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Injectable } from '@angular/core';
 
 @Injectable({
@@ -6936,10 +8161,9 @@ import { Injectable } from '@angular/core';
 export class GenericService<T, U> {
   getData(): T | U { return null!; }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.service.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.service.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -6966,17 +8190,16 @@ export class GenericService<T, U> {
 #[test]
 fn test_dts_generic_pipe() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Pipe, PipeTransform } from '@angular/core';
 
 @Pipe({ name: 'genericPipe', standalone: true })
 export class GenericPipe<T> implements PipeTransform {
   transform(value: T): T { return value; }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.pipe.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.pipe.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7001,7 +8224,7 @@ export class GenericPipe<T> implements PipeTransform {
 #[test]
 fn test_dts_generic_directive() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Input } from '@angular/core';
 
 @Directive({
@@ -7012,10 +8235,9 @@ export class GenericDirective<T, U> {
   @Input() value!: T;
   @Input() extra!: U;
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7041,15 +8263,14 @@ export class GenericDirective<T, U> {
 #[test]
 fn test_dts_generic_ng_module() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { NgModule } from '@angular/core';
 
 @NgModule({})
 export class GenericModule<T> {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "generic.module.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "generic.module.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7081,7 +8302,7 @@ export class GenericModule<T> {}
 #[test]
 fn test_dts_multiple_classes_in_file() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Injectable, Pipe, PipeTransform } from '@angular/core';
 
 @Injectable({ providedIn: 'root' })
@@ -7098,10 +8319,9 @@ export class MyPipe implements PipeTransform {
   template: '<p>{{value | myPipe}}</p>'
 })
 export class MultiComponent {}
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "multi.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "multi.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // Should have declarations for all 3 classes
@@ -7122,14 +8342,13 @@ export class MultiComponent {}
 #[test]
 fn test_dts_no_declarations_for_plain_class() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 export class PlainClass {
   doStuff() { return 42; }
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "plain.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "plain.ts", source, None, None);
 
     // Should have no dts declarations for plain classes
     assert!(
@@ -7141,7 +8360,7 @@ export class PlainClass {
 #[test]
 fn test_dts_component_with_signal_input() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, input } from '@angular/core';
 
 @Component({
@@ -7153,10 +8372,9 @@ export class SignalComponent {
   name = input<string>('default');
   required = input.required<number>();
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "signal.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "signal.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
@@ -7173,7 +8391,7 @@ export class SignalComponent {
 #[test]
 fn test_dts_component_ctor_deps_with_attribute() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Attribute } from '@angular/core';
 import { MyService } from './my.service';
 
@@ -7188,10 +8406,9 @@ export class TestComponent {
     @Attribute('title') title: string
   ) {}
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7207,7 +8424,7 @@ export class TestComponent {
 #[test]
 fn test_dts_component_ctor_deps_with_optional() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Optional } from '@angular/core';
 import { MyService } from './my.service';
 
@@ -7221,10 +8438,9 @@ export class TestComponent {
     @Optional() private svc: MyService
   ) {}
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7240,7 +8456,7 @@ export class TestComponent {
 #[test]
 fn test_dts_component_ctor_deps_no_flags() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component } from '@angular/core';
 import { MyService } from './my.service';
 
@@ -7252,10 +8468,9 @@ import { MyService } from './my.service';
 export class TestComponent {
   constructor(private svc: MyService) {}
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7270,7 +8485,7 @@ export class TestComponent {
 #[test]
 fn test_dts_directive_ctor_deps_with_optional_and_host() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Optional, Host } from '@angular/core';
 import { MyService } from './my.service';
 import { OtherService } from './other.service';
@@ -7285,10 +8500,9 @@ export class TestDirective {
     private other: OtherService
   ) {}
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7318,8 +8532,7 @@ import { Component } from '@angular/core';
 export class LayoutComponent {}
 "#;
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "layout.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "layout.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7343,7 +8556,7 @@ export class LayoutComponent {}
 #[test]
 fn test_dts_component_with_input_transform() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Input, booleanAttribute } from '@angular/core';
 
 @Component({
@@ -7355,10 +8568,9 @@ export class TestComponent {
   @Input({transform: booleanAttribute}) disabled: boolean = false;
   @Input() name: string = '';
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7382,7 +8594,7 @@ export class TestComponent {
 #[test]
 fn test_dts_directive_with_input_transform() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Directive, Input, booleanAttribute } from '@angular/core';
 
 @Directive({
@@ -7393,10 +8605,9 @@ export class TestDirective {
   @Input({transform: booleanAttribute}) disabled: boolean = false;
   @Input() name: string = '';
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.directive.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7420,7 +8631,7 @@ export class TestDirective {
 #[test]
 fn test_dts_signal_input_with_transform_no_accept_type() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, input, booleanAttribute } from '@angular/core';
 
 @Component({
@@ -7431,10 +8642,9 @@ import { Component, input, booleanAttribute } from '@angular/core';
 export class TestComponent {
   disabled = input(false, {transform: booleanAttribute});
 }
-"#;
+";
 
-    let options = ComponentTransformOptions::default();
-    let result = transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     let decl = &result.dts_declarations[0];
@@ -7873,7 +9083,7 @@ fn test_property_singleton_interpolation_with_sanitizer_angular_v19() {
 #[test]
 fn test_host_directives_with_inputs_outputs() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Directive, EventEmitter, Input, Output } from '@angular/core';
 
 @Directive({})
@@ -7896,15 +9106,9 @@ export class HostDir {
 })
 export class MyComponent {
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -7934,7 +9138,7 @@ export class MyComponent {
 #[test]
 fn test_host_directives_with_host_aliases() {
     let allocator = Allocator::default();
-    let source = r#"
+    let source = r"
 import { Component, Directive, EventEmitter, Input, Output } from '@angular/core';
 
 @Directive({})
@@ -7957,15 +9161,9 @@ export class HostDir {
 })
 export class MyComponent {
 }
-"#;
+";
 
-    let result = transform_angular_file(
-        &allocator,
-        "test.component.ts",
-        source,
-        &ComponentTransformOptions::default(),
-        None,
-    );
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
@@ -7988,4 +9186,258 @@ export class MyComponent {
     );
 
     insta::assert_snapshot!("host_directives_with_host_aliases", result.code);
+}
+
+// =============================================================================
+// Issue #203: useFactory with block-body functions silently dropped in providers
+// =============================================================================
+
+#[test]
+fn test_use_factory_block_body_arrow_preserved() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: () => {
+                const config = inject(AppConfig);
+                if (config.useMock) {
+                    return new MockService();
+                }
+                return new RealService(config);
+            }
+        }
+    ]
+})
+export class MyComponent {}
+";
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert_eq!(result.component_count, 1);
+
+    // The key assertion: the block-body arrow function should be preserved intact.
+    // Before the fix, `const config = inject(AppConfig)` and `if (config.useMock) { ... }`
+    // were silently dropped, leaving only `return new RealService(config)`.
+    assert!(
+        result.code.contains("const config = inject(AppConfig)"),
+        "Block-body arrow: const declaration should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("if (config.useMock)"),
+        "Block-body arrow: if statement should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("return new MockService()"),
+        "Block-body arrow: return inside if should be preserved. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("return new RealService(config)"),
+        "Block-body arrow: final return should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_use_factory_expression_body_arrow_still_works() {
+    // Verify that expression-body arrows (which already worked) are not regressed
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: () => new RealService(inject(AppConfig))
+        }
+    ]
+})
+export class MyComponent {}
+";
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("new RealService(inject(AppConfig))"),
+        "Expression-body arrow should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_providers_with_function_expression_preserved() {
+    // function() expressions should also be preserved
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, inject } from '@angular/core';
+
+const MY_TOKEN = 'MY_TOKEN';
+
+@Component({
+    selector: 'my-component',
+    template: '<div>hello</div>',
+    providers: [
+        {
+            provide: MY_TOKEN,
+            useFactory: function() { return new RealService(); }
+        }
+    ]
+})
+export class MyComponent {}
+";
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("function()"),
+        "function expression should be preserved. Got:\n{}",
+        result.code
+    );
+}
+
+// =============================================================================
+// Regression: @Inject(TOKEN) on pipe constructor parameters
+// =============================================================================
+// The `extract_param_dependency` function in `pipe/decorator.rs` previously did
+// not handle the `@Inject(TOKEN)` decorator, so the token was silently taken
+// from the TypeScript type annotation instead. When the type was an interface
+// (erased at runtime) this left the DI token undefined, which Angular 20's
+// `assertDefined(token)` guard rejects immediately. See commit b2dd390.
+
+/// `@Inject(TOKEN)` on a pipe constructor param must produce a factory that
+/// injects the TOKEN identifier, not the erased type annotation.
+#[test]
+fn test_pipe_factory_uses_inject_token_over_interface_type() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform, Inject, InjectionToken } from '@angular/core';
+
+export interface Config {
+    locale: string;
+}
+
+export const CONFIG = new InjectionToken<Config>('CONFIG');
+
+@Pipe({ name: 'localized', standalone: true })
+export class LocalizedPipe implements PipeTransform {
+    constructor(@Inject(CONFIG) private config: Config) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "localized.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    // Factory must inject CONFIG (the @Inject token), not Config (the interface type).
+    assert!(
+        factory_section.contains("CONFIG"),
+        "Pipe factory should inject the @Inject(CONFIG) token. Factory:\n{factory_section}"
+    );
+    assert!(
+        !factory_section.contains("directiveInject(Config)")
+            && !factory_section.contains("ɵɵinject(Config)"),
+        "Pipe factory must NOT inject the erased interface type 'Config'. Factory:\n{factory_section}"
+    );
+}
+
+/// When `@Inject(TOKEN)` is used alongside modifier decorators (`@Optional`,
+/// `@SkipSelf`), the factory must still pick up the TOKEN and forward the
+/// correct DI flags.
+#[test]
+fn test_pipe_factory_inject_token_with_optional_skip_self() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform, Inject, Optional, SkipSelf, InjectionToken } from '@angular/core';
+
+export const MY_TOKEN = new InjectionToken<string>('MY_TOKEN');
+
+@Pipe({ name: 'tagged', standalone: true })
+export class TaggedPipe implements PipeTransform {
+    constructor(
+        @Optional() @SkipSelf() @Inject(MY_TOKEN) private tag: string | null,
+    ) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "tagged.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    // MY_TOKEN must be present in the factory as the DI token.
+    assert!(
+        factory_section.contains("directiveInject(MY_TOKEN"),
+        "Pipe factory should inject MY_TOKEN. Factory:\n{factory_section}"
+    );
+
+    // The DI flag bitmask must include Optional (8) | SkipSelf (4). Angular's
+    // pipe compilation also ORs in ForPipe (16), yielding 28. We only require
+    // that both Optional and SkipSelf bits are set.
+    let flags = factory_section
+        .split("directiveInject(MY_TOKEN,")
+        .nth(1)
+        .and_then(|s| s.split(')').next())
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .expect("Factory should encode numeric DI flags");
+    assert!(
+        flags & 8 != 0 && flags & 4 != 0,
+        "Pipe factory flags should include Optional (8) and SkipSelf (4). Got: {flags}. Factory:\n{factory_section}"
+    );
+}
+
+/// Without `@Inject`, the factory must still fall back to the type annotation
+/// so that plain class-typed dependencies continue to resolve correctly.
+#[test]
+fn test_pipe_factory_without_inject_still_uses_type_annotation() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Pipe, PipeTransform } from '@angular/core';
+
+export class Logger {
+    log(msg: string): void {}
+}
+
+@Pipe({ name: 'logged', standalone: true })
+export class LoggedPipe implements PipeTransform {
+    constructor(private logger: Logger) {}
+    transform(value: string): string { return value; }
+}
+";
+
+    let result = transform_angular_file(&allocator, "logged.pipe.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+
+    assert!(
+        factory_section.contains("Logger"),
+        "Pipe factory should fall back to the type annotation (Logger). Factory:\n{factory_section}"
+    );
 }

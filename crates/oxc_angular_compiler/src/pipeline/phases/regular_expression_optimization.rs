@@ -7,7 +7,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/regular_expression_optimization.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::IrExpression;
@@ -32,7 +32,7 @@ pub fn optimize_regular_expressions(job: &mut ComponentCompilationJob<'_>) {
 
     // First pass: Pool regexes and collect their names for replacement
     // We need to collect regex info and pool them first, then do the replacement
-    let mut regex_replacements: Vec<(String, Option<String>, Atom<'_>)> = Vec::new();
+    let mut regex_replacements: Vec<(String, Option<String>, Ident<'_>)> = Vec::new();
 
     // Collect and pool all non-global regexes from root view using split borrow
     {
@@ -86,7 +86,7 @@ pub fn optimize_regular_expressions(job: &mut ComponentCompilationJob<'_>) {
 }
 
 /// Check if regex flags contain the global flag.
-fn is_global_regex(flags: Option<&oxc_span::Atom<'_>>) -> bool {
+fn is_global_regex(flags: Option<&Ident<'_>>) -> bool {
     flags.map_or(false, |f| f.contains('g'))
 }
 
@@ -99,7 +99,7 @@ fn make_regex_key(body: &str, flags: Option<&str>) -> String {
 fn collect_and_pool_regexes_from_create_op<'a>(
     op: &CreateOp<'a>,
     pool: &mut crate::pipeline::constant_pool::ConstantPool<'a>,
-    replacements: &mut Vec<(String, Option<String>, Atom<'a>)>,
+    replacements: &mut Vec<(String, Option<String>, Ident<'a>)>,
 ) {
     match op {
         CreateOp::Variable(var) => {
@@ -133,7 +133,7 @@ fn collect_and_pool_regexes_from_create_op<'a>(
 fn collect_and_pool_regexes_from_update_op<'a>(
     op: &UpdateOp<'a>,
     pool: &mut crate::pipeline::constant_pool::ConstantPool<'a>,
-    replacements: &mut Vec<(String, Option<String>, Atom<'a>)>,
+    replacements: &mut Vec<(String, Option<String>, Ident<'a>)>,
 ) {
     match op {
         UpdateOp::Property(prop) => {
@@ -162,7 +162,7 @@ fn collect_and_pool_regexes_from_update_op<'a>(
 fn collect_and_pool_from_expr<'a>(
     expr: &IrExpression<'a>,
     pool: &mut crate::pipeline::constant_pool::ConstantPool<'a>,
-    replacements: &mut Vec<(String, Option<String>, Atom<'a>)>,
+    replacements: &mut Vec<(String, Option<String>, Ident<'a>)>,
 ) {
     if let IrExpression::Ast(ast_expr) = expr {
         if let AngularExpression::RegularExpressionLiteral(regex) = ast_expr.as_ref() {
@@ -191,7 +191,7 @@ fn collect_and_pool_from_expr<'a>(
 fn transform_regexes_in_create_op<'a>(
     op: &mut CreateOp<'a>,
     allocator: &'a oxc_allocator::Allocator,
-    replacements: &[(String, Option<String>, Atom<'a>)],
+    replacements: &[(String, Option<String>, Ident<'a>)],
 ) {
     match op {
         CreateOp::Variable(var) => {
@@ -225,7 +225,7 @@ fn transform_regexes_in_create_op<'a>(
 fn transform_regexes_in_update_op<'a>(
     op: &mut UpdateOp<'a>,
     allocator: &'a oxc_allocator::Allocator,
-    replacements: &[(String, Option<String>, Atom<'a>)],
+    replacements: &[(String, Option<String>, Ident<'a>)],
 ) {
     match op {
         UpdateOp::Property(prop) => {
@@ -254,7 +254,7 @@ fn transform_regexes_in_update_op<'a>(
 fn transform_expr<'a>(
     expr: &mut IrExpression<'a>,
     allocator: &'a oxc_allocator::Allocator,
-    replacements: &[(String, Option<String>, Atom<'a>)],
+    replacements: &[(String, Option<String>, Ident<'a>)],
 ) {
     if let IrExpression::Ast(ast_expr) = expr {
         if let AngularExpression::RegularExpressionLiteral(regex) = ast_expr.as_ref() {
@@ -285,7 +285,7 @@ fn transform_expr<'a>(
 /// Host version - only processes the root unit (no embedded views).
 pub fn optimize_regular_expressions_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
-    let mut regex_replacements: Vec<(String, Option<String>, Atom<'_>)> = Vec::new();
+    let mut regex_replacements: Vec<(String, Option<String>, Ident<'_>)> = Vec::new();
 
     // First pass: Pool regexes from root unit
     {

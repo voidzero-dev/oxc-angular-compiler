@@ -1,12 +1,12 @@
 import { linkAngularPackage } from '#binding'
-import type { Plugin } from 'vite'
+import type { Plugin, ResolvedConfig } from 'vite'
 
 /**
  * Angular Linker plugin for Vite.
  *
- * Processes pre-compiled Angular library code from node_modules that contains
- * partial compilation declarations (ɵɵngDeclare*). These declarations need to
- * be "linked" (converted to full ɵɵdefine* calls) at build time.
+ * Processes pre-compiled Angular library code from node_modules (or Yarn PnP cache)
+ * that contains partial compilation declarations (ɵɵngDeclare*). These declarations
+ * need to be "linked" (converted to full ɵɵdefine* calls) at build time.
  *
  * Without this plugin, Angular falls back to JIT compilation which requires
  * @angular/compiler at runtime.
@@ -17,6 +17,8 @@ import type { Plugin } from 'vite'
  * This plugin works in two phases:
  * 1. During dependency optimization (Rolldown pre-bundling) via a Rolldown load plugin
  * 2. During Vite's transform pipeline for non-optimized node_modules files
+ *
+ * The linker automatically skips any package listed in `optimizeDeps.exclude`
  */
 
 const LINKER_DECLARATION_PREFIX = '\u0275\u0275ngDeclare'
@@ -24,8 +26,60 @@ const LINKER_DECLARATION_PREFIX = '\u0275\u0275ngDeclare'
 // Skip these packages - they don't need linking
 const SKIP_REGEX = /[\\/]@angular[\\/](?:compiler|core)[\\/]/
 
-// Match JS files in node_modules (Angular FESM bundles)
-const NODE_MODULES_JS_REGEX = /node_modules\/.*\.[cm]?js$/
+// Broad filter for the transform hook — deliberately simple so that every
+// Vite/Rolldown version can evaluate it.  Precise extension + query-string
+// checks are done inside the handler.
+const NODE_MODULES_JS_REGEX = /node_modules/
+
+// Precise check run inside the handler: matches .js / .mjs / .cjs with an
+// optional Vite query string (?v=…) and works on both Unix and Windows paths.
+const JS_EXT_REGEX = /\.[cm]?js(?:\?.*)?$/
+
+/**
+ * Returns an exclude filter that returns `true` if the file should be
+ * completely skipped by the linker because its package is listed in
+ * `optimizeDeps.exclude`.
+ *
+ * Supports:
+ * - Classic node_modules paths (npm / pnpm / Yarn with nodeLinker: node-modules)
+ * - Yarn PnP cache paths (default Yarn Berry behaviour with .zip files)
+ */
+function createExcludeFilter(exclude: readonly string[]): (id: string) => boolean {
+  return (id: string): boolean => {
+    if (exclude.length === 0) return false
+
+    // Normalize path separators to forward slashes for easier matching
+    const normalizedId = id.replace(/\\/g, '/')
+
+    return exclude.some((ex) => {
+      // Allows the wildcard to specify any subpackage like primeng/*
+      // Not often used but valid.
+      const pkg = ex.endsWith('/*') ? ex.slice(0, -2) : ex
+
+      // 1. Classic node_modules (npm, pnpm, Yarn node-modules mode)
+      if (
+        normalizedId.includes(`/node_modules/${pkg}/`) ||
+        normalizedId.endsWith(`/node_modules/${pkg}`)
+      ) {
+        return true
+      }
+
+      // 2. Yarn PnP cache paths (most common patterns)
+      // Examples:
+      //   /.yarn/cache/primeng-npm-17.0.0-abcdef1234.zip/node_modules/primeng/...
+      //   /.yarn/cache/@primeuix+themes-npm-1.x.x-xyz789.zip/...
+      if (
+        normalizedId.includes(`/.yarn/cache/${pkg}-`) ||
+        normalizedId.includes(`/.yarn/cache/${pkg.replace('@', '').replace('/', '+')}-`) ||
+        (normalizedId.includes('/.yarn/cache/') && normalizedId.includes(`/${pkg}/`))
+      ) {
+        return true
+      }
+
+      return false
+    })
+  }
+}
 
 /**
  * Run the OXC Rust linker on the given code.
@@ -43,8 +97,16 @@ async function linkCode(
 }
 
 export function angularLinkerPlugin(): Plugin {
+  let optimizeDepsExclude: readonly string[] = []
+
   return {
     name: '@oxc-angular/vite-linker',
+
+    configResolved(config: ResolvedConfig) {
+      // Capture optimizeDeps.exclude so we can skip the linker for those packages.
+      optimizeDepsExclude = config.optimizeDeps?.exclude ?? []
+    },
+
     config(_, { command }) {
       return {
         optimizeDeps: {
@@ -64,6 +126,9 @@ export function angularLinkerPlugin(): Plugin {
                     id: /\.[cm]?js$/,
                   },
                   async handler(id: string) {
+                    // early skip for packages in optimizeDeps.exclude
+                    if (createExcludeFilter(optimizeDepsExclude)(id)) return
+
                     // Skip @angular/compiler and @angular/core
                     if (SKIP_REGEX.test(id)) {
                       return
@@ -93,12 +158,25 @@ export function angularLinkerPlugin(): Plugin {
         },
       }
     },
+
     transform: {
       filter: {
         id: NODE_MODULES_JS_REGEX,
-        code: LINKER_DECLARATION_PREFIX,
       },
       async handler(code, id) {
+        // early skip for packages in optimizeDeps.exclude
+        if (createExcludeFilter(optimizeDepsExclude)(id)) return
+
+        // Precise extension check (covers .js, .mjs, .cjs with optional ?v=… query)
+        if (!JS_EXT_REGEX.test(id)) {
+          return
+        }
+
+        // Quick check: skip files without partial declarations
+        if (!code.includes(LINKER_DECLARATION_PREFIX)) {
+          return
+        }
+
         // Skip packages that don't need linking
         if (SKIP_REGEX.test(id)) {
           return

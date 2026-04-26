@@ -98,7 +98,7 @@ fn visit_expressions_for_required_parens(
             check_ir_expression_for_required_parens(&r.track, required);
         }
         CreateOp::I18nMessage(_) => {
-            // I18nMessage params are now formatted strings (Atom), not expressions
+            // I18nMessage params are now formatted strings (Ident), not expressions
             // No expressions to check here
         }
         CreateOp::I18nContext(_) => {

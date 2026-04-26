@@ -6,16 +6,16 @@ packages:
   - 'napi/angular-compiler/benchmarks/*'
 
 catalog:
-  '@napi-rs/cli': 3.5.1
-  '@oxc-node/cli': 0.0.35
-  '@oxc-node/core': 0.0.35
+  '@napi-rs/cli': 3.6.2
+  '@oxc-node/cli': 0.1.0
+  '@oxc-node/core': 0.1.0
   '@tailwindcss/vite': 4.2.2
   '@types/node': 24.1.0
-  tsdown: 0.21.4
-  typescript: 5.9.3
-  vitest: 4.1.0
-  oxfmt: 0.41.0
-  vite: 8.0.1
+  tsdown: 0.21.10
+  typescript: 6.0.3
+  vitest: 4.1.4
+  oxfmt: 0.46.0
+  vite: 8.0.8
   rxjs: 7.8.2
   tslib: 2.8.1
   tailwindcss: 4.2.2

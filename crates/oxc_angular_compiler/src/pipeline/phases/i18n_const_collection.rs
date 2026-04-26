@@ -8,7 +8,7 @@
 use std::ptr::NonNull;
 
 use oxc_allocator::Vec as ArenaVec;
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::i18n::serializer::format_i18n_placeholder_name;
@@ -132,7 +132,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
     // Map: i18n_block xref -> const index
     let mut message_const_indices: FxHashMap<XrefId, u32> = FxHashMap::default();
     // Map: i18n_context xref -> i18n variable name (for attribute bindings)
-    let mut i18n_var_names_by_context: FxHashMap<XrefId, Atom<'_>> = FxHashMap::default();
+    let mut i18n_var_names_by_context: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
     // Counter for unique variable names
     let mut i18n_var_counter: usize = 0;
@@ -184,7 +184,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
             // Add to consts array with statements as initializers and record the index.
             let var_name_str = allocator.alloc_str(&main_var_name);
             let main_var = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                ReadVarExpr { name: Atom::from(var_name_str), source_span: None },
+                ReadVarExpr { name: Ident::from(var_name_str), source_span: None },
                 allocator,
             ));
             let const_index =
@@ -195,7 +195,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
             // Add statements to consts_initializers and save the variable name.
             job.consts_initializers.extend(statements);
             let var_name_str = allocator.alloc_str(&main_var_name);
-            let var_name_atom = Atom::from(var_name_str);
+            let var_name_atom = Ident::from(var_name_str);
             i18n_var_names_by_context.insert(ctx_xref, var_name_atom.clone());
 
             // This i18n message may correspond to an individual extracted attribute. If so,
@@ -320,7 +320,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
                 let name_str = allocator.alloc_str(&expr.name);
                 let name_literal = OutputExpression::Literal(oxc_allocator::Box::new_in(
                     crate::output::ast::LiteralExpr {
-                        value: LiteralValue::String(Atom::from(name_str)),
+                        value: LiteralValue::String(Ident::from(name_str)),
                         source_span: None,
                     },
                     allocator,
@@ -508,11 +508,11 @@ fn collect_message<'a>(
     let meta = if msg_info.description.is_some() || msg_info.meaning.is_some() {
         let desc = msg_info.description.as_ref().map(|d| {
             let s = allocator.alloc_str(d);
-            Atom::from(s)
+            Ident::from(s)
         });
         let meaning = msg_info.meaning.as_ref().map(|m| {
             let s = allocator.alloc_str(m);
-            Atom::from(s)
+            Ident::from(s)
         });
         Some(I18nMessageMeta::new(desc, meaning))
     } else {
@@ -542,8 +542,8 @@ fn collect_message<'a>(
     };
 
     // Generate dual-mode translation declaration
-    let i18n_var_atom = Atom::from(allocator.alloc_str(&i18n_var_name));
-    let closure_var_atom = Atom::from(allocator.alloc_str(&closure_var_name));
+    let i18n_var_atom = Ident::from(allocator.alloc_str(&i18n_var_name));
+    let closure_var_atom = Ident::from(allocator.alloc_str(&closure_var_name));
 
     let statements = create_translation_declaration(
         allocator,
@@ -593,11 +593,11 @@ fn generate_message_from_params(params: &[(String, String)]) -> String {
 
 /// Format params from an I18nContext into (placeholder, value) pairs.
 fn format_context_params(
-    params: &oxc_allocator::HashMap<'_, Atom<'_>, ArenaVec<'_, I18nParamValue>>,
+    params: &oxc_allocator::HashMap<'_, Ident<'_>, ArenaVec<'_, I18nParamValue>>,
 ) -> Vec<(String, String)> {
     use crate::pipeline::phases::extract_i18n_messages::format_params;
 
-    let params_vec: Vec<(Atom<'_>, Vec<I18nParamValue>)> =
+    let params_vec: Vec<(Ident<'_>, Vec<I18nParamValue>)> =
         params.iter().map(|(k, v)| (k.clone(), v.iter().copied().collect())).collect();
 
     let (formatted, _needs_postprocessing) = format_params(&params_vec);
@@ -640,14 +640,14 @@ fn create_localize_expression<'a>(
     let first_text = text_parts.first().map(|s| s.as_str()).unwrap_or("");
     let head_cooked = serialize_i18n_head(first_text, &meaning, &description, &custom_id);
     let head_str = allocator.alloc_str(&head_cooked);
-    message_parts.push(Atom::from(head_str));
+    message_parts.push(Ident::from(head_str));
 
     // Subsequent parts: ":PLACEHOLDER_NAME:text"
     for (i, placeholder) in placeholder_order.iter().enumerate() {
         // Format placeholder name (UPPERCASE for $localize)
         let formatted_name = format_i18n_placeholder_name(placeholder, false);
         let name_str = allocator.alloc_str(&formatted_name);
-        placeholder_names.push(Atom::from(name_str));
+        placeholder_names.push(Ident::from(name_str));
 
         // Get the value for this placeholder
         // The params_map is keyed by the original placeholder name, but the message_string
@@ -657,7 +657,7 @@ fn create_localize_expression<'a>(
         let value_str = allocator.alloc_str(&value);
         let literal_expr = OutputExpression::Literal(oxc_allocator::Box::new_in(
             crate::output::ast::LiteralExpr {
-                value: LiteralValue::String(Atom::from(value_str)),
+                value: LiteralValue::String(Ident::from(value_str)),
                 source_span: None,
             },
             allocator,
@@ -668,21 +668,21 @@ fn create_localize_expression<'a>(
         let text_part = text_parts.get(i + 1).map(|s| s.as_str()).unwrap_or("");
         let part_cooked = serialize_i18n_template_part(&formatted_name, text_part);
         let part_str = allocator.alloc_str(&part_cooked);
-        message_parts.push(Atom::from(part_str));
+        message_parts.push(Ident::from(part_str));
     }
 
     // Store metadata for potential future use (JSDoc generation in emitter)
     let desc_atom = description.map(|d| {
         let s = allocator.alloc_str(&d);
-        Atom::from(s)
+        Ident::from(s)
     });
     let meaning_atom = meaning.map(|m| {
         let s = allocator.alloc_str(&m);
-        Atom::from(s)
+        Ident::from(s)
     });
     let custom_id_atom = custom_id.map(|c| {
         let s = allocator.alloc_str(&c);
-        Atom::from(s)
+        Ident::from(s)
     });
 
     OutputExpression::LocalizedString(oxc_allocator::Box::new_in(
@@ -829,12 +829,12 @@ fn wrap_with_postprocess<'a>(
         crate::output::ast::ReadPropExpr {
             receiver: oxc_allocator::Box::new_in(
                 OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(Identifiers::I18N_POSTPROCESS),
+            name: Ident::from(Identifiers::I18N_POSTPROCESS),
             optional: false,
             source_span: None,
         },
@@ -858,13 +858,13 @@ fn wrap_with_postprocess<'a>(
             for var_name in var_names {
                 let var_str = allocator.alloc_str(var_name);
                 var_refs.push(OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                    ReadVarExpr { name: Atom::from(var_str), source_span: None },
+                    ReadVarExpr { name: Ident::from(var_str), source_span: None },
                     allocator,
                 )));
             }
 
             entries.push(LiteralMapEntry {
-                key: Atom::from(key_str),
+                key: Ident::from(key_str),
                 value: OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                     LiteralArrayExpr { entries: var_refs, source_span: None },
                     allocator,
@@ -898,7 +898,7 @@ mod tests {
     use crate::output::ast::{LiteralExpr, OutputExpression, ReadVarExpr};
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Allocator;
-    use oxc_span::Atom;
+    use oxc_str::Ident;
 
     #[test]
     fn test_wrap_with_postprocess_uses_namespace_prefix() {
@@ -913,7 +913,7 @@ mod tests {
         // Create a simple input expression (simulating a $localize result)
         let input_expr = OutputExpression::Literal(oxc_allocator::Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Atom::from("test message")),
+                value: LiteralValue::String(Ident::from("test message")),
                 source_span: None,
             },
             &allocator,
@@ -941,7 +941,7 @@ mod tests {
         let allocator = Allocator::default();
 
         let input_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-            ReadVarExpr { name: Atom::from("i18n_0"), source_span: None },
+            ReadVarExpr { name: Ident::from("i18n_0"), source_span: None },
             &allocator,
         ));
 

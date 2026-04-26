@@ -45,9 +45,10 @@ jobs:
       - name: Support longpaths
         if: ${{ matrix.os == 'windows-latest' }}
         run: git config --system core.longpaths true
-      - uses: actions/checkout@v6
-        with:
-          submodules: recursive
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Update submodules
+        run: git submodule update --init --recursive
 
       - name: Print rustup toolchain version
         shell: bash
@@ -80,7 +81,7 @@ jobs:
           tool: cargo-zigbuild
 
       - name: Install pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb # v6.0.0
 
       - name: Install Node.js
         uses: actions/setup-node@v6
@@ -124,10 +125,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@v6
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
 
       - name: Install pnpm
-        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb # v6.0.0
 
       - name: Install Node.js
         uses: actions/setup-node@v6

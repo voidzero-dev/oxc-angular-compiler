@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_pipe_compiler.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::output::ast::OutputExpression;
 
@@ -13,11 +13,11 @@ use crate::output::ast::OutputExpression;
 #[derive(Debug)]
 pub struct R3PipeMetadata<'a> {
     /// The TypeScript class name of the pipe.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// The actual pipe name used in templates (from `@Pipe({name: '...'})`).
     /// If None, the class name is used.
-    pub pipe_name: Option<Atom<'a>>,
+    pub pipe_name: Option<Ident<'a>>,
 
     /// Reference to the pipe class itself.
     pub r#type: OutputExpression<'a>,
@@ -91,8 +91,8 @@ impl<'a> R3DependencyMetadata<'a> {
 
 /// Builder for creating pipe metadata.
 pub struct R3PipeMetadataBuilder<'a> {
-    name: Atom<'a>,
-    pipe_name: Option<Atom<'a>>,
+    name: Ident<'a>,
+    pipe_name: Option<Ident<'a>>,
     r#type: OutputExpression<'a>,
     type_argument_count: u32,
     deps: Option<Vec<'a, R3DependencyMetadata<'a>>>,
@@ -102,7 +102,7 @@ pub struct R3PipeMetadataBuilder<'a> {
 
 impl<'a> R3PipeMetadataBuilder<'a> {
     /// Creates a new builder with required fields.
-    pub fn new(name: Atom<'a>, r#type: OutputExpression<'a>) -> Self {
+    pub fn new(name: Ident<'a>, r#type: OutputExpression<'a>) -> Self {
         Self {
             name,
             pipe_name: None,
@@ -115,7 +115,7 @@ impl<'a> R3PipeMetadataBuilder<'a> {
     }
 
     /// Sets the pipe name (as used in templates).
-    pub fn pipe_name(mut self, name: Atom<'a>) -> Self {
+    pub fn pipe_name(mut self, name: Ident<'a>) -> Self {
         self.pipe_name = Some(name);
         self
     }
@@ -167,14 +167,14 @@ mod tests {
     #[test]
     fn test_pipe_metadata_builder() {
         let allocator = Allocator::default();
-        let name = Atom::from("TestPipe");
+        let name = Ident::from("TestPipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestPipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestPipe"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(name.clone(), type_expr)
-            .pipe_name(Atom::from("test"))
+            .pipe_name(Ident::from("test"))
             .pure(true)
             .is_standalone(true)
             .build();
@@ -191,7 +191,7 @@ mod tests {
         let token = Box::new_in(
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
-                    value: LiteralValue::String(Atom::from("MyService")),
+                    value: LiteralValue::String(Ident::from("MyService")),
                     source_span: None,
                 },
                 &allocator,

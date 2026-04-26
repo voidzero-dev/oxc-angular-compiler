@@ -6,7 +6,7 @@
 //! Ported from Angular's `packages/compiler/src/render3/r3_hmr_compiler.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use super::dependencies::HmrMetadata;
 use crate::output::ast::{
@@ -75,7 +75,7 @@ pub fn compile_hmr_initializer<'a>(
     // (m) => m.default && ɵɵreplaceMetadata(...)
     let replace_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Atom::from(module_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(module_name) }], allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(allocator, BinaryOperator::And, default_read, replace_call),
                 allocator,
@@ -104,7 +104,7 @@ pub fn compile_hmr_initializer<'a>(
     let dynamic_import = OutputExpression::DynamicImport(Box::new_in(
         DynamicImportExpr {
             url: DynamicImportUrl::Expression(Box::new_in(url, allocator)),
-            url_comment: Some(Atom::from("@vite-ignore")),
+            url_comment: Some(Ident::from("@vite-ignore")),
             source_span: None,
         },
         allocator,
@@ -116,8 +116,8 @@ pub fn compile_hmr_initializer<'a>(
     // function Cmp_HmrLoad(t) { import(...).then(...); }
     let import_callback = OutputStatement::DeclareFunction(Box::new_in(
         DeclareFunctionStmt {
-            name: Atom::from(allocator.alloc_str(&import_callback_name)),
-            params: Vec::from_iter_in([FnParam { name: Atom::from(timestamp_name) }], allocator),
+            name: Ident::from(allocator.alloc_str(&import_callback_name)),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(timestamp_name) }], allocator),
             statements: Vec::from_iter_in([expr_stmt(allocator, import_then_call)], allocator),
             modifiers: StmtModifier::FINAL,
             source_span: None,
@@ -128,7 +128,7 @@ pub fn compile_hmr_initializer<'a>(
     // (d) => d.id === id && Cmp_HmrLoad(d.timestamp)
     let update_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Atom::from(data_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(
                     allocator,
@@ -178,7 +178,7 @@ pub fn compile_hmr_initializer<'a>(
     // Handles the angular:invalidate event sent when HMR fails
     let invalidate_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Atom::from(data_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(
                     allocator,
@@ -290,7 +290,7 @@ pub fn compile_hmr_initializer<'a>(
 #[derive(Debug)]
 pub struct HmrDefinition<'a> {
     /// Name of the field (e.g., "ɵcmp", "ɵfac").
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Initializer expression.
     pub initializer: Option<OutputExpression<'a>>,
     /// Additional statements after the field assignment.
@@ -318,7 +318,7 @@ pub fn compile_hmr_update_callback<'a>(
     // Build function parameters: [className, ɵɵnamespaces, ...locals]
     let mut params: Vec<'a, FnParam<'a>> = Vec::new_in(allocator);
     params.push(FnParam { name: meta.class_name.clone() });
-    params.push(FnParam { name: Atom::from(namespaces_param) });
+    params.push(FnParam { name: Ident::from(namespaces_param) });
     for local in &meta.local_dependencies {
         params.push(FnParam { name: local.name.clone() });
     }
@@ -372,7 +372,7 @@ pub fn compile_hmr_update_callback<'a>(
     let fn_name = format!("{}_UpdateMetadata", meta.class_name);
     OutputStatement::DeclareFunction(Box::new_in(
         DeclareFunctionStmt {
-            name: Atom::from(allocator.alloc_str(&fn_name)),
+            name: Ident::from(allocator.alloc_str(&fn_name)),
             params,
             statements: body,
             modifiers: StmtModifier::FINAL,
@@ -389,7 +389,7 @@ pub fn compile_hmr_update_callback<'a>(
 /// Create a read variable expression.
 fn read_var<'a>(allocator: &'a Allocator, name: &str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(allocator.alloc_str(name)), source_span: None },
+        ReadVarExpr { name: Ident::from(allocator.alloc_str(name)), source_span: None },
         allocator,
     ))
 }
@@ -403,7 +403,7 @@ fn read_prop<'a>(
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(receiver, allocator),
-            name: Atom::from(allocator.alloc_str(name)),
+            name: Ident::from(allocator.alloc_str(name)),
             optional: false,
             source_span: None,
         },
@@ -433,7 +433,7 @@ fn invoke_fn<'a>(
 fn literal_str<'a>(allocator: &'a Allocator, value: &str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr {
-            value: LiteralValue::String(Atom::from(allocator.alloc_str(value))),
+            value: LiteralValue::String(Ident::from(allocator.alloc_str(value))),
             source_span: None,
         },
         allocator,
@@ -487,7 +487,7 @@ fn var_decl<'a>(
     let modifiers = if is_final { StmtModifier::FINAL } else { StmtModifier::NONE };
     OutputStatement::DeclareVar(Box::new_in(
         DeclareVarStmt {
-            name: Atom::from(allocator.alloc_str(name)),
+            name: Ident::from(allocator.alloc_str(name)),
             value: Some(value),
             modifiers,
             source_span: None,

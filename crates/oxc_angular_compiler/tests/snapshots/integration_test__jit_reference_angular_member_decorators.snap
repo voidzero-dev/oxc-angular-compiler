@@ -1,0 +1,50 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable, Inject, Optional, Input, Output, ViewChild, HostListener, HostBinding, ContentChild } from "@angular/core";
+import { __decorate } from "tslib";
+let MyService = class MyService {
+	myInput = "";
+	myOutput;
+	myViewChild;
+	isActive = false;
+	onClick(event) {}
+	myContent;
+	constructor(token, optService) {
+		this.token = token;
+		this.optService = optService;
+	}
+	normalMethod() {}
+	static ctorParameters = () => [{
+		type: undefined,
+		decorators: [{
+			type: Inject,
+			args: ["TOKEN"]
+		}]
+	}, {
+		type: undefined,
+		decorators: [{ type: Optional }]
+	}];
+	static propDecorators = {
+		myInput: [{ type: Input }],
+		myOutput: [{ type: Output }],
+		myViewChild: [{
+			type: ViewChild,
+			args: ["ref"]
+		}],
+		isActive: [{
+			type: HostBinding,
+			args: ["class.active"]
+		}],
+		onClick: [{
+			type: HostListener,
+			args: ["click", ["$event"]]
+		}],
+		myContent: [{
+			type: ContentChild,
+			args: ["content"]
+		}]
+	};
+};
+MyService = __decorate([Injectable()], MyService);

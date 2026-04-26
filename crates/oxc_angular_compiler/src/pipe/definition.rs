@@ -209,18 +209,18 @@ mod tests {
     use crate::output::emitter::JsEmitter;
     use crate::pipe::metadata::R3PipeMetadataBuilder;
     use oxc_allocator::Box;
-    use oxc_span::Atom;
+    use oxc_str::Ident;
 
     #[test]
     fn test_generate_pure_pipe_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyPipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyPipe"), source_span: None },
             &allocator,
         ));
 
-        let metadata = R3PipeMetadataBuilder::new(Atom::from("MyPipe"), type_expr)
-            .pipe_name(Atom::from("myPipe"))
+        let metadata = R3PipeMetadataBuilder::new(Ident::from("MyPipe"), type_expr)
+            .pipe_name(Ident::from("myPipe"))
             .pure(true)
             .is_standalone(true)
             .build();
@@ -248,12 +248,12 @@ mod tests {
     fn test_generate_impure_pipe_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ImpurePipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("ImpurePipe"), source_span: None },
             &allocator,
         ));
 
-        let metadata = R3PipeMetadataBuilder::new(Atom::from("ImpurePipe"), type_expr)
-            .pipe_name(Atom::from("impure"))
+        let metadata = R3PipeMetadataBuilder::new(Ident::from("ImpurePipe"), type_expr)
+            .pipe_name(Ident::from("impure"))
             .pure(false)
             .is_standalone(true)
             .build();
@@ -272,12 +272,12 @@ mod tests {
     fn test_generate_non_standalone_pipe_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("LegacyPipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("LegacyPipe"), source_span: None },
             &allocator,
         ));
 
-        let metadata = R3PipeMetadataBuilder::new(Atom::from("LegacyPipe"), type_expr)
-            .pipe_name(Atom::from("legacy"))
+        let metadata = R3PipeMetadataBuilder::new(Ident::from("LegacyPipe"), type_expr)
+            .pipe_name(Ident::from("legacy"))
             .pure(true)
             .is_standalone(false)
             .build();
@@ -298,12 +298,12 @@ mod tests {
         // This enables tree-shaking via the @__PURE__ annotation.
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TreeShakablePipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("TreeShakablePipe"), source_span: None },
             &allocator,
         ));
 
-        let metadata = R3PipeMetadataBuilder::new(Atom::from("TreeShakablePipe"), type_expr)
-            .pipe_name(Atom::from("treeshakable"))
+        let metadata = R3PipeMetadataBuilder::new(Ident::from("TreeShakablePipe"), type_expr)
+            .pipe_name(Ident::from("treeshakable"))
             .pure(true)
             .is_standalone(true)
             .build();

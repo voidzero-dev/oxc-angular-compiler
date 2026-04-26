@@ -49,6 +49,7 @@ use std::cell::RefCell;
 
 use oxc_allocator::{Allocator, Box as ArenaBox, Vec as ArenaVec};
 use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
@@ -287,7 +288,7 @@ where
 /// Data extracted from an access expression for processing.
 enum AccessInfo<'a> {
     /// Property read: `.name`
-    PropertyRead { name: oxc_span::Atom<'a>, source_span: Option<Span> },
+    PropertyRead { name: Ident<'a>, source_span: Option<Span> },
     /// Keyed read: `[key]`
     KeyedRead { key: IrExpression<'a>, source_span: Option<Span> },
     /// Function call: `(args)`

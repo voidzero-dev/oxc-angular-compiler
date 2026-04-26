@@ -33,7 +33,7 @@
 //! ```
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use super::metadata::{
     FactoryTarget, R3DependencyMetadata, R3FactoryDelegateType, R3FactoryDeps, R3FactoryMetadata,
@@ -104,7 +104,7 @@ pub fn compile_factory_function<'a>(
     factory_name: &'a str,
 ) -> FactoryCompileResult<'a> {
     let base = meta.base();
-    let factory_type_param = Atom::from("__ngFactoryType__");
+    let factory_type_param = Ident::from("__ngFactoryType__");
 
     // The type to instantiate via constructor invocation. If there is no delegated factory,
     // meaning this type is always created by constructor invocation, then this is the
@@ -261,7 +261,7 @@ pub fn compile_factory_function<'a>(
 
     let factory_fn = OutputExpression::Function(Box::new_in(
         FunctionExpr {
-            name: Some(Atom::from(factory_name)),
+            name: Some(Ident::from(factory_name)),
             params,
             statements: body,
             source_span: None,
@@ -290,11 +290,11 @@ pub fn compile_factory_function<'a>(
 fn make_conditional_factory<'a>(
     allocator: &'a Allocator,
     body: &mut Vec<'a, OutputStatement<'a>>,
-    factory_type_param: &Atom<'a>,
+    factory_type_param: &Ident<'a>,
     ctor_expr: Option<OutputExpression<'a>>,
     non_ctor_expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let conditional_factory_var = Atom::from("__ngConditionalFactory__");
+    let conditional_factory_var = Ident::from("__ngConditionalFactory__");
 
     // let __ngConditionalFactory__ = null;
     body.push(OutputStatement::DeclareVar(Box::new_in(
@@ -415,8 +415,8 @@ fn compile_inherited_factory<'a>(
 ) -> FactoryCompileResult<'a> {
     // Create base factory variable name: ɵMyClass_BaseFactory
     let base_factory_var_name =
-        Atom::from_in(format!("ɵ{}_BaseFactory", base.name).as_str(), allocator);
-    let factory_type_param = Atom::from("__ngFactoryType__");
+        Ident::from_in(format!("ɵ{}_BaseFactory", base.name).as_str(), allocator);
+    let factory_type_param = Ident::from("__ngFactoryType__");
 
     // Create ɵɵgetInheritedFactory(MyClass) call
     let get_inherited_factory_call = {
@@ -424,12 +424,12 @@ fn compile_inherited_factory<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
                         allocator,
                     )),
                     allocator,
                 ),
-                name: Atom::from(Identifiers::GET_INHERITED_FACTORY),
+                name: Ident::from(Identifiers::GET_INHERITED_FACTORY),
                 optional: false,
                 source_span: None,
             },
@@ -530,7 +530,7 @@ fn compile_inherited_factory<'a>(
 
     let inner_fn = OutputExpression::Function(Box::new_in(
         FunctionExpr {
-            name: Some(Atom::from(factory_name)),
+            name: Some(Ident::from(factory_name)),
             params: inner_params,
             statements: inner_body,
             source_span: None,
@@ -670,12 +670,12 @@ fn create_import_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(name),
+            name: Ident::from(name),
             optional: false,
             source_span: None,
         },
@@ -722,12 +722,12 @@ mod tests {
     fn test_compile_simple_factory() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TestClass"), source_span: None },
+            ReadVarExpr { name: Ident::from("TestClass"), source_span: None },
             &allocator,
         ));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
-            name: Atom::from("TestClass"),
+            name: Ident::from("TestClass"),
             type_expr: type_expr.clone_in(&allocator),
             type_decl: type_expr,
             type_argument_count: 0,
@@ -747,12 +747,12 @@ mod tests {
     fn test_compile_factory_with_deps() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyPipe"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyPipe"), source_span: None },
             &allocator,
         ));
 
         let dep_token = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("SomeService"), source_span: None },
+            ReadVarExpr { name: Ident::from("SomeService"), source_span: None },
             &allocator,
         ));
 
@@ -760,7 +760,7 @@ mod tests {
         deps.push(R3DependencyMetadata::simple(dep_token));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
-            name: Atom::from("MyPipe"),
+            name: Ident::from("MyPipe"),
             type_expr: type_expr.clone_in(&allocator),
             type_decl: type_expr,
             type_argument_count: 0,
@@ -780,12 +780,12 @@ mod tests {
     fn test_compile_invalid_deps_factory() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("BrokenClass"), source_span: None },
+            ReadVarExpr { name: Ident::from("BrokenClass"), source_span: None },
             &allocator,
         ));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
-            name: Atom::from("BrokenClass"),
+            name: Ident::from("BrokenClass"),
             type_expr: type_expr.clone_in(&allocator),
             type_decl: type_expr,
             type_argument_count: 0,
@@ -804,13 +804,13 @@ mod tests {
     fn test_compile_inherited_factory() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ChildClass"), source_span: None },
+            ReadVarExpr { name: Ident::from("ChildClass"), source_span: None },
             &allocator,
         ));
 
         // R3FactoryDeps::None indicates no constructor, use inherited factory
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
-            name: Atom::from("ChildClass"),
+            name: Ident::from("ChildClass"),
             type_expr: type_expr.clone_in(&allocator),
             type_decl: type_expr,
             type_argument_count: 0,

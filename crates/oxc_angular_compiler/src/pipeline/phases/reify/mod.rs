@@ -15,7 +15,7 @@ mod utils;
 
 use oxc_allocator::{Box, Vec as OxcVec};
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ast::expression::AngularExpression;
@@ -103,7 +103,7 @@ fn convert_output_expr_ir_nodes<'a>(
 /// Context for reifying operations, holding information needed across views.
 struct ReifyContext<'a> {
     /// Map from view xref to its function name (set by naming phase).
-    view_fn_names: FxHashMap<XrefId, Atom<'a>>,
+    view_fn_names: FxHashMap<XrefId, Ident<'a>>,
     /// Map from view xref to its declaration count.
     view_decls: FxHashMap<XrefId, u32>,
     /// Map from view xref to its variable count.
@@ -1073,10 +1073,7 @@ fn reify_update_op<'a>(
             let expr = convert_ir_expression(allocator, &anim.expression, expressions, root_xref);
             Some(create_animation_binding_stmt(allocator, &anim.name, expr))
         }
-        UpdateOp::Control(ctrl) => {
-            let expr = convert_ir_expression(allocator, &ctrl.expression, expressions, root_xref);
-            Some(create_control_stmt(allocator, expr, &ctrl.name))
-        }
+        UpdateOp::Control(_) => Some(create_control_stmt(allocator)),
         UpdateOp::Variable(var) => {
             // Emit variable declaration with initializer for update phase
             // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts
@@ -1398,7 +1395,7 @@ fn reify_track_by<'a>(
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
     track: &IrExpression<'a>,
-    track_fn_name: Option<&Atom<'a>>,
+    track_fn_name: Option<&Ident<'a>>,
     uses_component_instance: bool,
     track_by_ops: &mut Option<oxc_allocator::Vec<'a, UpdateOp<'a>>>,
     diagnostics: &mut Vec<OxcDiagnostic>,
@@ -1411,7 +1408,7 @@ fn reify_track_by<'a>(
                 ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
                             allocator,
                         )),
                         allocator,
@@ -1428,14 +1425,14 @@ fn reify_track_by<'a>(
             // Allocate the parts into the arena first
             let receiver_name_str = allocator.alloc_str(&fn_name[..dot_pos]);
             let prop_name_str = allocator.alloc_str(&fn_name[dot_pos + 1..]);
-            let receiver_name = Atom::from(receiver_name_str);
-            let prop_name = Atom::from(prop_name_str);
+            let receiver_name = Ident::from(receiver_name_str);
+            let prop_name = Ident::from(prop_name_str);
 
             // Check if receiver ends with "()" indicating a function call
             if receiver_name.ends_with("()") {
                 // componentInstance().fn pattern
                 let call_name =
-                    Atom::from(allocator.alloc_str(&receiver_name[..receiver_name.len() - 2]));
+                    Ident::from(allocator.alloc_str(&receiver_name[..receiver_name.len() - 2]));
                 return OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
                         receiver: Box::new_in(
@@ -1447,7 +1444,7 @@ fn reify_track_by<'a>(
                                                 receiver: Box::new_in(
                                                     OutputExpression::ReadVar(Box::new_in(
                                                         ReadVarExpr {
-                                                            name: Atom::from("i0"),
+                                                            name: Ident::from("i0"),
                                                             source_span: None,
                                                         },
                                                         allocator,
@@ -1503,8 +1500,8 @@ fn reify_track_by<'a>(
 
     // Create the track function with params ($index, $item)
     let mut params = OxcVec::with_capacity_in(2, allocator);
-    params.push(FnParam { name: Atom::from("$index") });
-    params.push(FnParam { name: Atom::from("$item") });
+    params.push(FnParam { name: Ident::from("$index") });
+    params.push(FnParam { name: Ident::from("$item") });
 
     let fn_expr = if let Some(track_ops) = track_by_ops {
         // Complex case: track_by_ops is present (set by track_fn_optimization phase).

@@ -1,0 +1,25 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable } from "@angular/core";
+import { State, Action, Selector } from "@ngxs/store";
+import { __decorate } from "tslib";
+let OrderTestState = class OrderTestState {
+	instanceFirst(ctx) {}
+	static staticSecond(state) {
+		return state;
+	}
+	instanceThird(ctx) {}
+	static staticFourth(state) {
+		return state;
+	}
+};
+__decorate([Action({ type: "First" })], OrderTestState.prototype, "instanceFirst", null);
+__decorate([Action({ type: "Third" })], OrderTestState.prototype, "instanceThird", null);
+__decorate([Selector()], OrderTestState, "staticSecond", null);
+__decorate([Selector()], OrderTestState, "staticFourth", null);
+OrderTestState = __decorate([State({
+	name: "order",
+	defaults: {}
+}), Injectable()], OrderTestState);

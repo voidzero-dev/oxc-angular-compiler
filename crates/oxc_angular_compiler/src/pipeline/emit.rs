@@ -15,7 +15,7 @@ use crate::output::ast::{
 };
 use crate::r3::{Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ir::ops::XrefId;
 
@@ -138,8 +138,8 @@ fn emit_view<'a>(allocator: &'a Allocator, view: &ViewCompilationUnit<'a>) -> Fu
     // - rf: Render flags (1 = create, 2 = update)
     // - ctx: Component context (this)
     let mut params: OxcVec<'a, FnParam<'a>> = OxcVec::new_in(allocator);
-    params.push(FnParam { name: Atom::from("rf") });
-    params.push(FnParam { name: Atom::from("ctx") });
+    params.push(FnParam { name: Ident::from("rf") });
+    params.push(FnParam { name: Ident::from("ctx") });
 
     FunctionExpr { name: fn_name, params, statements: body, source_span: None }
 }
@@ -186,7 +186,7 @@ fn maybe_generate_rf_block<'a>(
             operator: BinaryOperator::BitwiseAnd,
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("rf"), source_span: None },
+                    ReadVarExpr { name: Ident::from("rf"), source_span: None },
                     allocator,
                 )),
                 allocator,
@@ -250,8 +250,8 @@ pub fn emit_host_binding_function<'a>(
 
     // Create function parameters: (rf, ctx)
     let mut params: OxcVec<'a, FnParam<'a>> = OxcVec::new_in(allocator);
-    params.push(FnParam { name: Atom::from("rf") });
-    params.push(FnParam { name: Atom::from("ctx") });
+    params.push(FnParam { name: Ident::from("rf") });
+    params.push(FnParam { name: Ident::from("ctx") });
 
     Some(FunctionExpr { name: unit.fn_name.clone(), params, statements: body, source_span: None })
 }
@@ -369,7 +369,7 @@ pub fn emit_additional_pool_constants<'a>(
 fn convert_pure_function_body<'a>(
     allocator: &'a Allocator,
     expr: &IrExpression<'a>,
-    params: &[Atom<'a>],
+    params: &[Ident<'a>],
 ) -> OutputExpression<'a> {
     use crate::ir::expression::*;
     use crate::output::ast::*;
@@ -381,7 +381,7 @@ fn convert_pure_function_body<'a>(
                 params[pfp.index as usize].clone()
             } else {
                 // Fallback if index out of range
-                Atom::from(allocator.alloc_str(&format!("a{}", pfp.index)))
+                Ident::from(allocator.alloc_str(&format!("a{}", pfp.index)))
             };
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: param_name, source_span: None },
@@ -394,7 +394,7 @@ fn convert_pure_function_body<'a>(
             if lexical.name.as_str() == "ctx" {
                 // Direct reference to context parameter - emit as just `ctx`
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("ctx"), source_span: None },
+                    ReadVarExpr { name: Ident::from("ctx"), source_span: None },
                     allocator,
                 ))
             } else {
@@ -403,7 +403,7 @@ fn convert_pure_function_body<'a>(
                     ReadPropExpr {
                         receiver: Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
-                                ReadVarExpr { name: Atom::from("ctx"), source_span: None },
+                                ReadVarExpr { name: Ident::from("ctx"), source_span: None },
                                 allocator,
                             )),
                             allocator,
@@ -419,13 +419,13 @@ fn convert_pure_function_body<'a>(
 
         // Context reference becomes ctx
         IrExpression::Context(_) => OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("ctx"), source_span: None },
+            ReadVarExpr { name: Ident::from("ctx"), source_span: None },
             allocator,
         )),
 
         // TrackContext reference becomes this (for track functions)
         IrExpression::TrackContext(_) => OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("this"), source_span: None },
+            ReadVarExpr { name: Ident::from("this"), source_span: None },
             allocator,
         )),
 
@@ -434,7 +434,7 @@ fn convert_pure_function_body<'a>(
             let var_name = var
                 .name
                 .clone()
-                .unwrap_or_else(|| Atom::from(allocator.alloc_str(&format!("_v{}", var.xref.0))));
+                .unwrap_or_else(|| Ident::from(allocator.alloc_str(&format!("_v{}", var.xref.0))));
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: var_name, source_span: None },
                 allocator,
@@ -443,7 +443,7 @@ fn convert_pure_function_body<'a>(
 
         // Read temporary variable
         IrExpression::ReadTemporary(tmp) => {
-            let var_name = tmp.name.clone().unwrap_or_else(|| Atom::from("_tmp"));
+            let var_name = tmp.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: var_name, source_span: None },
                 allocator,
@@ -452,7 +452,7 @@ fn convert_pure_function_body<'a>(
 
         // Assign temporary variable: _tmp = expr
         IrExpression::AssignTemporary(assign) => {
-            let var_name = assign.name.clone().unwrap_or_else(|| Atom::from("_tmp"));
+            let var_name = assign.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
             let value = convert_pure_function_body(allocator, &assign.expr, params);
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -533,8 +533,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(allocator.alloc_str(instruction))),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(allocator.alloc_str(instruction))),
                                 },
                                 source_span: None,
                             },
@@ -600,8 +600,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(fn_name)),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(fn_name)),
                                 },
                                 source_span: None,
                             },
@@ -643,8 +643,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(Identifiers::PIPE_BIND_V)),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(Identifiers::PIPE_BIND_V)),
                                 },
                                 source_span: None,
                             },
@@ -1005,8 +1005,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(Identifiers::TWO_WAY_BINDING_SET)),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(Identifiers::TWO_WAY_BINDING_SET)),
                                 },
                                 source_span: None,
                             },
@@ -1038,8 +1038,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(Identifiers::READ_CONTEXT_LET)),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(Identifiers::READ_CONTEXT_LET)),
                                 },
                                 source_span: None,
                             },
@@ -1066,8 +1066,8 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Atom::from("@angular/core")),
-                                    name: Some(Atom::from(Identifiers::STORE_LET)),
+                                    module_name: Some(Ident::from("@angular/core")),
+                                    name: Some(Ident::from(Identifiers::STORE_LET)),
                                 },
                                 source_span: None,
                             },
@@ -1315,7 +1315,7 @@ fn convert_pure_function_body<'a>(
 fn convert_ast_for_pure_function_body<'a>(
     allocator: &'a Allocator,
     ast: &crate::ast::expression::AngularExpression<'a>,
-    params: &[Atom<'a>],
+    params: &[Ident<'a>],
 ) -> OutputExpression<'a> {
     use crate::ast::expression::{AngularExpression, LiteralMapKey};
     use crate::output::ast::{LiteralArrayExpr, LiteralMapEntry, LiteralMapExpr};
@@ -1378,7 +1378,7 @@ fn convert_ast_for_pure_function_body<'a>(
                         receiver: Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
                                 crate::output::ast::ReadVarExpr {
-                                    name: Atom::from("ctx"),
+                                    name: Ident::from("ctx"),
                                     source_span: None,
                                 },
                                 allocator,
@@ -1629,7 +1629,7 @@ mod tests {
     #[test]
     fn test_empty_template() {
         let allocator = Allocator::default();
-        let mut job = ComponentCompilationJob::new(&allocator, Atom::from("TestComponent"));
+        let mut job = ComponentCompilationJob::new(&allocator, Ident::from("TestComponent"));
 
         let result = compile_template(&mut job);
 

@@ -6,7 +6,7 @@
 //! in directive definitions.
 
 use oxc_allocator::{Allocator, Box, FromIn, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use super::metadata::{QueryPredicate, R3QueryMetadata};
 use crate::output::ast::{
@@ -107,12 +107,12 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(identifier),
+            name: Ident::from(identifier),
             optional: false,
             source_span: None,
         },
@@ -123,7 +123,7 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
 /// Create a variable reference.
 fn variable<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from(name), source_span: None },
+        ReadVarExpr { name: Ident::from(name), source_span: None },
         allocator,
     ))
 }
@@ -137,7 +137,7 @@ fn literal_number<'a>(allocator: &'a Allocator, value: u32) -> OutputExpression<
 }
 
 /// Create ctx.propertyName.
-fn context_prop<'a>(allocator: &'a Allocator, property_name: &Atom<'a>) -> OutputExpression<'a> {
+fn context_prop<'a>(allocator: &'a Allocator, property_name: &Ident<'a>) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(variable(allocator, CONTEXT_NAME), allocator),
@@ -234,7 +234,7 @@ fn get_query_predicate<'a>(
                     if !trimmed.is_empty() {
                         entries.push(OutputExpression::Literal(Box::new_in(
                             LiteralExpr {
-                                value: LiteralValue::String(Atom::from(trimmed)),
+                                value: LiteralValue::String(Ident::from(trimmed)),
                                 source_span: None,
                             },
                             allocator,
@@ -413,7 +413,7 @@ impl TempAllocator {
         // Angular always reuses the same _t variable - see temporaryAllocator in util.ts
         self.allocated = true;
         OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from(TEMPORARY_NAME), source_span: None },
+            ReadVarExpr { name: Ident::from(TEMPORARY_NAME), source_span: None },
             allocator,
         ))
     }
@@ -519,7 +519,7 @@ pub fn create_view_queries_function<'a>(
                 OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
                         receiver: Box::new_in(temp.clone_in(allocator), allocator),
-                        name: Atom::from("first"),
+                        name: Ident::from("first"),
                         optional: false,
                         source_span: None,
                     },
@@ -562,7 +562,7 @@ pub fn create_view_queries_function<'a>(
     if temp_allocator.needs_declaration() {
         final_update_statements.push(OutputStatement::DeclareVar(Box::new_in(
             DeclareVarStmt {
-                name: Atom::from(TEMPORARY_NAME),
+                name: Ident::from(TEMPORARY_NAME),
                 value: None,
                 modifiers: StmtModifier::NONE,
                 leading_comment: None,
@@ -592,13 +592,13 @@ pub fn create_view_queries_function<'a>(
 
     // Build function parameters
     let mut params = Vec::new_in(allocator);
-    params.push(FnParam { name: Atom::from(RENDER_FLAGS) });
-    params.push(FnParam { name: Atom::from(CONTEXT_NAME) });
+    params.push(FnParam { name: Ident::from(RENDER_FLAGS) });
+    params.push(FnParam { name: Ident::from(CONTEXT_NAME) });
 
     // Create function name
     let fn_name = name.map(|n| {
         let formatted = format!("{n}_Query");
-        Atom::from_in(formatted.as_str(), allocator)
+        Ident::from_in(formatted.as_str(), allocator)
     });
 
     OutputExpression::Function(Box::new_in(
@@ -704,7 +704,7 @@ pub fn create_content_queries_function<'a>(
                 OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
                         receiver: Box::new_in(temp.clone_in(allocator), allocator),
-                        name: Atom::from("first"),
+                        name: Ident::from("first"),
                         optional: false,
                         source_span: None,
                     },
@@ -745,7 +745,7 @@ pub fn create_content_queries_function<'a>(
     if temp_allocator.needs_declaration() {
         final_update_statements.push(OutputStatement::DeclareVar(Box::new_in(
             DeclareVarStmt {
-                name: Atom::from(TEMPORARY_NAME),
+                name: Ident::from(TEMPORARY_NAME),
                 value: None,
                 modifiers: StmtModifier::NONE,
                 leading_comment: None,
@@ -774,14 +774,14 @@ pub fn create_content_queries_function<'a>(
 
     // Build function parameters (rf, ctx, dirIndex)
     let mut params = Vec::new_in(allocator);
-    params.push(FnParam { name: Atom::from(RENDER_FLAGS) });
-    params.push(FnParam { name: Atom::from(CONTEXT_NAME) });
-    params.push(FnParam { name: Atom::from("dirIndex") });
+    params.push(FnParam { name: Ident::from(RENDER_FLAGS) });
+    params.push(FnParam { name: Ident::from(CONTEXT_NAME) });
+    params.push(FnParam { name: Ident::from("dirIndex") });
 
     // Create function name
     let fn_name = name.map(|n| {
         let formatted = format!("{n}_ContentQueries");
-        Atom::from_in(formatted.as_str(), allocator)
+        Ident::from_in(formatted.as_str(), allocator)
     });
 
     OutputExpression::Function(Box::new_in(
@@ -846,10 +846,10 @@ mod tests {
 
         // Create a signal query with a type predicate (e.g., SomeComponent)
         let query = R3QueryMetadata {
-            property_name: Atom::from("myQuery"),
+            property_name: Ident::from("myQuery"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("SomeComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("SomeComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -888,10 +888,10 @@ mod tests {
 
         // Create a signal content query with a type predicate
         let query = R3QueryMetadata {
-            property_name: Atom::from("myContent"),
+            property_name: Ident::from("myContent"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("ContentComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("ContentComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -929,10 +929,10 @@ mod tests {
 
         // Create two signal queries
         let query1 = R3QueryMetadata {
-            property_name: Atom::from("query1"),
+            property_name: Ident::from("query1"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("Component1"), source_span: None },
+                ReadVarExpr { name: Ident::from("Component1"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -943,10 +943,10 @@ mod tests {
         };
 
         let query2 = R3QueryMetadata {
-            property_name: Atom::from("query2"),
+            property_name: Ident::from("query2"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("Component2"), source_span: None },
+                ReadVarExpr { name: Ident::from("Component2"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -988,10 +988,10 @@ mod tests {
         let allocator = Allocator::default();
 
         let query1 = R3QueryMetadata {
-            property_name: Atom::from("myChild"),
+            property_name: Ident::from("myChild"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("ChildComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("ChildComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -1002,10 +1002,10 @@ mod tests {
         };
 
         let query2 = R3QueryMetadata {
-            property_name: Atom::from("myOther"),
+            property_name: Ident::from("myOther"),
             first: false,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("OtherComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("OtherComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -1054,10 +1054,10 @@ mod tests {
         let allocator = Allocator::default();
 
         let query1 = R3QueryMetadata {
-            property_name: Atom::from("items"),
+            property_name: Ident::from("items"),
             first: false,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("ItemComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("ItemComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: true,
@@ -1068,10 +1068,10 @@ mod tests {
         };
 
         let query2 = R3QueryMetadata {
-            property_name: Atom::from("headers"),
+            property_name: Ident::from("headers"),
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("HeaderComponent"), source_span: None },
+                ReadVarExpr { name: Ident::from("HeaderComponent"), source_span: None },
                 &allocator,
             ))),
             descendants: false,
@@ -1118,10 +1118,10 @@ mod tests {
 
         // Create a signal query with a string selector
         let mut selectors = Vec::new_in(&allocator);
-        selectors.push(Atom::from("myRef"));
+        selectors.push(Ident::from("myRef"));
 
         let query = R3QueryMetadata {
-            property_name: Atom::from("refQuery"),
+            property_name: Ident::from("refQuery"),
             first: true,
             predicate: QueryPredicate::Selectors(selectors),
             descendants: true,

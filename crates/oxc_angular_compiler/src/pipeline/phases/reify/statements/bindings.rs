@@ -1,7 +1,7 @@
 //! Property, style, class, and attribute binding statement generation.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::output::ast::{
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
@@ -28,14 +28,14 @@ pub fn is_aria_attribute(name: &str) -> bool {
 /// DOM properties that need to be remapped on the compiler side.
 /// Note: this mapping has to be kept in sync with the equally named mapping in the Angular runtime.
 /// See: Angular's `template/pipeline/src/phases/reify.ts`
-fn remap_dom_property<'a>(name: &Atom<'a>) -> Atom<'a> {
+fn remap_dom_property<'a>(name: &Ident<'a>) -> Ident<'a> {
     match name.as_str() {
-        "class" => Atom::from("className"),
-        "for" => Atom::from("htmlFor"),
-        "formaction" => Atom::from("formAction"),
-        "innerHtml" => Atom::from("innerHTML"),
-        "readonly" => Atom::from("readOnly"),
-        "tabindex" => Atom::from("tabIndex"),
+        "class" => Ident::from("className"),
+        "for" => Ident::from("htmlFor"),
+        "formaction" => Ident::from("formAction"),
+        "innerHtml" => Ident::from("innerHTML"),
+        "readonly" => Ident::from("readOnly"),
+        "tabindex" => Ident::from("tabIndex"),
         _ => name.clone(),
     }
 }
@@ -46,14 +46,14 @@ fn remap_dom_property<'a>(name: &Atom<'a>) -> Atom<'a> {
 /// This creates an expression like `i0.ɵɵsanitizeHtml`.
 fn create_sanitizer_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    sanitizer: &Atom<'a>,
+    sanitizer: &Ident<'a>,
 ) -> OutputExpression<'a> {
     // Create: i0.ɵɵsanitize* expression
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
@@ -69,9 +69,9 @@ fn create_sanitizer_expr<'a>(
 /// Creates an ɵɵproperty() call statement with expression value.
 pub fn create_property_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    sanitizer: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(OutputExpression::Literal(Box::new_in(
@@ -91,7 +91,7 @@ pub fn create_property_stmt_with_expr<'a>(
 /// that sets the ARIA attribute rather than a DOM property.
 pub fn create_aria_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -106,7 +106,7 @@ pub fn create_aria_property_stmt<'a>(
 /// Creates a generic binding statement with expression value.
 pub fn create_binding_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -122,9 +122,9 @@ pub fn create_binding_stmt_with_expr<'a>(
 /// Creates an ɵɵstyleProp() call statement with expression.
 pub fn create_style_prop_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    unit: Option<&Atom<'a>>,
+    unit: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(OutputExpression::Literal(Box::new_in(
@@ -145,7 +145,7 @@ pub fn create_style_prop_stmt_with_expr<'a>(
 /// Creates an ɵɵclassProp() call statement with expression.
 pub fn create_class_prop_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
@@ -163,10 +163,10 @@ pub fn create_class_prop_stmt_with_expr<'a>(
 /// If sanitizer is None but namespace is Some, emits null for sanitizer.
 pub fn create_attribute_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    sanitizer: Option<&Atom<'a>>,
-    namespace: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
+    namespace: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(OutputExpression::Literal(Box::new_in(
@@ -198,9 +198,9 @@ pub fn create_attribute_stmt_with_expr<'a>(
 /// Creates an ɵɵtwoWayProperty() call statement.
 pub fn create_two_way_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    sanitizer: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     args.push(OutputExpression::Literal(Box::new_in(
@@ -221,9 +221,9 @@ pub fn create_two_way_property_stmt<'a>(
 /// The property name is remapped if necessary (e.g., `for` -> `htmlFor`).
 pub fn create_dom_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    sanitizer: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let remapped_name = remap_dom_property(name);
     let mut args = OxcVec::new_in(allocator);
@@ -284,10 +284,10 @@ pub fn create_text_interpolate_stmt_with_args<'a>(
 /// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer]
 pub fn create_property_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
-    sanitizer: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     // Save length before consuming interp_args — the simple case check must use
     // the interpolation args count, not the final args count (which includes name
@@ -327,11 +327,11 @@ pub fn create_property_interpolate_stmt<'a>(
 /// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer], [namespace]
 pub fn create_attribute_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
-    sanitizer: Option<&Atom<'a>>,
-    namespace: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
+    namespace: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     // Save length before consuming — same reason as create_property_interpolate_stmt.
     let interp_args_len = interp_args.len();
@@ -376,9 +376,9 @@ pub fn create_attribute_interpolate_stmt<'a>(
 /// For Angular 19, host/DomOnly property bindings use `ɵɵhostProperty` instead of `ɵɵdomProperty`.
 pub fn create_host_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     value: OutputExpression<'a>,
-    sanitizer: Option<&Atom<'a>>,
+    sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let remapped_name = remap_dom_property(name);
     let mut args = OxcVec::new_in(allocator);
@@ -402,10 +402,10 @@ pub fn create_host_property_stmt<'a>(
 /// Signature: `ɵɵstylePropInterpolateN(prop, s0, v0, ..., [unit])`
 pub fn create_style_prop_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
-    name: &Atom<'a>,
+    name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
-    unit: Option<&Atom<'a>>,
+    unit: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(allocator);
     // First arg: style property name

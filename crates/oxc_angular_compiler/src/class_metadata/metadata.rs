@@ -3,7 +3,7 @@
 //! Ported from Angular's `render3/r3_class_metadata_compiler.ts` and `view/api.ts`.
 
 use crate::output::ast::OutputExpression;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 /// Metadata of a class which captures the original Angular decorators.
 ///
@@ -35,10 +35,10 @@ pub struct R3ClassMetadata<'a> {
 #[derive(Debug)]
 pub struct R3DeferPerComponentDependency<'a> {
     /// The symbol name of the dependency.
-    pub symbol_name: Atom<'a>,
+    pub symbol_name: Ident<'a>,
 
     /// The import path for the dependency.
-    pub import_path: Atom<'a>,
+    pub import_path: Ident<'a>,
 
     /// Whether this is a default import.
     pub is_default_import: bool,

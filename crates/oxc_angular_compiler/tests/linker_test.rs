@@ -86,3 +86,38 @@ fn test_link_outputs_simple_identifier() {
     let result = link(&allocator, &code, "test.mjs");
     insta::assert_snapshot!(result.code);
 }
+
+#[test]
+fn test_link_inputs_array_format_with_transform_function() {
+    let allocator = Allocator::default();
+    let code =
+        make_directive_source(r#"push: ["cdkConnectedOverlayPush", "push", i0.booleanAttribute]"#);
+    let result = link(&allocator, &code, "test.mjs");
+    insta::assert_snapshot!(result.code);
+}
+
+/// Regression: signal form FormField directive declares
+/// `controlCreate: { passThroughInput: "formField" }` in its partial metadata.
+/// The linker must emit `ɵɵControlFeature("formField")` in the features array,
+/// otherwise `DirectiveDef.controlDef` is never set and the runtime
+/// `ɵɵcontrolCreate()` / `ɵɵcontrol()` instructions become no-ops.
+/// See voidzero-dev/oxc-angular-compiler#229.
+#[test]
+fn test_link_control_feature_pass_through_input() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+export class FormField {}
+FormField.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.2.8", type: FormField, selector: "[formField]", inputs: { field: { classPropertyName: "field", publicName: "formField", isRequired: true, isSignal: true } }, controlCreate: { passThroughInput: "formField" }, isStandalone: true, isSignal: true });"#;
+    let result = link(&allocator, code, "test.mjs");
+    insta::assert_snapshot!(result.code);
+}
+
+#[test]
+fn test_link_control_feature_null_pass_through_input() {
+    let allocator = Allocator::default();
+    let code = r#"import * as i0 from "@angular/core";
+export class MyControl {}
+MyControl.ɵdir = i0.ɵɵngDeclareDirective({ minVersion: "14.0.0", version: "21.2.8", type: MyControl, selector: "[myControl]", controlCreate: { passThroughInput: null }, isStandalone: true, isSignal: true });"#;
+    let result = link(&allocator, code, "test.mjs");
+    insta::assert_snapshot!(result.code);
+}

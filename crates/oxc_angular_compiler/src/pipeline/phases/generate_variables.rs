@@ -17,7 +17,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/generate_variables.ts`.
 
 use oxc_allocator::Box;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ir::enums::{SemanticVariableKind, VariableFlags};
 use crate::ir::expression::{
@@ -31,7 +31,7 @@ use crate::pipeline::compilation::ComponentCompilationJob;
 #[derive(Debug, Clone)]
 struct LocalRefInfo<'a> {
     /// Name of the local reference (e.g., "myDiv" from #myDiv).
-    name: Atom<'a>,
+    name: Ident<'a>,
     /// XrefId of the element this reference points to.
     target_id: XrefId,
     /// Slot of the target element.
@@ -49,7 +49,7 @@ struct LetDeclarationInfo<'a> {
     /// Slot of the @let declaration.
     target_slot: Option<SlotId>,
     /// Variable name.
-    variable_name: Atom<'a>,
+    variable_name: Ident<'a>,
 }
 
 /// Lexical scope of a view, including a reference to its parent view's scope.
@@ -59,9 +59,9 @@ struct Scope<'a, 'b> {
     /// XrefId of the view this scope belongs to.
     view: XrefId,
     /// Context variables (name, value) from the view.
-    context_variables: Vec<(Atom<'a>, Atom<'a>)>,
+    context_variables: Vec<(Ident<'a>, Ident<'a>)>,
     /// Alias variables (name, expression) from the view.
-    alias_variables: Vec<(Atom<'a>, IrExpression<'a>)>,
+    alias_variables: Vec<(Ident<'a>, IrExpression<'a>)>,
     /// Local references collected from elements within the view.
     references: Vec<LocalRefInfo<'a>>,
     /// @let declarations collected from the view.
@@ -554,7 +554,7 @@ fn clone_update_op<'a>(allocator: &'a oxc_allocator::Allocator, op: &UpdateOp<'a
             base: Default::default(),
             xref: XrefId(0),
             kind: SemanticVariableKind::Identifier,
-            name: Atom::from(""),
+            name: Ident::from(""),
             initializer: Box::new_in(
                 IrExpression::NextContext(Box::new_in(
                     NextContextExpr { steps: 0, source_span: None },
@@ -674,7 +674,7 @@ fn create_next_context_variable<'a>(
         base: Default::default(),
         xref,
         kind: SemanticVariableKind::Context,
-        name: Atom::from(""), // Empty = naming phase will assign it
+        name: Ident::from(""), // Empty = naming phase will assign it
         initializer: Box::new_in(initializer, allocator),
         flags: VariableFlags::NONE,
         view: Some(context_view),
@@ -694,8 +694,8 @@ fn create_context_read_variable<'a>(
     allocator: &'a oxc_allocator::Allocator,
     xref: XrefId,
     view_xref: XrefId,
-    name: Atom<'a>,
-    context_value: Atom<'a>,
+    name: Ident<'a>,
+    context_value: Ident<'a>,
 ) -> UpdateOp<'a> {
     use crate::pipeline::compilation::CTX_REF;
 
@@ -740,7 +740,7 @@ fn create_alias_variable<'a>(
     allocator: &'a oxc_allocator::Allocator,
     xref: XrefId,
     view_xref: XrefId,
-    name: Atom<'a>,
+    name: Ident<'a>,
     expression: IrExpression<'a>,
 ) -> UpdateOp<'a> {
     UpdateOp::Variable(UpdateVariableOp {
@@ -795,7 +795,7 @@ fn create_reference_variable<'a>(
 fn create_context_let_reference_variable<'a>(
     allocator: &'a oxc_allocator::Allocator,
     xref: XrefId,
-    name: Atom<'a>,
+    name: Ident<'a>,
     target_id: XrefId,
     target_slot: Option<SlotId>,
 ) -> UpdateOp<'a> {

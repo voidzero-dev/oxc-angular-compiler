@@ -6,7 +6,7 @@
 //! Ported from Angular's `constant_pool.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::expression::IrExpression;
@@ -108,7 +108,7 @@ impl<'a> ConstantPool<'a> {
 
         let index = self.values.len() as u32;
         let name = self.generate_name("_c");
-        let atom = Atom::from(self.allocator.alloc_str(value));
+        let atom = Ident::from(self.allocator.alloc_str(value));
 
         self.values.push(PooledConstant {
             name: name.clone(),
@@ -168,10 +168,10 @@ impl<'a> ConstantPool<'a> {
     }
 
     /// Generates a unique name for a pooled constant.
-    fn generate_name(&mut self, prefix: &str) -> Atom<'a> {
+    fn generate_name(&mut self, prefix: &str) -> Ident<'a> {
         let name = format!("{}{}", prefix, self.next_name_index);
         self.next_name_index += 1;
-        Atom::from(self.allocator.alloc_str(&name))
+        Ident::from(self.allocator.alloc_str(&name))
     }
 
     /// Gets the constant at the given index.
@@ -193,8 +193,8 @@ impl<'a> ConstantPool<'a> {
 
         let index = self.values.len() as u32;
         let name = self.generate_name("_c");
-        let body_atom = Atom::from(self.allocator.alloc_str(body));
-        let flags_atom = flags.map(|f| Atom::from(self.allocator.alloc_str(f)));
+        let body_atom = Ident::from(self.allocator.alloc_str(body));
+        let flags_atom = flags.map(|f| Ident::from(self.allocator.alloc_str(f)));
 
         self.values.push(PooledConstant {
             name: name.clone(),
@@ -230,7 +230,7 @@ impl<'a> ConstantPool<'a> {
         num_args: u32,
         body_key: &str,
         body_expr: IrExpression<'a>,
-    ) -> (u32, Atom<'a>) {
+    ) -> (u32, Ident<'a>) {
         // Create a key for deduplication based on arg count and body
         let key = format!("pf:{}:{}", num_args, body_key);
 
@@ -247,7 +247,7 @@ impl<'a> ConstantPool<'a> {
         // Generate parameter names: a0, a1, a2, ...
         let mut params = Vec::with_capacity_in(num_args as usize, self.allocator);
         for i in 0..num_args {
-            params.push(Atom::from(self.allocator.alloc_str(&format!("a{}", i))));
+            params.push(Ident::from(self.allocator.alloc_str(&format!("a{}", i))));
         }
 
         // Store the actual body expression
@@ -404,7 +404,7 @@ impl<'a> ConstantPool<'a> {
     /// * `base` - The base name to make unique
     /// * `always_include_suffix` - If `true`, always append a numeric suffix.
     ///   If `false`, only append suffix if the name has been used before.
-    pub fn unique_name(&mut self, base: &str, always_include_suffix: bool) -> Atom<'a> {
+    pub fn unique_name(&mut self, base: &str, always_include_suffix: bool) -> Ident<'a> {
         // Get the per-base-name count for deduplication within this component
         let count = self.claimed_names.get(base).copied().unwrap_or(0);
 
@@ -424,7 +424,7 @@ impl<'a> ConstantPool<'a> {
         // Increment the per-base-name counter
         self.claimed_names.insert(base.to_string(), count + 1);
 
-        Atom::from(self.allocator.alloc_str(&name))
+        Ident::from(self.allocator.alloc_str(&name))
     }
 
     /// Gets or creates a constant literal and returns a reference expression.
@@ -513,7 +513,7 @@ pub struct PooledValue {
 #[derive(Debug)]
 pub struct PooledConstant<'a> {
     /// Generated variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Value reference.
     pub value: PooledValue,
     /// The constant's kind and value.
@@ -524,7 +524,7 @@ pub struct PooledConstant<'a> {
 #[derive(Debug)]
 pub enum PooledConstantKind<'a> {
     /// A string literal.
-    String(Atom<'a>),
+    String(Ident<'a>),
     /// A number literal.
     Number(f64),
     /// A boolean literal.
@@ -534,7 +534,7 @@ pub enum PooledConstantKind<'a> {
     /// A placeholder for an array (content not yet known).
     ArrayPlaceholder,
     /// An object literal.
-    Object(Vec<'a, (Atom<'a>, PooledConstantKind<'a>)>),
+    Object(Vec<'a, (Ident<'a>, PooledConstantKind<'a>)>),
     /// An external reference.
     External(ExternalReference<'a>),
     /// A pure function wrapper.
@@ -550,18 +550,18 @@ pub enum PooledConstantKind<'a> {
 #[derive(Debug)]
 pub struct RegexConstant<'a> {
     /// The regex pattern body.
-    pub body: Atom<'a>,
+    pub body: Ident<'a>,
     /// The regex flags.
-    pub flags: Option<Atom<'a>>,
+    pub flags: Option<Ident<'a>>,
 }
 
 /// An external reference (import).
 #[derive(Debug)]
 pub struct ExternalReference<'a> {
     /// Module to import from.
-    pub module: Atom<'a>,
+    pub module: Ident<'a>,
     /// Name to import.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// A pure function definition.
@@ -574,7 +574,7 @@ pub struct ExternalReference<'a> {
 #[derive(Debug)]
 pub struct PureFunctionDef<'a> {
     /// Parameter names (a0, a1, a2, ...).
-    pub params: Vec<'a, Atom<'a>>,
+    pub params: Vec<'a, Ident<'a>>,
     /// Body expression - the actual IR expression to emit.
     ///
     /// This expression may contain `PureFunctionParameterExpr` nodes that

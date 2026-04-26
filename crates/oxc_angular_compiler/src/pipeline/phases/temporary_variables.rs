@@ -34,7 +34,7 @@
 use std::cell::RefCell;
 
 use oxc_allocator::Allocator;
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ir::expression::{
@@ -388,7 +388,7 @@ fn generate_temporaries_for_update<'a>(
 fn create_declare_var_statement<'a>(allocator: &'a Allocator, name: &str) -> OutputStatement<'a> {
     OutputStatement::DeclareVar(oxc_allocator::Box::new_in(
         DeclareVarStmt {
-            name: Atom::from(allocator.alloc_str(name)),
+            name: Ident::from(allocator.alloc_str(name)),
             value: None,
             modifiers: StmtModifier::NONE, // Use `var` since there's no initializer
             leading_comment: None,
@@ -416,12 +416,12 @@ fn assign_temp_names<'a>(
     match expr {
         IrExpression::AssignTemporary(assign) => {
             let name = tracker.borrow_mut().assign(assign.xref);
-            assign.name = Some(Atom::from(allocator.alloc_str(&name)));
+            assign.name = Some(Ident::from(allocator.alloc_str(&name)));
         }
         IrExpression::ReadTemporary(read) => {
             let name = tracker.borrow_mut().read(read.xref);
             if let Some(n) = name {
-                read.name = Some(Atom::from(allocator.alloc_str(&n)));
+                read.name = Some(Ident::from(allocator.alloc_str(&n)));
             }
         }
         // Recursively process nested expressions

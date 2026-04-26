@@ -6,7 +6,8 @@
 //! Ported from Angular's `output/output_ast.ts`.
 
 use oxc_allocator::{Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ir::expression::IrExpression;
 
@@ -293,7 +294,7 @@ pub struct MapType<'a> {
 #[derive(Debug)]
 pub struct TransplantedType<'a> {
     /// String representation of the external type.
-    pub type_repr: Atom<'a>,
+    pub type_repr: Ident<'a>,
     /// Type modifiers.
     pub modifiers: TypeModifier,
 }
@@ -460,6 +461,12 @@ pub enum OutputExpression<'a> {
     // Spread element (for array spread)
     /// Spread element (...expr).
     SpreadElement(Box<'a, SpreadElementExpr<'a>>),
+
+    // Raw source (preserved verbatim from source code)
+    /// Raw source expression, used when the expression contains constructs that
+    /// the output AST cannot represent (e.g., block-body arrow functions with
+    /// complex statements like variable declarations, if/else, for loops, etc.).
+    RawSource(Box<'a, RawSourceExpr<'a>>),
 }
 
 /// Literal expression.
@@ -483,7 +490,7 @@ pub enum LiteralValue<'a> {
     /// Number literal.
     Number(f64),
     /// String literal.
-    String(Atom<'a>),
+    String(Ident<'a>),
 }
 
 /// Array literal expression.
@@ -499,7 +506,7 @@ pub struct LiteralArrayExpr<'a> {
 #[derive(Debug)]
 pub struct LiteralMapEntry<'a> {
     /// Property key.
-    pub key: Atom<'a>,
+    pub key: Ident<'a>,
     /// Property value.
     pub value: OutputExpression<'a>,
     /// Whether the key is quoted.
@@ -519,9 +526,9 @@ pub struct LiteralMapExpr<'a> {
 #[derive(Debug)]
 pub struct RegularExpressionLiteralExpr<'a> {
     /// Regex body.
-    pub body: Atom<'a>,
+    pub body: Ident<'a>,
     /// Regex flags.
-    pub flags: Option<Atom<'a>>,
+    pub flags: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -530,9 +537,9 @@ pub struct RegularExpressionLiteralExpr<'a> {
 #[derive(Debug)]
 pub struct TemplateLiteralElement<'a> {
     /// Cooked text.
-    pub text: Atom<'a>,
+    pub text: Ident<'a>,
     /// Raw text.
-    pub raw_text: Atom<'a>,
+    pub raw_text: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -563,7 +570,7 @@ pub struct TaggedTemplateLiteralExpr<'a> {
 #[derive(Debug)]
 pub struct ReadVarExpr<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -574,7 +581,7 @@ pub struct ReadPropExpr<'a> {
     /// Receiver expression.
     pub receiver: Box<'a, OutputExpression<'a>>,
     /// Property name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Whether this is an optional chain access (`?.`).
     pub optional: bool,
     /// Source span.
@@ -682,14 +689,14 @@ pub struct CommaExpr<'a> {
 #[derive(Debug)]
 pub struct FnParam<'a> {
     /// Parameter name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 }
 
 /// Function expression.
 #[derive(Debug)]
 pub struct FunctionExpr<'a> {
     /// Function name (optional).
-    pub name: Option<Atom<'a>>,
+    pub name: Option<Ident<'a>>,
     /// Parameters.
     pub params: Vec<'a, FnParam<'a>>,
     /// Function body.
@@ -750,7 +757,7 @@ pub struct DynamicImportExpr<'a> {
     /// URL to import.
     pub url: DynamicImportUrl<'a>,
     /// URL comment for bundlers.
-    pub url_comment: Option<Atom<'a>>,
+    pub url_comment: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -759,7 +766,7 @@ pub struct DynamicImportExpr<'a> {
 #[derive(Debug)]
 pub enum DynamicImportUrl<'a> {
     /// Static string URL.
-    String(Atom<'a>),
+    String(Ident<'a>),
     /// Dynamic expression URL.
     Expression(Box<'a, OutputExpression<'a>>),
 }
@@ -768,9 +775,9 @@ pub enum DynamicImportUrl<'a> {
 #[derive(Debug)]
 pub struct ExternalReference<'a> {
     /// Module name.
-    pub module_name: Option<Atom<'a>>,
+    pub module_name: Option<Ident<'a>>,
     /// Export name.
-    pub name: Option<Atom<'a>>,
+    pub name: Option<Ident<'a>>,
 }
 
 /// External expression (reference to external module).
@@ -786,15 +793,15 @@ pub struct ExternalExpr<'a> {
 #[derive(Debug)]
 pub struct LocalizedStringExpr<'a> {
     /// Message description.
-    pub description: Option<Atom<'a>>,
+    pub description: Option<Ident<'a>>,
     /// Message meaning.
-    pub meaning: Option<Atom<'a>>,
+    pub meaning: Option<Ident<'a>>,
     /// Custom message ID.
-    pub custom_id: Option<Atom<'a>>,
+    pub custom_id: Option<Ident<'a>>,
     /// Message parts.
-    pub message_parts: Vec<'a, Atom<'a>>,
+    pub message_parts: Vec<'a, Ident<'a>>,
     /// Placeholder names.
-    pub placeholder_names: Vec<'a, Atom<'a>>,
+    pub placeholder_names: Vec<'a, Ident<'a>>,
     /// Interpolated expressions.
     pub expressions: Vec<'a, OutputExpression<'a>>,
     /// Source span.
@@ -805,7 +812,7 @@ pub struct LocalizedStringExpr<'a> {
 #[derive(Debug)]
 pub struct WrappedNodeExpr<'a> {
     /// Node identifier/reference.
-    pub node_id: Atom<'a>,
+    pub node_id: Ident<'a>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -833,6 +840,21 @@ pub struct SpreadElementExpr<'a> {
     pub source_span: Option<Span>,
 }
 
+/// Raw source expression (preserved verbatim from source code).
+///
+/// Used when the expression contains constructs that the output AST cannot
+/// represent, such as block-body arrow functions with variable declarations,
+/// if/else statements, for loops, try/catch, etc. Rather than silently
+/// dropping these constructs, the raw source text is preserved and emitted
+/// verbatim.
+#[derive(Debug)]
+pub struct RawSourceExpr<'a> {
+    /// The raw source text of the expression.
+    pub source: Ident<'a>,
+    /// Source span.
+    pub source_span: Option<Span>,
+}
+
 // ============================================================================
 // Statements
 // ============================================================================
@@ -856,7 +878,7 @@ pub enum OutputStatement<'a> {
 #[derive(Debug)]
 pub struct DeclareVarStmt<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Initial value.
     pub value: Option<OutputExpression<'a>>,
     /// Statement modifiers.
@@ -873,18 +895,18 @@ pub enum LeadingComment<'a> {
     /// JSDoc comment.
     JSDoc(JsDocComment<'a>),
     /// Single-line comment.
-    SingleLine(Atom<'a>),
+    SingleLine(Ident<'a>),
     /// Multi-line comment.
-    MultiLine(Atom<'a>),
+    MultiLine(Ident<'a>),
 }
 
 /// JSDoc comment for Closure Compiler compatibility.
 #[derive(Debug, Clone)]
 pub struct JsDocComment<'a> {
     /// Description tag (@desc).
-    pub description: Option<Atom<'a>>,
+    pub description: Option<Ident<'a>>,
     /// Meaning tag (@meaning).
-    pub meaning: Option<Atom<'a>>,
+    pub meaning: Option<Ident<'a>>,
     /// Suppress warnings (@suppress {msgDescriptions}).
     pub suppress_msg_descriptions: bool,
 }
@@ -893,7 +915,7 @@ pub struct JsDocComment<'a> {
 #[derive(Debug)]
 pub struct DeclareFunctionStmt<'a> {
     /// Function name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Parameters.
     pub params: Vec<'a, FnParam<'a>>,
     /// Function body.
@@ -1071,6 +1093,10 @@ impl<'a> OutputExpression<'a> {
             // Spread elements
             (OutputExpression::SpreadElement(a), OutputExpression::SpreadElement(b)) => {
                 a.expr.is_equivalent(&b.expr)
+            }
+            // Raw source
+            (OutputExpression::RawSource(a), OutputExpression::RawSource(b)) => {
+                a.source == b.source
             }
             _ => false,
         }
@@ -1402,6 +1428,10 @@ impl<'a> OutputExpression<'a> {
                 },
                 allocator,
             )),
+            OutputExpression::RawSource(e) => OutputExpression::RawSource(Box::new_in(
+                RawSourceExpr { source: e.source.clone(), source_span: e.source_span },
+                allocator,
+            )),
         }
     }
 }
@@ -1588,7 +1618,7 @@ impl OutputAstBuilder {
     /// Create a string literal.
     pub fn string<'a>(
         allocator: &'a oxc_allocator::Allocator,
-        value: Atom<'a>,
+        value: Ident<'a>,
     ) -> OutputExpression<'a> {
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(value), source_span: None },
@@ -1599,7 +1629,7 @@ impl OutputAstBuilder {
     /// Create a variable read.
     pub fn variable<'a>(
         allocator: &'a oxc_allocator::Allocator,
-        name: Atom<'a>,
+        name: Ident<'a>,
     ) -> OutputExpression<'a> {
         OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, allocator))
     }
@@ -1804,6 +1834,9 @@ pub trait RecursiveOutputAstVisitor<'a> {
             OutputExpression::WrappedNode(e) => self.visit_wrapped_node(e),
             OutputExpression::WrappedIrNode(e) => self.visit_wrapped_ir_node(e),
             OutputExpression::SpreadElement(e) => self.visit_spread_element(e),
+            OutputExpression::RawSource(_) => {
+                // Raw source is opaque — no sub-expressions to visit
+            }
         }
     }
 

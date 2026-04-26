@@ -39,8 +39,8 @@ export default defineConfig({
   plugins: [
     angular({
       // Optional configuration
-      angularVersion: 21,
-      enableHmr: true,
+      angularVersion: { major: 21, minor: 0, patch: 0 },
+      liveReload: true,
     }),
   ],
 })
@@ -57,8 +57,8 @@ const result = await compileTemplate(
   'AppComponent',
   'app.component.ts',
   {
-    angularVersion: 21,
-    enableHmr: false,
+    angularVersion: { major: 21, minor: 0, patch: 0 },
+    hmr: false,
   },
 )
 
@@ -115,10 +115,14 @@ Returns: `Promise<TransformResult>`
 ```typescript
 interface TransformOptions {
   // Angular version (19, 20, 21)
-  angularVersion?: number
+  angularVersion?: {
+    major: number
+    minor: number
+    patch: number
+  }
 
   // Enable Hot Module Replacement
-  enableHmr?: boolean
+  hmr?: boolean
 
   // Enable cross-file type elision
   enableCrossFileElision?: boolean

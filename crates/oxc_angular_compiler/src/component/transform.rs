@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 
+use std::path::Path;
+
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Declaration, ExportDefaultDeclarationKind, Expression,
@@ -12,7 +14,8 @@ use oxc_ast::ast::{
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
-use oxc_span::{Atom, GetSpan, SourceType, Span};
+use oxc_span::{GetSpan, SourceType, Span};
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};
@@ -402,7 +405,7 @@ pub struct CompiledComponent<'a> {
 #[derive(Debug, Clone)]
 pub struct ImportInfo<'a> {
     /// The source module path (e.g., "@angular/core", "./services").
-    pub source_module: Atom<'a>,
+    pub source_module: Ident<'a>,
     /// Whether this is a named import that can be reused with bare name.
     /// True for: `import { AuthService } from "module"`
     /// False for: `import * as core from "module"` (namespace imports)
@@ -417,7 +420,7 @@ pub struct ImportInfo<'a> {
 ///
 /// Used to look up where a constructor dependency token was imported from
 /// and whether it can be reused with a bare name or requires namespace prefix.
-pub type ImportMap<'a> = FxHashMap<Atom<'a>, ImportInfo<'a>>;
+pub type ImportMap<'a> = FxHashMap<Ident<'a>, ImportInfo<'a>>;
 
 /// Build an import map from the program's import declarations.
 ///
@@ -474,7 +477,7 @@ pub fn build_import_map<'a>(
                     // or aliased: `import { AuthService as Auth } from "module"`
                     // We use the local name as the key
                     // Named imports CAN be reused with bare name
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Type-only if the declaration is `import type { ... }` or the specifier
                     // is `import { type X }` (inline type specifier)
@@ -484,8 +487,8 @@ pub fn build_import_map<'a>(
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -495,13 +498,13 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
                     // Default import: `import DefaultService from "module"`
                     // Default imports CAN be reused with bare name
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -515,13 +518,13 @@ pub fn build_import_map<'a>(
                 ImportDeclarationSpecifier::ImportNamespaceSpecifier(spec) => {
                     // Namespace import: `import * as core from "module"`
                     // Namespace imports CANNOT be reused with bare name for individual symbols
-                    let local_name: Atom<'a> = spec.local.name.clone().into();
+                    let local_name: Ident<'a> = spec.local.name.clone().into();
 
                     // Check if we have a resolved path for this identifier
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
-                        .map(|resolved| Atom::from(allocator.alloc_str(resolved)))
-                        .unwrap_or_else(|| default_source_module.clone());
+                        .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
+                        .unwrap_or_else(|| default_source_module.clone().into());
 
                     import_map.insert(
                         local_name,
@@ -683,8 +686,8 @@ enum AngularDecoratorKind {
 struct JitClassInfo {
     /// The class name.
     class_name: String,
-    /// Span of the decorator (including @).
-    decorator_span: Span,
+    /// Spans of ALL class-level decorators (including @) to be removed.
+    all_class_decorator_spans: std::vec::Vec<Span>,
     /// Start of the statement (includes export keyword if present).
     stmt_start: u32,
     /// Start of the class keyword.
@@ -695,12 +698,16 @@ struct JitClassInfo {
     is_exported: bool,
     /// Whether the class is export default.
     is_default_export: bool,
+    /// Whether the class is abstract.
+    is_abstract: bool,
     /// Constructor parameter info for ctorParameters.
     ctor_params: std::vec::Vec<JitCtorParam>,
-    /// Member decorator info for propDecorators.
+    /// Member decorator info for propDecorators (Angular decorators like @Input, @Output).
     member_decorators: std::vec::Vec<JitMemberDecorator>,
-    /// The modified decorator expression text for __decorate call.
-    decorator_text: String,
+    /// All class-level decorator expression texts for __decorate call, in source order.
+    all_class_decorator_texts: std::vec::Vec<String>,
+    /// Non-Angular member decorators that need __decorate() calls.
+    non_angular_member_decorators: std::vec::Vec<JitNonAngularMemberDecorator>,
 }
 
 /// Constructor parameter info for JIT ctorParameters generation.
@@ -725,6 +732,19 @@ struct JitMemberDecorator {
     member_name: String,
     /// The Angular decorators on this member.
     decorators: std::vec::Vec<JitParamDecorator>,
+}
+
+/// A non-Angular member decorator that needs to be lowered via __decorate().
+struct JitNonAngularMemberDecorator {
+    /// The member name.
+    member_name: String,
+    /// Whether the member is static.
+    is_static: bool,
+    /// Whether this is a property (field) vs a method/accessor.
+    /// TypeScript uses `void 0` for properties and `null` for methods/accessors.
+    is_property: bool,
+    /// The decorator expression texts (e.g., "Selector()", "Action(AddTodo)").
+    decorator_texts: std::vec::Vec<String>,
 }
 
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
@@ -820,38 +840,71 @@ fn extract_jit_ctor_params(
     params
 }
 
-/// Extract Angular member decorators for JIT propDecorators generation.
+/// Angular field decorators that go into `static propDecorators`.
+/// Matches Angular's official `FIELD_DECORATORS` constant from `@angular/compiler-cli`.
+const ANGULAR_FIELD_DECORATORS: &[&str] = &[
+    "Input",
+    "Output",
+    "HostBinding",
+    "HostListener",
+    "ViewChild",
+    "ViewChildren",
+    "ContentChild",
+    "ContentChildren",
+];
+
+/// All Angular decorator names from `@angular/core`.
+/// Any decorator with one of these names is treated as Angular and excluded from
+/// non-Angular `__decorate()` lowering. Angular identifies decorators by import source;
+/// we use names since they're unique to `@angular/core`.
+const ANGULAR_DECORATOR_NAMES: &[&str] = &[
+    // Field decorators (→ propDecorators)
+    "Input",
+    "Output",
+    "HostBinding",
+    "HostListener",
+    "ViewChild",
+    "ViewChildren",
+    "ContentChild",
+    "ContentChildren",
+    // Parameter decorators (→ ctorParameters)
+    "Inject",
+    "Optional",
+    "Self",
+    "SkipSelf",
+    "Host",
+    "Attribute",
+    // Class decorators (→ class __decorate)
+    "Component",
+    "Directive",
+    "Pipe",
+    "Injectable",
+    "NgModule",
+];
+
+/// Extract all member decorators for JIT transformation in a single pass.
 ///
-/// Collects all Angular-relevant decorators from class properties/methods
-/// (excluding constructor) so they can be emitted as a `static propDecorators` property.
-fn extract_jit_member_decorators(
+/// Returns two collections:
+/// - Angular field decorators → emitted as `static propDecorators = { ... }`
+/// - Non-Angular decorators → emitted as `__decorate([...], target, "name", desc)` calls
+fn extract_all_jit_member_decorators(
     source: &str,
     class: &oxc_ast::ast::Class<'_>,
-) -> std::vec::Vec<JitMemberDecorator> {
+) -> (std::vec::Vec<JitMemberDecorator>, std::vec::Vec<JitNonAngularMemberDecorator>) {
     use oxc_ast::ast::{ClassElement, MethodDefinitionKind, PropertyKey};
 
-    const ANGULAR_MEMBER_DECORATORS: &[&str] = &[
-        "Input",
-        "Output",
-        "HostBinding",
-        "HostListener",
-        "ViewChild",
-        "ViewChildren",
-        "ContentChild",
-        "ContentChildren",
-    ];
-
-    let mut result: std::vec::Vec<JitMemberDecorator> = std::vec::Vec::new();
+    let mut angular_members: std::vec::Vec<JitMemberDecorator> = std::vec::Vec::new();
+    let mut non_angular_members: std::vec::Vec<JitNonAngularMemberDecorator> = std::vec::Vec::new();
 
     for element in &class.body.body {
-        let (member_name, decorators) = match element {
+        let (member_name, is_static, is_property, decorators) = match element {
             ClassElement::PropertyDefinition(prop) => {
                 let name = match &prop.key {
                     PropertyKey::StaticIdentifier(id) => id.name.to_string(),
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, &prop.decorators)
+                (name, prop.r#static, true, &prop.decorators)
             }
             ClassElement::MethodDefinition(method) => {
                 if method.kind == MethodDefinitionKind::Constructor {
@@ -862,7 +915,7 @@ fn extract_jit_member_decorators(
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, &method.decorators)
+                (name, method.r#static, false, &method.decorators)
             }
             ClassElement::AccessorProperty(accessor) => {
                 let name = match &accessor.key {
@@ -870,12 +923,13 @@ fn extract_jit_member_decorators(
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, &accessor.decorators)
+                (name, accessor.r#static, false, &accessor.decorators)
             }
             _ => continue,
         };
 
         let mut angular_decs: std::vec::Vec<JitParamDecorator> = std::vec::Vec::new();
+        let mut non_angular_texts: std::vec::Vec<String> = std::vec::Vec::new();
 
         for decorator in decorators {
             let (dec_name, call_args) = match &decorator.expression {
@@ -898,17 +952,37 @@ fn extract_jit_member_decorators(
                 _ => continue,
             };
 
-            if ANGULAR_MEMBER_DECORATORS.contains(&dec_name.as_str()) {
+            if ANGULAR_FIELD_DECORATORS.contains(&dec_name.as_str()) {
+                // Angular field decorator → goes into propDecorators
                 angular_decs.push(JitParamDecorator { name: dec_name, args: call_args });
+            } else if !ANGULAR_DECORATOR_NAMES.contains(&dec_name.as_str()) {
+                // Non-Angular decorator → goes into __decorate() call
+                let expr_start = decorator.expression.span().start;
+                let expr_end = decorator.expression.span().end;
+                non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());
             }
+            // Angular non-field decorators (e.g. @Inject on a member) are silently dropped
+            // since they have no meaningful effect on members.
         }
 
         if !angular_decs.is_empty() {
-            result.push(JitMemberDecorator { member_name, decorators: angular_decs });
+            angular_members.push(JitMemberDecorator {
+                member_name: member_name.clone(),
+                decorators: angular_decs,
+            });
+        }
+
+        if !non_angular_texts.is_empty() {
+            non_angular_members.push(JitNonAngularMemberDecorator {
+                member_name,
+                is_static,
+                is_property,
+                decorator_texts: non_angular_texts,
+            });
         }
     }
 
-    result
+    (angular_members, non_angular_members)
 }
 
 /// Build the propDecorators static property text for JIT member decorator metadata.
@@ -1138,6 +1212,37 @@ fn build_jit_decorator_text(
 
 /// Transform an Angular TypeScript file in JIT (Just-In-Time) compilation mode.
 ///
+/// Strip TypeScript syntax from JIT output using oxc_transformer.
+///
+/// This runs as a post-pass after JIT text-edits, converting TypeScript → JavaScript.
+/// It handles abstract members, type annotations, parameter properties, etc.
+fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let parser_ret = Parser::new(allocator, code, source_type).parse();
+    if parser_ret.panicked {
+        return code.to_string();
+    }
+
+    let mut program = parser_ret.program;
+
+    let semantic_ret =
+        oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
+
+    let ts_options =
+        oxc_transformer::TypeScriptOptions { only_remove_type_imports: true, ..Default::default() };
+
+    let transform_options =
+        oxc_transformer::TransformOptions { typescript: ts_options, ..Default::default() };
+
+    let transformer =
+        oxc_transformer::Transformer::new(allocator, Path::new(path), &transform_options);
+    transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
+
+    let codegen_ret = oxc_codegen::Codegen::new().with_source_text(code).build(&program);
+
+    codegen_ret.code
+}
+
 /// JIT mode produces output compatible with Angular's JIT runtime compiler:
 /// - Decorators are downleveled using `__decorate` from tslib
 /// - `templateUrl` is replaced with `angular:jit:template:file;` imports
@@ -1197,36 +1302,56 @@ fn transform_angular_file_jit(
             continue;
         };
 
-        let Some((decorator_kind, decorator)) = find_angular_decorator(class) else {
+        let Some((decorator_kind, angular_decorator)) = find_angular_decorator(class) else {
             continue;
         };
 
-        // Build modified decorator text (replaces templateUrl/styleUrl with resource imports)
-        let decorator_text = build_jit_decorator_text(
-            source,
-            decorator,
-            decorator_kind,
-            &mut resource_counter,
-            &mut resource_imports,
-        );
+        // Collect ALL class-level decorator spans and texts (in source order)
+        let mut all_class_decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
+        let mut all_class_decorator_texts: std::vec::Vec<String> = std::vec::Vec::new();
+
+        for dec in &class.decorators {
+            all_class_decorator_spans.push(dec.span);
+
+            // Check if this is the Angular decorator that needs special text transformation
+            if dec.span == angular_decorator.span {
+                let text = build_jit_decorator_text(
+                    source,
+                    dec,
+                    decorator_kind,
+                    &mut resource_counter,
+                    &mut resource_imports,
+                );
+                all_class_decorator_texts.push(text);
+            } else {
+                // Non-Angular decorator: extract expression text from source (without @)
+                let expr_start = dec.expression.span().start;
+                let expr_end = dec.expression.span().end;
+                all_class_decorator_texts
+                    .push(source[expr_start as usize..expr_end as usize].to_string());
+            }
+        }
 
         // Extract constructor parameters for ctorParameters
         let ctor_params = extract_jit_ctor_params(source, class);
 
-        // Extract member decorators for propDecorators
-        let member_decorators = extract_jit_member_decorators(source, class);
+        // Extract Angular and non-Angular member decorators
+        let (member_decorators, non_angular_member_decorators) =
+            extract_all_jit_member_decorators(source, class);
 
         jit_classes.push(JitClassInfo {
             class_name,
-            decorator_span: decorator.span,
+            all_class_decorator_spans,
             stmt_start,
             class_start: class.span.start,
             class_body_end: class.body.span.end,
             is_exported,
             is_default_export,
+            is_abstract: class.r#abstract,
             ctor_params,
             member_decorators,
-            decorator_text,
+            all_class_decorator_texts,
+            non_angular_member_decorators,
         });
 
         result.component_count +=
@@ -1307,9 +1432,9 @@ fn transform_angular_file_jit(
             continue;
         };
 
-        // 4a. Remove the Angular decorator (including @ and trailing whitespace)
-        {
-            let mut end = jit_info.decorator_span.end as usize;
+        // 4a. Remove ALL class-level decorators (including @ and trailing whitespace)
+        for decorator_span in &jit_info.all_class_decorator_spans {
+            let mut end = decorator_span.end as usize;
             let bytes = source.as_bytes();
             while end < bytes.len() {
                 let c = bytes[end];
@@ -1319,14 +1444,14 @@ fn transform_angular_file_jit(
                     break;
                 }
             }
-            edits.push(Edit::delete(jit_info.decorator_span.start, end as u32));
+            edits.push(Edit::delete(decorator_span.start, end as u32));
         }
 
-        // 4b. Remove member decorators (@Input, @Output, etc.) and constructor param decorators
+        // 4b. Remove ALL member decorators and constructor param decorators
         {
             let mut decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
             super::decorator::collect_constructor_decorator_spans(class, &mut decorator_spans);
-            super::decorator::collect_member_decorator_spans(class, &mut decorator_spans);
+            super::decorator::collect_all_member_decorator_spans(class, &mut decorator_spans);
             for span in &decorator_spans {
                 let mut end = span.end as usize;
                 let bytes = source.as_bytes();
@@ -1343,15 +1468,25 @@ fn transform_angular_file_jit(
         }
 
         // 4c. Class restructuring: `export class X` → `let X = class X`
+        // For abstract classes, also strip the `abstract` keyword since class expressions can't be abstract.
+        let class_keyword_start = if jit_info.is_abstract {
+            let rest = &source[jit_info.class_start as usize..];
+            let offset = rest.find("class").unwrap_or(0);
+            jit_info.class_start + offset as u32
+        } else {
+            jit_info.class_start
+        };
+
         if jit_info.is_exported || jit_info.is_default_export {
             edits.push(Edit::replace(
                 jit_info.stmt_start,
-                jit_info.class_start,
+                class_keyword_start,
                 format!("let {} = ", jit_info.class_name),
             ));
         } else {
-            edits.push(Edit::insert(
+            edits.push(Edit::replace(
                 jit_info.class_start,
+                class_keyword_start,
                 format!("let {} = ", jit_info.class_name),
             ));
         }
@@ -1371,11 +1506,41 @@ fn transform_angular_file_jit(
             }
         }
 
-        // 4e. After class body, add __decorate call and export
-        let mut after_class = format!(
-            ";\n{} = __decorate([\n    {}\n], {});\n",
-            jit_info.class_name, jit_info.decorator_text, jit_info.class_name
-        );
+        // 4e. After class body, add member __decorate calls, then class __decorate call, then export
+        let mut after_class = String::from(";\n");
+
+        // Emit __decorate() for non-Angular member decorators (before class __decorate).
+        // Match TypeScript's ordering: instance (prototype) members first, then static members.
+        // Within each group, preserve source declaration order.
+        for member_dec in jit_info
+            .non_angular_member_decorators
+            .iter()
+            .filter(|m| !m.is_static)
+            .chain(jit_info.non_angular_member_decorators.iter().filter(|m| m.is_static))
+        {
+            let target = if member_dec.is_static {
+                jit_info.class_name.clone()
+            } else {
+                format!("{}.prototype", jit_info.class_name)
+            };
+            // TypeScript uses `null` for methods/accessors (reads existing descriptor)
+            // and `void 0` for properties (no existing descriptor).
+            let desc = if member_dec.is_property { "void 0" } else { "null" };
+            after_class.push_str(&format!(
+                "__decorate([{}], {}, \"{}\", {});\n",
+                member_dec.decorator_texts.join(", "),
+                target,
+                member_dec.member_name,
+                desc
+            ));
+        }
+
+        // Emit class-level __decorate() with ALL class decorators
+        let all_decorator_text = jit_info.all_class_decorator_texts.join(",\n    ");
+        after_class.push_str(&format!(
+            "{} = __decorate([\n    {}\n], {});\n",
+            jit_info.class_name, all_decorator_text, jit_info.class_name
+        ));
 
         if jit_info.is_exported {
             after_class.push_str(&format!("export {{ {} }};\n", jit_info.class_name));
@@ -1394,6 +1559,9 @@ fn transform_angular_file_jit(
     } else {
         result.code = apply_edits(source, edits);
     }
+
+    // 5. Strip TypeScript syntax from JIT output
+    result.code = strip_typescript(allocator, path, &result.code);
 
     result
 }
@@ -1422,9 +1590,11 @@ pub fn transform_angular_file(
     allocator: &Allocator,
     path: &str,
     source: &str,
-    options: &TransformOptions,
+    options: Option<&TransformOptions>,
     resolved_resources: Option<&ResolvedResources>,
 ) -> TransformResult {
+    let default_options = TransformOptions::default();
+    let options = options.unwrap_or_else(|| &default_options);
     // JIT mode uses a completely different code path
     if options.jit {
         return transform_angular_file_jit(allocator, path, source, options);
@@ -1535,7 +1705,7 @@ pub fn transform_angular_file(
     // a TypeScript type checker we cannot otherwise distinguish interfaces from classes.
     #[cfg(feature = "cross_file_elision")]
     for (name, is_type_only) in &cross_file_type_only {
-        if let Some(info) = import_map.get_mut(name.as_str()) {
+        if let Some(info) = import_map.get_mut(&Ident::from(name.as_str())) {
             if *is_type_only {
                 info.is_type_only = true;
             }
@@ -1565,9 +1735,13 @@ pub fn transform_angular_file(
             // Compute implicit_standalone based on Angular version
             let implicit_standalone = options.implicit_standalone();
 
-            if let Some(mut metadata) =
-                extract_component_metadata(allocator, class, implicit_standalone, &import_map)
-            {
+            if let Some(mut metadata) = extract_component_metadata(
+                allocator,
+                class,
+                implicit_standalone,
+                &import_map,
+                Some(source),
+            ) {
                 // 3. Resolve external styles and merge into metadata
                 resolve_styles(allocator, &mut metadata, resolved_resources);
 
@@ -1581,11 +1755,11 @@ pub fn transform_angular_file(
                     let template = allocator.alloc_str(&template_string);
                     // 4.5 Extract view queries from the class (for @ViewChild/@ViewChildren)
                     // These need to be passed to compile_component_full so predicates can be pooled
-                    let view_queries = extract_view_queries(allocator, class);
+                    let view_queries = extract_view_queries(allocator, class, Some(source));
 
                     // 4.6 Extract content queries from the class (for @ContentChild/@ContentChildren)
                     // Signal-based queries (contentChild(), contentChildren()) are also detected here
-                    let content_queries = extract_content_queries(allocator, class);
+                    let content_queries = extract_content_queries(allocator, class, Some(source));
 
                     // Collect content query property names for .d.ts generation
                     // (before content_queries is moved into compile_component_full)
@@ -1600,6 +1774,7 @@ pub fn transform_angular_file(
                         template,
                         &mut metadata,
                         path,
+                        source,
                         options,
                         view_queries,
                         content_queries,
@@ -1644,7 +1819,8 @@ pub fn transform_angular_file(
 
                             // Check if the class also has an @Injectable decorator.
                             // @Injectable is SHARED precedence and can coexist with @Component.
-                            let has_injectable = extract_injectable_metadata(allocator, class);
+                            let has_injectable =
+                                extract_injectable_metadata(allocator, class, Some(source));
                             if let Some(injectable_metadata) = &has_injectable {
                                 if let Some(span) = find_injectable_decorator_span(class) {
                                     decorator_spans_to_remove.push(span);
@@ -1688,7 +1864,7 @@ pub fn transform_angular_file(
                                     let type_expr = crate::output::ast::OutputExpression::ReadVar(
                                         oxc_allocator::Box::new_in(
                                             ReadVarExpr {
-                                                name: Atom::from(class_name.as_str()),
+                                                name: Ident::from(class_name.as_str()),
                                                 source_span: None,
                                             },
                                             allocator,
@@ -1706,6 +1882,7 @@ pub fn transform_angular_file(
                                         decorators: build_decorator_metadata_array(
                                             allocator,
                                             &[decorator],
+                                            Some(source),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,
@@ -1713,9 +1890,12 @@ pub fn transform_angular_file(
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
                                             &import_map,
+                                            Some(source),
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
-                                            allocator, class,
+                                            allocator,
+                                            class,
+                                            Some(source),
                                         ),
                                     };
 
@@ -1796,7 +1976,7 @@ pub fn transform_angular_file(
                 // the directive and creating conflicting property definitions (like
                 // ɵfac getters) that interfere with the AOT-compiled assignments.
                 if let Some(mut directive_metadata) =
-                    extract_directive_metadata(allocator, class, implicit_standalone)
+                    extract_directive_metadata(allocator, class, implicit_standalone, Some(source))
                 {
                     // Track decorator span for removal
                     if let Some(span) = find_directive_decorator_span(class) {
@@ -1854,7 +2034,8 @@ pub fn transform_angular_file(
 
                     // Check if the class also has an @Injectable decorator.
                     // @Injectable is SHARED precedence and can coexist with @Directive.
-                    let has_injectable = extract_injectable_metadata(allocator, class);
+                    let has_injectable =
+                        extract_injectable_metadata(allocator, class, Some(source));
                     if let Some(injectable_metadata) = &has_injectable {
                         if let Some(span) = find_injectable_decorator_span(class) {
                             decorator_spans_to_remove.push(span);
@@ -1887,7 +2068,7 @@ pub fn transform_angular_file(
                     class_definitions
                         .insert(class_name, (property_assignments, String::new(), String::new()));
                 } else if let Some(mut pipe_metadata) =
-                    extract_pipe_metadata(allocator, class, implicit_standalone)
+                    extract_pipe_metadata(allocator, class, implicit_standalone, Some(source))
                 {
                     // Not a @Component or @Directive - check if it's a @Pipe (PRIMARY)
                     // We need to compile @Pipe classes to generate ɵpipe and ɵfac definitions.
@@ -1928,7 +2109,8 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator (issue #65).
                         // @Injectable is SHARED precedence and can coexist with @Pipe.
-                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        let has_injectable =
+                            extract_injectable_metadata(allocator, class, Some(source));
                         if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
@@ -1965,7 +2147,7 @@ pub fn transform_angular_file(
                         );
                     }
                 } else if let Some(mut ng_module_metadata) =
-                    extract_ng_module_metadata(allocator, class)
+                    extract_ng_module_metadata(allocator, class, Some(source))
                 {
                     // Not a @Component, @Directive, @Injectable, or @Pipe - check if it's an @NgModule
                     // We need to compile @NgModule classes to generate ɵmod, ɵfac, and ɵinj definitions.
@@ -2009,7 +2191,8 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator.
                         // @Injectable is SHARED precedence and can coexist with @NgModule.
-                        let has_injectable = extract_injectable_metadata(allocator, class);
+                        let has_injectable =
+                            extract_injectable_metadata(allocator, class, Some(source));
                         if let Some(injectable_metadata) = &has_injectable {
                             if let Some(span) = find_injectable_decorator_span(class) {
                                 decorator_spans_to_remove.push(span);
@@ -2056,7 +2239,7 @@ pub fn transform_angular_file(
                         );
                     }
                 } else if let Some(mut injectable_metadata) =
-                    extract_injectable_metadata(allocator, class)
+                    extract_injectable_metadata(allocator, class, Some(source))
                 {
                     // Standalone @Injectable (no PRIMARY decorator on the class)
                     // We need to compile @Injectable classes to generate ɵprov and ɵfac definitions.
@@ -2266,6 +2449,7 @@ fn compile_component_full<'a>(
     template: &'a str,
     metadata: &mut ComponentMetadata<'a>,
     file_path: &str,
+    source: &str,
     options: &TransformOptions,
     view_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     content_queries: OxcVec<'a, R3QueryMetadata<'a>>,
@@ -2336,7 +2520,7 @@ fn compile_component_full<'a>(
 
     // Stage 3-5: Ingest and compile
     // Build ingest options from metadata and transform options
-    let component_name_atom = Atom::from_in(metadata.class_name.as_str(), allocator);
+    let component_name_atom = Ident::from_in(metadata.class_name.as_str(), allocator);
 
     // OXC is a single-file compiler, equivalent to Angular's local compilation mode.
     // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
@@ -2360,9 +2544,9 @@ fn compile_component_full<'a>(
 
     // Build relative paths for debug locations
     let relative_template_path =
-        if enable_debug_locations { Some(Atom::from_in(file_path, allocator)) } else { None };
+        if enable_debug_locations { Some(Ident::from_in(file_path, allocator)) } else { None };
 
-    let relative_context_file_path = Some(Atom::from_in(file_path, allocator));
+    let relative_context_file_path = Some(Ident::from_in(file_path, allocator));
 
     let ingest_options = IngestOptions {
         mode,
@@ -2513,11 +2697,11 @@ fn compile_component_full<'a>(
         let mut hmr_meta = HmrMetadata::new(
             component_type,
             metadata.class_name.clone(),
-            Atom::from_in(file_path, allocator),
+            Ident::from_in(file_path, allocator),
         );
 
         // Add the @angular/core namespace dependency (i0)
-        hmr_meta.add_namespace_dependency(Atom::from("@angular/core"), Atom::from("i0"));
+        hmr_meta.add_namespace_dependency(Ident::from("@angular/core"), Ident::from("i0"));
 
         // Generate the HMR initializer expression
         let hmr_expr = compile_hmr_initializer(allocator, &hmr_meta);
@@ -2540,13 +2724,22 @@ fn compile_component_full<'a>(
             allocator,
         ));
 
-        // Build the debug info
-        // Note: line_number is 1-indexed. We don't have access to the actual source
-        // line number here, but Angular uses the class declaration position.
-        // For now we use line 1, but this could be enhanced if we pass line info.
+        // Compute the 1-indexed line number of the class declaration from its byte offset
+        let class_line_number = {
+            let offset = metadata.class_span.start as usize;
+            let mut line = 1u32;
+            for &byte in &source.as_bytes()[..offset.min(source.len())] {
+                if byte == b'\n' {
+                    line += 1;
+                }
+            }
+            line
+        };
+
+        // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
-            .with_file_path(Atom::from_in(file_path, allocator))
-            .with_line_number(1); // TODO: Get actual line number from class declaration
+            .with_file_path(Ident::from_in(file_path, allocator))
+            .with_line_number(class_line_number);
 
         // Compile to IIFE-wrapped expression
         let debug_info_expr = compile_class_debug_info(allocator, &debug_info);
@@ -2615,7 +2808,7 @@ fn resolve_styles<'a>(
             if let Some(style_contents) = resources.styles.get(style_url.as_str()) {
                 // Add all resolved style contents to the metadata styles
                 for style in style_contents {
-                    metadata.styles.push(Atom::from_in(style.as_str(), allocator));
+                    metadata.styles.push(Ident::from_in(style.as_str(), allocator));
                 }
             }
         }
@@ -2689,7 +2882,7 @@ pub fn compile_component_template<'a>(
 
     // Stage 3-5: Ingest and compile
     use oxc_allocator::FromIn;
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component(allocator, component_name_atom, r3_result.nodes);
 
     let compiled = compile_template(&mut job);
@@ -2810,7 +3003,7 @@ pub fn compile_template_to_js_with_options<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -2983,7 +3176,7 @@ pub fn compile_template_for_hmr<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -3141,7 +3334,7 @@ fn compile_component_host_bindings<'a>(
 
     // Get component name and selector
     let component_name = metadata.class_name.clone();
-    let component_selector = metadata.selector.clone().unwrap_or_else(|| Atom::from(""));
+    let component_selector = metadata.selector.clone().unwrap_or_else(|| Ident::from(""));
 
     // Convert HostMetadata to HostBindingInput
     let input = convert_host_metadata_to_input(allocator, host, component_name, component_selector);
@@ -3165,8 +3358,8 @@ fn compile_component_host_bindings<'a>(
 fn convert_host_metadata_to_input<'a>(
     allocator: &'a Allocator,
     host: &HostMetadata<'a>,
-    component_name: Atom<'a>,
-    component_selector: Atom<'a>,
+    component_name: Ident<'a>,
+    component_selector: Ident<'a>,
 ) -> HostBindingInput<'a> {
     use oxc_allocator::FromIn;
 
@@ -3193,11 +3386,11 @@ fn convert_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
 
         properties.push(R3BoundAttribute {
-            name: Atom::from_in(final_name, allocator),
+            name: Ident::from_in(final_name, allocator),
             binding_type,
             security_context: SecurityContext::None,
             value: parse_result.ast,
-            unit: unit.map(|u| Atom::from_in(u, allocator)),
+            unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,
             key_span: empty_span,
             value_span: Some(empty_span),
@@ -3225,10 +3418,10 @@ fn convert_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_event(value_str, empty_span);
 
         events.push(R3BoundEvent {
-            name: Atom::from_in(final_event_name, allocator),
+            name: Ident::from_in(final_event_name, allocator),
             event_type: ParsedEventType::Regular,
             handler: parse_result.ast,
-            target: target.map(|t| Atom::from_in(t, allocator)),
+            target: target.map(|t| Ident::from_in(t, allocator)),
             phase: None,
             source_span: empty_span,
             handler_span: empty_span,
@@ -3238,7 +3431,7 @@ fn convert_host_metadata_to_input<'a>(
 
     // Convert static attributes: "role" -> OutputExpression::Literal
     // This matches TypeScript which uses `o.literal(value)` for host attributes
-    let mut attributes: FxHashMap<Atom<'a>, crate::output::ast::OutputExpression<'a>> =
+    let mut attributes: FxHashMap<Ident<'a>, crate::output::ast::OutputExpression<'a>> =
         FxHashMap::default();
 
     for (key, value) in host.attributes.iter() {
@@ -3264,7 +3457,7 @@ fn convert_host_metadata_to_input<'a>(
             },
             allocator,
         ));
-        attributes.insert(Atom::from("style"), expr);
+        attributes.insert(Ident::from("style"), expr);
     }
 
     if let Some(ref class_attr) = host.class_attr {
@@ -3275,7 +3468,7 @@ fn convert_host_metadata_to_input<'a>(
             },
             allocator,
         ));
-        attributes.insert(Atom::from("class"), expr);
+        attributes.insert(Ident::from("class"), expr);
     }
 
     HostBindingInput { component_name, component_selector, properties, attributes, events }
@@ -3339,30 +3532,30 @@ fn convert_host_metadata_input_to_host_metadata<'a>(
 ) -> HostMetadata<'a> {
     use oxc_allocator::FromIn;
 
-    let mut properties: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut properties: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.properties {
         properties
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
-    let mut attributes: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut attributes: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.attributes {
         attributes
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
-    let mut listeners: OxcVec<'a, (Atom<'a>, Atom<'a>)> = OxcVec::new_in(allocator);
+    let mut listeners: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
     for (k, v) in &input.listeners {
         listeners
-            .push((Atom::from_in(k.as_str(), allocator), Atom::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
     }
 
     HostMetadata {
         properties,
         attributes,
         listeners,
-        class_attr: input.class_attr.as_ref().map(|s| Atom::from_in(s.as_str(), allocator)),
-        style_attr: input.style_attr.as_ref().map(|s| Atom::from_in(s.as_str(), allocator)),
+        class_attr: input.class_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
+        style_attr: input.style_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
     }
 }
 
@@ -3398,7 +3591,7 @@ fn pool_selector_attrs<'a>(
     for attr in selector_attrs {
         attr_entries.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Atom::from_in(attr.as_str(), allocator)),
+                value: LiteralValue::String(Ident::from_in(attr.as_str(), allocator)),
                 source_span: None,
             },
             allocator,
@@ -3445,9 +3638,9 @@ fn compile_host_bindings_from_input<'a>(
     let host = convert_host_metadata_input_to_host_metadata(allocator, host_input);
 
     // Get component name and selector as atoms
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let component_selector =
-        selector.map(|s| Atom::from_in(s, allocator)).unwrap_or_else(|| Atom::from(""));
+        selector.map(|s| Ident::from_in(s, allocator)).unwrap_or_else(|| Ident::from(""));
 
     // Convert to HostBindingInput and compile
     let input =
@@ -3610,7 +3803,7 @@ pub fn compile_template_for_linker<'a>(
         angular_version: None,
     };
 
-    let component_name_atom = Atom::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, allocator);
     let mut job = ingest_component_with_options(
         allocator,
         component_name_atom,
@@ -3746,13 +3939,7 @@ export class HelloComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "hello.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "hello.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -3788,13 +3975,7 @@ import { Component } from '@angular/core';
 export class TestComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(!result.has_errors());
 
@@ -3847,13 +4028,7 @@ export class TestComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(!result.has_errors());
 
@@ -3880,13 +4055,7 @@ export class RegularClass {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "regular.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "regular.ts", source, None, None);
 
         assert_eq!(result.component_count, 0);
         assert!(!result.has_errors());
@@ -3914,13 +4083,7 @@ export class FirstComponent {}
 export class SecondComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "multi.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "multi.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 2);
         assert!(!result.has_errors());
@@ -3959,13 +4122,7 @@ export class ButtonComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "button.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "button.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4002,13 +4159,8 @@ import { Component } from '@angular/core';
 export class BitErrorSummaryComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "error-summary.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "error-summary.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4049,13 +4201,7 @@ import { Component } from '@angular/core';
 export class AppComponent {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
         assert_eq!(result.component_count, 1);
         assert!(!result.has_errors());
@@ -4100,13 +4246,7 @@ import { Directive } from '@angular/core';
 export class MyDirective {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.directive.ts", source, None, None);
 
         // The @Directive decorator should be removed from the output
         assert!(
@@ -4153,13 +4293,7 @@ export class NavBaseDirective {}
 export class NavComponent extends NavBaseDirective {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "nav.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "nav.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -4204,13 +4338,8 @@ export abstract class NavBaseComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "nav-base.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "nav-base.component.ts", source, None, None);
 
         // The @Directive() decorator should be removed
         assert!(
@@ -4254,13 +4383,7 @@ export class MyService {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed from the output
         assert!(
@@ -4299,13 +4422,7 @@ import { Injectable } from '@angular/core';
 export class LocalService {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "local.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "local.service.ts", source, None, None);
 
         // The @Injectable() decorator should be removed
         assert!(
@@ -4324,10 +4441,10 @@ export class LocalService {}
             result.code.contains("ɵɵdefineInjectable"),
             "Code should contain ɵɵdefineInjectable"
         );
-        // Should default to providedIn: "root" (Angular's default behavior)
+        // Should NOT have providedIn when not explicitly specified
         assert!(
-            result.code.contains(r#"providedIn:"root""#),
-            "Code should contain providedIn:\"root\" by default, but got:\n{}",
+            !result.code.contains("providedIn"),
+            "Code should NOT contain providedIn when not specified, but got:\n{}",
             result.code
         );
     }
@@ -4348,13 +4465,7 @@ export class MyService {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "factory.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "factory.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed
         assert!(
@@ -4389,13 +4500,7 @@ import { Injectable } from '@angular/core';
 export class Config {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "config.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "config.service.ts", source, None, None);
 
         // The @Injectable decorator should be removed
         assert!(
@@ -4435,13 +4540,7 @@ export class DataComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "data.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "data.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -4479,13 +4578,7 @@ import { Injectable } from '@angular/core';
 export class PlatformService {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "platform.service.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "platform.service.ts", source, None, None);
 
         // ɵprov should be generated
         assert!(
@@ -4515,13 +4608,7 @@ export class UppercasePipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "uppercase.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "uppercase.pipe.ts", source, None, None);
 
         // The @Pipe decorator should be removed from the output
         assert!(
@@ -4566,13 +4653,7 @@ import { Pipe } from '@angular/core';
 export class MyPurePipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my-pure.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my-pure.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4597,13 +4678,7 @@ import { Pipe } from '@angular/core';
 export class ImpurePipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "impure.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "impure.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4632,13 +4707,7 @@ import { Pipe } from '@angular/core';
 export class LegacyPipe {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "legacy.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "legacy.pipe.ts", source, None, None);
 
         assert!(
             result.code.contains("static ɵpipe = "),
@@ -4675,13 +4744,7 @@ export class DataComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "data.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "data.component.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -4740,13 +4803,7 @@ export class AppComponent {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.component.ts", source, None, None);
 
         // All decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -4811,13 +4868,7 @@ import { NgModule } from '@angular/core';
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // The @NgModule decorator should be removed from the output
         assert!(
@@ -4856,13 +4907,7 @@ import { NgModule } from '@angular/core';
 export class EmptyModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "empty.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "empty.module.ts", source, None, None);
 
         // The @NgModule() decorator should be removed
         assert!(
@@ -4893,13 +4938,8 @@ import { NgModule, CUSTOM_ELEMENTS_SCHEMA } from '@angular/core';
 export class CustomElementsModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "custom-elements.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "custom-elements.module.ts", source, None, None);
 
         // ɵmod should be generated with schemas
         assert!(
@@ -4923,13 +4963,7 @@ import { NgModule } from '@angular/core';
 export class IdentifiedModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "identified.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "identified.module.ts", source, None, None);
 
         // ɵmod should be generated
         assert!(
@@ -4966,13 +5000,7 @@ export class AppComponent {}
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(!result.code.contains("@NgModule"), "Code should NOT contain @NgModule decorator");
@@ -5027,13 +5055,7 @@ export class AppComponent {
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "app.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "app.module.ts", source, None, None);
 
         // All decorators should be removed
         assert!(!result.code.contains("@Pipe"), "Code should NOT contain @Pipe decorator");
@@ -5101,13 +5123,8 @@ import { NgModule, forwardRef } from '@angular/core';
 export class AppModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "forward-ref.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result =
+            transform_angular_file(&allocator, "forward-ref.module.ts", source, None, None);
 
         // ɵmod should be generated
         assert!(
@@ -5137,7 +5154,7 @@ export class AppModule {}
             build_import_map(&allocator, &parser_ret.program.body, None);
         assert_eq!(
             import_map_without_resolved
-                .get(&Atom::from("AriaDisableDirective"))
+                .get(&Ident::from("AriaDisableDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("../a11y")
         );
@@ -5155,7 +5172,7 @@ export class AppModule {}
         // AriaDisableDirective should have the resolved path
         assert_eq!(
             import_map_with_resolved
-                .get(&Atom::from("AriaDisableDirective"))
+                .get(&Ident::from("AriaDisableDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("../a11y/aria-disable.directive"),
             "AriaDisableDirective should use resolved path"
@@ -5164,7 +5181,7 @@ export class AppModule {}
         // OtherDirective should still use the original import path (not in resolved_imports)
         assert_eq!(
             import_map_with_resolved
-                .get(&Atom::from("OtherDirective"))
+                .get(&Ident::from("OtherDirective"))
                 .map(|i| i.source_module.as_str()),
             Some("./other"),
             "OtherDirective should use original import path"
@@ -5197,7 +5214,7 @@ export class TestComponent {}
         options.resolved_imports = Some(resolved_imports);
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         assert!(!result.has_errors());
         // The output should contain the host directive feature
@@ -5288,7 +5305,7 @@ export class ButtonComponent {}
             &allocator,
             component_path.to_str().unwrap(),
             component_source,
-            &options,
+            Some(&options),
             None,
         );
 
@@ -5342,7 +5359,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // @Inject(DARK_THEME) now uses namespace imports (i1 for @app/theme),
         // so rxjs gets i2 for Observable.
@@ -5399,7 +5416,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // The type 'AbstractService' is imported from './service' and should get a namespace import
         // even though the @Inject token 'SERVICE_TOKEN' is also from './service'.
@@ -5449,7 +5466,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // Should NOT generate a namespace import for ./some.interface
         // (the original `import type` statement may still appear, but no `import * as iN`)
@@ -5485,7 +5502,7 @@ export class TestComponent {
         options.emit_class_metadata = true;
 
         let result =
-            transform_angular_file(&allocator, "test.component.ts", source, &options, None);
+            transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
 
         // Should NOT generate a namespace import for ./some.interface
         assert!(
@@ -5516,13 +5533,7 @@ export class MyDirective {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "my.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "my.directive.ts", source, None, None);
 
         assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
 
@@ -5581,13 +5592,7 @@ export class OSTypeIconPipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "os-type-icon.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "os-type-icon.pipe.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -5635,13 +5640,7 @@ export class OSTypeIconPipe implements PipeTransform {
 }
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "os-type-icon.pipe.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "os-type-icon.pipe.ts", source, None, None);
 
         // Both decorators should be removed
         assert!(
@@ -5689,13 +5688,7 @@ import { Component, Injectable } from '@angular/core';
 export class TestCmp {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.component.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
 
         assert!(
             !result.code.contains("@Component"),
@@ -5739,13 +5732,7 @@ import { Directive, Injectable } from '@angular/core';
 export class TestDir {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.directive.ts", source, None, None);
 
         assert!(
             !result.code.contains("@Directive"),
@@ -5787,13 +5774,7 @@ import { NgModule, Injectable } from '@angular/core';
 export class TestNgModule {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "test.module.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "test.module.ts", source, None, None);
 
         assert!(
             !result.code.contains("@NgModule"),
@@ -5845,13 +5826,7 @@ import { BrnTooltipTrigger } from '@spartan-ng/brain/tooltip';
 export class UnityTooltipTrigger {}
 "#;
 
-        let result = transform_angular_file(
-            &allocator,
-            "tooltip.directive.ts",
-            source,
-            &TransformOptions::default(),
-            None,
-        );
+        let result = transform_angular_file(&allocator, "tooltip.directive.ts", source, None, None);
 
         assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
 

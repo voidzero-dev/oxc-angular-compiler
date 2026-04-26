@@ -6,7 +6,7 @@
 //! - `setClassDebugInfo(type, { className, filePath?, lineNumber?, forbidOrphanRendering? })`
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use super::metadata::R3ClassDebugInfo;
 use crate::output::ast::{
@@ -54,7 +54,7 @@ fn internal_compile_class_debug_info<'a>(
 
     // className
     entries.push(LiteralMapEntry {
-        key: Atom::from("className"),
+        key: Ident::from("className"),
         value: literal_string_atom(allocator, debug_info.class_name.clone()),
         quoted: false,
     });
@@ -64,13 +64,13 @@ fn internal_compile_class_debug_info<'a>(
     // will typically ignore lineNumber as well)
     if let Some(file_path) = &debug_info.file_path {
         entries.push(LiteralMapEntry {
-            key: Atom::from("filePath"),
+            key: Ident::from("filePath"),
             value: literal_string_atom(allocator, file_path.clone()),
             quoted: false,
         });
 
         entries.push(LiteralMapEntry {
-            key: Atom::from("lineNumber"),
+            key: Ident::from("lineNumber"),
             value: literal_number(allocator, debug_info.line_number),
             quoted: false,
         });
@@ -79,7 +79,7 @@ fn internal_compile_class_debug_info<'a>(
     // Include forbidOrphanRendering only if it's true (to reduce generated code)
     if debug_info.forbid_orphan_rendering {
         entries.push(LiteralMapEntry {
-            key: Atom::from("forbidOrphanRendering"),
+            key: Ident::from("forbidOrphanRendering"),
             value: literal_bool(allocator, true),
             quoted: false,
         });
@@ -114,7 +114,7 @@ fn dev_only_guarded_expression<'a>(
     expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     let guard_var = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Atom::from("ngDevMode"), source_span: None },
+        ReadVarExpr { name: Ident::from("ngDevMode"), source_span: None },
         allocator,
     ));
 
@@ -167,12 +167,12 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Atom::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
                     allocator,
                 )),
                 allocator,
             ),
-            name: Atom::from(identifier),
+            name: Ident::from(identifier),
             optional: false,
             source_span: None,
         },
@@ -183,13 +183,13 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
 /// Creates a string literal from a static str.
 fn literal_string<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
-        LiteralExpr { value: LiteralValue::String(Atom::from(value)), source_span: None },
+        LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
         allocator,
     ))
 }
 
 /// Creates a string literal from an Atom.
-fn literal_string_atom<'a>(allocator: &'a Allocator, value: Atom<'a>) -> OutputExpression<'a> {
+fn literal_string_atom<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(value), source_span: None },
         allocator,

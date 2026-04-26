@@ -7,6 +7,7 @@
 
 use std::ptr::NonNull;
 
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nExpressionFor, I18nParamResolutionTime};
@@ -69,7 +70,7 @@ struct ConversionInfo<'a> {
     op_ptr: NonNull<UpdateOp<'a>>,
     target: XrefId,
     i18n_context: XrefId,
-    name: oxc_span::Atom<'a>,
+    name: Ident<'a>,
     source_span: Option<oxc_span::Span>,
     /// The expression (if it's an interpolation, we extract sub-expressions).
     expression: Option<InterpolationInfo<'a>>,
@@ -78,7 +79,7 @@ struct ConversionInfo<'a> {
 /// Information extracted from an Interpolation expression.
 struct InterpolationInfo<'a> {
     expressions: Vec<IrExpression<'a>>,
-    i18n_placeholders: Vec<oxc_span::Atom<'a>>,
+    i18n_placeholders: Vec<Ident<'a>>,
 }
 
 /// Processes update ops for a single view, converting i18n bindings.

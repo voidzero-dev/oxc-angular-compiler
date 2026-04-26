@@ -1,29 +1,23 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
-assertion_line: 6360
+assertion_line: 6406
 expression: result.code
 ---
-
-import { Component } from '@angular/core';
-import { ServiceA } from './a.service';
-import { ServiceB } from './b.service';
-import { ServiceC } from './c.service';
+import { Component } from "@angular/core";
+import { ServiceA } from "./a.service";
+import { ServiceB } from "./b.service";
+import { ServiceC } from "./c.service";
 import { __decorate } from "tslib";
-
 let TestComponent = class TestComponent {
-    constructor(
-        svcA: undefined | ServiceA,
-        svcB: null | undefined | ServiceB,
-        svcC: ServiceC | null,
-    ) {}
-
-static ctorParameters = () => [
-    { type: undefined },
-    { type: undefined },
-    { type: ServiceC }
-];
+	constructor(svcA, svcB, svcC) {}
+	static ctorParameters = () => [
+		{ type: undefined },
+		{ type: undefined },
+		{ type: ServiceC }
+	];
 };
-TestComponent = __decorate([
-    Component({ selector: 'test', template: '' })
-], TestComponent);
+TestComponent = __decorate([Component({
+	selector: "test",
+	template: ""
+})], TestComponent);
 export { TestComponent };

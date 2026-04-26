@@ -33,6 +33,28 @@ const COMMENT_PLACEHOLDER: &str = "%COMMENT%";
 const POLYFILL_HOST: &str = "-shadowcsshost";
 const POLYFILL_HOST_NO_COMBINATOR: &str = "-shadowcsshost-no-combinator";
 
+/// Push a single UTF-8 character starting at byte position `i` from `source` into `result`.
+/// Returns the number of bytes consumed (1 for ASCII, 2-4 for multi-byte).
+///
+/// This replaces the incorrect `result.push(bytes[i] as char)` pattern which
+/// corrupts multi-byte UTF-8 characters by treating each byte as a Latin-1 codepoint.
+#[inline]
+fn push_utf8_char(result: &mut String, source: &str, i: usize) -> usize {
+    // Determine UTF-8 character width from the leading byte per RFC 3629.
+    let b = source.as_bytes()[i];
+    let width = if b < 0x80 {
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    };
+    result.push_str(&source[i..i + width]);
+    width
+}
+
 // =============================================================================
 // SafeSelector - Escapes problematic CSS patterns before processing
 // =============================================================================
@@ -101,8 +123,7 @@ impl SafeSelector {
                         i += 1;
                     }
                 } else {
-                    new_result.push(bytes[i] as char);
-                    i += 1;
+                    i += push_utf8_char(&mut new_result, &result, i);
                 }
             }
             result = new_result;
@@ -125,8 +146,7 @@ impl SafeSelector {
                     new_result.push_str(&placeholder);
                     i += 2;
                 } else {
-                    new_result.push(bytes[i] as char);
-                    i += 1;
+                    i += push_utf8_char(&mut new_result, &result, i);
                 }
             }
             result = new_result;
@@ -349,8 +369,7 @@ fn extract_comments(css: &str) -> (String, Vec<String>) {
 
             result.push_str(COMMENT_PLACEHOLDER);
         } else {
-            result.push(bytes[i] as char);
-            i += 1;
+            i += push_utf8_char(&mut result, css, i);
         }
     }
 
@@ -505,8 +524,7 @@ fn scope_keyframes_names(
                         (name, name_end, None)
                     } else {
                         // No valid name found
-                        result.push(bytes[i] as char);
-                        i += 1;
+                        i += push_utf8_char(&mut result, css, i);
                         continue;
                     };
 
@@ -571,8 +589,7 @@ fn scope_keyframes_names(
             }
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, css, i);
     }
 
     result
@@ -627,8 +644,7 @@ fn scope_animation_rules(
                     || !css.is_char_boundary(i + value_start)
                     || !css.is_char_boundary(i + value_end)
                 {
-                    result.push(bytes[i] as char);
-                    i += 1;
+                    i += push_utf8_char(&mut result, css, i);
                     continue;
                 }
                 let prefix = &css[i..i + prefix_end];
@@ -655,8 +671,7 @@ fn scope_animation_rules(
             }
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, css, i);
     }
 
     result
@@ -2256,7 +2271,9 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
             ')' => paren_depth = paren_depth.saturating_sub(1),
             '[' => bracket_depth += 1,
             ']' => bracket_depth = bracket_depth.saturating_sub(1),
-            ' ' | '>' | '+' | '~' if paren_depth == 0 && bracket_depth == 0 => {
+            ' ' | '\n' | '\t' | '\r' | '>' | '+' | '~'
+                if paren_depth == 0 && bracket_depth == 0 =>
+            {
                 // A space following an escaped hex value and followed by another hex character
                 // (ie: ".\fc ber" for ".über") is not a separator between 2 selectors
                 // Check: if the part ends with an escape placeholder AND next char is hex
@@ -2277,7 +2294,9 @@ fn split_by_combinators(selector: &str) -> Vec<(&str, &str)> {
 
                 // Collect the combinator (may include spaces around it)
                 let combinator_start = byte_pos;
-                while i < char_indices.len() && matches!(char_indices[i].1, ' ' | '>' | '+' | '~') {
+                while i < char_indices.len()
+                    && matches!(char_indices[i].1, ' ' | '\n' | '\t' | '\r' | '>' | '+' | '~')
+                {
                     i += 1;
                 }
 
@@ -2426,7 +2445,15 @@ fn scope_after_host_with_context(selector: &str, ctx: &mut ScopingContext) -> St
                     // First part (pseudo-selector attached to host) - don't scope
                     scoped_after.push_str(part);
                     if !combinator.is_empty()
-                        && combinator.chars().any(|c| c == ' ' || c == '>' || c == '+' || c == '~')
+                        && combinator.chars().any(|c| {
+                            c == ' '
+                                || c == '\n'
+                                || c == '\t'
+                                || c == '\r'
+                                || c == '>'
+                                || c == '+'
+                                || c == '~'
+                        })
                     {
                         found_combinator = true;
                     }
@@ -2576,8 +2603,7 @@ fn replace_host_context_patterns(s: &str, replacement: &str) -> String {
             i = after;
             continue;
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, s, i);
     }
 
     result
@@ -2635,8 +2661,7 @@ fn insert_polyfill_directives(css: &str) -> String {
                 continue;
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, css, i);
     }
 
     result
@@ -2757,8 +2782,7 @@ fn insert_polyfill_rules(css: &str) -> String {
                 }
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, css, i);
     }
 
     result
@@ -3043,8 +3067,7 @@ fn strip_deep_combinators(s: &str) -> String {
             continue;
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, s, i);
     }
 
     result
@@ -3092,8 +3115,7 @@ fn strip_host_patterns(s: &str) -> String {
             continue;
         }
 
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, s, i);
     }
 
     result
@@ -3142,8 +3164,7 @@ fn remove_unscoped_rules(css: &str) -> String {
                 continue;
             }
         }
-        result.push(bytes[i] as char);
-        i += 1;
+        i += push_utf8_char(&mut result, css, i);
     }
 
     result

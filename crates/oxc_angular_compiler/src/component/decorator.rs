@@ -8,7 +8,8 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
     MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::dependency::R3DependencyMetadata;
 use super::metadata::{
@@ -50,9 +51,10 @@ pub fn extract_component_metadata<'a>(
     class: &'a Class<'a>,
     implicit_standalone: bool,
     import_map: &ImportMap<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<ComponentMetadata<'a>> {
     // Get the class name
-    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
+    let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Component decorator
@@ -130,7 +132,8 @@ pub fn extract_component_metadata<'a>(
                     // 1. The identifier list for local analysis
                     metadata.imports = extract_identifier_array(allocator, &prop.value);
                     // 2. The raw expression to pass to ɵɵgetComponentDepsFactory in RuntimeResolved mode
-                    metadata.raw_imports = convert_oxc_expression(allocator, &prop.value);
+                    metadata.raw_imports =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
@@ -138,7 +141,7 @@ pub fn extract_component_metadata<'a>(
                         for part in export_as.as_str().split(',') {
                             let trimmed = part.trim();
                             if !trimmed.is_empty() {
-                                metadata.export_as.push(Atom::from(allocator.alloc_str(trimmed)));
+                                metadata.export_as.push(Ident::from(allocator.alloc_str(trimmed)));
                             }
                         }
                     }
@@ -150,7 +153,8 @@ pub fn extract_component_metadata<'a>(
                 "animations" => {
                     // Extract animations expression as full OutputExpression
                     // Handles both identifier references and complex array expressions
-                    metadata.animations = convert_oxc_expression(allocator, &prop.value);
+                    metadata.animations =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "schemas" => {
                     // Extract schemas identifiers (e.g., [CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA])
@@ -159,11 +163,13 @@ pub fn extract_component_metadata<'a>(
                 "providers" => {
                     // Extract providers as full OutputExpression
                     // Handles complex expressions like [{provide: TOKEN, useFactory: Factory}]
-                    metadata.providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.providers =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "viewProviders" => {
                     // Extract view providers as full OutputExpression
-                    metadata.view_providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.view_providers =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "hostDirectives" => {
                     // Extract host directives array
@@ -196,7 +202,8 @@ pub fn extract_component_metadata<'a>(
         // Add @HostBinding properties
         // Wrap with brackets: "class.active" -> "[class.active]"
         for (host_prop, class_prop) in host_bindings {
-            let wrapped_key = Atom::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
+            let wrapped_key =
+                Ident::from(allocator.alloc_str(&format!("[{}]", host_prop.as_str())));
             host.properties.push((wrapped_key, class_prop));
         }
 
@@ -206,15 +213,15 @@ pub fn extract_component_metadata<'a>(
         for (event_name, method_name, args) in host_listeners {
             // Wrap event name: "click" -> "(click)"
             let wrapped_key =
-                Atom::from(allocator.alloc_str(&format!("({})", event_name.as_str())));
+                Ident::from(allocator.alloc_str(&format!("({})", event_name.as_str())));
 
             // Build method expression with args: "handleClick" + ["$event"] -> "handleClick($event)"
             let method_expr = if args.is_empty() {
-                Atom::from(allocator.alloc_str(&format!("{}()", method_name.as_str())))
+                Ident::from(allocator.alloc_str(&format!("{}()", method_name.as_str())))
             } else {
                 let args_str: String =
                     args.iter().map(|a| a.as_str()).collect::<std::vec::Vec<_>>().join(",");
-                Atom::from(allocator.alloc_str(&format!("{}({})", method_name.as_str(), args_str)))
+                Ident::from(allocator.alloc_str(&format!("{}({})", method_name.as_str(), args_str)))
             };
 
             host.listeners.push((wrapped_key, method_expr));
@@ -235,7 +242,7 @@ pub fn extract_component_metadata<'a>(
         extract_constructor_deps(allocator, class, import_map, has_superclass);
 
     // Extract inputs from @Input decorators on class members
-    metadata.inputs = extract_input_metadata(allocator, class);
+    metadata.inputs = extract_input_metadata(allocator, class, source_text);
 
     // Extract outputs from @Output decorators on class members
     metadata.outputs = extract_output_metadata(allocator, class);
@@ -291,7 +298,7 @@ fn populate_declarations_from_imports<'a>(
             allocator,
             import_name.clone(),
             // Use a placeholder selector - the actual selector isn't used for dependencies array
-            Atom::from("*"),
+            Ident::from("*"),
             false, // is_component - unknown at this point
         );
 
@@ -334,23 +341,23 @@ fn is_component_call(callee: &Expression<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             // Simple template literal with no expressions: `template string`
             // Use cooked value to properly interpret escape sequences (\n -> newline)
             // Angular evaluates template literals, so we need cooked, not raw
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -359,7 +366,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
-        Expression::BooleanLiteral(lit) => Some(lit.value),
+        Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }
@@ -367,7 +374,7 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 fn extract_string_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> Option<Vec<'a, Atom<'a>>> {
+) -> Option<Vec<'a, Ident<'a>>> {
     let Expression::ArrayExpression(arr) = expr else {
         return None;
     };
@@ -375,13 +382,13 @@ fn extract_string_array<'a>(
     let mut result = Vec::new_in(allocator);
     for element in &arr.elements {
         if let ArrayExpressionElement::StringLiteral(lit) = element {
-            result.push(lit.value.clone());
+            result.push(lit.value.clone().into());
         } else if let ArrayExpressionElement::TemplateLiteral(tpl) = element {
             if tpl.expressions.is_empty() {
                 // Use cooked value to properly interpret escape sequences
                 if let Some(quasi) = tpl.quasis.first() {
                     if let Some(cooked) = &quasi.value.cooked {
-                        result.push(cooked.clone());
+                        result.push(cooked.clone().into());
                     }
                 }
             }
@@ -395,7 +402,7 @@ fn extract_string_array<'a>(
 fn extract_identifier_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> Vec<'a, Atom<'a>> {
+) -> Vec<'a, Ident<'a>> {
     let mut result = Vec::new_in(allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
@@ -562,7 +569,7 @@ fn extract_single_host_directive<'a>(
     match element {
         // Simple identifier: TooltipDirective
         ArrayExpressionElement::Identifier(id) => {
-            let name: Atom<'a> = id.name.clone().into();
+            let name: Ident<'a> = id.name.clone().into();
             let mut meta = HostDirectiveMetadata::new(allocator, name.clone());
             // Look up the source module from the import map
             if let Some(import_info) = import_map.get(&name) {
@@ -573,7 +580,7 @@ fn extract_single_host_directive<'a>(
 
         // Object expression: { directive: ColorDirective, inputs: [...], outputs: [...] }
         ArrayExpressionElement::ObjectExpression(obj) => {
-            let mut directive_name: Option<Atom<'a>> = None;
+            let mut directive_name: Option<Ident<'a>> = None;
             let mut inputs = Vec::new_in(allocator);
             let mut outputs = Vec::new_in(allocator);
             let mut is_forward_reference = false;
@@ -643,7 +650,7 @@ fn extract_single_host_directive<'a>(
 /// Extract a directive reference from an expression.
 ///
 /// Returns the directive class name and whether it's a forward reference.
-fn extract_directive_reference<'a>(expr: &Expression<'a>) -> (Option<Atom<'a>>, bool) {
+fn extract_directive_reference<'a>(expr: &Expression<'a>) -> (Option<Ident<'a>>, bool) {
     match expr {
         // Simple identifier: ColorDirective
         Expression::Identifier(id) => (Some(id.name.clone().into()), false),
@@ -672,7 +679,7 @@ fn is_forward_ref_call(callee: &Expression<'_>) -> bool {
 /// Extract the directive name from a forwardRef argument.
 ///
 /// Handles: `forwardRef(() => MyDirective)`
-fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<Atom<'a>> {
+fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<Ident<'a>> {
     let arg = arg?;
     match arg {
         // forwardRef(() => MyDirective)
@@ -712,7 +719,7 @@ fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<
 fn extract_io_mappings<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> Vec<'a, (Atom<'a>, Atom<'a>)> {
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut result = Vec::new_in(allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
@@ -737,7 +744,7 @@ fn extract_io_mappings<'a>(
 fn parse_mapping_element<'a>(
     allocator: &'a Allocator,
     element: &ArrayExpressionElement<'a>,
-) -> Option<(Atom<'a>, Atom<'a>)> {
+) -> Option<(Ident<'a>, Ident<'a>)> {
     match element {
         // Simple string: "color" - same public and internal name
         ArrayExpressionElement::StringLiteral(lit) => {
@@ -748,12 +755,12 @@ fn parse_mapping_element<'a>(
                 let internal_name = value[..colon_pos].trim();
                 let public_name = value[colon_pos + 1..].trim();
                 Some((
-                    Atom::from(allocator.alloc_str(public_name)),
-                    Atom::from(allocator.alloc_str(internal_name)),
+                    Ident::from(allocator.alloc_str(public_name)),
+                    Ident::from(allocator.alloc_str(internal_name)),
                 ))
             } else {
                 // Same name for both
-                Some((lit.value.clone(), lit.value.clone()))
+                Some((lit.value.clone().into(), lit.value.clone().into()))
             }
         }
 
@@ -762,11 +769,15 @@ fn parse_mapping_element<'a>(
             let elements = &arr.elements;
             if elements.len() >= 2 {
                 let internal = match elements.first() {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 let public = match elements.get(1) {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 if let (Some(internal_name), Some(public_name)) = (internal, public) {
@@ -898,8 +909,8 @@ fn extract_param_dependency<'a>(
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
-    let mut inject_token: Option<Atom<'a>> = None;
-    let mut attribute_name: Option<Atom<'a>> = None;
+    let mut inject_token: Option<Ident<'a>> = None;
+    let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name(&decorator.expression) {
@@ -920,7 +931,7 @@ fn extract_param_dependency<'a>(
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone());
+                            attribute_name = Some(s.value.clone().into());
                         }
                     }
                 }
@@ -965,7 +976,7 @@ fn extract_param_dependency<'a>(
 }
 
 /// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
+fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
     match expr {
         // @Optional
         Expression::Identifier(id) => Some(id.name.clone().into()),
@@ -982,7 +993,7 @@ fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
 }
 
 /// Extract the injection token from an @Inject decorator argument.
-fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Atom<'a>> {
+fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Ident<'a>> {
     match arg {
         Argument::Identifier(id) => Some(id.name.clone().into()),
         _ => {
@@ -997,7 +1008,7 @@ fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Atom<'a>> {
 }
 
 /// Extract the injection token from a parameter's type annotation.
-fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Option<Atom<'a>> {
+fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Option<Ident<'a>> {
     // Get the type annotation (directly on FormalParameter)
     let type_annotation = param.type_annotation.as_ref()?;
     let ts_type = &type_annotation.type_annotation;
@@ -1089,6 +1100,33 @@ pub fn collect_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::V
     }
 }
 
+/// Collect ALL decorator spans from class members (properties, methods, accessors),
+/// regardless of whether they are Angular-specific or not.
+///
+/// This is used when lowering a class that has Angular decorators: since the class
+/// declaration is converted to a class expression, ALL member decorators must be
+/// removed (decorators are not valid on class expressions in TypeScript).
+pub fn collect_all_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+    for element in &class.body.body {
+        let decorators = match element {
+            ClassElement::PropertyDefinition(prop) => &prop.decorators,
+            ClassElement::MethodDefinition(method) => {
+                // Skip constructor - it's handled separately
+                if method.kind == MethodDefinitionKind::Constructor {
+                    continue;
+                }
+                &method.decorators
+            }
+            ClassElement::AccessorProperty(accessor) => &accessor.decorators,
+            _ => continue,
+        };
+
+        for decorator in decorators {
+            spans.push(decorator.span);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1129,9 +1167,13 @@ mod tests {
             };
 
             if let Some(class) = class {
-                if let Some(metadata) =
-                    extract_component_metadata(&allocator, class, implicit_standalone, &import_map)
-                {
+                if let Some(metadata) = extract_component_metadata(
+                    &allocator,
+                    class,
+                    implicit_standalone,
+                    &import_map,
+                    Some(code),
+                ) {
                     found_metadata = Some(metadata);
                     break;
                 }

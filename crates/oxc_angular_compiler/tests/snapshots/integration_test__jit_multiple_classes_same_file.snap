@@ -1,0 +1,23 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Component, Injectable } from "@angular/core";
+import { __decorate } from "tslib";
+function Logger() {
+	return function(t) {
+		return t;
+	};
+}
+let FooComponent = class FooComponent {};
+FooComponent = __decorate([Component({
+	selector: "app-foo",
+	template: "<p>foo</p>"
+})], FooComponent);
+export { FooComponent };
+let FooService = class FooService {
+	doWork() {}
+};
+__decorate([Logger()], FooService.prototype, "doWork", null);
+FooService = __decorate([Logger(), Injectable()], FooService);
+export { FooService };

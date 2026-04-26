@@ -8,7 +8,8 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
     MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::metadata::{
     R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata, R3HostMetadata,
@@ -77,9 +78,10 @@ pub fn extract_directive_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
+    source_text: Option<&'a str>,
 ) -> Option<R3DirectiveMetadata<'a>> {
     // Get the class name
-    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
+    let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
 
     // Find the @Directive decorator
     let directive_decorator = find_directive_decorator(&class.decorators)?;
@@ -136,13 +138,15 @@ pub fn extract_directive_metadata<'a>(
                                 let trimmed = part.trim();
                                 if !trimmed.is_empty() {
                                     builder = builder
-                                        .add_export_as(Atom::from(allocator.alloc_str(trimmed)));
+                                        .add_export_as(Ident::from(allocator.alloc_str(trimmed)));
                                 }
                             }
                         }
                     }
                     "providers" => {
-                        if let Some(providers) = convert_oxc_expression(allocator, &prop.value) {
+                        if let Some(providers) =
+                            convert_oxc_expression(allocator, &prop.value, source_text)
+                        {
                             builder = builder.providers(providers);
                         }
                     }
@@ -164,7 +168,7 @@ pub fn extract_directive_metadata<'a>(
     }
 
     // Extract @Input/@Output/@HostBinding/@HostListener from class members
-    builder = builder.extract_from_class(allocator, class);
+    builder = builder.extract_from_class(allocator, class, source_text);
 
     // Detect if ngOnChanges lifecycle hook is implemented
     // Similar to Angular's: const usesOnChanges = members.some(member => ...)
@@ -180,7 +184,7 @@ pub fn extract_directive_metadata<'a>(
     // Extract constructor dependencies for factory generation
     // This enables proper DI for directive constructors
     // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts
-    let constructor_deps = extract_constructor_deps(allocator, class, has_superclass);
+    let constructor_deps = extract_constructor_deps(allocator, class, has_superclass, source_text);
     if let Some(deps) = constructor_deps {
         builder = builder.deps(deps);
     }
@@ -252,6 +256,7 @@ fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     has_superclass: bool,
+    source_text: Option<&'a str>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
     let constructor = class.body.body.iter().find_map(|element| {
@@ -270,7 +275,7 @@ fn extract_constructor_deps<'a>(
             let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
 
             for param in &params.items {
-                let dep = extract_param_dependency(allocator, param);
+                let dep = extract_param_dependency(allocator, param, source_text);
                 deps.push(dep);
             }
 
@@ -290,6 +295,7 @@ fn extract_constructor_deps<'a>(
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
+    source_text: Option<&'a str>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
     let mut optional = false;
@@ -297,7 +303,7 @@ fn extract_param_dependency<'a>(
     let mut self_ = false;
     let mut host = false;
     let mut inject_token: Option<OutputExpression<'a>> = None;
-    let mut attribute_name: Option<Atom<'a>> = None;
+    let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name_from_expr(&decorator.expression) {
@@ -306,7 +312,8 @@ fn extract_param_dependency<'a>(
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(arg) = call.arguments.first() {
-                            inject_token = convert_oxc_expression(allocator, arg.to_expression());
+                            inject_token =
+                                convert_oxc_expression(allocator, arg.to_expression(), source_text);
                         }
                     }
                 }
@@ -318,7 +325,7 @@ fn extract_param_dependency<'a>(
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone());
+                            attribute_name = Some(s.value.clone().into());
                         }
                     }
                 }
@@ -354,7 +361,7 @@ fn extract_param_dependency<'a>(
 }
 
 /// Get the name of a decorator from its expression.
-fn get_decorator_name_from_expr<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
+fn get_decorator_name_from_expr<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
     match expr {
         // @Optional
         Expression::Identifier(id) => Some(id.name.clone().into()),
@@ -433,21 +440,21 @@ fn has_ng_on_changes_method(class: &Class<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
             // Simple template literal with no expressions
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -456,7 +463,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
-        Expression::BooleanLiteral(lit) => Some(lit.value),
+        Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }
@@ -651,7 +658,7 @@ fn is_forward_ref_call(callee: &Expression<'_>) -> bool {
 /// Extract the directive name from a forwardRef argument.
 ///
 /// Handles: `forwardRef(() => MyDirective)`
-fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<Atom<'a>> {
+fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<Ident<'a>> {
     let arg = arg?;
     match arg {
         Argument::ArrowFunctionExpression(arrow) => {
@@ -682,7 +689,7 @@ fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<
 fn extract_io_mappings<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> Vec<'a, (Atom<'a>, Atom<'a>)> {
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut result = Vec::new_in(allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
@@ -707,7 +714,7 @@ fn extract_io_mappings<'a>(
 fn parse_mapping_element<'a>(
     allocator: &'a Allocator,
     element: &ArrayExpressionElement<'a>,
-) -> Option<(Atom<'a>, Atom<'a>)> {
+) -> Option<(Ident<'a>, Ident<'a>)> {
     match element {
         // Simple string: "color" - same public and internal name
         ArrayExpressionElement::StringLiteral(lit) => {
@@ -718,12 +725,12 @@ fn parse_mapping_element<'a>(
                 let internal_name = value[..colon_pos].trim();
                 let public_name = value[colon_pos + 1..].trim();
                 Some((
-                    Atom::from(allocator.alloc_str(public_name)),
-                    Atom::from(allocator.alloc_str(internal_name)),
+                    Ident::from(allocator.alloc_str(public_name)),
+                    Ident::from(allocator.alloc_str(internal_name)),
                 ))
             } else {
                 // Same name for both
-                Some((lit.value.clone(), lit.value.clone()))
+                Some((lit.value.clone().into(), lit.value.clone().into()))
             }
         }
 
@@ -732,11 +739,15 @@ fn parse_mapping_element<'a>(
             let elements = &arr.elements;
             if elements.len() >= 2 {
                 let internal = match elements.first() {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 let public = match elements.get(1) {
-                    Some(ArrayExpressionElement::StringLiteral(lit)) => Some(lit.value.clone()),
+                    Some(ArrayExpressionElement::StringLiteral(lit)) => {
+                        Some(lit.value.clone().into())
+                    }
                     _ => None,
                 };
                 if let (Some(internal_name), Some(public_name)) = (internal, public) {
@@ -881,7 +892,7 @@ mod tests {
 
             if let Some(class) = class {
                 if let Some(metadata) =
-                    extract_directive_metadata(&allocator, class, implicit_standalone)
+                    extract_directive_metadata(&allocator, class, implicit_standalone, Some(code))
                 {
                     found_metadata = Some(metadata);
                     break;

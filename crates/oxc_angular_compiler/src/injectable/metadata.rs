@@ -3,7 +3,7 @@
 //! Ported from Angular's `injectable_compiler_2.ts`.
 
 use oxc_allocator::Vec;
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::OutputExpression;
@@ -74,7 +74,7 @@ pub enum ProvidedIn<'a> {
 #[derive(Debug)]
 pub struct R3InjectableMetadata<'a> {
     /// Name of the injectable type.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
 
     /// An expression representing a reference to the injectable class.
     pub r#type: OutputExpression<'a>,
@@ -103,7 +103,7 @@ impl<'a> R3InjectableMetadata<'a> {
 
 /// Builder for R3InjectableMetadata.
 pub struct R3InjectableMetadataBuilder<'a> {
-    name: Option<Atom<'a>>,
+    name: Option<Ident<'a>>,
     r#type: Option<OutputExpression<'a>>,
     type_argument_count: u32,
     provided_in: ProvidedIn<'a>,
@@ -125,7 +125,7 @@ impl<'a> R3InjectableMetadataBuilder<'a> {
     }
 
     /// Set the injectable name.
-    pub fn name(mut self, name: Atom<'a>) -> Self {
+    pub fn name(mut self, name: Ident<'a>) -> Self {
         self.name = Some(name);
         self
     }

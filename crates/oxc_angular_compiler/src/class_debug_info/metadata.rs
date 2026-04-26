@@ -2,7 +2,7 @@
 //!
 //! Ported from Angular's `render3/r3_class_debug_info_compiler.ts`.
 
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::output::ast::OutputExpression;
 
@@ -16,7 +16,7 @@ pub struct R3ClassDebugInfo<'a> {
     pub r#type: OutputExpression<'a>,
 
     /// The original class name as it appears in its definition.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// The relative path of the file in which the class is defined.
     ///
@@ -24,7 +24,7 @@ pub struct R3ClassDebugInfo<'a> {
     /// absolute file paths are never shown. If the relative path cannot
     /// be computed, this should be `None`, and downstream consumers will
     /// typically ignore the `line_number` field as well.
-    pub file_path: Option<Atom<'a>>,
+    pub file_path: Option<Ident<'a>>,
 
     /// The line number in which this class is defined (1-indexed).
     pub line_number: u32,
@@ -40,12 +40,12 @@ impl<'a> R3ClassDebugInfo<'a> {
     ///
     /// File path and line number default to `None`/`0`, and
     /// `forbid_orphan_rendering` defaults to `false`.
-    pub fn new(r#type: OutputExpression<'a>, class_name: Atom<'a>) -> Self {
+    pub fn new(r#type: OutputExpression<'a>, class_name: Ident<'a>) -> Self {
         Self { r#type, class_name, file_path: None, line_number: 0, forbid_orphan_rendering: false }
     }
 
     /// Sets the file path for this debug info.
-    pub fn with_file_path(mut self, file_path: Atom<'a>) -> Self {
+    pub fn with_file_path(mut self, file_path: Ident<'a>) -> Self {
         self.file_path = Some(file_path);
         self
     }

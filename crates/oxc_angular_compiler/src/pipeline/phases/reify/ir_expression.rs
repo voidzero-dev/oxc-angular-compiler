@@ -1,7 +1,7 @@
 //! IR expression to Output AST conversion.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ast::expression::AngularExpression;
 use crate::ir::expression::{IrExpression, TwoWayBindingSetExpr};
@@ -39,7 +39,7 @@ pub fn convert_ir_expression<'a>(
                     // Fallback to a debuggable name using xref (should not happen after naming phase)
                     let fallback = format!("_unnamed_{}", var.xref.0);
                     let fallback_str = allocator.alloc_str(&fallback);
-                    Atom::from(fallback_str)
+                    Ident::from(fallback_str)
                 }
             };
             OutputExpression::ReadVar(Box::new_in(
@@ -52,7 +52,7 @@ pub fn convert_ir_expression<'a>(
             // Reference to the component context
             // This becomes `ctx` in the generated code
             OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("ctx"), source_span: ctx.source_span },
+                ReadVarExpr { name: Ident::from("ctx"), source_span: ctx.source_span },
                 allocator,
             ))
         }
@@ -73,7 +73,7 @@ pub fn convert_ir_expression<'a>(
                     ReadPropExpr {
                         receiver: Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
-                                ReadVarExpr { name: Atom::from("ctx"), source_span: None },
+                                ReadVarExpr { name: Ident::from("ctx"), source_span: None },
                                 allocator,
                             )),
                             allocator,
@@ -150,7 +150,7 @@ pub fn convert_ir_expression<'a>(
                 crate::ir::expression::RestoreViewTarget::Static(_) => {
                     // Fallback: use _r if not resolved (shouldn't happen in correct flow)
                     args.push(OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Atom::from("_r"), source_span: None },
+                        ReadVarExpr { name: Ident::from("_r"), source_span: None },
                         allocator,
                     )));
                 }
@@ -315,14 +315,14 @@ pub fn convert_ir_expression<'a>(
         IrExpression::TrackContext(_) => {
             // Reference to `this` for track functions
             OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("this"), source_span: None },
+                ReadVarExpr { name: Ident::from("this"), source_span: None },
                 allocator,
             ))
         }
 
         IrExpression::ReadTemporary(tmp) => {
             // Read a temporary variable
-            let var_name = tmp.name.clone().unwrap_or_else(|| Atom::from("_tmp"));
+            let var_name = tmp.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: var_name, source_span: None },
                 allocator,
@@ -331,7 +331,7 @@ pub fn convert_ir_expression<'a>(
 
         IrExpression::AssignTemporary(assign) => {
             // Assign to a temporary variable: _tmp = expr
-            let var_name = assign.name.clone().unwrap_or_else(|| Atom::from("_tmp"));
+            let var_name = assign.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
             let value = convert_ir_expression(allocator, &assign.expr, expressions, root_xref);
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -820,7 +820,7 @@ pub fn convert_ir_expression<'a>(
         IrExpression::LiteralMap(map) => {
             let mut entries = OxcVec::with_capacity_in(map.values.len(), allocator);
             for (i, value) in map.values.iter().enumerate() {
-                let key = map.keys.get(i).cloned().unwrap_or_else(|| Atom::from(""));
+                let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, value, expressions, root_xref);
@@ -846,7 +846,7 @@ pub fn convert_ir_expression<'a>(
         IrExpression::DerivedLiteralMap(map) => {
             let mut entries = OxcVec::with_capacity_in(map.values.len(), allocator);
             for (i, value) in map.values.iter().enumerate() {
-                let key = map.keys.get(i).cloned().unwrap_or_else(|| Atom::from(""));
+                let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, value, expressions, root_xref);

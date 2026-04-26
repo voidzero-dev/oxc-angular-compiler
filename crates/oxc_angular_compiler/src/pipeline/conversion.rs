@@ -7,7 +7,8 @@
 //! and `template/pipeline/src/conversion.ts`.
 
 use oxc_allocator::{Allocator, Box, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, BinaryOperator as AstBinaryOperator, LiteralMapKey,
@@ -199,10 +200,10 @@ pub fn convert_unary_operator(op: AstUnaryOperator) -> OutputUnaryOperator {
 /// - `${` to prevent interpolation syntax
 /// - Backslashes to preserve escape sequences
 /// - Carriage returns and line feeds to their escape sequences
-fn cooked_to_raw_text<'a>(allocator: &'a Allocator, cooked: &str) -> Atom<'a> {
+fn cooked_to_raw_text<'a>(allocator: &'a Allocator, cooked: &str) -> Ident<'a> {
     // Fast path: if no escaping needed, return as-is
     if !cooked.contains(['`', '$', '\\', '\r', '\n']) {
-        return Atom::from(allocator.alloc_str(cooked));
+        return Ident::from(allocator.alloc_str(cooked));
     }
 
     // Escape special characters
@@ -225,7 +226,7 @@ fn cooked_to_raw_text<'a>(allocator: &'a Allocator, cooked: &str) -> Atom<'a> {
             _ => raw.push(c),
         }
     }
-    Atom::from(allocator.alloc_str(&raw))
+    Ident::from(allocator.alloc_str(&raw))
 }
 
 // ============================================================================

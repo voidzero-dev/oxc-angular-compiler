@@ -384,7 +384,7 @@ impl WhitespaceRemovingHumanizer {
         for token in tokens {
             match token.token_type {
                 InterpolatedTokenType::Text => {
-                    let text = token.parts.first().map_or("", oxc_span::Atom::as_str);
+                    let text = token.parts.first().map_or("", oxc_str::Ident::as_str);
                     let processed = process_whitespace(text);
                     result.push(vec![processed]);
                 }

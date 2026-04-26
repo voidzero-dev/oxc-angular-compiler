@@ -9,7 +9,7 @@ use oxc_angular_compiler::{
     },
     transform::html_to_r3::{HtmlToR3Transform, TransformOptions},
 };
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let allocator = Allocator::default();
@@ -20,7 +20,7 @@ fn compile_template_to_js(template: &str, component_name: &str) -> String {
     let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
     let r3_result = transformer.transform(&nodes);
     assert!(r3_result.errors.is_empty(), "Transform errors: {:?}", r3_result.errors);
-    let mut job = ingest_component(&allocator, Atom::from(component_name), r3_result.nodes);
+    let mut job = ingest_component(&allocator, Ident::from(component_name), r3_result.nodes);
     let result = compile_template(&mut job);
     let emitter = JsEmitter::new();
     let mut output = String::new();
@@ -341,7 +341,7 @@ fn test_for_loop_alias_ingest() {
     let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
     let r3_result = transformer.transform(&nodes);
 
-    let job = ingest_component(&allocator, Atom::from("TestComponent"), r3_result.nodes);
+    let job = ingest_component(&allocator, Ident::from("TestComponent"), r3_result.nodes);
 
     // Check that the body view has the expected context variables and aliases
     assert!(!job.views.is_empty(), "Should have at least one embedded view");

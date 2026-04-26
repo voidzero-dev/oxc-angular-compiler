@@ -6,7 +6,8 @@
 //! Ported from Angular's `render3/r3_ast.ts`.
 
 use oxc_allocator::{Allocator, Box, HashMap, Vec};
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::ast::expression::{ASTWithSource, AngularExpression, BindingType, ParsedEventType};
 use crate::i18n::serializer::format_i18n_placeholder_name;
@@ -43,18 +44,18 @@ pub struct I18nMessage<'a> {
     /// Message AST nodes.
     pub nodes: Vec<'a, I18nNode<'a>>,
     /// The meaning of the message (for disambiguation).
-    pub meaning: Atom<'a>,
+    pub meaning: Ident<'a>,
     /// Description of the message for translators.
-    pub description: Atom<'a>,
+    pub description: Ident<'a>,
     /// Custom ID specified by the developer.
-    pub custom_id: Atom<'a>,
+    pub custom_id: Ident<'a>,
     /// The computed message ID.
-    pub id: Atom<'a>,
+    pub id: Ident<'a>,
     /// Legacy IDs for backwards compatibility.
-    pub legacy_ids: Vec<'a, Atom<'a>>,
+    pub legacy_ids: Vec<'a, Ident<'a>>,
     /// The serialized message string for goog.getMsg and $localize.
     /// Contains the message text with placeholder markers like "{$interpolation}".
-    pub message_string: Atom<'a>,
+    pub message_string: Ident<'a>,
 }
 
 /// i18n AST node.
@@ -80,7 +81,7 @@ pub enum I18nNode<'a> {
 #[derive(Debug)]
 pub struct I18nText<'a> {
     /// The text value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -98,28 +99,28 @@ pub struct I18nContainer<'a> {
 #[derive(Debug)]
 pub struct I18nIcu<'a> {
     /// The expression being evaluated.
-    pub expression: Atom<'a>,
+    pub expression: Ident<'a>,
     /// ICU type string (plural, select, selectordinal, or custom).
-    pub icu_type: Atom<'a>,
+    pub icu_type: Ident<'a>,
     /// Case branches.
-    pub cases: HashMap<'a, Atom<'a>, I18nNode<'a>>,
+    pub cases: HashMap<'a, Ident<'a>, I18nNode<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Expression placeholder name (for message serialization).
-    pub expression_placeholder: Option<Atom<'a>>,
+    pub expression_placeholder: Option<Ident<'a>>,
 }
 
 /// HTML tag placeholder.
 #[derive(Debug)]
 pub struct I18nTagPlaceholder<'a> {
     /// Tag name.
-    pub tag: Atom<'a>,
+    pub tag: Ident<'a>,
     /// Tag attributes.
-    pub attrs: HashMap<'a, Atom<'a>, Atom<'a>>,
+    pub attrs: HashMap<'a, Ident<'a>, Ident<'a>>,
     /// Start tag placeholder name.
-    pub start_name: Atom<'a>,
+    pub start_name: Ident<'a>,
     /// Close tag placeholder name.
-    pub close_name: Atom<'a>,
+    pub close_name: Ident<'a>,
     /// Child nodes.
     pub children: Vec<'a, I18nNode<'a>>,
     /// Whether this is a void element.
@@ -136,9 +137,9 @@ pub struct I18nTagPlaceholder<'a> {
 #[derive(Debug)]
 pub struct I18nPlaceholder<'a> {
     /// The expression value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Placeholder name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -149,7 +150,7 @@ pub struct I18nIcuPlaceholder<'a> {
     /// The ICU expression.
     pub value: Box<'a, I18nIcu<'a>>,
     /// Placeholder name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -158,13 +159,13 @@ pub struct I18nIcuPlaceholder<'a> {
 #[derive(Debug)]
 pub struct I18nBlockPlaceholder<'a> {
     /// Block name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Block parameters.
-    pub parameters: Vec<'a, Atom<'a>>,
+    pub parameters: Vec<'a, Ident<'a>>,
     /// Start block placeholder name.
-    pub start_name: Atom<'a>,
+    pub start_name: Ident<'a>,
     /// End block placeholder name.
-    pub close_name: Atom<'a>,
+    pub close_name: Ident<'a>,
     /// Child nodes.
     pub children: Vec<'a, I18nNode<'a>>,
     /// Source span (overall).
@@ -559,7 +560,7 @@ impl<'a> R3Node<'a> {
 #[derive(Debug, Clone)]
 pub struct R3Comment<'a> {
     /// The comment text.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -568,7 +569,7 @@ pub struct R3Comment<'a> {
 #[derive(Debug)]
 pub struct R3Text<'a> {
     /// The text content.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
 }
@@ -592,9 +593,9 @@ pub struct R3BoundText<'a> {
 #[derive(Debug)]
 pub struct R3TextAttribute<'a> {
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Attribute value.
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span (the attribute name).
@@ -647,7 +648,7 @@ impl Default for SecurityContext {
 #[derive(Debug)]
 pub struct R3BoundAttribute<'a> {
     /// Attribute name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Binding type (Property, Attribute, Class, Style, etc.).
     pub binding_type: BindingType,
     /// Security context for sanitization.
@@ -655,7 +656,7 @@ pub struct R3BoundAttribute<'a> {
     /// The binding expression.
     pub value: AngularExpression<'a>,
     /// Unit for style bindings (e.g., "px").
-    pub unit: Option<Atom<'a>>,
+    pub unit: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -670,15 +671,15 @@ pub struct R3BoundAttribute<'a> {
 #[derive(Debug)]
 pub struct R3BoundEvent<'a> {
     /// Event name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Event type.
     pub event_type: ParsedEventType,
     /// Handler expression.
     pub handler: AngularExpression<'a>,
     /// Target element (for `window:` or `document:` events).
-    pub target: Option<Atom<'a>>,
+    pub target: Option<Ident<'a>>,
     /// Animation phase.
-    pub phase: Option<Atom<'a>>,
+    pub phase: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Handler span.
@@ -695,7 +696,7 @@ pub struct R3BoundEvent<'a> {
 #[derive(Debug)]
 pub struct R3Element<'a> {
     /// Element tag name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound input properties.
@@ -726,7 +727,7 @@ pub struct R3Element<'a> {
 #[derive(Debug)]
 pub struct R3Template<'a> {
     /// Tag name (None for structural directives on `ng-template`).
-    pub tag_name: Option<Atom<'a>>,
+    pub tag_name: Option<Ident<'a>>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -768,7 +769,7 @@ pub enum R3TemplateAttr<'a> {
 #[derive(Debug)]
 pub struct R3Content<'a> {
     /// The selector for content projection.
-    pub selector: Atom<'a>,
+    pub selector: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Child nodes (usually empty).
@@ -789,9 +790,9 @@ pub struct R3Content<'a> {
 #[derive(Debug)]
 pub struct R3Variable<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Variable value (for `let x = value`).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -804,9 +805,9 @@ pub struct R3Variable<'a> {
 #[derive(Debug)]
 pub struct R3Reference<'a> {
     /// Reference name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Reference value (directive name or empty).
-    pub value: Atom<'a>,
+    pub value: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Key span.
@@ -1068,7 +1069,7 @@ pub struct R3ImmediateDeferredTrigger {
 #[derive(Debug)]
 pub struct R3HoverDeferredTrigger<'a> {
     /// Reference to the element to hover.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1102,7 +1103,7 @@ pub struct R3TimerDeferredTrigger {
 #[derive(Debug)]
 pub struct R3InteractionDeferredTrigger<'a> {
     /// Reference to the element to interact with.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1119,7 +1120,7 @@ pub struct R3InteractionDeferredTrigger<'a> {
 #[derive(Debug)]
 pub struct R3ViewportDeferredTrigger<'a> {
     /// Reference to the element to observe.
-    pub reference: Option<Atom<'a>>,
+    pub reference: Option<Ident<'a>>,
     /// Viewport options (margin, etc.).
     pub options: Option<AngularExpression<'a>>,
     /// Source span.
@@ -1265,7 +1266,7 @@ pub struct R3DeferredBlockError<'a> {
 #[derive(Debug)]
 pub struct R3UnknownBlock<'a> {
     /// Block name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Source span.
     pub source_span: Span,
     /// Name span.
@@ -1276,7 +1277,7 @@ pub struct R3UnknownBlock<'a> {
 #[derive(Debug)]
 pub struct R3LetDeclaration<'a> {
     /// Variable name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Value expression.
     pub value: AngularExpression<'a>,
     /// Source span.
@@ -1291,11 +1292,11 @@ pub struct R3LetDeclaration<'a> {
 #[derive(Debug)]
 pub struct R3Component<'a> {
     /// Component class name.
-    pub component_name: Atom<'a>,
+    pub component_name: Ident<'a>,
     /// Tag name in template.
-    pub tag_name: Option<Atom<'a>>,
+    pub tag_name: Option<Ident<'a>>,
     /// Full component name.
-    pub full_name: Atom<'a>,
+    pub full_name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -1324,7 +1325,7 @@ pub struct R3Component<'a> {
 #[derive(Debug)]
 pub struct R3Directive<'a> {
     /// Directive class name.
-    pub name: Atom<'a>,
+    pub name: Ident<'a>,
     /// Static attributes.
     pub attributes: Vec<'a, R3TextAttribute<'a>>,
     /// Bound inputs.
@@ -1349,7 +1350,7 @@ pub struct R3Directive<'a> {
 #[derive(Debug)]
 pub struct R3HostElement<'a> {
     /// Possible tag names for the host element. Must have at least one.
-    pub tag_names: Vec<'a, Atom<'a>>,
+    pub tag_names: Vec<'a, Ident<'a>>,
     /// Attribute and property bindings.
     pub bindings: Vec<'a, R3BoundAttribute<'a>>,
     /// Event listeners.
@@ -1362,9 +1363,9 @@ pub struct R3HostElement<'a> {
 #[derive(Debug)]
 pub struct R3Icu<'a> {
     /// Variable expressions (ordered: must preserve insertion order like JS objects).
-    pub vars: Vec<'a, (Atom<'a>, R3BoundText<'a>)>,
+    pub vars: Vec<'a, (Ident<'a>, R3BoundText<'a>)>,
     /// Placeholder expressions (ordered: must preserve insertion order like JS objects).
-    pub placeholders: Vec<'a, (Atom<'a>, R3IcuPlaceholder<'a>)>,
+    pub placeholders: Vec<'a, (Ident<'a>, R3IcuPlaceholder<'a>)>,
     /// Source span.
     pub source_span: Span,
     /// i18n metadata.
@@ -1395,13 +1396,31 @@ pub trait R3Visitor<'a> {
     /// Visit a bound text node.
     fn visit_bound_text(&mut self, _text: &R3BoundText<'a>) {}
 
+    /// Visit a static text attribute.
+    fn visit_text_attribute(&mut self, _attr: &R3TextAttribute<'a>) {}
+
+    /// Visit a bound attribute (input property).
+    fn visit_bound_attribute(&mut self, _attr: &R3BoundAttribute<'a>) {}
+
+    /// Visit a bound event (output).
+    fn visit_bound_event(&mut self, _event: &R3BoundEvent<'a>) {}
+
     /// Visit an element.
     fn visit_element(&mut self, element: &R3Element<'a>) {
         self.visit_element_children(element);
     }
 
-    /// Visit element children.
+    /// Visit element children, attributes, inputs, and outputs.
     fn visit_element_children(&mut self, element: &R3Element<'a>) {
+        for attr in &element.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &element.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &element.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &element.children {
             child.visit(self);
         }
@@ -1412,8 +1431,17 @@ pub trait R3Visitor<'a> {
         self.visit_template_children(template);
     }
 
-    /// Visit template children.
+    /// Visit template children, attributes, inputs, and outputs.
     fn visit_template_children(&mut self, template: &R3Template<'a>) {
+        for attr in &template.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &template.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &template.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &template.children {
             child.visit(self);
         }
@@ -1421,6 +1449,9 @@ pub trait R3Visitor<'a> {
 
     /// Visit a content projection slot.
     fn visit_content(&mut self, content: &R3Content<'a>) {
+        for attr in &content.attributes {
+            self.visit_text_attribute(attr);
+        }
         for child in &content.children {
             child.visit(self);
         }
@@ -1531,6 +1562,15 @@ pub trait R3Visitor<'a> {
 
     /// Visit a component.
     fn visit_component(&mut self, component: &R3Component<'a>) {
+        for attr in &component.attributes {
+            self.visit_text_attribute(attr);
+        }
+        for input in &component.inputs {
+            self.visit_bound_attribute(input);
+        }
+        for output in &component.outputs {
+            self.visit_bound_event(output);
+        }
         for child in &component.children {
             child.visit(self);
         }
@@ -1560,11 +1600,133 @@ pub struct R3ParseResult<'a> {
     /// Uses std::vec::Vec since ParseError contains Drop types (Arc, String).
     pub errors: std::vec::Vec<crate::util::ParseError>,
     /// Extracted styles.
-    pub styles: Vec<'a, Atom<'a>>,
+    pub styles: Vec<'a, Ident<'a>>,
     /// Extracted style URLs.
-    pub style_urls: Vec<'a, Atom<'a>>,
+    pub style_urls: Vec<'a, Ident<'a>>,
     /// Content projection selectors.
-    pub ng_content_selectors: Vec<'a, Atom<'a>>,
+    pub ng_content_selectors: Vec<'a, Ident<'a>>,
     /// Comment nodes (if collected).
     pub comment_nodes: Option<Vec<'a, R3Comment<'a>>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use oxc_allocator::Allocator;
+
+    use crate::ast::r3::{R3Visitor, visit_all};
+    use crate::parser::html::HtmlParser;
+    use crate::transform::html_to_r3::{TransformOptions, html_ast_to_r3_ast};
+
+    /// A visitor that collects names of visited attributes, inputs, and outputs.
+    struct AttributeCollector {
+        text_attributes: Vec<String>,
+        bound_attributes: Vec<String>,
+        bound_events: Vec<String>,
+        elements: Vec<String>,
+    }
+
+    impl AttributeCollector {
+        fn new() -> Self {
+            Self {
+                text_attributes: Vec::new(),
+                bound_attributes: Vec::new(),
+                bound_events: Vec::new(),
+                elements: Vec::new(),
+            }
+        }
+    }
+
+    impl<'a> R3Visitor<'a> for AttributeCollector {
+        fn visit_element(&mut self, element: &super::R3Element<'a>) {
+            self.elements.push(element.name.to_string());
+            self.visit_element_children(element);
+        }
+
+        fn visit_text_attribute(&mut self, attr: &super::R3TextAttribute<'a>) {
+            self.text_attributes.push(attr.name.to_string());
+        }
+
+        fn visit_bound_attribute(&mut self, attr: &super::R3BoundAttribute<'a>) {
+            self.bound_attributes.push(attr.name.to_string());
+        }
+
+        fn visit_bound_event(&mut self, event: &super::R3BoundEvent<'a>) {
+            self.bound_events.push(event.name.to_string());
+        }
+    }
+
+    #[test]
+    fn test_r3_visitor_visits_attributes_inputs_outputs() {
+        let allocator = Allocator::default();
+        let template =
+            r#"<button type="submit" [disabled]="isDisabled" (click)="onClick()">Save</button>"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        let mut collector = AttributeCollector::new();
+        visit_all(&mut collector, &r3_result.nodes);
+
+        assert_eq!(collector.elements, vec!["button"]);
+        assert_eq!(collector.text_attributes, vec!["type"]);
+        assert_eq!(collector.bound_attributes, vec!["disabled"]);
+        assert_eq!(collector.bound_events, vec!["click"]);
+    }
+
+    #[test]
+    fn test_r3_visitor_visits_nested_elements() {
+        let allocator = Allocator::default();
+        let template = r#"<div id="outer"><span class="inner" [title]="t" (mouseenter)="onHover()">text</span></div>"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        let mut collector = AttributeCollector::new();
+        visit_all(&mut collector, &r3_result.nodes);
+
+        assert_eq!(collector.elements, vec!["div", "span"]);
+        assert_eq!(collector.text_attributes, vec!["id", "class"]);
+        assert_eq!(collector.bound_attributes, vec!["title"]);
+        assert_eq!(collector.bound_events, vec!["mouseenter"]);
+    }
+
+    #[test]
+    fn test_r3_visitor_default_noop_does_not_break() {
+        let allocator = Allocator::default();
+        let template = r#"<input [value]="name" (change)="update()" required />"#;
+
+        let html_result = HtmlParser::new(&allocator, template, "test.html").parse();
+        assert!(html_result.errors.is_empty());
+
+        let r3_result = html_ast_to_r3_ast(
+            &allocator,
+            template,
+            &html_result.nodes,
+            TransformOptions::default(),
+        );
+        assert!(r3_result.errors.is_empty());
+
+        // A visitor with all default no-op methods should traverse without panic
+        struct NoopVisitor;
+        impl<'a> R3Visitor<'a> for NoopVisitor {}
+
+        let mut visitor = NoopVisitor;
+        visit_all(&mut visitor, &r3_result.nodes);
+    }
 }

@@ -14,7 +14,7 @@
 //! Ported from Angular's `template/pipeline/src/phases/save_restore_view.ts`.
 
 use oxc_allocator::{Box, Vec as OxcVec};
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::ir::enums::{ExpressionKind, SemanticVariableKind, VariableFlags};
 use crate::ir::expression::{
@@ -181,7 +181,7 @@ fn process_arrow_functions_in_view(
             // Per Angular (save_restore_view.ts lines 77-93):
             // The target is o.variable(expr.currentViewName) where currentViewName is 'view'
             let view_var_expr = OutputExpression::ReadVar(Box::new_in(
-                ReadVarExpr { name: Atom::from("view"), source_span: None },
+                ReadVarExpr { name: Ident::from("view"), source_span: None },
                 allocator,
             ));
 
@@ -189,7 +189,7 @@ fn process_arrow_functions_in_view(
                 base: UpdateOpBase::default(),
                 xref: var_xref,
                 kind: SemanticVariableKind::Context,
-                name: Atom::from(""), // Empty = naming phase will assign it
+                name: Ident::from(""), // Empty = naming phase will assign it
                 initializer: Box::new_in(
                     IrExpression::RestoreView(Box::new_in(
                         RestoreViewExpr {
@@ -395,7 +395,7 @@ fn add_restore_view_ops_only<'a>(
         base: UpdateOpBase::default(),
         xref: var_xref,
         kind: SemanticVariableKind::Context,
-        name: oxc_span::Atom::from(""), // Empty = naming phase will assign it
+        name: Ident::from(""), // Empty = naming phase will assign it
         initializer: Box::new_in(
             IrExpression::RestoreView(Box::new_in(
                 RestoreViewExpr { view: RestoreViewTarget::Static(view_xref), source_span: None },
@@ -435,7 +435,7 @@ fn add_restore_view_to_listener<'a>(
         base: UpdateOpBase::default(),
         xref: var_xref,
         kind: SemanticVariableKind::Context,
-        name: oxc_span::Atom::from(""), // Empty = naming phase will assign it
+        name: Ident::from(""), // Empty = naming phase will assign it
         initializer: Box::new_in(
             IrExpression::RestoreView(Box::new_in(
                 RestoreViewExpr { view: RestoreViewTarget::Static(view_xref), source_span: None },
@@ -511,7 +511,7 @@ fn create_saved_view_variable<'a>(
         base: Default::default(),
         xref,
         kind: SemanticVariableKind::SavedView,
-        name: oxc_span::Atom::from(""), // Empty = naming phase will assign it
+        name: Ident::from(""), // Empty = naming phase will assign it
         initializer: Box::new_in(
             IrExpression::GetCurrentView(Box::new_in(
                 GetCurrentViewExpr { source_span: None },

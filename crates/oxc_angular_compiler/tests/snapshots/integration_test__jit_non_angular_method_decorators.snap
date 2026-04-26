@@ -1,0 +1,19 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Injectable } from "@angular/core";
+import { State, Action, Selector } from "@ngxs/store";
+import { __decorate } from "tslib";
+let TodoState = class TodoState {
+	static todos(state) {
+		return state.items;
+	}
+	add(ctx, action) {
+		ctx.setState(action);
+	}
+};
+__decorate([Action(AddTodo)], TodoState.prototype, "add", null);
+__decorate([Selector()], TodoState, "todos", null);
+TodoState = __decorate([State({ name: "todo" }), Injectable()], TodoState);
+export { TodoState };

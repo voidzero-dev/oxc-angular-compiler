@@ -230,8 +230,10 @@ fn vars_used_by_update_op(
             1
         }
         UpdateOp::Control(_) => {
-            // Control bindings use 2 slots (one for value, one for bound states)
-            2
+            // Angular's ControlOp does not implement ConsumesVarsTrait, so it does not
+            // contribute any top-level variable slots. The bound [formField] value is
+            // accounted for by the PropertyOp that precedes it.
+            0
         }
         UpdateOp::Conditional(_) => 1,
         UpdateOp::StoreLet(_) => 1,
@@ -841,7 +843,8 @@ fn assign_var_offsets_in_output_expression(
         | OutputExpression::External(_)
         | OutputExpression::ReadVar(_)
         | OutputExpression::RegularExpressionLiteral(_)
-        | OutputExpression::WrappedNode(_) => {}
+        | OutputExpression::WrappedNode(_)
+        | OutputExpression::RawSource(_) => {}
     }
 }
 

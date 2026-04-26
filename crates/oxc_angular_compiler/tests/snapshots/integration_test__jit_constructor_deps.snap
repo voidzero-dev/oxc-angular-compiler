@@ -1,22 +1,19 @@
 ---
 source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 6164
 expression: result.code
 ---
-import { Component } from '@angular/core';
-import { TitleService } from './title.service';
+import { Component } from "@angular/core";
+import { TitleService } from "./title.service";
 import { __decorate } from "tslib";
-
 let AppComponent = class AppComponent {
-    constructor(private titleService: TitleService) {}
-
-static ctorParameters = () => [
-    { type: TitleService }
-];
+	constructor(titleService) {
+		this.titleService = titleService;
+	}
+	static ctorParameters = () => [{ type: TitleService }];
 };
-AppComponent = __decorate([
-    Component({
-    selector: 'app-root',
-    template: '<h1>Hello</h1>',
-})
-], AppComponent);
+AppComponent = __decorate([Component({
+	selector: "app-root",
+	template: "<h1>Hello</h1>"
+})], AppComponent);
 export { AppComponent };

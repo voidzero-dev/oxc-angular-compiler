@@ -3,7 +3,8 @@
 //! This module defines the metadata extracted from `@Component` decorators.
 
 use oxc_allocator::Vec;
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use super::dependency::R3DependencyMetadata;
 use crate::directive::R3InputMetadata;
@@ -117,25 +118,25 @@ pub enum ChangeDetectionStrategy {
 #[derive(Debug)]
 pub struct ComponentMetadata<'a> {
     /// The name of the component class.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// The span of the class declaration.
     pub class_span: Span,
 
     /// The CSS selector for this component.
-    pub selector: Option<Atom<'a>>,
+    pub selector: Option<Ident<'a>>,
 
     /// Inline template string.
-    pub template: Option<Atom<'a>>,
+    pub template: Option<Ident<'a>>,
 
     /// URL to an external template file.
-    pub template_url: Option<Atom<'a>>,
+    pub template_url: Option<Ident<'a>>,
 
     /// Inline styles array.
-    pub styles: Vec<'a, Atom<'a>>,
+    pub styles: Vec<'a, Ident<'a>>,
 
     /// URLs to external stylesheet files.
-    pub style_urls: Vec<'a, Atom<'a>>,
+    pub style_urls: Vec<'a, Ident<'a>>,
 
     /// Whether this is a standalone component.
     pub standalone: bool,
@@ -150,13 +151,13 @@ pub struct ComponentMetadata<'a> {
     pub host: Option<HostMetadata<'a>>,
 
     /// Component imports (for standalone components).
-    pub imports: Vec<'a, Atom<'a>>,
+    pub imports: Vec<'a, Ident<'a>>,
 
     /// Exported names for template references.
     ///
     /// In Angular, `exportAs` can be a comma-separated string (e.g., "foo, bar"),
     /// which is split into an array and emitted as `exportAs: ["foo", "bar"]`.
-    pub export_as: Vec<'a, Atom<'a>>,
+    pub export_as: Vec<'a, Ident<'a>>,
 
     /// Whether to preserve whitespace in templates.
     pub preserve_whitespaces: bool,
@@ -185,7 +186,7 @@ pub struct ComponentMetadata<'a> {
     /// Extracted from class property decorators like:
     /// - `@Output() valueChange = new EventEmitter<string>();`
     /// - `@Output('changed') valueChange = new EventEmitter<string>();`
-    pub outputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     // =========================================================================
     // Feature-related fields
@@ -226,7 +227,7 @@ pub struct ComponentMetadata<'a> {
     /// External stylesheet URLs that were resolved and need to be loaded.
     ///
     /// Corresponds to resolved `styleUrls`. Used to generate `ɵɵExternalStylesFeature`.
-    pub external_styles: Vec<'a, Atom<'a>>,
+    pub external_styles: Vec<'a, Ident<'a>>,
 
     // =========================================================================
     // Template Dependency Fields
@@ -269,7 +270,7 @@ pub struct ComponentMetadata<'a> {
     /// Corresponds to the `schemas` property in `@Component`.
     /// Common values are `CUSTOM_ELEMENTS_SCHEMA` and `NO_ERRORS_SCHEMA`.
     /// These are stored as identifier names.
-    pub schemas: Vec<'a, Atom<'a>>,
+    pub schemas: Vec<'a, Ident<'a>>,
 
     /// Whether this component uses signal-based inputs.
     ///
@@ -287,20 +288,20 @@ pub struct ComponentMetadata<'a> {
 #[derive(Debug)]
 pub struct HostDirectiveMetadata<'a> {
     /// The directive class name.
-    pub directive: Atom<'a>,
+    pub directive: Ident<'a>,
 
     /// The source module of the directive (e.g., "@angular/common", "./my-directive").
     /// Used to generate proper namespace aliases for imported host directives.
     /// `None` for local directives defined in the same file.
-    pub source_module: Option<Atom<'a>>,
+    pub source_module: Option<Ident<'a>>,
 
     /// Input mappings: (publicName, internalName) pairs.
     /// Empty if no inputs are exposed.
-    pub inputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub inputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Output mappings: (publicName, internalName) pairs.
     /// Empty if no outputs are exposed.
-    pub outputs: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Whether this is a forward reference (requires wrapping in a function).
     pub is_forward_reference: bool,
@@ -308,7 +309,7 @@ pub struct HostDirectiveMetadata<'a> {
 
 impl<'a> HostDirectiveMetadata<'a> {
     /// Create a new HostDirectiveMetadata.
-    pub fn new(allocator: &'a oxc_allocator::Allocator, directive: Atom<'a>) -> Self {
+    pub fn new(allocator: &'a oxc_allocator::Allocator, directive: Ident<'a>) -> Self {
         Self {
             directive,
             source_module: None,
@@ -324,7 +325,7 @@ impl<'a> HostDirectiveMetadata<'a> {
     }
 
     /// Set the source module for this host directive.
-    pub fn with_source_module(mut self, source_module: Atom<'a>) -> Self {
+    pub fn with_source_module(mut self, source_module: Ident<'a>) -> Self {
         self.source_module = Some(source_module);
         self
     }
@@ -394,30 +395,30 @@ pub struct TemplateDependency<'a> {
     pub kind: TemplateDependencyKind,
 
     /// The type expression (class name or import reference).
-    pub type_name: Atom<'a>,
+    pub type_name: Ident<'a>,
 
     /// The source module of the dependency (e.g., "@angular/common", "./my-directive").
     /// Used to generate proper namespace aliases for imported dependencies.
     /// `None` for local dependencies defined in the same file.
-    pub source_module: Option<Atom<'a>>,
+    pub source_module: Option<Ident<'a>>,
 
     /// For directives: the CSS selector.
-    pub selector: Option<Atom<'a>>,
+    pub selector: Option<Ident<'a>>,
 
     /// For directives: input property names.
-    pub inputs: Vec<'a, Atom<'a>>,
+    pub inputs: Vec<'a, Ident<'a>>,
 
     /// For directives: output property names.
-    pub outputs: Vec<'a, Atom<'a>>,
+    pub outputs: Vec<'a, Ident<'a>>,
 
     /// For directives: export names (exportAs).
-    pub export_as: Vec<'a, Atom<'a>>,
+    pub export_as: Vec<'a, Ident<'a>>,
 
     /// For directives: whether this is a component.
     pub is_component: bool,
 
     /// For pipes: the pipe name used in templates.
-    pub pipe_name: Option<Atom<'a>>,
+    pub pipe_name: Option<Ident<'a>>,
 
     /// Whether this is a forward reference.
     pub is_forward_reference: bool,
@@ -427,8 +428,8 @@ impl<'a> TemplateDependency<'a> {
     /// Create a new directive dependency.
     pub fn directive(
         allocator: &'a oxc_allocator::Allocator,
-        type_name: Atom<'a>,
-        selector: Atom<'a>,
+        type_name: Ident<'a>,
+        selector: Ident<'a>,
         is_component: bool,
     ) -> Self {
         Self {
@@ -448,8 +449,8 @@ impl<'a> TemplateDependency<'a> {
     /// Create a new pipe dependency.
     pub fn pipe(
         allocator: &'a oxc_allocator::Allocator,
-        type_name: Atom<'a>,
-        pipe_name: Atom<'a>,
+        type_name: Ident<'a>,
+        pipe_name: Ident<'a>,
     ) -> Self {
         Self {
             kind: TemplateDependencyKind::Pipe,
@@ -472,7 +473,7 @@ impl<'a> TemplateDependency<'a> {
     }
 
     /// Set the source module for this dependency.
-    pub fn with_source_module(mut self, source_module: Atom<'a>) -> Self {
+    pub fn with_source_module(mut self, source_module: Ident<'a>) -> Self {
         self.source_module = Some(source_module);
         self
     }
@@ -484,21 +485,21 @@ impl<'a> TemplateDependency<'a> {
 #[derive(Debug)]
 pub struct HostMetadata<'a> {
     /// Host property bindings: `{ '[class.active]': 'isActive' }`
-    pub properties: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub properties: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Host attribute bindings: `{ 'role': 'button' }`
-    pub attributes: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub attributes: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Host event listeners: `{ '(click)': 'onClick()' }`
-    pub listeners: Vec<'a, (Atom<'a>, Atom<'a>)>,
+    pub listeners: Vec<'a, (Ident<'a>, Ident<'a>)>,
 
     /// Special attribute for static class binding: `{ 'class': 'foo bar' }`
     /// Captured separately to generate class instructions during compilation.
-    pub class_attr: Option<Atom<'a>>,
+    pub class_attr: Option<Ident<'a>>,
 
     /// Special attribute for static style binding: `{ 'style': 'color: red' }`
     /// Captured separately to generate style instructions during compilation.
-    pub style_attr: Option<Atom<'a>>,
+    pub style_attr: Option<Ident<'a>>,
 }
 
 impl<'a> HostMetadata<'a> {
@@ -524,7 +525,7 @@ impl<'a> ComponentMetadata<'a> {
     /// - `true` when the Angular version is unknown (assume latest)
     pub fn new(
         allocator: &'a oxc_allocator::Allocator,
-        class_name: Atom<'a>,
+        class_name: Ident<'a>,
         class_span: Span,
         implicit_standalone: bool,
     ) -> Self {

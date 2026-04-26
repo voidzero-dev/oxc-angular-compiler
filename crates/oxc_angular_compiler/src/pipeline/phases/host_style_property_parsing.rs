@@ -13,6 +13,8 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/host_style_property_parsing.ts`.
 
+use oxc_str::Ident;
+
 use crate::ir::enums::BindingKind;
 use crate::ir::ops::UpdateOp;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -64,21 +66,21 @@ pub fn parse_host_style_properties(job: &mut ComponentCompilationJob<'_>) {
 
                     // Parse property and unit suffix
                     let (property, unit) = parse_property(&hyphenated);
-                    binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
-                    binding.unit = unit.map(|u| oxc_span::Atom::from(allocator.alloc_str(&u)));
+                    binding.name = Ident::from(allocator.alloc_str(&property));
+                    binding.unit = unit.map(|u| Ident::from(allocator.alloc_str(&u)));
                 } else if name.starts_with(STYLE_BANG) {
                     binding.kind = BindingKind::StyleProperty;
-                    binding.name = oxc_span::Atom::from("style");
+                    binding.name = Ident::from("style");
                 } else if name.starts_with(CLASS_DOT) {
                     binding.kind = BindingKind::ClassName;
                     let class_name = &name[CLASS_DOT.len()..];
                     let (property, _) = parse_property(class_name);
-                    binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
+                    binding.name = Ident::from(allocator.alloc_str(&property));
                 } else if name.starts_with(CLASS_BANG) {
                     binding.kind = BindingKind::ClassName;
                     let class_name = &name[CLASS_BANG.len()..];
                     let (property, _) = parse_property(class_name);
-                    binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
+                    binding.name = Ident::from(allocator.alloc_str(&property));
                 }
             }
         }
@@ -163,21 +165,21 @@ pub fn parse_host_style_properties_for_host(job: &mut HostBindingCompilationJob<
 
                 // Parse property and unit suffix
                 let (property, unit) = parse_property(&hyphenated);
-                binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
-                binding.unit = unit.map(|u| oxc_span::Atom::from(allocator.alloc_str(&u)));
+                binding.name = Ident::from(allocator.alloc_str(&property));
+                binding.unit = unit.map(|u| Ident::from(allocator.alloc_str(&u)));
             } else if name.starts_with(STYLE_BANG) {
                 binding.kind = BindingKind::StyleProperty;
-                binding.name = oxc_span::Atom::from("style");
+                binding.name = Ident::from("style");
             } else if name.starts_with(CLASS_DOT) {
                 binding.kind = BindingKind::ClassName;
                 let class_name = &name[CLASS_DOT.len()..];
                 let (property, _) = parse_property(class_name);
-                binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
+                binding.name = Ident::from(allocator.alloc_str(&property));
             } else if name.starts_with(CLASS_BANG) {
                 binding.kind = BindingKind::ClassName;
                 let class_name = &name[CLASS_BANG.len()..];
                 let (property, _) = parse_property(class_name);
-                binding.name = oxc_span::Atom::from(allocator.alloc_str(&property));
+                binding.name = Ident::from(allocator.alloc_str(&property));
             }
         }
     }

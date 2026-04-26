@@ -8,7 +8,8 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
     MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
-use oxc_span::{Atom, Span};
+use oxc_span::Span;
+use oxc_str::Ident;
 
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
@@ -21,16 +22,16 @@ use crate::output::oxc_converter::convert_oxc_expression;
 #[derive(Debug)]
 pub struct NgModuleMetadata<'a> {
     /// The name of the NgModule class.
-    pub class_name: Atom<'a>,
+    pub class_name: Ident<'a>,
 
     /// Span of the class declaration.
     pub class_span: Span,
 
     /// Declared components, directives, and pipes as class names.
-    pub declarations: Vec<'a, Atom<'a>>,
+    pub declarations: Vec<'a, Ident<'a>>,
 
     /// Imported modules as class names (for ɵmod scope resolution).
-    pub imports: Vec<'a, Atom<'a>>,
+    pub imports: Vec<'a, Ident<'a>>,
 
     /// Raw imports array expression (for ɵinj provider resolution).
     /// This preserves call expressions like `StoreModule.forRoot(...)` and spread elements
@@ -38,19 +39,19 @@ pub struct NgModuleMetadata<'a> {
     pub raw_imports_expr: Option<OutputExpression<'a>>,
 
     /// Exported declarations and modules as class names.
-    pub exports: Vec<'a, Atom<'a>>,
+    pub exports: Vec<'a, Ident<'a>>,
 
     /// Providers expression as OutputExpression.
     pub providers: Option<OutputExpression<'a>>,
 
     /// Bootstrap components as class names.
-    pub bootstrap: Vec<'a, Atom<'a>>,
+    pub bootstrap: Vec<'a, Ident<'a>>,
 
     /// Schema identifiers (e.g., "CUSTOM_ELEMENTS_SCHEMA").
-    pub schemas: Vec<'a, Atom<'a>>,
+    pub schemas: Vec<'a, Ident<'a>>,
 
     /// Module ID for registration.
-    pub id: Option<Atom<'a>>,
+    pub id: Option<Ident<'a>>,
 
     /// Whether any declarations/imports/exports contain forward references.
     pub contains_forward_decls: bool,
@@ -63,7 +64,7 @@ pub struct NgModuleMetadata<'a> {
 
 impl<'a> NgModuleMetadata<'a> {
     /// Create a new NgModuleMetadata with defaults.
-    pub fn new(allocator: &'a Allocator, class_name: Atom<'a>, class_span: Span) -> Self {
+    pub fn new(allocator: &'a Allocator, class_name: Ident<'a>, class_span: Span) -> Self {
         Self {
             class_name,
             class_span,
@@ -180,9 +181,10 @@ impl<'a> NgModuleMetadata<'a> {
 pub fn extract_ng_module_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<NgModuleMetadata<'a>> {
     // Get the class name
-    let class_name: Atom<'a> = class.id.as_ref()?.name.clone().into();
+    let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @NgModule decorator
@@ -235,7 +237,8 @@ pub fn extract_ng_module_metadata<'a>(
                     // Also store the raw imports expression for ɵinj generation.
                     // This preserves call expressions like StoreModule.forRoot(...)
                     // and spread elements that are dropped by extract_reference_array.
-                    metadata.raw_imports_expr = convert_oxc_expression(allocator, &prop.value);
+                    metadata.raw_imports_expr =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "exports" => {
                     let (identifiers, has_forward_refs) =
@@ -246,7 +249,8 @@ pub fn extract_ng_module_metadata<'a>(
                     }
                 }
                 "providers" => {
-                    metadata.providers = convert_oxc_expression(allocator, &prop.value);
+                    metadata.providers =
+                        convert_oxc_expression(allocator, &prop.value, source_text);
                 }
                 "bootstrap" => {
                     let (identifiers, has_forward_refs) =
@@ -305,20 +309,20 @@ fn is_ng_module_call(callee: &Expression<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value.clone()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
     match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone()),
+        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
-            tpl.quasis.first().and_then(|q| q.value.cooked.clone())
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
         _ => None,
     }
@@ -329,7 +333,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Atom<'a>> {
 fn extract_reference_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> (Vec<'a, Atom<'a>>, bool) {
+) -> (Vec<'a, Ident<'a>>, bool) {
     let mut result = Vec::new_in(allocator);
     let mut has_forward_refs = false;
 
@@ -377,7 +381,7 @@ fn extract_reference_array<'a>(
 fn extract_identifier_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
-) -> Vec<'a, Atom<'a>> {
+) -> Vec<'a, Ident<'a>> {
     let mut result = Vec::new_in(allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
@@ -444,7 +448,7 @@ fn extract_param_dependency<'a>(
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
-    let mut attribute_name: Option<Atom<'a>> = None;
+    let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = get_decorator_name(&decorator.expression) {
@@ -457,7 +461,7 @@ fn extract_param_dependency<'a>(
                     // @Attribute('attrName') - extract the attribute name
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(Argument::StringLiteral(s)) = call.arguments.first() {
-                            attribute_name = Some(s.value.clone());
+                            attribute_name = Some(s.value.clone().into());
                         }
                     }
                 }
@@ -491,7 +495,7 @@ fn extract_param_dependency<'a>(
 }
 
 /// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Atom<'a>> {
+fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
     match expr {
         // @Optional
         Expression::Identifier(id) => Some(id.name.clone().into()),
@@ -519,7 +523,7 @@ fn extract_param_token<'a>(
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
         // Get the type name
-        let type_name: Atom<'a> = match &type_ref.type_name {
+        let type_name: Ident<'a> = match &type_ref.type_name {
             oxc_ast::ast::TSTypeName::IdentifierReference(id) => id.name.clone().into(),
             oxc_ast::ast::TSTypeName::QualifiedName(_)
             | oxc_ast::ast::TSTypeName::ThisExpression(_) => {
@@ -571,7 +575,7 @@ mod tests {
             };
 
             if let Some(class) = class {
-                if let Some(metadata) = extract_ng_module_metadata(&allocator, class) {
+                if let Some(metadata) = extract_ng_module_metadata(&allocator, class, Some(code)) {
                     found_metadata = Some(metadata);
                     break;
                 }

@@ -8,7 +8,7 @@ use oxc_ast::ast::{
     Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind, PropertyKey,
     TSType, TSTypeName,
 };
-use oxc_span::Atom;
+use oxc_str::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::output::ast::{
@@ -23,6 +23,7 @@ use crate::output::oxc_converter::convert_oxc_expression;
 pub fn build_decorator_metadata_array<'a>(
     allocator: &'a Allocator,
     decorators: &[&Decorator<'a>],
+    source_text: Option<&'a str>,
 ) -> OutputExpression<'a> {
     let mut decorator_entries = AllocVec::new_in(allocator);
 
@@ -38,7 +39,7 @@ pub fn build_decorator_metadata_array<'a>(
                 ))),
                 Expression::StaticMemberExpression(member) => {
                     // Handle namespaced decorators like ng.Component
-                    convert_oxc_expression(allocator, &member.object).map(|receiver| {
+                    convert_oxc_expression(allocator, &member.object, source_text).map(|receiver| {
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
                                 receiver: Box::new_in(receiver, allocator),
@@ -65,7 +66,7 @@ pub fn build_decorator_metadata_array<'a>(
 
         // Add "type" entry
         map_entries.push(LiteralMapEntry {
-            key: Atom::from("type"),
+            key: Ident::from("type"),
             value: type_expr,
             quoted: false,
         });
@@ -77,14 +78,14 @@ pub fn build_decorator_metadata_array<'a>(
             let mut args = AllocVec::new_in(allocator);
             for arg in &call.arguments {
                 let expr = arg.to_expression();
-                if let Some(converted) = convert_oxc_expression(allocator, expr) {
+                if let Some(converted) = convert_oxc_expression(allocator, expr, source_text) {
                     args.push(converted);
                 }
             }
 
             if !args.is_empty() {
                 map_entries.push(LiteralMapEntry {
-                    key: Atom::from("args"),
+                    key: Ident::from("args"),
                     value: OutputExpression::LiteralArray(Box::new_in(
                         LiteralArrayExpr { entries: args, source_span: None },
                         allocator,
@@ -122,6 +123,7 @@ pub fn build_ctor_params_metadata<'a>(
     constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
@@ -155,7 +157,7 @@ pub fn build_ctor_params_metadata<'a>(
         });
 
         map_entries.push(LiteralMapEntry {
-            key: Atom::from("type"),
+            key: Ident::from("type"),
             value: type_expr,
             quoted: false,
         });
@@ -163,9 +165,10 @@ pub fn build_ctor_params_metadata<'a>(
         // Extract decorators from the parameter
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
-            let decorators_array = build_decorator_metadata_array(allocator, &param_decorators);
+            let decorators_array =
+                build_decorator_metadata_array(allocator, &param_decorators, source_text);
             map_entries.push(LiteralMapEntry {
-                key: Atom::from("decorators"),
+                key: Ident::from("decorators"),
                 value: decorators_array,
                 quoted: false,
             });
@@ -205,6 +208,7 @@ pub fn build_ctor_params_metadata<'a>(
 pub fn build_prop_decorators_metadata<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
+    source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     const ANGULAR_PROP_DECORATORS: &[&str] = &[
         "Input",
@@ -251,7 +255,8 @@ pub fn build_prop_decorators_metadata<'a>(
         }
 
         // Build decorators array for this property
-        let decorators_array = build_decorator_metadata_array(allocator, &angular_decorators);
+        let decorators_array =
+            build_decorator_metadata_array(allocator, &angular_decorators, source_text);
 
         prop_entries.push(LiteralMapEntry {
             key: prop_name,
@@ -366,7 +371,7 @@ fn build_param_type_expression<'a>(
 ///
 /// Returns the simple type name from the annotation, if present.
 /// Used to get the type name for namespace-prefixed references in metadata.
-fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Atom<'a>> {
+fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Ident<'a>> {
     let type_annotation = param.type_annotation.as_ref()?;
     match &type_annotation.type_annotation {
         TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
@@ -444,10 +449,10 @@ fn get_decorator_name<'a>(decorator: &Decorator<'a>) -> Option<&'a str> {
 }
 
 /// Get property key name as an Atom.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Atom<'a>> {
+fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
-        PropertyKey::StringLiteral(lit) => Some(lit.value),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
 }

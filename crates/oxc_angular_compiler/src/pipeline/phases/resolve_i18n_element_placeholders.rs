@@ -4,7 +4,7 @@
 //!
 //! Ported from Angular's `template/pipeline/src/phases/resolve_i18n_element_placeholders.ts`.
 
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use crate::ir::enums::{I18nParamValueFlags, TemplateKind};
@@ -564,7 +564,7 @@ enum OpInfo<'a> {
     ElementStart {
         slot: Option<u32>,
         /// The start placeholder name (e.g., "START_TAG_DIV").
-        start_name: Atom<'a>,
+        start_name: Ident<'a>,
         context_xref: XrefId,
         sub_template_index: Option<u32>,
         pending_structural: Option<PendingStructuralDirective>,
@@ -574,7 +574,7 @@ enum OpInfo<'a> {
     ElementEnd {
         slot: Option<u32>,
         /// The close placeholder name (e.g., "CLOSE_TAG_DIV").
-        close_name: Atom<'a>,
+        close_name: Ident<'a>,
         context_xref: XrefId,
         sub_template_index: Option<u32>,
         pending_structural: Option<PendingStructuralDirective>,
@@ -583,7 +583,7 @@ enum OpInfo<'a> {
         view_xref: XrefId,
         slot: u32,
         /// The start placeholder name (e.g., "START_BLOCK_IF").
-        start_name: Atom<'a>,
+        start_name: Ident<'a>,
         context_xref: XrefId,
         sub_template_index: Option<u32>,
         pending_structural: Option<PendingStructuralDirective>,
@@ -594,7 +594,7 @@ enum OpInfo<'a> {
         view_xref: XrefId,
         slot: u32,
         /// The close placeholder name (e.g., "CLOSE_BLOCK_IF").
-        close_name: Atom<'a>,
+        close_name: Ident<'a>,
         context_xref: XrefId,
         pending_structural: Option<PendingStructuralDirective>,
     },
@@ -608,7 +608,7 @@ fn add_param_to_context<'a>(
     value: I18nParamValue,
     allocator: &'a oxc_allocator::Allocator,
 ) {
-    let placeholder_atom = Atom::from(placeholder);
+    let placeholder_atom = Ident::from(placeholder);
 
     // Try root view first
     for op in job.root.create.iter_mut() {
@@ -638,8 +638,8 @@ fn add_param_to_context<'a>(
 
 /// Add a value to a params map, creating the list if needed.
 fn add_to_params_map<'a>(
-    params: &mut oxc_allocator::HashMap<'a, Atom<'a>, oxc_allocator::Vec<'a, I18nParamValue>>,
-    placeholder: Atom<'a>,
+    params: &mut oxc_allocator::HashMap<'a, Ident<'a>, oxc_allocator::Vec<'a, I18nParamValue>>,
+    placeholder: Ident<'a>,
     value: I18nParamValue,
     allocator: &'a oxc_allocator::Allocator,
 ) {

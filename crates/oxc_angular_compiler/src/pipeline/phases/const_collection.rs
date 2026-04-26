@@ -10,7 +10,7 @@
 
 use oxc_allocator::Vec as OxcVec;
 use oxc_diagnostics::OxcDiagnostic;
-use oxc_span::Atom;
+use oxc_str::Ident;
 use rustc_hash::FxHashMap;
 
 use oxc_allocator::Box;
@@ -31,10 +31,10 @@ use crate::pipeline::selector::{parse_selector_to_r3_selector, r3_selector_to_ou
 #[derive(Debug, Clone)]
 enum AttributeValue<'a> {
     /// A string literal value.
-    String(Atom<'a>),
+    String(Ident<'a>),
     /// An i18n variable reference (stores just the variable name for efficient comparison).
     /// This will be serialized as a ReadVar expression in the const array.
-    I18nVar(Atom<'a>),
+    I18nVar(Ident<'a>),
 }
 
 /// Marker values for attribute arrays (matches Angular's AttributeMarker enum).
@@ -71,19 +71,19 @@ struct ElementAttributes<'a> {
     known: std::collections::HashMap<BindingKind, std::collections::HashSet<String>>,
     /// Static attributes (namespace, name, value).
     /// Value can be a string literal or an expression (for i18n variable references).
-    attributes: std::vec::Vec<(Option<Atom<'a>>, Atom<'a>, Option<AttributeValue<'a>>)>,
+    attributes: std::vec::Vec<(Option<Ident<'a>>, Ident<'a>, Option<AttributeValue<'a>>)>,
     /// Class names.
-    classes: std::vec::Vec<Atom<'a>>,
+    classes: std::vec::Vec<Ident<'a>>,
     /// Style properties.
-    styles: std::vec::Vec<(Atom<'a>, Option<Atom<'a>>)>,
+    styles: std::vec::Vec<(Ident<'a>, Option<Ident<'a>>)>,
     /// Property bindings (just names for the const array).
-    bindings: std::vec::Vec<Atom<'a>>,
+    bindings: std::vec::Vec<Ident<'a>>,
     /// Template bindings.
-    template: std::vec::Vec<Atom<'a>>,
+    template: std::vec::Vec<Ident<'a>>,
     /// i18n attributes.
-    i18n: std::vec::Vec<Atom<'a>>,
+    i18n: std::vec::Vec<Ident<'a>>,
     /// The ngProjectAs selector value (if present).
-    project_as: Option<Atom<'a>>,
+    project_as: Option<Ident<'a>>,
 }
 
 impl<'a> ElementAttributes<'a> {
@@ -296,7 +296,7 @@ impl<'a> ElementAttributes<'a> {
         }
 
         // Fall back to truthy expression check (for boolean attributes)
-        if attr.truthy_expression { Some(AttributeValue::String(Atom::from(""))) } else { None }
+        if attr.truthy_expression { Some(AttributeValue::String(Ident::from(""))) } else { None }
     }
 
     fn is_empty(&self) -> bool {

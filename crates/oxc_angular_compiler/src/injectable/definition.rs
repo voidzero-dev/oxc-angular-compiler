@@ -205,18 +205,18 @@ mod tests {
     use crate::output::ast::ReadVarExpr;
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Box;
-    use oxc_span::Atom;
+    use oxc_str::Ident;
 
     #[test]
     fn test_generate_simple_injectable_definition() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("MyService"), source_span: None },
+            ReadVarExpr { name: Ident::from("MyService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("MyService"))
+            .name(Ident::from("MyService"))
             .r#type(type_expr)
             .provided_in_root()
             .build()
@@ -243,12 +243,12 @@ mod tests {
     fn test_generate_injectable_definition_no_provided_in() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("LocalService"), source_span: None },
+            ReadVarExpr { name: Ident::from("LocalService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("LocalService"))
+            .name(Ident::from("LocalService"))
             .r#type(type_expr)
             .build()
             .unwrap();
@@ -268,12 +268,12 @@ mod tests {
     fn test_generate_injectable_definition_with_platform() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("PlatformService"), source_span: None },
+            ReadVarExpr { name: Ident::from("PlatformService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("PlatformService"))
+            .name(Ident::from("PlatformService"))
             .r#type(type_expr)
             .provided_in_platform()
             .build()
@@ -291,12 +291,12 @@ mod tests {
     fn test_generate_injectable_definition_with_any() {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("AnyService"), source_span: None },
+            ReadVarExpr { name: Ident::from("AnyService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("AnyService"))
+            .name(Ident::from("AnyService"))
             .r#type(type_expr)
             .provided_in_any()
             .build()
@@ -317,12 +317,12 @@ mod tests {
         // This test verifies the definition is correctly structured for tree-shaking.
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr { name: Atom::from("TreeShakableService"), source_span: None },
+            ReadVarExpr { name: Ident::from("TreeShakableService"), source_span: None },
             &allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
-            .name(Atom::from("TreeShakableService"))
+            .name(Ident::from("TreeShakableService"))
             .r#type(type_expr)
             .provided_in_root()
             .build()
@@ -368,7 +368,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Verify deps are extracted
@@ -424,7 +424,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Verify no deps (no constructor)
@@ -469,7 +469,7 @@ mod tests {
         });
 
         let class = class.expect("Should find class declaration");
-        let metadata = extract_injectable_metadata(&allocator, class);
+        let metadata = extract_injectable_metadata(&allocator, class, Some(code));
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Generate definition
