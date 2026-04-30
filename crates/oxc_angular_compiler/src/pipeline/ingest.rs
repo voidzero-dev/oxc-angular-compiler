@@ -31,7 +31,7 @@ use crate::ast::r3::{
     SecurityContext,
 };
 use crate::ir::enums::{
-    AnimationKind, BindingKind, DeferOpModifierKind, DeferTriggerKind, Namespace, TemplateKind,
+    BindingKind, DeferOpModifierKind, DeferTriggerKind, Namespace, TemplateKind,
 };
 use crate::ir::expression::{
     BinaryExpr, ConditionalCaseExpr, EmptyExpr, IrBinaryOperator, IrExpression, LexicalReadExpr,
@@ -1775,18 +1775,19 @@ fn ingest_listener_owned<'a>(
             }
         }
 
-        // Determine if this is an animation listener and extract animation phase
-        let (is_animation_listener, animation_phase) = match output.event_type {
+        // Match Angular's createListenerOp:
+        //   isLegacyAnimationListener = legacyAnimationPhase !== null
+        // The raw phase string is preserved verbatim so that bogus phases (e.g.
+        // `@anim.foo`) still emit `ɵɵsyntheticHostListener("@anim.foo", fn)`,
+        // matching Angular's reference output. ParsedEventType::Animation has no
+        // phase and is currently flagged as an animation listener for parity with
+        // the prior behavior; it should be dispatched to AnimationListenerOp by a
+        // separate template-path fix.
+        let (is_animation_listener, legacy_animation_phase) = match output.event_type {
             ParsedEventType::Animation => (true, None),
             ParsedEventType::LegacyAnimation => {
-                // For legacy animations, parse the phase from the output
-                // Phase can be "start" or "done"
-                let phase = output.phase.as_ref().and_then(|p| match p.as_str() {
-                    "start" => Some(AnimationKind::Enter),
-                    "done" => Some(AnimationKind::Leave),
-                    _ => None,
-                });
-                (true, phase)
+                let phase = output.phase.clone();
+                (phase.is_some(), phase)
             }
             _ => (false, None),
         };
@@ -1803,7 +1804,7 @@ fn ingest_listener_owned<'a>(
             handler_fn_name: None,
             consume_fn_name: None,
             is_animation_listener,
-            animation_phase,
+            legacy_animation_phase,
             event_target: output.target,
             consumes_dollar_event: false, // Set during resolve_dollar_event phase
         })
@@ -4147,7 +4148,6 @@ fn ingest_host_attribute<'a>(
 /// statements to ExpressionStatement ops and the last statement to the return.
 fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3BoundEvent<'a>) {
     use crate::ast::expression::ParsedEventType;
-    use crate::ir::enums::AnimationKind;
 
     let allocator = job.allocator;
 
@@ -4200,22 +4200,24 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
         }
     }
 
-    // Determine event target and animation phase based on event type
-    let (animation_phase, target) = match event.event_type {
-        ParsedEventType::LegacyAnimation => {
-            // Convert phase string to AnimationKind
-            let phase = event.phase.as_ref().and_then(|p| match p.as_str() {
-                "start" => Some(AnimationKind::Enter),
-                "done" => Some(AnimationKind::Leave),
-                _ => None,
-            });
-            (phase, None)
-        }
+    // Match Angular's createListenerOp (compiler/src/template/pipeline/ir/src/ops/create.ts):
+    //   isLegacyAnimationListener = legacyAnimationPhase !== null
+    //
+    // The raw phase string is preserved verbatim. Angular's binding parser already
+    // lowercased + trimmed it via `splitAtPeriod` + `.toLowerCase()`, so `@anim.START`
+    // arrives here as `start`. Phases other than `start`/`done` (e.g. `@anim.foo`) are
+    // not silently dropped — they round-trip into the emitted instruction so the
+    // output matches Angular byte-for-byte.
+    //
+    // For host events the binding parser only produces Regular or LegacyAnimation
+    // (Animation is template-only), and a LegacyAnimation event with no phase (e.g.
+    // `@HostListener('@anim')`) leaves is_animation_listener=false so reify emits a
+    // plain ɵɵlistener — matching Angular's `isLegacyAnimationListener=false` path.
+    let (legacy_animation_phase, target) = match event.event_type {
+        ParsedEventType::LegacyAnimation => (event.phase.clone(), None),
         _ => (None, event.target.clone()),
     };
-
-    // Check if this is an animation event
-    let is_animation = matches!(event.event_type, ParsedEventType::Animation);
+    let is_animation = legacy_animation_phase.is_some();
 
     let op = CreateOp::Listener(ListenerOp {
         base: CreateOpBase { source_span: Some(event.source_span), ..Default::default() },
@@ -4229,7 +4231,7 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
         handler_fn_name: None,
         consume_fn_name: None,
         is_animation_listener: is_animation,
-        animation_phase,
+        legacy_animation_phase,
         event_target: target,
         consumes_dollar_event: false, // Set during resolve_dollar_event phase
     });

@@ -964,12 +964,26 @@ pub struct ListenerOp<'a> {
     pub consume_fn_name: Option<Ident<'a>>,
     /// Whether this is an animation listener.
     pub is_animation_listener: bool,
-    /// Animation phase.
-    pub animation_phase: Option<AnimationKind>,
+    /// Raw legacy animation phase string (e.g. `"start"`, `"done"`, or any other token
+    /// the user wrote — Angular only validates `start`/`done` as a diagnostic but still
+    /// emits `ɵɵsyntheticHostListener` with the user-supplied phase verbatim).
+    /// Lowercased and trimmed by the parser to match Angular's `splitAtPeriod` +
+    /// `.toLowerCase()` semantics.
+    pub legacy_animation_phase: Option<Ident<'a>>,
     /// Event target (window, document, body).
     pub event_target: Option<Ident<'a>>,
     /// Whether this listener uses $event.
     pub consumes_dollar_event: bool,
+}
+
+impl<'a> ListenerOp<'a> {
+    /// Returns true when this is a legacy animation host listener (`@trigger.phase`).
+    ///
+    /// Mirrors Angular's `isLegacyAnimationListener = legacyAnimationPhase !== null`
+    /// (compiler/src/template/pipeline/ir/src/ops/create.ts).
+    pub fn is_legacy_animation(&self) -> bool {
+        self.legacy_animation_phase.is_some()
+    }
 }
 
 /// Create a pipe instance.
@@ -1988,4 +2002,64 @@ pub struct LocalRef<'a> {
     pub name: Ident<'a>,
     /// Target directive/component.
     pub target: Ident<'a>,
+}
+
+#[cfg(test)]
+mod tests {
+    use oxc_allocator::{Allocator, Vec as AllocVec};
+    use oxc_str::Ident;
+
+    use super::*;
+
+    fn make_listener_op<'a>(
+        allocator: &'a Allocator,
+        legacy_animation_phase: Option<Ident<'a>>,
+    ) -> ListenerOp<'a> {
+        ListenerOp {
+            base: CreateOpBase::default(),
+            target: XrefId(0),
+            target_slot: SlotId(0),
+            tag: None,
+            host_listener: true,
+            name: Ident::from(""),
+            handler_expression: None,
+            handler_ops: AllocVec::new_in(allocator),
+            handler_fn_name: None,
+            consume_fn_name: None,
+            is_animation_listener: legacy_animation_phase.is_some(),
+            legacy_animation_phase,
+            event_target: None,
+            consumes_dollar_event: false,
+        }
+    }
+
+    #[test]
+    fn is_legacy_animation_true_when_phase_is_done() {
+        let allocator = Allocator::default();
+        let op = make_listener_op(&allocator, Some(Ident::from("done")));
+        assert!(op.is_legacy_animation());
+    }
+
+    #[test]
+    fn is_legacy_animation_true_when_phase_is_start() {
+        let allocator = Allocator::default();
+        let op = make_listener_op(&allocator, Some(Ident::from("start")));
+        assert!(op.is_legacy_animation());
+    }
+
+    #[test]
+    fn is_legacy_animation_true_when_phase_is_bogus() {
+        // Mirrors Angular: a non-start/done phase still produces a legacy animation
+        // listener (an error is reported separately, but isLegacyAnimationListener stays true).
+        let allocator = Allocator::default();
+        let op = make_listener_op(&allocator, Some(Ident::from("foo")));
+        assert!(op.is_legacy_animation());
+    }
+
+    #[test]
+    fn is_legacy_animation_false_when_no_phase() {
+        let allocator = Allocator::default();
+        let op = make_listener_op(&allocator, None);
+        assert!(!op.is_legacy_animation());
+    }
 }

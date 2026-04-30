@@ -100,19 +100,27 @@ fn update_op_priority_host(op: &UpdateOp<'_>) -> u32 {
 /// Ordering priority for create operations.
 /// Lower values are processed first.
 ///
-/// Matches Angular's CREATE_ORDERING:
-/// 1. Legacy animation listeners on host (Listener with hostListener && isLegacyAnimationListener)
-/// 2. Basic listeners (Listener, TwoWayListener, Animation, AnimationListener)
+/// Matches Angular's CREATE_ORDERING (ordering.ts).
+///
+/// LegacyAnimation host listeners are placed before regular listeners to match
+/// Angular's reference compiler output. The two instructions differ only in which
+/// renderer they use: `ɵɵsyntheticHostListener` calls `loadComponentRenderer` to
+/// use the component's own renderer (so @trigger events are handled by the
+/// animation engine), while `ɵɵlistener` uses the parent lView's renderer.
+/// The ordering itself is a spec requirement — it ensures our output is consistent
+/// with TemplateDefinitionBuilder and Angular's compliance tests.
 fn create_op_priority(op: &CreateOp<'_>) -> u32 {
     match op {
-        // Legacy animation listeners on host come first
+        // LegacyAnimation host listeners before regular listeners (spec compliance)
         CreateOp::Listener(l) if l.host_listener && l.is_animation_listener => 0,
         // Basic listeners (Listener, TwoWayListener, Animation, AnimationListener)
         CreateOp::Listener(_) => 1,
         CreateOp::TwoWayListener(_) => 1,
         CreateOp::Animation(_) => 1,
         CreateOp::AnimationListener(_) => 1,
-        _ => 100, // Other ops maintain original order
+        // Any new CreateOp variants default to 100 (maintain original order).
+        // If a new variant has an ordering constraint, add an explicit arm above.
+        _ => 100,
     }
 }
 
@@ -529,4 +537,61 @@ fn order_update_ops_host(list: &mut UpdateOpList<'_>) {
 pub fn order_ops_for_host(job: &mut HostBindingCompilationJob<'_>) {
     order_create_ops(&mut job.root.create);
     order_update_ops_host(&mut job.root.update);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::ops::{CreateOpBase, ListenerOp, SlotId, XrefId};
+    use oxc_allocator::{Allocator, Vec as AllocVec};
+    use oxc_str::Ident;
+
+    fn make_listener_op<'a>(
+        allocator: &'a Allocator,
+        host_listener: bool,
+        is_animation_listener: bool,
+        legacy_animation_phase: Option<Ident<'a>>,
+    ) -> CreateOp<'a> {
+        CreateOp::Listener(ListenerOp {
+            base: CreateOpBase::default(),
+            target: XrefId(0),
+            target_slot: SlotId(0),
+            tag: None,
+            host_listener,
+            name: Ident::from(""),
+            handler_expression: None,
+            handler_ops: AllocVec::new_in(allocator),
+            handler_fn_name: None,
+            consume_fn_name: None,
+            is_animation_listener,
+            legacy_animation_phase,
+            event_target: None,
+            consumes_dollar_event: false,
+        })
+    }
+
+    #[test]
+    fn legacy_animation_host_listener_has_priority_zero() {
+        let allocator = Allocator::default();
+        // LegacyAnimation host listener (host_listener=true, is_animation_listener=true)
+        // must get priority 0 so it is ordered before regular listeners.
+        let op = make_listener_op(&allocator, true, true, Some(Ident::from("done")));
+        assert_eq!(create_op_priority(&op), 0);
+    }
+
+    #[test]
+    fn regular_host_listener_has_priority_one() {
+        let allocator = Allocator::default();
+        let op = make_listener_op(&allocator, true, false, None);
+        assert_eq!(create_op_priority(&op), 1);
+    }
+
+    #[test]
+    fn template_animation_listener_has_priority_one() {
+        let allocator = Allocator::default();
+        // Template-level animation listeners (host_listener=false) are NOT synthetic
+        // host listeners and should NOT get priority 0.
+        let op = make_listener_op(&allocator, false, true, Some(Ident::from("start")));
+        assert_eq!(create_op_priority(&op), 1);
+    }
 }

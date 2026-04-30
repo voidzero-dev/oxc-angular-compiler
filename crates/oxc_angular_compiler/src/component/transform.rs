@@ -3413,16 +3413,19 @@ fn convert_host_metadata_to_input<'a>(
         // Check for target prefix (window:, document:, body:)
         let (final_event_name, target) = parse_event_target(event_name);
 
+        let (effective_name, event_type, phase) =
+            parse_legacy_animation_event(final_event_name, allocator);
+
         // Parse the handler expression
         let value_str = allocator.alloc_str(value.as_str());
         let parse_result = binding_parser.parse_event(value_str, empty_span);
 
         events.push(R3BoundEvent {
-            name: Ident::from_in(final_event_name, allocator),
-            event_type: ParsedEventType::Regular,
+            name: Ident::from_in(effective_name, allocator),
+            event_type,
             handler: parse_result.ast,
             target: target.map(|t| Ident::from_in(t, allocator)),
-            phase: None,
+            phase,
             source_span: empty_span,
             handler_span: empty_span,
             key_span: empty_span,
@@ -3502,6 +3505,49 @@ fn parse_host_property_name(name: &str) -> (BindingType, &str, Option<&str>) {
     } else {
         (BindingType::Property, name, None)
     }
+}
+
+/// Classify a host event name as a legacy animation event.
+///
+/// Mirrors Angular's `parseLegacyAnimationEventName` (binding_parser.ts) +
+/// `splitAtPeriod` (util.ts): `@` is stripped, the name is split on the first `.`,
+/// **both halves are trimmed**, and the **phase is lowercased** via `.toLowerCase()`.
+///
+/// - `@trigger.phase`  → (`"trigger"`, `LegacyAnimation`, `Some("phase")`)
+/// - `@anim.START`     → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
+/// - `@anim. start `   → (`"anim"`,    `LegacyAnimation`, `Some("start")`)
+/// - `@anim.foo`       → (`"anim"`,    `LegacyAnimation`, `Some("foo")`)  Angular reports
+///                       an error for invalid phases; we drop the diagnostic to match
+///                       this codebase's convention for host metadata (see
+///                       `binding_parser.parse_event` callers below — `parse_result.errors`
+///                       is also discarded). Code output still matches Angular byte-for-byte.
+/// - `@trigger`        → (`"trigger"`, `LegacyAnimation`, `None`)
+/// - `click`           → (`"click"`,   `Regular`,         `None`)
+///
+/// Keep in sync with the identical helper in `directive/compiler.rs`.
+fn parse_legacy_animation_event<'a>(
+    event_name: &'a str,
+    allocator: &'a Allocator,
+) -> (&'a str, ParsedEventType, Option<Ident<'a>>) {
+    use oxc_allocator::FromIn;
+    let Some(without_at) = event_name.strip_prefix('@') else {
+        return (event_name, ParsedEventType::Regular, None);
+    };
+    let (trigger_raw, phase_raw) = match without_at.find('.') {
+        Some(dot) => (&without_at[..dot], Some(&without_at[dot + 1..])),
+        None => (without_at, None),
+    };
+    let trigger_trimmed = trigger_raw.trim();
+    let trigger: &'a str = if trigger_trimmed.len() == trigger_raw.len() {
+        trigger_trimmed
+    } else {
+        allocator.alloc_str(trigger_trimmed)
+    };
+    let phase = phase_raw.map(|p| {
+        let normalized = p.trim().to_lowercase();
+        Ident::from_in(normalized.as_str(), allocator)
+    });
+    (trigger, ParsedEventType::LegacyAnimation, phase)
 }
 
 /// Parse event name to extract target (window:, document:, body:).

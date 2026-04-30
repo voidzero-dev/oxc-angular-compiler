@@ -226,6 +226,40 @@ pub fn create_two_way_listener_stmt<'a>(
     create_instruction_call_stmt(allocator, Identifiers::TWO_WAY_LISTENER, args)
 }
 
+/// Creates an ɵɵsyntheticHostListener() call for a LegacyAnimation host listener.
+///
+/// Unlike `create_animation_listener_stmt`, this takes the full pre-built event name
+/// (e.g. `"@slideIn.done"`) directly — the naming phase has already set it.
+/// Matches TypeScript: `syntheticHost = op.hostListener && op.isLegacyAnimationListener`.
+pub fn create_synthetic_host_listener_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    name: &Ident<'a>,
+    handler_stmts: OxcVec<'a, OutputStatement<'a>>,
+    handler_fn_name: Option<&Ident<'a>>,
+    consumes_dollar_event: bool,
+) -> OutputStatement<'a> {
+    let mut args = OxcVec::new_in(allocator);
+    args.push(OutputExpression::Literal(Box::new_in(
+        LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
+        allocator,
+    )));
+    let mut params = OxcVec::new_in(allocator);
+    if consumes_dollar_event {
+        params.push(FnParam { name: Ident::from("$event") });
+    }
+    let handler_fn = OutputExpression::Function(Box::new_in(
+        FunctionExpr {
+            name: handler_fn_name.cloned(),
+            params,
+            statements: handler_stmts,
+            source_span: None,
+        },
+        allocator,
+    ));
+    args.push(handler_fn);
+    create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_LISTENER, args)
+}
+
 /// Creates an ɵɵsyntheticHostListener() call statement for animation listeners.
 ///
 /// Animation listeners have event names like "@trigger.start" or "@trigger.done".
