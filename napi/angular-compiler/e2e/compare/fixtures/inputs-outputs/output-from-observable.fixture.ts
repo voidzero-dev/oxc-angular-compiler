@@ -13,7 +13,8 @@ export const fixtures: Fixture[] = [
     type: 'full-transform',
     name: 'output-from-observable-simple',
     category: 'inputs-outputs',
-    description: 'outputFromObservable with a simple EventEmitter should appear in outputs metadata',
+    description:
+      'outputFromObservable with a simple EventEmitter should appear in outputs metadata',
     className: 'OutputFromObservableSimpleComponent',
     sourceCode: `
 import { Component, EventEmitter } from '@angular/core';
@@ -34,7 +35,8 @@ export class OutputFromObservableSimpleComponent {
     type: 'full-transform',
     name: 'output-from-observable-piped',
     category: 'inputs-outputs',
-    description: 'outputFromObservable with a piped observable chain should appear in outputs metadata',
+    description:
+      'outputFromObservable with a piped observable chain should appear in outputs metadata',
     className: 'OutputFromObservablePipedComponent',
     sourceCode: `
 import { Component } from '@angular/core';
@@ -63,7 +65,8 @@ export class OutputFromObservablePipedComponent {
     type: 'full-transform',
     name: 'output-from-observable-alias',
     category: 'inputs-outputs',
-    description: 'outputFromObservable with alias in second argument should use alias as binding name',
+    description:
+      'outputFromObservable with alias in second argument should use alias as binding name',
     className: 'OutputFromObservableAliasComponent',
     sourceCode: `
 import { Component, EventEmitter } from '@angular/core';
