@@ -9441,3 +9441,154 @@ export class LoggedPipe implements PipeTransform {
         "Pipe factory should fall back to the type annotation (Logger). Factory:\n{factory_section}"
     );
 }
+
+// ============================================================================
+// outputFromObservable tests
+// ============================================================================
+
+#[test]
+fn test_output_from_observable_simple() {
+    // outputFromObservable with a simple new EventEmitter() should appear in outputs metadata
+    // and in setClassMetadata propDecorators.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly queryChanged = outputFromObservable(new EventEmitter<string>());
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"queryChanged:"queryChanged""#)
+            || result.code.contains(r#"queryChanged: "queryChanged""#),
+        "outputFromObservable property should appear in outputs metadata.\nCode:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_output_from_observable_property_reference() {
+    // outputFromObservable with a direct property reference (this.service.obs$) should appear in outputs.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly valueChanged = outputFromObservable(this.someService.value$);
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"valueChanged:"valueChanged""#)
+            || result.code.contains(r#"valueChanged: "valueChanged""#),
+        "outputFromObservable with property reference should appear in outputs metadata.\nCode:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_output_from_observable_piped() {
+    // outputFromObservable with a piped observable (the reported real-world issue).
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly queryChanged = outputFromObservable(
+        this.queryEditorService.latestParsedDataprimeQuery$.pipe(
+            skip(1),
+            debounceTime(300),
+        ),
+    );
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"queryChanged:"queryChanged""#)
+            || result.code.contains(r#"queryChanged: "queryChanged""#),
+        "outputFromObservable with piped observable should appear in outputs metadata.\nCode:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_output_from_observable_with_alias() {
+    // outputFromObservable with alias in the second argument.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly _clicked = outputFromObservable(new EventEmitter<void>(), { alias: 'clicked' });
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"_clicked:"clicked""#)
+            || result.code.contains(r#"_clicked: "clicked""#),
+        "outputFromObservable alias should be used as the binding property name.\nCode:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_output_from_observable_mixed_with_output() {
+    // A class that uses both output() and outputFromObservable() should have both in outputs.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter, output } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly clicked = output<void>();
+    readonly queryChanged = outputFromObservable(new EventEmitter<string>());
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains(r#"clicked:"clicked""#) || result.code.contains(r#"clicked: "clicked""#),
+        "output() property should appear in outputs metadata.\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains(r#"queryChanged:"queryChanged""#)
+            || result.code.contains(r#"queryChanged: "queryChanged""#),
+        "outputFromObservable property should also appear in outputs metadata.\nCode:\n{}",
+        result.code
+    );
+}

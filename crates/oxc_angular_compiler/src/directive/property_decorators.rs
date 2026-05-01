@@ -313,68 +313,63 @@ fn try_parse_signal_model<'a>(
 
 /// Try to detect and parse a signal-based output from a property initializer.
 ///
-/// Signal-based outputs are created by calling `output()` or `output<T>()`
-/// from `@angular/core`. Unlike `model()`, they only create an output (no input).
+/// Signal-based outputs are created by calling `output()` or `output<T>()` from
+/// `@angular/core`, or `outputFromObservable()` from `@angular/core/rxjs-interop`.
+/// Unlike `model()`, they only create an output (no input).
 ///
-/// # Examples
-/// ```typescript
-/// readonly openChange = output<boolean>(); // creates output 'openChange'
-/// readonly clicked = output();             // creates output 'clicked'
-/// readonly aliased = output<string>({ alias: 'myAlias' }); // creates output 'myAlias'
-/// ```
+/// For `output()` the options object is the first argument.
+/// For `outputFromObservable(observable, options?)` the options are the second argument;
+/// the observable expression is irrelevant for metadata extraction.
 ///
 /// Based on Angular's `output_function.ts` in the compiler-cli.
 fn try_parse_signal_output<'a>(
     value: &Expression<'a>,
     property_name: Ident<'a>,
 ) -> Option<(Ident<'a>, Ident<'a>)> {
-    // Check if the value is a call expression
     let call_expr = match value {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
 
-    // Check if this is output() - note that output() does NOT support .required()
-    let is_output = match &call_expr.callee {
-        // output() - simple identifier call
-        Expression::Identifier(id) if id.name == "output" => true,
-        // Handle namespaced calls like `core.output()`
+    // Detect which output initializer is called and whether options are at index 0 or 1.
+    let is_from_observable = match &call_expr.callee {
+        Expression::Identifier(id) => match id.name.as_str() {
+            "output" => false,
+            "outputFromObservable" => true,
+            _ => return None,
+        },
+        // Handle namespaced calls like `core.output()` or `rxjs.outputFromObservable()`
         Expression::StaticMemberExpression(member) => {
-            if member.property.name == "output" {
-                matches!(&member.object, Expression::Identifier(_))
-            } else {
-                false
+            if !matches!(&member.object, Expression::Identifier(_)) {
+                return None;
+            }
+            match member.property.name.as_str() {
+                "output" => false,
+                "outputFromObservable" => true,
+                _ => return None,
             }
         }
-        _ => false,
+        _ => return None,
     };
 
-    if !is_output {
-        return None;
-    }
-
-    // Parse options from the first argument (options are the first arg for output())
-    // Options can contain an alias
+    // output() → options at index 0; outputFromObservable(obs, options?) → options at index 1
+    let options_idx = if is_from_observable { 1 } else { 0 };
     let mut alias: Option<Ident<'a>> = None;
 
-    if let Some(first_arg) = call_expr.arguments.first() {
-        if let Argument::ObjectExpression(obj) = first_arg {
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    let Some(key_name) = get_property_key_name(&prop.key) else {
-                        continue;
-                    };
-
-                    if key_name.as_str() == "alias" {
-                        alias = extract_string_value(&prop.value);
-                    }
+    if let Some(Argument::ObjectExpression(obj)) = call_expr.arguments.get(options_idx) {
+        for prop in &obj.properties {
+            if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                let Some(key_name) = get_property_key_name(&prop.key) else {
+                    continue;
+                };
+                if key_name.as_str() == "alias" {
+                    alias = extract_string_value(&prop.value);
                 }
             }
         }
     }
 
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
-
     Some((property_name, binding_property_name))
 }
 
