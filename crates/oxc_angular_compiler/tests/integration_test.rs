@@ -9519,7 +9519,7 @@ import { outputFromObservable } from '@angular/core/rxjs-interop';
 })
 export class TestComponent {
     readonly queryChanged = outputFromObservable(
-        this.queryEditorService.latestParsedDataprimeQuery$.pipe(
+        this.dataService.value$.pipe(
             skip(1),
             debounceTime(300),
         ),

@@ -9,7 +9,7 @@ import * as i0 from '@angular/core';
 
 export class TestComponent {
     readonly queryChanged = outputFromObservable(
-        this.queryEditorService.latestParsedDataprimeQuery$.pipe(
+        this.dataService.value$.pipe(
             skip(1),
             debounceTime(300),
         ),
