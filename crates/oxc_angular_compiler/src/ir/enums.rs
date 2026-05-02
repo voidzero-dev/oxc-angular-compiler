@@ -460,6 +460,16 @@ pub enum AnimationKind {
     Leave,
 }
 
+impl AnimationKind {
+    /// Returns the phase string used in legacy animation event names ("start" or "done").
+    pub fn legacy_phase_str(self) -> &'static str {
+        match self {
+            AnimationKind::Enter => "start",
+            AnimationKind::Leave => "done",
+        }
+    }
+}
+
 /// Kinds of animation bindings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnimationBindingKind {
@@ -490,4 +500,19 @@ impl TDeferDetailsFlags {
     pub const DEFAULT: Self = Self(0);
     /// Has hydrate triggers.
     pub const HAS_HYDRATE_TRIGGERS: Self = Self(1 << 0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AnimationKind;
+
+    #[test]
+    fn animation_kind_enter_maps_to_start() {
+        assert_eq!(AnimationKind::Enter.legacy_phase_str(), "start");
+    }
+
+    #[test]
+    fn animation_kind_leave_maps_to_done() {
+        assert_eq!(AnimationKind::Leave.legacy_phase_str(), "done");
+    }
 }

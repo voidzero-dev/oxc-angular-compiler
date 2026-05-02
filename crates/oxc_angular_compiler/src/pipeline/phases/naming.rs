@@ -24,9 +24,13 @@ use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilati
 use crate::pipeline::phases::parse_extracted_styles::hyphenate;
 
 /// Sanitizes an identifier by replacing non-word characters with underscores.
-/// Matches Angular's `sanitizeIdentifier` in parse_util.ts.
+///
+/// Matches Angular's `sanitizeIdentifier` (parse_util.ts) which uses the JavaScript
+/// regex `/\W/g`. JS `\W` is ASCII-only — equivalent to `[^A-Za-z0-9_]`. So we use
+/// `is_ascii_alphanumeric()` and not Rust's `is_alphanumeric()` (which accepts
+/// Unicode letters/digits and would diverge for non-ASCII trigger names).
 fn sanitize_identifier(name: &str) -> String {
-    name.chars().map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' }).collect()
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect()
 }
 
 /// State for generating unique variable names.
@@ -795,14 +799,14 @@ fn process_single_create_op_ref<'a>(
                 // After sanitize: fnName_tag_animation_openClose_start_slot_listener
                 // (the @ becomes _ via sanitize, giving animation_openClose not animation__openClose)
                 let (event_name, animation_prefix) = if listener.is_animation_listener {
-                    // Build the animation event name with @ prefix and phase suffix
+                    // Build the animation event name with @ prefix and phase suffix.
+                    // Use the raw legacy phase string (already trimmed + lowercased by the
+                    // parser) so that bogus phases like `@anim.foo` round-trip into the
+                    // emitted `@anim.foo` literal — matching Angular's reference output.
                     let phase_str = listener
-                        .animation_phase
+                        .legacy_animation_phase
                         .as_ref()
-                        .map(|p| match p {
-                            crate::ir::enums::AnimationKind::Enter => "start",
-                            crate::ir::enums::AnimationKind::Leave => "done",
-                        })
+                        .map(|p| p.as_str())
                         .unwrap_or("start");
                     let new_name = format!("@{}.{}", listener.name.as_str(), phase_str);
                     let name_str = allocator.alloc_str(&new_name);
@@ -1157,10 +1161,29 @@ pub fn name_functions_and_variables_for_host(job: &mut HostBindingCompilationJob
         match op {
             CreateOp::Listener(listener) => {
                 if listener.handler_fn_name.is_none() && listener.host_listener {
-                    // For host listeners, format is: ComponentName_eventName_HostBindingHandler
-                    // Event name needs dots replaced with underscores (e.g., keydown.enter -> keydown_enter)
-                    let event_name = listener.name.as_str().replace('.', "_");
-                    let handler_name = format!("{sanitized_base}_{event_name}_HostBindingHandler");
+                    // LegacyAnimation host listeners: build full "@trigger.phase" name and
+                    // prefix handler with "animation" to match TypeScript's naming:
+                    //   handlerFnName = `${componentName}_animation${op.name}_HostBindingHandler`
+                    //   (after sanitize: @ and . become _)
+                    let (event_name, animation_prefix) = if listener.is_legacy_animation() {
+                        // Use the raw phase string (already trimmed + lowercased by the
+                        // parser) so bogus phases round-trip into the emitted literal —
+                        // matching Angular's reference output for invalid input.
+                        let phase_str = listener
+                            .legacy_animation_phase
+                            .as_ref()
+                            .map(|p| p.as_str())
+                            .unwrap_or("start");
+                        let full_name = format!("@{}.{}", listener.name.as_str(), phase_str);
+                        let name_str = allocator.alloc_str(&full_name);
+                        listener.name = Ident::from(name_str);
+                        (full_name, "animation")
+                    } else {
+                        (listener.name.as_str().replace('.', "_"), "")
+                    };
+                    let handler_name = format!(
+                        "{sanitized_base}_{animation_prefix}{event_name}_HostBindingHandler"
+                    );
                     let sanitized = sanitize_identifier(&handler_name);
                     let name_str = allocator.alloc_str(&sanitized);
                     listener.handler_fn_name = Some(Ident::from(name_str));

@@ -256,3 +256,287 @@ function OtherComponent_Template(rf, ctx) {}
     expect(result.templateFunctions.some((f) => f.includes('OtherComponent'))).toBe(false)
   })
 })
+
+describe('animation host listeners', () => {
+  it('should emit syntheticHostListener for @HostListener animation events', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@animation.done', ['$event'])
+        onDone(event: any) {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toContain('"@animation.done"')
+    expect(result.code).not.toMatch(/ɵɵlistener\(["']@animation/)
+  })
+
+  it('should emit syntheticHostListener for @HostListener animation start phase', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@animation.start', ['$event'])
+        onStart(event: any) {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toContain('"@animation.start"')
+    expect(result.code).not.toMatch(/ɵɵlistener\(["']@animation/)
+  })
+
+  it('should emit syntheticHostListener for host object animation event binding', async () => {
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-test',
+        template: '',
+        host: { '(@animation.done)': 'onDone()' },
+      })
+      export class TestComponent {
+        onDone() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toContain('"@animation.done"')
+  })
+
+  it('should emit correct handler function name for animation listener', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@animation.done')
+        onDone() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    // Handler name must follow Angular's pattern: ComponentName_animation@trigger.phase_HostBindingHandler
+    // After sanitize: TestComponent_animation_animation_done_HostBindingHandler
+    expect(result.code).toContain('TestComponent_animation_animation_done_HostBindingHandler')
+  })
+
+  it('should emit syntheticHostListener before listener when both are present (ordering)', async () => {
+    // Declare the regular listener first so that without the ordering fix the
+    // output order would be wrong (listener before syntheticHostListener).
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('click')
+        onClick() {}
+        @HostListener('@animation.done')
+        onDone() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toContain('ɵɵlistener')
+    // syntheticHostListener must appear before the regular listener in the output
+    const syntheticIdx = result.code.indexOf('ɵɵsyntheticHostListener')
+    const listenerIdx = result.code.indexOf('ɵɵlistener')
+    expect(syntheticIdx).toBeLessThan(listenerIdx)
+  })
+
+  it('should emit syntheticHostListener for @Directive animation host listener', async () => {
+    const source = `
+      import { Directive, HostListener } from '@angular/core';
+      @Directive({ selector: '[appTest]' })
+      export class TestDirective {
+        @HostListener('@animation.done')
+        onDone() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.directive.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toContain('"@animation.done"')
+    expect(result.code).not.toMatch(/ɵɵlistener\(["']@animation/)
+  })
+
+  // Mirrors Angular compliance test: chain_synthetic_listeners.ts
+  // Angular output:
+  //   ɵɵsyntheticHostListener("@animation.done", fn MyComponent_animation_animation_done_HostBindingHandler)
+  //                           ("@animation.start", fn MyComponent_animation_animation_start_HostBindingHandler)
+  it('should match Angular compliance chain_synthetic_listeners: chained syntheticHostListener with exact handler names', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({
+        selector: 'my-comp',
+        template: '',
+        host: { '(@animation.done)': 'done()' },
+      })
+      export class MyComponent {
+        @HostListener('@animation.start')
+        start() {}
+        done() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    // Both phased listeners must use syntheticHostListener — never ɵɵlistener for @animation
+    expect(result.code).not.toMatch(/ɵɵlistener\(["']@animation/)
+    // Exact chained structure: ɵɵsyntheticHostListener("@animation.done", fn)("@animation.start", fn)
+    // (whitespace-insensitive match to allow for formatting differences)
+    expect(result.code).toMatch(
+      /ɵɵsyntheticHostListener\("@animation\.done",function MyComponent_animation_animation_done_HostBindingHandler[\s\S]*?\)\s*\(\s*"@animation\.start",function MyComponent_animation_animation_start_HostBindingHandler/,
+    )
+  })
+
+  // Mirrors Angular compliance test: chain_synthetic_listeners_mixed.ts
+  // Angular output:
+  //   ɵɵsyntheticHostListener("@animation.done", fn_done)("@animation.start", fn_start);
+  //   ɵɵlistener("mousedown", fn)("mouseup", fn)("click", fn);
+  it('should match Angular compliance chain_synthetic_listeners_mixed: synthetic chain before regular chain', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({
+        selector: 'my-comp',
+        template: '',
+        host: {
+          '(mousedown)': 'mousedown()',
+          '(@animation.done)': 'done()',
+          '(mouseup)': 'mouseup()',
+        },
+      })
+      export class MyComponent {
+        @HostListener('@animation.start')
+        start() {}
+        @HostListener('click')
+        click() {}
+        mousedown() {}
+        done() {}
+        mouseup() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    // Synthetic chain: both animation handlers chained on one syntheticHostListener call
+    expect(result.code).toMatch(
+      /ɵɵsyntheticHostListener\("@animation\.done",function MyComponent_animation_animation_done_HostBindingHandler[\s\S]*?\)\s*\(\s*"@animation\.start",function MyComponent_animation_animation_start_HostBindingHandler/,
+    )
+    // Regular chain: all three regular handlers chained on one ɵɵlistener call
+    expect(result.code).toMatch(
+      /ɵɵlistener\("mousedown",function MyComponent_mousedown_HostBindingHandler/,
+    )
+    expect(result.code).toMatch(/MyComponent_mouseup_HostBindingHandler/)
+    expect(result.code).toMatch(/MyComponent_click_HostBindingHandler/)
+    // Synthetic chain must come before the regular chain
+    const syntheticIdx = result.code.indexOf('ɵɵsyntheticHostListener')
+    const listenerIdx = result.code.indexOf('ɵɵlistener')
+    expect(syntheticIdx).toBeLessThan(listenerIdx)
+    // No animation events via regular ɵɵlistener
+    expect(result.code).not.toMatch(/ɵɵlistener\(["']@animation/)
+  })
+
+  // Mirrors Angular's parseLegacyAnimationEventName: phase is lowercased via `.toLowerCase()`.
+  // Source `@HostListener('@anim.START')` should compile identically to `@HostListener('@anim.start')`.
+  it('should lowercase phase to match Angular parser', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@anim.START')
+        onStart() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener("@anim.start"')
+    expect(result.code).toContain('TestComponent_animation_anim_start_HostBindingHandler')
+  })
+
+  // Mirrors Angular's splitAtPeriod which trims both sides of the split.
+  it('should trim phase whitespace to match Angular parser', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@anim. start ')
+        onStart() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵsyntheticHostListener("@anim.start"')
+  })
+
+  // Mirrors Angular's `_parseLegacyAnimationEvent`: a phase that is not "start" or "done"
+  // still produces a ParsedEvent with that phase (an error is also reported, but code is
+  // still emitted). The listener is therefore `ɵɵsyntheticHostListener("@anim.foo", fn)`,
+  // not a fallback `ɵɵlistener`.
+  it('should preserve bogus phase in syntheticHostListener output', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@anim.foo')
+        onFoo() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.code).toContain('ɵɵsyntheticHostListener("@anim.foo"')
+    expect(result.code).toContain('TestComponent_animation_anim_foo_HostBindingHandler')
+    expect(result.code).not.toContain('ɵɵlistener("anim"')
+  })
+
+  // Mirrors Angular's `sanitizeIdentifier` (parse_util.ts) which uses `/\W/g` —
+  // an ASCII-only character class. Non-ASCII characters in trigger names must be
+  // replaced with `_`, matching the JavaScript regex behavior.
+  it('should ASCII-sanitize non-ASCII trigger characters in handler names', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@μAnim.start')
+        onStart() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    // The literal in syntheticHostListener preserves the trigger as-is (Angular
+    // does not sanitize it — the @ + trigger + . + phase string is the runtime key)
+    expect(result.code).toContain('ɵɵsyntheticHostListener("@μAnim.start"')
+    // The handler function name MUST sanitize μ → _ (JS \W matches non-ASCII)
+    expect(result.code).toContain('TestComponent_animation__Anim_start_HostBindingHandler')
+    expect(result.code).not.toContain('TestComponent_animation_μAnim_start')
+  })
+
+  // Mirrors Angular's binding_parser.ts + ingest.ts behavior for `@HostListener('@trigger')`
+  // without an explicit phase. Angular's parseLegacyAnimationEventName strips the `@`,
+  // leaves phase=null, and createListenerOp sets isLegacyAnimationListener=false (since
+  // phase is null). Reify then emits plain `ɵɵlistener(name, handler)` — no
+  // syntheticHostListener, no trailing useCapture argument.
+  //
+  // Angular also reports an error here, but matching the host-metadata convention in
+  // this codebase (binding_parser parse errors are silently dropped for host bindings
+  // — see component/transform.rs and directive/compiler.rs which never inspect
+  // `parse_result.errors`), we don't surface a diagnostic. Only the code output is
+  // checked for parity.
+  it('should emit plain ɵɵlistener for @HostListener without phase, matching Angular', async () => {
+    const source = `
+      import { Component, HostListener } from '@angular/core';
+      @Component({ selector: 'app-test', template: '' })
+      export class TestComponent {
+        @HostListener('@anim')
+        onAnim() {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).not.toContain('ɵɵsyntheticHostListener')
+    expect(result.code).toMatch(
+      /ɵɵlistener\(\s*"anim"\s*,\s*function TestComponent_anim_HostBindingHandler\(\)\s*\{[\s\S]*?\}\s*\)\s*;/,
+    )
+    expect(result.code).not.toMatch(/ɵɵlistener\(\s*"anim"[\s\S]*?,\s*null\s*,\s*true\s*\)/)
+  })
+})

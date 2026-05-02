@@ -1327,19 +1327,38 @@ fn reify_host_create_op<'a>(
                 .as_ref()
                 .and_then(|target| GlobalEventTarget::from_str(target.as_str()));
 
-            // Host listeners use ɵɵlistener, NOT ɵɵsyntheticHostListener
-            // syntheticHostListener is only for animation listeners
-            // Use capture mode only when both host_listener and is_animation_listener are true
-            let use_capture = listener.host_listener && listener.is_animation_listener;
-            Some(create_listener_stmt_with_handler(
-                allocator,
-                &listener.name,
-                handler_stmts,
-                event_target,
-                use_capture,
-                listener.handler_fn_name.as_ref(),
-                listener.consumes_dollar_event,
-            ))
+            // LegacyAnimation host listeners (from @HostListener('@trigger.phase') or
+            // host: { '(@trigger.phase)': '...' }) must use ɵɵsyntheticHostListener so
+            // Angular's animation renderer handles them. Matches TypeScript:
+            //   syntheticHost = op.hostListener && op.isLegacyAnimationListener
+            let is_synthetic_host = listener.host_listener && listener.is_legacy_animation();
+            if is_synthetic_host {
+                Some(create_synthetic_host_listener_stmt(
+                    allocator,
+                    &listener.name,
+                    handler_stmts,
+                    listener.handler_fn_name.as_ref(),
+                    listener.consumes_dollar_event,
+                ))
+            } else {
+                // Plain ɵɵlistener path. Angular's reify (compiler/src/template/pipeline/
+                // src/phases/reify.ts) only differentiates synthetic vs non-synthetic via
+                // the function-name swap above; it does not pass a useCapture argument.
+                // After the ingest fix that aligns is_animation_listener with Angular's
+                // isLegacyAnimationListener (= phase != null), this expression is
+                // structurally always false here — kept for defence-in-depth and to make
+                // the relationship to the synthetic branch explicit.
+                let use_capture = listener.host_listener && listener.is_animation_listener;
+                Some(create_listener_stmt_with_handler(
+                    allocator,
+                    &listener.name,
+                    handler_stmts,
+                    event_target,
+                    use_capture,
+                    listener.handler_fn_name.as_ref(),
+                    listener.consumes_dollar_event,
+                ))
+            }
         }
         CreateOp::AnimationListener(listener) => {
             // Emit syntheticHostListener for animation listeners
