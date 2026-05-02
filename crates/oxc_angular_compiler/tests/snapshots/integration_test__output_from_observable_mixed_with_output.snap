@@ -1,0 +1,25 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+
+import { Component, EventEmitter, output } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+import * as i0 from '@angular/core';
+
+export class TestComponent {
+    readonly clicked = output<void>();
+    readonly queryChanged = outputFromObservable(new EventEmitter<string>());
+
+static ɵfac = function TestComponent_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || TestComponent)();
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selectors:[["test-comp"]],outputs:{clicked:"clicked",
+    queryChanged:"queryChanged"},decls:0,vars:0,template:function TestComponent_Template(rf,
+    ctx) {
+},encapsulation:2});
+}
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(TestComponent,
+      {className:"TestComponent",filePath:"test.component.ts",lineNumber:10}));
+})();

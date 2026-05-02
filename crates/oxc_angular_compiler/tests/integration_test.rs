@@ -9441,3 +9441,168 @@ export class LoggedPipe implements PipeTransform {
         "Pipe factory should fall back to the type annotation (Logger). Factory:\n{factory_section}"
     );
 }
+
+// ============================================================================
+// outputFromObservable tests
+// ============================================================================
+
+#[test]
+fn test_output_from_observable_simple() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly queryChanged = outputFromObservable(new EventEmitter<string>());
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"ɵɵdefineComponent("#)
+            && normalized.contains(r#"outputs:{queryChanged:"queryChanged"}"#),
+        "outputFromObservable property should appear in outputs:{{}} inside ɵɵdefineComponent.\nCode:\n{}",
+        result.code
+    );
+    insta::assert_snapshot!("output_from_observable_simple", result.code);
+}
+
+#[test]
+fn test_output_from_observable_property_reference() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly valueChanged = outputFromObservable(this.someService.value$);
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"ɵɵdefineComponent("#)
+            && normalized.contains(r#"outputs:{valueChanged:"valueChanged"}"#),
+        "outputFromObservable with property reference should appear in outputs:{{}} inside ɵɵdefineComponent.\nCode:\n{}",
+        result.code
+    );
+    insta::assert_snapshot!("output_from_observable_property_reference", result.code);
+}
+
+#[test]
+fn test_output_from_observable_piped() {
+    // Regression: the reported real-world case — complex piped observable as argument.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly queryChanged = outputFromObservable(
+        this.dataService.value$.pipe(
+            skip(1),
+            debounceTime(300),
+        ),
+    );
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"ɵɵdefineComponent("#)
+            && normalized.contains(r#"outputs:{queryChanged:"queryChanged"}"#),
+        "outputFromObservable with piped observable should appear in outputs:{{}} inside ɵɵdefineComponent.\nCode:\n{}",
+        result.code
+    );
+    insta::assert_snapshot!("output_from_observable_piped", result.code);
+}
+
+#[test]
+fn test_output_from_observable_with_alias() {
+    // The alias option is the second argument; the class property name maps to the alias binding name.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly _clicked = outputFromObservable(new EventEmitter<void>(), { alias: 'clicked' });
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    // Class property name '_clicked' must map to binding name 'clicked' (the alias value).
+    assert!(
+        normalized.contains(r#"ɵɵdefineComponent("#)
+            && normalized.contains(r#"outputs:{_clicked:"clicked"}"#),
+        "outputFromObservable alias should become the binding property name in outputs:{{}}.\nCode:\n{}",
+        result.code
+    );
+    // Also verify the class property name itself is NOT used as the binding name.
+    assert!(
+        !normalized.contains(r#"outputs:{_clicked:"_clicked"}"#),
+        "Class property name '_clicked' should NOT be used as binding name when alias is set.\nCode:\n{}",
+        result.code
+    );
+    insta::assert_snapshot!("output_from_observable_with_alias", result.code);
+}
+
+#[test]
+fn test_output_from_observable_mixed_with_output() {
+    // Both output() and outputFromObservable() in the same class must both appear in outputs.
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component, EventEmitter, output } from '@angular/core';
+import { outputFromObservable } from '@angular/core/rxjs-interop';
+
+@Component({
+    selector: 'test-comp',
+    standalone: true,
+    template: '',
+})
+export class TestComponent {
+    readonly clicked = output<void>();
+    readonly queryChanged = outputFromObservable(new EventEmitter<string>());
+}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"ɵɵdefineComponent("#)
+            && normalized.contains(r#"outputs:{clicked:"clicked",queryChanged:"queryChanged"}"#),
+        "Both output() and outputFromObservable() must appear in outputs:{{}} inside ɵɵdefineComponent.\nCode:\n{}",
+        result.code
+    );
+    insta::assert_snapshot!("output_from_observable_mixed_with_output", result.code);
+}
