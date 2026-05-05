@@ -847,6 +847,14 @@ fn resolve_expression<'a>(
             );
         }
 
+        // ResolvedTemplateLiteral (created by ingest for template literals with inner expressions)
+        // - resolve each inner expression so LexicalRead refs to @let vars and pipe args are resolved
+        IrExpression::ResolvedTemplateLiteral(tl) => {
+            for expr in tl.expressions.iter_mut() {
+                resolve_expression(expr, scope, root_xref, saved_view, allocator, expressions);
+            }
+        }
+
         // Other expression types don't need resolution
         _ => {}
     }

@@ -352,6 +352,11 @@ fn collect_pipe_bindings<'a>(op: &crate::ir::ops::UpdateOp<'a>, bindings: &mut V
             IrExpression::Parenthesized(paren) => {
                 check_expression(&paren.expr, target_element, bindings);
             }
+            IrExpression::ResolvedTemplateLiteral(tl) => {
+                for expr in tl.expressions.iter() {
+                    check_expression(expr, target_element, bindings);
+                }
+            }
             _ => {}
         }
     }

@@ -141,6 +141,38 @@ describe('compileTemplateSync', () => {
     expect(result.code).toContain('function')
     expect(result.code).toContain('TestComponent_Template')
   })
+
+  it('should compile template literal with pipe inside interpolation (CX-40791)', async () => {
+    // TemplateLiteral was not handled in convert_ast_to_ir and fell through to
+    // store_and_ref_expr, so the inner BindingPipe was never registered with
+    // pipe_creation and the @let variable was resolved against ctx instead of the
+    // local scope.
+    const result = await compileTemplate(
+      '@let num = 0.75; {{ `${num | percent}` }}',
+      'TestComponent',
+      'test.ts',
+    )
+
+    expect(result.errors).toHaveLength(0)
+    // Pipe must be registered in the create block
+    expect(result.code).toContain('ɵɵpipe')
+    // pipeBind1 must be called in the update block
+    expect(result.code).toContain('ɵɵpipeBind1')
+    // @let variable must be stored
+    expect(result.code).toContain('0.75')
+  })
+
+  it('should compile template literal with surrounding text and pipe (CX-40791)', async () => {
+    const result = await compileTemplate(
+      '@let num = 0.75; {{ `Value: ${num | percent} done` }}',
+      'TestComponent',
+      'test.ts',
+    )
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain('ɵɵpipe')
+    expect(result.code).toContain('ɵɵpipeBind1')
+  })
 })
 
 describe('extractAngularComponentByAst', () => {

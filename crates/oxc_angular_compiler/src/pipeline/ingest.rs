@@ -567,6 +567,37 @@ fn convert_ast_to_ir<'a>(
             )
         }
 
+        // Convert TemplateLiteral - recursively convert inner expressions to preserve pipes.
+        // Without this, template literals fall through to store_and_ref_expr, which stores
+        // the entire literal as a raw AST blob. Any BindingPipe inside is then invisible to
+        // the pipe_creation phase and any @let variable reads inside are never resolved.
+        AngularExpression::TemplateLiteral(tl) => {
+            let tl = tl.unbox();
+            let mut elements = Vec::with_capacity_in(tl.elements.len(), allocator);
+            for elem in tl.elements.iter() {
+                elements.push(crate::ir::expression::IrTemplateLiteralElement {
+                    text: elem.text.clone(),
+                    source_span: Some(elem.source_span.to_span()),
+                });
+            }
+            let mut expressions = Vec::with_capacity_in(tl.expressions.len(), allocator);
+            for expr in tl.expressions {
+                let converted = convert_ast_to_ir(job, expr);
+                expressions.push(converted.unbox());
+            }
+            Box::new_in(
+                IrExpression::ResolvedTemplateLiteral(Box::new_in(
+                    crate::ir::expression::ResolvedTemplateLiteralExpr {
+                        elements,
+                        expressions,
+                        source_span: Some(tl.source_span.to_span()),
+                    },
+                    allocator,
+                )),
+                allocator,
+            )
+        }
+
         // For all other expressions, store in ExpressionStore and return reference.
         other => store_and_ref_expr(job, other),
     }
