@@ -863,14 +863,14 @@ fn wrap_with_postprocess<'a>(
                 )));
             }
 
-            entries.push(LiteralMapEntry {
-                key: Ident::from(key_str),
-                value: OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from(key_str),
+                OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                     LiteralArrayExpr { entries: var_refs, source_span: None },
                     allocator,
                 )),
-                quoted: true,
-            });
+                true,
+            ));
         }
 
         args.push(OutputExpression::LiteralMap(oxc_allocator::Box::new_in(

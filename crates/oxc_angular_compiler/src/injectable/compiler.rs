@@ -404,66 +404,62 @@ fn build_definition_map<'a>(
     let mut entries = Vec::new_in(allocator);
 
     // token: MyService
-    entries.push(LiteralMapEntry {
-        key: Ident::from("token"),
-        value: metadata.r#type.clone_in(allocator),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("token"),
+        metadata.r#type.clone_in(allocator),
+        false,
+    ));
 
     // factory: <factory_function>
-    entries.push(LiteralMapEntry {
-        key: Ident::from("factory"),
-        value: factory_expr,
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(Ident::from("factory"), factory_expr, false));
 
     // providedIn: 'root' (only if not None)
     match &metadata.provided_in {
         ProvidedIn::Root => {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("providedIn"),
-                value: OutputExpression::Literal(Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from("providedIn"),
+                OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::String(Ident::from("root")),
                         source_span: None,
                     },
                     allocator,
                 )),
-                quoted: false,
-            });
+                false,
+            ));
         }
         ProvidedIn::Platform => {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("providedIn"),
-                value: OutputExpression::Literal(Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from("providedIn"),
+                OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::String(Ident::from("platform")),
                         source_span: None,
                     },
                     allocator,
                 )),
-                quoted: false,
-            });
+                false,
+            ));
         }
         ProvidedIn::Any => {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("providedIn"),
-                value: OutputExpression::Literal(Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from("providedIn"),
+                OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::String(Ident::from("any")),
                         source_span: None,
                     },
                     allocator,
                 )),
-                quoted: false,
-            });
+                false,
+            ));
         }
         ProvidedIn::Module(module_expr) => {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("providedIn"),
-                value: module_expr.clone_in(allocator),
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(
+                Ident::from("providedIn"),
+                module_expr.clone_in(allocator),
+                false,
+            ));
         }
         ProvidedIn::None => {
             // Don't add providedIn field

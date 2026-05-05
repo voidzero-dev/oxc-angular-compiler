@@ -1,0 +1,9 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+const _c0 = (a0,a1) =>({...a0,...a1,key:"val"});
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) { i0.ɵɵelement(0,"div",0); }
+  if ((rf & 2)) { i0.ɵɵproperty("title",i0.ɵɵpureFunction2(1,_c0,ctx.a,ctx.b)); }
+}

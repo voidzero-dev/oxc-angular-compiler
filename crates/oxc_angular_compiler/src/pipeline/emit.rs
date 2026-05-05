@@ -1143,8 +1143,19 @@ fn convert_pure_function_body<'a>(
         // DerivedLiteralArray: convert to a literal array with nested conversions
         IrExpression::DerivedLiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.entries.len(), allocator);
-            for entry in arr.entries.iter() {
-                entries.push(convert_pure_function_body(allocator, entry, params));
+            for (i, entry) in arr.entries.iter().enumerate() {
+                let converted = convert_pure_function_body(allocator, entry, params);
+                if arr.spreads.get(i).copied().unwrap_or(false) {
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(converted, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(converted);
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
@@ -1159,7 +1170,8 @@ fn convert_pure_function_body<'a>(
                 let key = map.keys[i].clone();
                 let value = convert_pure_function_body(allocator, &map.values[i], params);
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
-                entries.push(LiteralMapEntry { key, value, quoted });
+                let is_spread = map.spreads.get(i).copied().unwrap_or(false);
+                entries.push(LiteralMapEntry { key, value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: None },
@@ -1170,8 +1182,19 @@ fn convert_pure_function_body<'a>(
         // LiteralArray: convert to a literal array with nested conversions
         IrExpression::LiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.elements.len(), allocator);
-            for elem in arr.elements.iter() {
-                entries.push(convert_pure_function_body(allocator, elem, params));
+            for (i, elem) in arr.elements.iter().enumerate() {
+                let converted = convert_pure_function_body(allocator, elem, params);
+                if arr.spreads.get(i).copied().unwrap_or(false) {
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(converted, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(converted);
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
@@ -1186,7 +1209,8 @@ fn convert_pure_function_body<'a>(
                 let key = map.keys[i].clone();
                 let value = convert_pure_function_body(allocator, &map.values[i], params);
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
-                entries.push(LiteralMapEntry { key, value, quoted });
+                let is_spread = map.spreads.get(i).copied().unwrap_or(false);
+                entries.push(LiteralMapEntry { key, value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: None },
@@ -1318,7 +1342,9 @@ fn convert_ast_for_pure_function_body<'a>(
     params: &[Ident<'a>],
 ) -> OutputExpression<'a> {
     use crate::ast::expression::{AngularExpression, LiteralMapKey};
-    use crate::output::ast::{LiteralArrayExpr, LiteralMapEntry, LiteralMapExpr};
+    use crate::output::ast::{
+        LiteralArrayExpr, LiteralMapEntry, LiteralMapExpr, SpreadElementExpr,
+    };
 
     match ast {
         AngularExpression::LiteralPrimitive(lit) => {
@@ -1337,7 +1363,19 @@ fn convert_ast_for_pure_function_body<'a>(
         AngularExpression::LiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.expressions.len(), allocator);
             for entry in arr.expressions.iter() {
-                entries.push(convert_ast_for_pure_function_body(allocator, entry, params));
+                if let AngularExpression::SpreadElement(spread) = entry {
+                    let inner =
+                        convert_ast_for_pure_function_body(allocator, &spread.expression, params);
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(inner, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(convert_ast_for_pure_function_body(allocator, entry, params));
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
@@ -1347,18 +1385,21 @@ fn convert_ast_for_pure_function_body<'a>(
         AngularExpression::LiteralMap(map) => {
             let mut entries = OxcVec::with_capacity_in(map.keys.len(), allocator);
             for (i, key) in map.keys.iter().enumerate() {
-                // Only handle property keys; skip spread keys
-                if let LiteralMapKey::Property(prop) = key {
-                    let key_value = prop.key.clone();
-                    let value = if i < map.values.len() {
-                        convert_ast_for_pure_function_body(allocator, &map.values[i], params)
-                    } else {
-                        OutputExpression::Literal(Box::new_in(
-                            LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                            allocator,
-                        ))
-                    };
-                    entries.push(LiteralMapEntry { key: key_value, value, quoted: prop.quoted });
+                let value = if i < map.values.len() {
+                    convert_ast_for_pure_function_body(allocator, &map.values[i], params)
+                } else {
+                    OutputExpression::Literal(Box::new_in(
+                        LiteralExpr { value: LiteralValue::Undefined, source_span: None },
+                        allocator,
+                    ))
+                };
+                match key {
+                    LiteralMapKey::Property(prop) => {
+                        entries.push(LiteralMapEntry::new(prop.key.clone(), value, prop.quoted));
+                    }
+                    LiteralMapKey::Spread(_) => {
+                        entries.push(LiteralMapEntry::spread(value));
+                    }
                 }
             }
             OutputExpression::LiteralMap(Box::new_in(
@@ -1451,11 +1492,11 @@ fn emit_pooled_constant_value<'a>(
             // Emit object literal
             let mut map_entries = OxcVec::with_capacity_in(entries.len(), allocator);
             for (key, value) in entries.iter_mut() {
-                map_entries.push(LiteralMapEntry {
-                    key: key.clone(),
-                    value: emit_pooled_constant_value(allocator, value),
-                    quoted: false,
-                });
+                map_entries.push(LiteralMapEntry::new(
+                    key.clone(),
+                    emit_pooled_constant_value(allocator, value),
+                    false,
+                ));
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries: map_entries, source_span: None },

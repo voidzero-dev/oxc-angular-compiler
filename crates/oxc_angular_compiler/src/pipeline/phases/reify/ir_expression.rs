@@ -9,7 +9,7 @@ use crate::ir::ops::XrefId;
 use crate::output::ast::{
     BinaryOperator, BinaryOperatorExpr, ConditionalExpr, InvokeFunctionExpr, LiteralArrayExpr,
     LiteralExpr, LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression,
-    ParenthesizedExpr, ReadKeyExpr, ReadPropExpr, ReadVarExpr,
+    ParenthesizedExpr, ReadKeyExpr, ReadPropExpr, ReadVarExpr, SpreadElementExpr,
 };
 use crate::pipeline::expression_store::ExpressionStore;
 use crate::r3::{Identifiers, get_pipe_bind_instruction, get_pure_function_instruction};
@@ -808,8 +808,19 @@ pub fn convert_ir_expression<'a>(
 
         IrExpression::LiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.elements.len(), allocator);
-            for elem in arr.elements.iter() {
-                entries.push(convert_ir_expression(allocator, elem, expressions, root_xref));
+            for (i, elem) in arr.elements.iter().enumerate() {
+                let converted = convert_ir_expression(allocator, elem, expressions, root_xref);
+                if arr.spreads.get(i).copied().unwrap_or(false) {
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(converted, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(converted);
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: arr.source_span },
@@ -822,9 +833,10 @@ pub fn convert_ir_expression<'a>(
             for (i, value) in map.values.iter().enumerate() {
                 let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
+                let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, value, expressions, root_xref);
-                entries.push(LiteralMapEntry { key, value: converted_value, quoted });
+                entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },
@@ -834,8 +846,19 @@ pub fn convert_ir_expression<'a>(
 
         IrExpression::DerivedLiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.entries.len(), allocator);
-            for entry in arr.entries.iter() {
-                entries.push(convert_ir_expression(allocator, entry, expressions, root_xref));
+            for (i, entry) in arr.entries.iter().enumerate() {
+                let converted = convert_ir_expression(allocator, entry, expressions, root_xref);
+                if arr.spreads.get(i).copied().unwrap_or(false) {
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(converted, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(converted);
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: arr.source_span },
@@ -848,9 +871,10 @@ pub fn convert_ir_expression<'a>(
             for (i, value) in map.values.iter().enumerate() {
                 let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
+                let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
                     convert_ir_expression(allocator, value, expressions, root_xref);
-                entries.push(LiteralMapEntry { key, value: converted_value, quoted });
+                entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },

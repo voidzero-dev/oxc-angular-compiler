@@ -194,17 +194,17 @@ pub fn create_goog_get_msg_statements<'a>(
             let formatted_name = format_i18n_placeholder_name(name, true);
             let key_str = allocator.alloc_str(&formatted_name);
             let value_str = allocator.alloc_str(value);
-            entries.push(LiteralMapEntry {
-                key: Ident::from(key_str),
-                value: OutputExpression::Literal(AllocBox::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from(key_str),
+                OutputExpression::Literal(AllocBox::new_in(
                     LiteralExpr {
                         value: LiteralValue::String(Ident::from(value_str)),
                         source_span: None,
                     },
                     allocator,
                 )),
-                quoted: true,
-            });
+                true,
+            ));
         }
         goog_args.push(OutputExpression::LiteralMap(AllocBox::new_in(
             LiteralMapExpr { entries, source_span: None },

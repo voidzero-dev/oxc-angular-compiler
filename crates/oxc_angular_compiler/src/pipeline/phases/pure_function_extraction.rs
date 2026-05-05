@@ -150,22 +150,39 @@ fn generate_expression_key(expr: &IrExpression<'_>) -> String {
         // Handle AST expressions - these are the main expression types that need key generation
         IrExpression::Ast(ast) => generate_angular_expression_key(ast),
 
-        // DerivedLiteralArray -> `[${entries.join(',')}]`
+        // DerivedLiteralArray -> `[${entries.join(',')}]` with `...` prefix on spread entries.
+        // The spread flag must participate in the key so `[a]` and `[...a]` don't collide in
+        // the pure-function pool and silently swap runtime semantics.
         IrExpression::DerivedLiteralArray(arr) => {
-            let entries: Vec<_> = arr.entries.iter().map(generate_expression_key).collect();
+            let entries: Vec<_> = arr
+                .entries
+                .iter()
+                .zip(arr.spreads.iter())
+                .map(|(entry, is_spread)| {
+                    let key = generate_expression_key(entry);
+                    if *is_spread { format!("...{}", key) } else { key }
+                })
+                .collect();
             format!("[{}]", entries.join(","))
         }
 
-        // DerivedLiteralMap -> `{${entries.join(',')}}`
+        // DerivedLiteralMap -> `{${entries.join(',')}}` with `...value` for spread entries.
         IrExpression::DerivedLiteralMap(map) => {
             let entries: Vec<_> = map
                 .keys
                 .iter()
                 .zip(map.values.iter())
                 .zip(map.quoted.iter())
-                .map(|((key, value), quoted)| {
-                    let key_str = if *quoted { format!("\"{}\"", key) } else { key.to_string() };
-                    format!("{}:{}", key_str, generate_expression_key(value))
+                .zip(map.spreads.iter())
+                .map(|(((key, value), quoted), is_spread)| {
+                    let value_key = generate_expression_key(value);
+                    if *is_spread {
+                        format!("...{}", value_key)
+                    } else {
+                        let key_str =
+                            if *quoted { format!("\"{}\"", key) } else { key.to_string() };
+                        format!("{}:{}", key_str, value_key)
+                    }
                 })
                 .collect();
             format!("{{{}}}", entries.join(","))

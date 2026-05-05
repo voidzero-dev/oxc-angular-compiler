@@ -3579,8 +3579,12 @@ where
             for entry in arr.entries.iter() {
                 entries.push(transform_expression(entry, allocator, transform));
             }
+            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), allocator);
+            for s in arr.spreads.iter() {
+                spreads.push(*s);
+            }
             IrExpression::DerivedLiteralArray(OxcBox::new_in(
-                DerivedLiteralArrayExpr { entries, source_span: arr.source_span },
+                DerivedLiteralArrayExpr { entries, spreads, source_span: arr.source_span },
                 allocator,
             ))
         }
@@ -3598,8 +3602,18 @@ where
             for q in map.quoted.iter() {
                 quoted.push(*q);
             }
+            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), allocator);
+            for s in map.spreads.iter() {
+                spreads.push(*s);
+            }
             IrExpression::DerivedLiteralMap(OxcBox::new_in(
-                DerivedLiteralMapExpr { keys, values, quoted, source_span: map.source_span },
+                DerivedLiteralMapExpr {
+                    keys,
+                    values,
+                    quoted,
+                    spreads,
+                    source_span: map.source_span,
+                },
                 allocator,
             ))
         }
@@ -3609,8 +3623,12 @@ where
             for elem in arr.elements.iter() {
                 elements.push(transform_expression(elem, allocator, transform));
             }
+            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), allocator);
+            for s in arr.spreads.iter() {
+                spreads.push(*s);
+            }
             IrExpression::LiteralArray(OxcBox::new_in(
-                IrLiteralArrayExpr { elements, source_span: arr.source_span },
+                IrLiteralArrayExpr { elements, spreads, source_span: arr.source_span },
                 allocator,
             ))
         }
@@ -3628,8 +3646,12 @@ where
             for q in map.quoted.iter() {
                 quoted.push(*q);
             }
+            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), allocator);
+            for s in map.spreads.iter() {
+                spreads.push(*s);
+            }
             IrExpression::LiteralMap(OxcBox::new_in(
-                IrLiteralMapExpr { keys, values, quoted, source_span: map.source_span },
+                IrLiteralMapExpr { keys, values, quoted, spreads, source_span: map.source_span },
                 allocator,
             ))
         }

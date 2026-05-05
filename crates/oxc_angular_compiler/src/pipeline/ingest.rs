@@ -264,18 +264,27 @@ fn convert_ast_to_ir<'a>(
             )
         }
 
-        // Convert LiteralArray - recursively convert elements to preserve pipes
+        // Convert LiteralArray - recursively convert elements to preserve pipes.
+        // Spread elements (e.g. [...base, item]) are preserved via the spreads parallel vec.
         AngularExpression::LiteralArray(arr) => {
             let arr = arr.unbox();
             let mut elements = Vec::with_capacity_in(arr.expressions.len(), allocator);
+            let mut spreads = Vec::with_capacity_in(arr.expressions.len(), allocator);
             for elem in arr.expressions {
-                let elem_expr = convert_ast_to_ir(job, elem);
-                elements.push(elem_expr.unbox());
+                let is_spread = matches!(elem, AngularExpression::SpreadElement(_));
+                let inner = if let AngularExpression::SpreadElement(s) = elem {
+                    convert_ast_to_ir(job, s.unbox().expression)
+                } else {
+                    convert_ast_to_ir(job, elem)
+                };
+                elements.push(inner.unbox());
+                spreads.push(is_spread);
             }
             Box::new_in(
                 IrExpression::LiteralArray(Box::new_in(
                     crate::ir::expression::IrLiteralArrayExpr {
                         elements,
+                        spreads,
                         source_span: Some(arr.source_span.to_span()),
                     },
                     allocator,
@@ -284,22 +293,32 @@ fn convert_ast_to_ir<'a>(
             )
         }
 
-        // Convert LiteralMap (object literal) - recursively convert values to preserve pipes
+        // Convert LiteralMap (object literal) - recursively convert values to preserve pipes.
+        // Spread entries (e.g. { ...base, key: val }) are preserved: spread keys get a dummy
+        // empty Ident with spreads[i] = true so later phases can emit them correctly.
         AngularExpression::LiteralMap(map) => {
             use crate::ast::expression::LiteralMapKey;
             let map = map.unbox();
             let mut keys = Vec::with_capacity_in(map.keys.len(), allocator);
             let mut values = Vec::with_capacity_in(map.values.len(), allocator);
             let mut quoted = Vec::with_capacity_in(map.keys.len(), allocator);
+            let mut spreads = Vec::with_capacity_in(map.keys.len(), allocator);
 
             for (key, value) in map.keys.into_iter().zip(map.values.into_iter()) {
-                // Only handle property keys; spread keys need special handling
-                if let LiteralMapKey::Property(prop) = key {
-                    keys.push(prop.key);
-                    quoted.push(prop.quoted);
-                    let value_expr = convert_ast_to_ir(job, value);
-                    values.push(value_expr.unbox());
+                match key {
+                    LiteralMapKey::Property(prop) => {
+                        keys.push(prop.key);
+                        quoted.push(prop.quoted);
+                        spreads.push(false);
+                    }
+                    LiteralMapKey::Spread(_) => {
+                        keys.push(Ident::from(""));
+                        quoted.push(false);
+                        spreads.push(true);
+                    }
                 }
+                let value_expr = convert_ast_to_ir(job, value);
+                values.push(value_expr.unbox());
             }
 
             Box::new_in(
@@ -308,6 +327,7 @@ fn convert_ast_to_ir<'a>(
                         keys,
                         values,
                         quoted,
+                        spreads,
                         source_span: Some(map.source_span.to_span()),
                     },
                     allocator,

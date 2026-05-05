@@ -860,6 +860,178 @@ fn test_let_self_reference_replaced_with_undefined() {
 }
 
 // ============================================================================
+// Object Spread Tests
+// ============================================================================
+
+#[test]
+fn test_object_spread_in_binding() {
+    // { ...base, extra: 'val' } — spread was silently dropped, resulting in { extra: 'val' }
+    // Keys/values in LiteralMap are parallel arrays; LiteralMapKey::Spread was skipped in
+    // convert_ast_to_ir so the spread expression never reached the IR or emitter.
+    let js = compile_template_to_js(
+        r#"<div [title]="{ ...base, extra: 'val' }"></div>"#,
+        "TestComponent",
+    );
+    // Angular wraps object literals in pure functions; spread appears as ...a0 in the
+    // pure function body and ctx.base is passed as the argument.
+    assert!(js.contains("...a0"), "object spread should be preserved in output. Output:\n{js}");
+    assert!(js.contains("ctx.base"), "spread variable should be referenced. Output:\n{js}");
+    insta::assert_snapshot!("object_spread_in_binding", js);
+}
+
+#[test]
+fn test_object_spread_only() {
+    let js = compile_template_to_js(r#"<div [title]="{ ...base }"></div>"#, "TestComponent");
+    assert!(js.contains("...a0"), "spread-only object should emit spread. Output:\n{js}");
+    assert!(js.contains("ctx.base"), "spread variable should be referenced. Output:\n{js}");
+    insta::assert_snapshot!("object_spread_only", js);
+}
+
+#[test]
+fn test_object_multiple_spreads() {
+    let js = compile_template_to_js(
+        r#"<div [title]="{ ...a, ...b, key: 'val' }"></div>"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("...a0") && js.contains("...a1"),
+        "multiple spreads should both appear. Output:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.a") && js.contains("ctx.b"),
+        "both spread variables should be referenced. Output:\n{js}"
+    );
+    insta::assert_snapshot!("object_multiple_spreads", js);
+}
+
+#[test]
+fn test_object_spread_with_pipe() {
+    // Pipe inside the same object literal as a spread — pipe must still be registered.
+    let js = compile_template_to_js(
+        r#"<div [title]="{ ...base, val: num | percent }"></div>"#,
+        "TestComponent",
+    );
+    assert!(js.contains("...a0"), "spread should be preserved alongside pipe. Output:\n{js}");
+    assert!(
+        js.contains("ɵɵpipeBind1"),
+        "pipe inside object literal with spread should still be registered. Output:\n{js}"
+    );
+    insta::assert_snapshot!("object_spread_with_pipe", js);
+}
+
+#[test]
+fn test_object_spread_at_end() {
+    let js =
+        compile_template_to_js(r#"<div [title]="{ key: 'val', ...base }"></div>"#, "TestComponent");
+    assert!(js.contains("...a0"), "trailing spread should be preserved. Output:\n{js}");
+    assert!(js.contains("ctx.base"), "spread variable should be referenced. Output:\n{js}");
+    insta::assert_snapshot!("object_spread_at_end", js);
+}
+
+// ============================================================================
+// Spread in Complex Expressions
+// ============================================================================
+
+#[test]
+fn test_spread_in_arrow_function_body() {
+    // Array spread inside an arrow function binding. Arrow functions fall through to the
+    // ExpressionStore in ingest (not explicitly handled), so the LiteralArray with SpreadElement
+    // reaches convert_angular_expression_with_ctx directly. Before the fix to the LiteralArray
+    // arm in reify/angular_expression.rs, SpreadElement entries were silently unwrapped,
+    // resulting in `() => [ctx.base,"extra"]` instead of `() => [...ctx.base,"extra"]`.
+    let js = compile_template_to_js(
+        r#"<button (click)="handler(() => [...base, 'extra'])">click</button>"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("...ctx.base"),
+        "spread inside arrow function body should be preserved. Output:\n{js}"
+    );
+    insta::assert_snapshot!("spread_in_arrow_function_body", js);
+}
+
+#[test]
+fn test_object_spread_chained_bindings() {
+    // Two property bindings on the same element force the chaining phase to run.
+    // The chaining phase clones instruction args via clone_expression. Before the fix to
+    // chaining.rs, LiteralMapEntry::new() was used (which always sets is_spread: false),
+    // silently dropping spread info from any LiteralMap that clone_expression encountered.
+    let js = compile_template_to_js(
+        r#"<div [title]="{ ...base, extra: 'val' }" [id]="myId"></div>"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("...a0"),
+        "spread should be preserved when bindings are chained. Output:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.base"),
+        "spread variable should be referenced when bindings are chained. Output:\n{js}"
+    );
+    insta::assert_snapshot!("object_spread_chained_bindings", js);
+}
+
+// ============================================================================
+// Array Spread Tests
+// ============================================================================
+
+#[test]
+fn test_array_spread_in_binding() {
+    let js = compile_template_to_js(r#"<div [title]="[...base, 'extra']"></div>"#, "TestComponent");
+    assert!(js.contains("...a0"), "array spread should be preserved in output. Output:\n{js}");
+    assert!(js.contains("ctx.base"), "spread variable should be referenced. Output:\n{js}");
+    insta::assert_snapshot!("array_spread_in_binding", js);
+}
+
+#[test]
+fn test_array_multiple_spreads() {
+    let js =
+        compile_template_to_js(r#"<div [title]="[...a, ...b, 'val']"></div>"#, "TestComponent");
+    assert!(
+        js.contains("...a0") && js.contains("...a1"),
+        "multiple array spreads should both appear. Output:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.a") && js.contains("ctx.b"),
+        "both spread variables should be referenced. Output:\n{js}"
+    );
+    insta::assert_snapshot!("array_multiple_spreads", js);
+}
+
+#[test]
+fn test_array_spread_vs_non_spread_pooling_distinct() {
+    // Two array bindings whose entries are identical except for spread shape: `[a]` vs `[...a]`.
+    // The pure-function pool deduplicates by body key, so if the key generation ignores the
+    // spread metadata on DerivedLiteralArray entries, both bindings collide on the same pooled
+    // helper and one binding gets the other's runtime semantics.
+    let js = compile_template_to_js(
+        r#"<div [title]="[a]"></div><div [id]="[...a]"></div>"#,
+        "TestComponent",
+    );
+    // Each binding must produce its own pure function: one emitting `[a0]`, the other `[...a0]`.
+    assert!(js.contains("[a0]"), "non-spread array binding should emit `[a0]` body. Output:\n{js}");
+    assert!(
+        js.contains("[...a0]"),
+        "spread array binding should emit `[...a0]` body. Output:\n{js}"
+    );
+}
+
+#[test]
+fn test_object_spread_vs_non_spread_pooling_distinct() {
+    // Object literal counterpart of the array test above. `{k: a}` and `{...a}` would collide
+    // on the same pooled helper if spread metadata is excluded from the key.
+    let js = compile_template_to_js(
+        r#"<div [title]="{k: a}"></div><div [id]="{...a}"></div>"#,
+        "TestComponent",
+    );
+    assert!(js.contains("...a0"), "object spread binding should emit `...a0`. Output:\n{js}");
+    assert!(
+        js.contains("k: a0") || js.contains("k:a0"),
+        "non-spread object binding should emit `k: a0`. Output:\n{js}"
+    );
+}
+
+// ============================================================================
 // ng-content Tests
 // ============================================================================
 

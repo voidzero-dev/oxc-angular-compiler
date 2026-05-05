@@ -505,12 +505,20 @@ pub struct LiteralArrayExpr<'a> {
 /// Object literal entry.
 #[derive(Debug)]
 pub struct LiteralMapEntry<'a> {
-    /// Property key.
     pub key: Ident<'a>,
-    /// Property value.
     pub value: OutputExpression<'a>,
-    /// Whether the key is quoted.
     pub quoted: bool,
+    pub is_spread: bool,
+}
+
+impl<'a> LiteralMapEntry<'a> {
+    pub fn new(key: Ident<'a>, value: OutputExpression<'a>, quoted: bool) -> Self {
+        Self { key, value, quoted, is_spread: false }
+    }
+
+    pub fn spread(value: OutputExpression<'a>) -> Self {
+        Self { key: Ident::from(""), value, quoted: false, is_spread: true }
+    }
 }
 
 /// Object literal expression.
@@ -1129,6 +1137,7 @@ impl<'a> OutputExpression<'a> {
                         key: entry.key.clone(),
                         value: entry.value.clone_in(allocator),
                         quoted: entry.quoted,
+                        is_spread: entry.is_spread,
                     });
                 }
                 OutputExpression::LiteralMap(Box::new_in(

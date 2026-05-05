@@ -81,21 +81,17 @@ fn build_definition_map<'a>(
     let mut entries = Vec::new_in(allocator);
 
     // type: ModuleClass
-    entries.push(LiteralMapEntry {
-        key: Ident::from("type"),
-        value: metadata.r#type.value.clone_in(allocator),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("type"),
+        metadata.r#type.value.clone_in(allocator),
+        false,
+    ));
 
     // bootstrap: [ComponentClass, ...]
     if metadata.has_bootstrap() {
         let bootstrap_array =
             create_reference_array(allocator, &metadata.bootstrap, metadata.contains_forward_decls);
-        entries.push(LiteralMapEntry {
-            key: Ident::from("bootstrap"),
-            value: bootstrap_array,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("bootstrap"), bootstrap_array, false));
     }
 
     // Inline scope if mode is Inline
@@ -107,11 +103,11 @@ fn build_definition_map<'a>(
                 &metadata.declarations,
                 metadata.contains_forward_decls,
             );
-            entries.push(LiteralMapEntry {
-                key: Ident::from("declarations"),
-                value: declarations_array,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(
+                Ident::from("declarations"),
+                declarations_array,
+                false,
+            ));
         }
 
         // imports: [ImportedModule, ...]
@@ -121,11 +117,7 @@ fn build_definition_map<'a>(
                 &metadata.imports,
                 metadata.contains_forward_decls,
             );
-            entries.push(LiteralMapEntry {
-                key: Ident::from("imports"),
-                value: imports_array,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("imports"), imports_array, false));
         }
 
         // exports: [ExportedClass, ...]
@@ -135,11 +127,7 @@ fn build_definition_map<'a>(
                 &metadata.exports,
                 metadata.contains_forward_decls,
             );
-            entries.push(LiteralMapEntry {
-                key: Ident::from("exports"),
-                value: exports_array,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("exports"), exports_array, false));
         }
     }
 
@@ -147,20 +135,12 @@ fn build_definition_map<'a>(
     if metadata.has_schemas() {
         let schemas_array =
             create_reference_array(allocator, &metadata.schemas, metadata.contains_forward_decls);
-        entries.push(LiteralMapEntry {
-            key: Ident::from("schemas"),
-            value: schemas_array,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("schemas"), schemas_array, false));
     }
 
     // id: 'unique-module-id'
     if let Some(id) = &metadata.id {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("id"),
-            value: id.clone_in(allocator),
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("id"), id.clone_in(allocator), false));
     }
 
     entries
@@ -276,31 +256,19 @@ fn create_set_scope_side_effect<'a>(
             &metadata.declarations,
             metadata.contains_forward_decls,
         );
-        scope_entries.push(LiteralMapEntry {
-            key: Ident::from("declarations"),
-            value: decls,
-            quoted: false,
-        });
+        scope_entries.push(LiteralMapEntry::new(Ident::from("declarations"), decls, false));
     }
 
     if metadata.has_imports() {
         let imports =
             create_reference_array(allocator, &metadata.imports, metadata.contains_forward_decls);
-        scope_entries.push(LiteralMapEntry {
-            key: Ident::from("imports"),
-            value: imports,
-            quoted: false,
-        });
+        scope_entries.push(LiteralMapEntry::new(Ident::from("imports"), imports, false));
     }
 
     if metadata.has_exports() {
         let exports =
             create_reference_array(allocator, &metadata.exports, metadata.contains_forward_decls);
-        scope_entries.push(LiteralMapEntry {
-            key: Ident::from("exports"),
-            value: exports,
-            quoted: false,
-        });
+        scope_entries.push(LiteralMapEntry::new(Ident::from("exports"), exports, false));
     }
 
     let scope_map = OutputExpression::LiteralMap(Box::new_in(

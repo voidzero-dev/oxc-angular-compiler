@@ -1231,11 +1231,19 @@ fn resolve_angular_expression<'a>(
                 // Create a DerivedLiteralMap with the resolved values
                 let mut keys = oxc_allocator::Vec::new_in(allocator);
                 let mut quoted = oxc_allocator::Vec::new_in(allocator);
+                let mut spreads = oxc_allocator::Vec::new_in(allocator);
                 for key in map.keys.iter() {
-                    // Only handle property keys; skip spread keys
-                    if let LiteralMapKey::Property(prop) = key {
-                        keys.push(prop.key.clone());
-                        quoted.push(prop.quoted);
+                    match key {
+                        LiteralMapKey::Property(prop) => {
+                            keys.push(prop.key.clone());
+                            quoted.push(prop.quoted);
+                            spreads.push(false);
+                        }
+                        LiteralMapKey::Spread(_) => {
+                            keys.push(Ident::from(""));
+                            quoted.push(false);
+                            spreads.push(true);
+                        }
                     }
                 }
 
@@ -1244,6 +1252,7 @@ fn resolve_angular_expression<'a>(
                         keys,
                         values: resolved_values,
                         quoted,
+                        spreads,
                         source_span: Some(map.source_span.to_span()),
                     },
                     allocator,
@@ -1256,27 +1265,35 @@ fn resolve_angular_expression<'a>(
         AngularExpression::LiteralArray(arr) => {
             // Handle array literals - need to resolve variable references in entries
             let mut resolved_entries = oxc_allocator::Vec::new_in(allocator);
+            let mut spreads = oxc_allocator::Vec::new_in(allocator);
             let mut any_resolved = false;
 
             for entry in arr.expressions.iter() {
+                let is_spread = matches!(entry, AngularExpression::SpreadElement(_));
+                let inner = if let AngularExpression::SpreadElement(s) = entry {
+                    &s.expression
+                } else {
+                    entry
+                };
                 if let Some(resolved) =
-                    resolve_angular_expression(entry, scope, root_xref, allocator)
+                    resolve_angular_expression(inner, scope, root_xref, allocator)
                 {
                     resolved_entries.push(resolved);
                     any_resolved = true;
                 } else {
-                    // Keep the original entry wrapped as Ast
                     resolved_entries.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(entry, allocator),
+                        crate::ir::expression::clone_angular_expression(inner, allocator),
                         allocator,
                     )));
                 }
+                spreads.push(is_spread);
             }
 
             if any_resolved {
                 Some(IrExpression::DerivedLiteralArray(Box::new_in(
                     crate::ir::expression::DerivedLiteralArrayExpr {
                         entries: resolved_entries,
+                        spreads,
                         source_span: Some(arr.source_span.to_span()),
                     },
                     allocator,

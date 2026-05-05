@@ -65,11 +65,7 @@ pub fn build_decorator_metadata_array<'a>(
         };
 
         // Add "type" entry
-        map_entries.push(LiteralMapEntry {
-            key: Ident::from("type"),
-            value: type_expr,
-            quoted: false,
-        });
+        map_entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
         // Add "args" entry if the decorator has arguments
         if let Expression::CallExpression(call) = &decorator.expression
@@ -84,14 +80,14 @@ pub fn build_decorator_metadata_array<'a>(
             }
 
             if !args.is_empty() {
-                map_entries.push(LiteralMapEntry {
-                    key: Ident::from("args"),
-                    value: OutputExpression::LiteralArray(Box::new_in(
+                map_entries.push(LiteralMapEntry::new(
+                    Ident::from("args"),
+                    OutputExpression::LiteralArray(Box::new_in(
                         LiteralArrayExpr { entries: args, source_span: None },
                         allocator,
                     )),
-                    quoted: false,
-                });
+                    false,
+                ));
             }
         }
 
@@ -156,22 +152,18 @@ pub fn build_ctor_params_metadata<'a>(
             ))
         });
 
-        map_entries.push(LiteralMapEntry {
-            key: Ident::from("type"),
-            value: type_expr,
-            quoted: false,
-        });
+        map_entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
         // Extract decorators from the parameter
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
             let decorators_array =
                 build_decorator_metadata_array(allocator, &param_decorators, source_text);
-            map_entries.push(LiteralMapEntry {
-                key: Ident::from("decorators"),
-                value: decorators_array,
-                quoted: false,
-            });
+            map_entries.push(LiteralMapEntry::new(
+                Ident::from("decorators"),
+                decorators_array,
+                false,
+            ));
         }
 
         param_entries.push(OutputExpression::LiteralMap(Box::new_in(
@@ -258,11 +250,7 @@ pub fn build_prop_decorators_metadata<'a>(
         let decorators_array =
             build_decorator_metadata_array(allocator, &angular_decorators, source_text);
 
-        prop_entries.push(LiteralMapEntry {
-            key: prop_name,
-            value: decorators_array,
-            quoted: false,
-        });
+        prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
     }
 
     if prop_entries.is_empty() {

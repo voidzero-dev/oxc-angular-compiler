@@ -491,6 +491,7 @@ fn clone_expression<'a>(
                     key: entry.key.clone(),
                     value: clone_expression(allocator, &entry.value, diagnostics),
                     quoted: entry.quoted,
+                    is_spread: entry.is_spread,
                 });
             }
             OutputExpression::LiteralMap(Box::new_in(
