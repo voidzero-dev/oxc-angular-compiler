@@ -108,20 +108,16 @@ fn build_base_directive_fields<'a>(
     let mut host_declarations = oxc_allocator::Vec::new_in(allocator);
 
     // type: MyDirective
-    entries.push(LiteralMapEntry {
-        key: Ident::from("type"),
-        value: metadata.r#type.clone_in(allocator),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("type"),
+        metadata.r#type.clone_in(allocator),
+        false,
+    ));
 
     // selectors: [['', 'myDir', '']]
     if let Some(selector) = &metadata.selector {
         if let Some(selectors_expr) = parse_selector_to_r3_selector(allocator, selector) {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("selectors"),
-                value: selectors_expr,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("selectors"), selectors_expr, false));
         }
     }
 
@@ -135,11 +131,11 @@ fn build_base_directive_fields<'a>(
             Some(metadata.name.as_str()),
             None,
         );
-        entries.push(LiteralMapEntry {
-            key: Ident::from("contentQueries"),
-            value: content_queries_fn,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("contentQueries"),
+            content_queries_fn,
+            false,
+        ));
     }
 
     // viewQuery: (rf, ctx) => { ... }
@@ -152,11 +148,7 @@ fn build_base_directive_fields<'a>(
             Some(metadata.name.as_str()),
             None,
         );
-        entries.push(LiteralMapEntry {
-            key: Ident::from("viewQuery"),
-            value: view_queries_fn,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("viewQuery"), view_queries_fn, false));
     }
 
     // hostBindings: (rf, ctx) => { ... }
@@ -175,35 +167,31 @@ fn build_base_directive_fields<'a>(
             // Note: Property/TwoWayProperty bindings are excluded from hostAttrs
             // as they are dynamic bindings handled by hostBindings function
             if let Some(host_attrs) = result.host_attrs {
-                entries.push(LiteralMapEntry {
-                    key: Ident::from("hostAttrs"),
-                    value: host_attrs,
-                    quoted: false,
-                });
+                entries.push(LiteralMapEntry::new(Ident::from("hostAttrs"), host_attrs, false));
             }
 
             // hostVars: number - only if > 0
             if let Some(host_vars) = result.host_vars {
-                entries.push(LiteralMapEntry {
-                    key: Ident::from("hostVars"),
-                    value: OutputExpression::Literal(Box::new_in(
+                entries.push(LiteralMapEntry::new(
+                    Ident::from("hostVars"),
+                    OutputExpression::Literal(Box::new_in(
                         LiteralExpr {
                             value: LiteralValue::Number(host_vars as f64),
                             source_span: None,
                         },
                         allocator,
                     )),
-                    quoted: false,
-                });
+                    false,
+                ));
             }
 
             // hostBindings: function(rf, ctx) { ... }
             if let Some(host_fn) = result.host_binding_fn {
-                entries.push(LiteralMapEntry {
-                    key: Ident::from("hostBindings"),
-                    value: OutputExpression::Function(Box::new_in(host_fn, allocator)),
-                    quoted: false,
-                });
+                entries.push(LiteralMapEntry::new(
+                    Ident::from("hostBindings"),
+                    OutputExpression::Function(Box::new_in(host_fn, allocator)),
+                    false,
+                ));
             }
 
             // Collect host binding pool declarations (pure functions, etc.)
@@ -214,22 +202,14 @@ fn build_base_directive_fields<'a>(
     // inputs: { prop: 'prop', aliased: ['publicName', 'privateField'] }
     if !metadata.inputs.is_empty() {
         if let Some(inputs_expr) = create_inputs_literal(allocator, &metadata.inputs) {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("inputs"),
-                value: inputs_expr,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_expr, false));
         }
     }
 
     // outputs: { click: 'click' }
     if !metadata.outputs.is_empty() {
         if let Some(outputs_expr) = create_outputs_literal(allocator, &metadata.outputs) {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("outputs"),
-                value: outputs_expr,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_expr, false));
         }
     }
 
@@ -242,38 +222,38 @@ fn build_base_directive_fields<'a>(
                 allocator,
             )));
         }
-        entries.push(LiteralMapEntry {
-            key: Ident::from("exportAs"),
-            value: OutputExpression::LiteralArray(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("exportAs"),
+            OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: export_items, source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // standalone: false (only if not standalone, since true is default)
     if !metadata.is_standalone {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("standalone"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("standalone"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // signals: true (only if signal-based)
     if metadata.is_signal {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("signals"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("signals"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     (entries, next_pool_index, host_declarations)
@@ -316,14 +296,14 @@ fn add_features<'a>(
     }
 
     if !features.is_empty() {
-        definition_map.push(LiteralMapEntry {
-            key: Ident::from("features"),
-            value: OutputExpression::LiteralArray(Box::new_in(
+        definition_map.push(LiteralMapEntry::new(
+            Ident::from("features"),
+            OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: features, source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 }
 
@@ -521,7 +501,7 @@ pub fn create_inputs_literal<'a>(
         };
 
         let quoted = needs_object_key_quoting(declared_name);
-        entries.push(LiteralMapEntry { key: declared_name.clone(), value, quoted });
+        entries.push(LiteralMapEntry::new(declared_name.clone(), value, quoted));
     }
 
     Some(OutputExpression::LiteralMap(Box::new_in(
@@ -543,9 +523,9 @@ pub fn create_outputs_literal<'a>(
 
     for (class_name, binding_name) in outputs {
         let quoted = needs_object_key_quoting(class_name);
-        entries.push(LiteralMapEntry {
-            key: class_name.clone(),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            class_name.clone(),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
                     value: LiteralValue::String(binding_name.clone()),
                     source_span: None,
@@ -553,7 +533,7 @@ pub fn create_outputs_literal<'a>(
                 allocator,
             )),
             quoted,
-        });
+        ));
     }
 
     Some(OutputExpression::LiteralMap(Box::new_in(
@@ -934,30 +914,18 @@ fn create_host_directives_feature_arg<'a>(
             hd.directive.clone_in(allocator)
         };
 
-        entries.push(LiteralMapEntry {
-            key: Ident::from("directive"),
-            value: directive_expr,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("directive"), directive_expr, false));
 
         // inputs (if any)
         if !hd.inputs.is_empty() {
             let inputs_array = create_host_directive_mappings_array(allocator, &hd.inputs);
-            entries.push(LiteralMapEntry {
-                key: Ident::from("inputs"),
-                value: inputs_array,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_array, false));
         }
 
         // outputs (if any)
         if !hd.outputs.is_empty() {
             let outputs_array = create_host_directive_mappings_array(allocator, &hd.outputs);
-            entries.push(LiteralMapEntry {
-                key: Ident::from("outputs"),
-                value: outputs_array,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_array, false));
         }
 
         items.push(OutputExpression::LiteralMap(Box::new_in(

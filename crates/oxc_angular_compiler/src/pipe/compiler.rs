@@ -64,42 +64,42 @@ fn build_definition_map<'a>(
 
     // name: literal(metadata.pipeName ?? metadata.name)
     let pipe_name = metadata.pipe_name.clone().unwrap_or_else(|| metadata.name.clone());
-    entries.push(LiteralMapEntry {
-        key: Ident::from("name"),
-        value: OutputExpression::Literal(Box::new_in(
+    entries.push(LiteralMapEntry::new(
+        Ident::from("name"),
+        OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(pipe_name), source_span: None },
             allocator,
         )),
-        quoted: false,
-    });
+        false,
+    ));
 
     // type: metadata.type.value
-    entries.push(LiteralMapEntry {
-        key: Ident::from("type"),
-        value: metadata.r#type.clone_in(allocator),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("type"),
+        metadata.r#type.clone_in(allocator),
+        false,
+    ));
 
     // pure: literal(metadata.pure)
-    entries.push(LiteralMapEntry {
-        key: Ident::from("pure"),
-        value: OutputExpression::Literal(Box::new_in(
+    entries.push(LiteralMapEntry::new(
+        Ident::from("pure"),
+        OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(metadata.pure), source_span: None },
             allocator,
         )),
-        quoted: false,
-    });
+        false,
+    ));
 
     // standalone: only included if false (Angular's runtime defaults standalone to true)
     if !metadata.is_standalone {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("standalone"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("standalone"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     entries

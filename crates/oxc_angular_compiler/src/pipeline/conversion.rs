@@ -506,15 +506,18 @@ pub fn convert_ast<'a>(
             let mut entries = Vec::with_capacity_in(map.keys.len(), allocator);
             for (key, value) in map.keys.iter().zip(map.values.iter()) {
                 let converted_value = convert_ast(allocator, value, root_xref, allocate_xref_id);
-                // Only handle property keys for now; spread keys need special handling
-                if let LiteralMapKey::Property(prop) = key {
-                    entries.push(LiteralMapEntry {
-                        key: prop.key.clone(),
-                        value: converted_value.to_output(allocator),
-                        quoted: prop.quoted,
-                    });
+                match key {
+                    LiteralMapKey::Property(prop) => {
+                        entries.push(LiteralMapEntry::new(
+                            prop.key.clone(),
+                            converted_value.to_output(allocator),
+                            prop.quoted,
+                        ));
+                    }
+                    LiteralMapKey::Spread(_) => {
+                        entries.push(LiteralMapEntry::spread(converted_value.to_output(allocator)));
+                    }
                 }
-                // TODO: Handle spread keys when needed
             }
             ConvertedExpression::output(OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: convert_source_span(map.source_span) },

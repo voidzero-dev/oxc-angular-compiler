@@ -324,12 +324,11 @@ fn convert_object_expression<'a>(
                 // Convert the value
                 let value = convert_oxc_expression(allocator, &p.value, source_text)?;
 
-                entries.push(LiteralMapEntry { key, value, quoted });
+                entries.push(LiteralMapEntry::new(key, value, quoted));
             }
-            ObjectPropertyKind::SpreadProperty(_) => {
-                // Spread properties are not directly supported in LiteralMap
-                // Skip for now
-                continue;
+            ObjectPropertyKind::SpreadProperty(spread) => {
+                let value = convert_oxc_expression(allocator, &spread.argument, source_text)?;
+                entries.push(LiteralMapEntry::spread(value));
             }
         }
     }
@@ -910,6 +909,28 @@ mod tests {
             assert!(matches!(arr.entries.get(2), Some(OutputExpression::ReadVar(_))));
         } else {
             panic!("Expected LiteralArray expression");
+        }
+    }
+
+    #[test]
+    fn test_convert_spread_in_object() {
+        // SpreadProperty in object expressions was previously skipped (// Skip for now).
+        // Now that LiteralMapEntry::spread() exists, it should be preserved.
+        let allocator = Allocator::default();
+        let expr = parse_expression(&allocator, "{ ...base, key: 'val' }");
+        let result = convert_oxc_expression(&allocator, &expr, None);
+        assert!(result.is_some(), "Expected Some result");
+        if let Some(OutputExpression::LiteralMap(map)) = result {
+            assert_eq!(map.entries.len(), 2, "Expected 2 entries (spread + property)");
+            // First entry should be a spread
+            let first = &map.entries[0];
+            assert!(first.is_spread, "Expected first entry to be a spread");
+            // Second entry should be a regular property
+            let second = &map.entries[1];
+            assert!(!second.is_spread, "Expected second entry to be a regular property");
+            assert_eq!(second.key.as_str(), "key");
+        } else {
+            panic!("Expected LiteralMap expression, got: {:?}", result);
         }
     }
 

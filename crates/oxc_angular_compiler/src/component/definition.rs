@@ -128,14 +128,14 @@ fn generate_cmp_definition<'a>(
     // =========================================================================
 
     // 1. type: ComponentClass
-    entries.push(LiteralMapEntry {
-        key: Ident::from("type"),
-        value: OutputExpression::ReadVar(Box::new_in(
+    entries.push(LiteralMapEntry::new(
+        Ident::from("type"),
+        OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
             allocator,
         )),
-        quoted: false,
-    });
+        false,
+    ));
 
     // 2. selectors: [["selector"]] or [["ng-component"]] if no selector
     // Angular uses "ng-component" as the default selector for components without an explicit selector.
@@ -144,22 +144,14 @@ fn generate_cmp_definition<'a>(
     let selector_value =
         metadata.selector.as_ref().map_or_else(|| Ident::from("ng-component"), |s| s.clone());
     let selector_entries = parse_selector_to_array(allocator, &selector_value);
-    entries.push(LiteralMapEntry {
-        key: Ident::from("selectors"),
-        value: selector_entries,
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(Ident::from("selectors"), selector_entries, false));
 
     // 3. contentQueries: function(rf, ctx, dirIndex) { ... } (if any)
     // This handles @ContentChild/@ContentChildren decorators and signal-based queries
     // (contentChild(), contentChildren()).
     // Per Angular compiler.ts lines 57-63 (baseDirectiveFields)
     if let Some(content_queries) = content_queries_fn {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("contentQueries"),
-            value: content_queries,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("contentQueries"), content_queries, false));
     }
 
     // 4. viewQuery: function(rf, ctx) { ... } (if any)
@@ -167,11 +159,7 @@ fn generate_cmp_definition<'a>(
     // The predicate arrays are pre-pooled to ensure correct constant ordering.
     // Per Angular compiler.ts lines 65-70 (baseDirectiveFields)
     if let Some(view_query) = view_query_fn {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("viewQuery"),
-            value: view_query,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("viewQuery"), view_query, false));
     }
 
     // 5-7. Host binding fields (hostAttrs, hostVars, hostBindings)
@@ -181,35 +169,31 @@ fn generate_cmp_definition<'a>(
     if let Some(host_result) = host_binding_result {
         // 5. hostAttrs: [...] - static host attributes
         if let Some(host_attrs) = host_result.host_attrs {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("hostAttrs"),
-                value: host_attrs,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("hostAttrs"), host_attrs, false));
         }
 
         // 6. hostVars: number - only if > 0
         if let Some(host_vars) = host_result.host_vars {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("hostVars"),
-                value: OutputExpression::Literal(Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from("hostVars"),
+                OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::Number(host_vars as f64),
                         source_span: None,
                     },
                     allocator,
                 )),
-                quoted: false,
-            });
+                false,
+            ));
         }
 
         // 7. hostBindings: function(rf, ctx) { ... } (if any)
         if let Some(host_fn) = host_result.host_binding_fn {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("hostBindings"),
-                value: OutputExpression::Function(Box::new_in(host_fn, allocator)),
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(
+                Ident::from("hostBindings"),
+                OutputExpression::Function(Box::new_in(host_fn, allocator)),
+                false,
+            ));
         }
     }
 
@@ -217,11 +201,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 86-87 (baseDirectiveFields)
     if !metadata.inputs.is_empty() {
         if let Some(inputs_expr) = create_inputs_literal(allocator, &metadata.inputs) {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("inputs"),
-                value: inputs_expr,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_expr, false));
         }
     }
 
@@ -229,11 +209,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts lines 89-90 (baseDirectiveFields)
     if !metadata.outputs.is_empty() {
         if let Some(outputs_expr) = create_outputs_literal(allocator, &metadata.outputs) {
-            entries.push(LiteralMapEntry {
-                key: Ident::from("outputs"),
-                value: outputs_expr,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_expr, false));
         }
     }
 
@@ -247,40 +223,40 @@ fn generate_cmp_definition<'a>(
                 allocator,
             )));
         }
-        entries.push(LiteralMapEntry {
-            key: Ident::from("exportAs"),
-            value: OutputExpression::LiteralArray(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("exportAs"),
+            OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: export_items, source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // 11. standalone: false - only emit when NOT standalone (true is the default in Angular v17+)
     // Per Angular compiler.ts lines 96-98 (baseDirectiveFields)
     if !metadata.standalone {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("standalone"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("standalone"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // 12. signals: true (if isSignal)
     // Per Angular compiler.ts lines 99-101 (baseDirectiveFields)
     if metadata.is_signal {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("signals"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("signals"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // =========================================================================
@@ -290,11 +266,7 @@ fn generate_cmp_definition<'a>(
     // 13. features: [...] - component features like providers, lifecycle hooks, inheritance
     // See: packages/compiler/src/render3/view/compiler.ts:119-161
     if let Some(features) = generate_features_array(allocator, metadata, namespace_registry) {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("features"),
-            value: features,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("features"), features, false));
     }
 
     // =========================================================================
@@ -307,42 +279,42 @@ fn generate_cmp_definition<'a>(
     // The attrs_ref is pre-pooled BEFORE template compilation to ensure correct constant ordering.
     // TypeScript Angular adds attrs to the pool BEFORE template ingestion/compilation.
     if let Some(attrs) = attrs_ref {
-        entries.push(LiteralMapEntry { key: Ident::from("attrs"), value: attrs, quoted: false });
+        entries.push(LiteralMapEntry::new(Ident::from("attrs"), attrs, false));
     }
 
     // 15. ngContentSelectors: [...] - content projection selectors
     // Per Angular compiler.ts lines 254-256
     if let Some(content_selectors) = job.content_selectors.take() {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("ngContentSelectors"),
-            value: content_selectors,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("ngContentSelectors"),
+            content_selectors,
+            false,
+        ));
     }
 
     // 16. decls: number (from compilation)
     // Per Angular compiler.ts line 258
     let decls = job.root.decl_count.unwrap_or(0);
-    entries.push(LiteralMapEntry {
-        key: Ident::from("decls"),
-        value: OutputExpression::Literal(Box::new_in(
+    entries.push(LiteralMapEntry::new(
+        Ident::from("decls"),
+        OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(decls as f64), source_span: None },
             allocator,
         )),
-        quoted: false,
-    });
+        false,
+    ));
 
     // 17. vars: number (from compilation)
     // Per Angular compiler.ts line 259
     let vars = job.root.vars.unwrap_or(0);
-    entries.push(LiteralMapEntry {
-        key: Ident::from("vars"),
-        value: OutputExpression::Literal(Box::new_in(
+    entries.push(LiteralMapEntry::new(
+        Ident::from("vars"),
+        OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(vars as f64), source_span: None },
             allocator,
         )),
-        quoted: false,
-    });
+        false,
+    ));
 
     // 18. consts: [...] or consts: function() { ...initializers...; return [...]; }
     // Per Angular compiler.ts lines 260-268:
@@ -394,31 +366,23 @@ fn generate_cmp_definition<'a>(
             ))
         };
 
-        entries.push(LiteralMapEntry {
-            key: Ident::from("consts"),
-            value: consts_value,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("consts"), consts_value, false));
     }
 
     // 19. template: function(rf, ctx) { ... }
     // Per Angular compiler.ts line 270
-    entries.push(LiteralMapEntry {
-        key: Ident::from("template"),
-        value: OutputExpression::Function(Box::new_in(template_fn, allocator)),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("template"),
+        OutputExpression::Function(Box::new_in(template_fn, allocator)),
+        false,
+    ));
 
     // 20. dependencies: [...] - template dependencies (directives and pipes)
     // Per Angular compiler.ts lines 272-289
     if let Some(dependencies) =
         generate_dependencies_expression(allocator, metadata, namespace_registry)
     {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("dependencies"),
-            value: dependencies,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("dependencies"), dependencies, false));
     }
 
     // 21. styles: [...]
@@ -459,14 +423,14 @@ fn generate_cmp_definition<'a>(
 
         if !style_entries.is_empty() {
             has_styles = true;
-            entries.push(LiteralMapEntry {
-                key: Ident::from("styles"),
-                value: OutputExpression::LiteralArray(Box::new_in(
+            entries.push(LiteralMapEntry::new(
+                Ident::from("styles"),
+                OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries: style_entries, source_span: None },
                     allocator,
                 )),
-                quoted: false,
-            });
+                false,
+            ));
         }
     }
 
@@ -485,17 +449,17 @@ fn generate_cmp_definition<'a>(
             ViewEncapsulation::None => 2,
             ViewEncapsulation::ShadowDom => 3,
         };
-        entries.push(LiteralMapEntry {
-            key: Ident::from("encapsulation"),
-            value: OutputExpression::Literal(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("encapsulation"),
+            OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
                     value: LiteralValue::Number(encapsulation_value as f64),
                     source_span: None,
                 },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // 23. data: {animation: [...]} - animation triggers
@@ -504,21 +468,20 @@ fn generate_cmp_definition<'a>(
         // Create the inner map: {animation: animationsExpr}
         let mut data_entries: OxcVec<'a, LiteralMapEntry<'a>> =
             OxcVec::with_capacity_in(1, allocator);
-        data_entries.push(LiteralMapEntry {
-            key: Ident::from("animation"),
-            // Use the full animations expression directly
-            value: animations.clone_in(allocator),
-            quoted: false,
-        });
+        data_entries.push(LiteralMapEntry::new(
+            Ident::from("animation"),
+            animations.clone_in(allocator),
+            false,
+        ));
 
-        entries.push(LiteralMapEntry {
-            key: Ident::from("data"),
-            value: OutputExpression::LiteralMap(Box::new_in(
+        entries.push(LiteralMapEntry::new(
+            Ident::from("data"),
+            OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries: data_entries, source_span: None },
                 allocator,
             )),
-            quoted: false,
-        });
+            false,
+        ));
     }
 
     // 24. changeDetection: ChangeDetectionStrategy.OnPush - only emit if not Default
@@ -549,11 +512,11 @@ fn generate_cmp_definition<'a>(
             },
             allocator,
         ));
-        entries.push(LiteralMapEntry {
-            key: Ident::from("changeDetection"),
-            value: strategy_value_expr,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("changeDetection"),
+            strategy_value_expr,
+            false,
+        ));
     }
 
     // Create the config object
@@ -1193,32 +1156,20 @@ fn create_host_directives_arg<'a>(
             let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(allocator);
 
             // directive: DirectiveClass (or i1.DirectiveClass for imports)
-            entries.push(LiteralMapEntry {
-                key: Ident::from("directive"),
-                value: directive_ref,
-                quoted: false,
-            });
+            entries.push(LiteralMapEntry::new(Ident::from("directive"), directive_ref, false));
 
             // inputs: ['internalName', 'publicName', ...]
             if !directive.inputs.is_empty() {
                 let inputs_array =
                     create_host_directive_mappings_array(allocator, &directive.inputs);
-                entries.push(LiteralMapEntry {
-                    key: Ident::from("inputs"),
-                    value: inputs_array,
-                    quoted: false,
-                });
+                entries.push(LiteralMapEntry::new(Ident::from("inputs"), inputs_array, false));
             }
 
             // outputs: ['internalName', 'publicName', ...]
             if !directive.outputs.is_empty() {
                 let outputs_array =
                     create_host_directive_mappings_array(allocator, &directive.outputs);
-                entries.push(LiteralMapEntry {
-                    key: Ident::from("outputs"),
-                    value: outputs_array,
-                    quoted: false,
-                });
+                entries.push(LiteralMapEntry::new(Ident::from("outputs"), outputs_array, false));
             }
 
             expressions.push(OutputExpression::LiteralMap(Box::new_in(

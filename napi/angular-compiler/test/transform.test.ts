@@ -540,3 +540,42 @@ describe('animation host listeners', () => {
     expect(result.code).not.toMatch(/ɵɵlistener\(\s*"anim"[\s\S]*?,\s*null\s*,\s*true\s*\)/)
   })
 })
+
+describe('object spread in template bindings', () => {
+  it('should preserve spread syntax in object literal bindings', async () => {
+    const source = `
+      import { Component } from '@angular/core'
+      @Component({
+        template: \`<div [title]="{ ...base, extra: 'val' }"></div>\`,
+      })
+      export class TestComponent {
+        base = {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    // Spread is inside a pure function body (Angular memoizes object literals).
+    // The emitted code should contain spread syntax, not an empty-string key.
+    expect(result.code).toContain('...')
+    expect(result.code).not.toMatch(/""\s*:/)
+  })
+
+  it('should preserve multiple spreads in object literal bindings', async () => {
+    const source = `
+      import { Component } from '@angular/core'
+      @Component({
+        template: \`<div [title]="{ ...a, ...b, key: 'val' }"></div>\`,
+      })
+      export class TestComponent {
+        a = {}
+        b = {}
+      }
+    `
+    const result = await transformAngularFile(source, 'test.component.ts', {})
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).not.toMatch(/""\s*:/)
+    // Both spread variables should appear in the output
+    expect(result.code).toContain('ctx.a')
+    expect(result.code).toContain('ctx.b')
+  })
+})

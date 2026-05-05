@@ -87,6 +87,7 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
         // which emits `null` for missing values, not `0`.
         if config.loading_minimum_time.is_some() || config.loading_after_time.is_some() {
             let mut elements = OxcVec::with_capacity_in(2, allocator);
+            let mut spreads = oxc_allocator::Vec::with_capacity_in(2, allocator);
 
             // minimumTime: number or null
             let min_val = match config.loading_minimum_time {
@@ -100,6 +101,7 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
                 )),
                 allocator,
             )));
+            spreads.push(false);
 
             // afterTime: number or null
             let after_val = match config.loading_after_time {
@@ -113,9 +115,10 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
                 )),
                 allocator,
             )));
+            spreads.push(false);
 
             let array_expr = IrExpression::LiteralArray(Box::new_in(
-                IrLiteralArrayExpr { elements, source_span: None },
+                IrLiteralArrayExpr { elements, spreads, source_span: None },
                 allocator,
             ));
 
@@ -134,6 +137,7 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
         // Create placeholder config: [minimumTime]
         if let Some(min_time) = config.placeholder_minimum_time {
             let mut elements = OxcVec::with_capacity_in(1, allocator);
+            let mut spreads = oxc_allocator::Vec::with_capacity_in(1, allocator);
             elements.push(IrExpression::Ast(Box::new_in(
                 crate::ast::expression::AngularExpression::LiteralPrimitive(Box::new_in(
                     LiteralPrimitive {
@@ -145,9 +149,10 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
                 )),
                 allocator,
             )));
+            spreads.push(false);
 
             let array_expr = IrExpression::LiteralArray(Box::new_in(
-                IrLiteralArrayExpr { elements, source_span: None },
+                IrLiteralArrayExpr { elements, spreads, source_span: None },
                 allocator,
             ));
 

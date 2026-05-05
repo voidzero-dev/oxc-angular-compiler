@@ -953,10 +953,16 @@ impl JsEmitter {
                     ctx.print(",");
                 }
             }
-            let key = escape_identifier(&entry.key, self.escape_dollar_in_strings, entry.quoted);
-            ctx.print(&key);
-            ctx.print(":");
-            self.visit_expression(&entry.value, ctx);
+            if entry.is_spread {
+                ctx.print("...");
+                self.visit_expression(&entry.value, ctx);
+            } else {
+                let key =
+                    escape_identifier(&entry.key, self.escape_dollar_in_strings, entry.quoted);
+                ctx.print(&key);
+                ctx.print(":");
+                self.visit_expression(&entry.value, ctx);
+            }
         }
         if incremented_indent {
             ctx.dec_indent();
@@ -2660,11 +2666,7 @@ mod tests {
         ));
 
         let mut entries = oxc_allocator::Vec::new_in(&alloc);
-        entries.push(LiteralMapEntry {
-            key: Ident::from("showMenu"),
-            value: signal_call,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("showMenu"), signal_call, false));
 
         let obj_literal = OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries, source_span: None },
@@ -2725,11 +2727,7 @@ mod tests {
         ));
 
         let mut entries = oxc_allocator::Vec::new_in(&alloc);
-        entries.push(LiteralMapEntry {
-            key: Ident::from("showMenu"),
-            value: signal_call,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("showMenu"), signal_call, false));
 
         let obj_literal = OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries, source_span: None },

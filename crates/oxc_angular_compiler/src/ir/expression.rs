@@ -643,8 +643,12 @@ impl<'a> IrExpression<'a> {
                 for entry in e.entries.iter() {
                     entries.push(entry.clone_in(allocator));
                 }
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                for s in e.spreads.iter() {
+                    spreads.push(*s);
+                }
                 IrExpression::DerivedLiteralArray(Box::new_in(
-                    DerivedLiteralArrayExpr { entries, source_span: e.source_span },
+                    DerivedLiteralArrayExpr { entries, spreads, source_span: e.source_span },
                     allocator,
                 ))
             }
@@ -661,8 +665,18 @@ impl<'a> IrExpression<'a> {
                 for q in e.quoted.iter() {
                     quoted.push(*q);
                 }
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                for s in e.spreads.iter() {
+                    spreads.push(*s);
+                }
                 IrExpression::DerivedLiteralMap(Box::new_in(
-                    DerivedLiteralMapExpr { keys, values, quoted, source_span: e.source_span },
+                    DerivedLiteralMapExpr {
+                        keys,
+                        values,
+                        quoted,
+                        spreads,
+                        source_span: e.source_span,
+                    },
                     allocator,
                 ))
             }
@@ -671,8 +685,12 @@ impl<'a> IrExpression<'a> {
                 for elem in e.elements.iter() {
                     elements.push(elem.clone_in(allocator));
                 }
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                for s in e.spreads.iter() {
+                    spreads.push(*s);
+                }
                 IrExpression::LiteralArray(Box::new_in(
-                    IrLiteralArrayExpr { elements, source_span: e.source_span },
+                    IrLiteralArrayExpr { elements, spreads, source_span: e.source_span },
                     allocator,
                 ))
             }
@@ -689,8 +707,12 @@ impl<'a> IrExpression<'a> {
                 for q in e.quoted.iter() {
                     quoted.push(*q);
                 }
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                for s in e.spreads.iter() {
+                    spreads.push(*s);
+                }
                 IrExpression::LiteralMap(Box::new_in(
-                    IrLiteralMapExpr { keys, values, quoted, source_span: e.source_span },
+                    IrLiteralMapExpr { keys, values, quoted, spreads, source_span: e.source_span },
                     allocator,
                 ))
             }
@@ -998,6 +1020,8 @@ pub struct IrTemplateLiteralElement<'a> {
 pub struct DerivedLiteralArrayExpr<'a> {
     /// Array entries - can be Ast (constants) or PureFunctionParameter (refs).
     pub entries: Vec<'a, IrExpression<'a>>,
+    /// Whether each entry is a spread element (parallel to entries).
+    pub spreads: Vec<'a, bool>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1013,6 +1037,8 @@ pub struct DerivedLiteralMapExpr<'a> {
     pub values: Vec<'a, IrExpression<'a>>,
     /// Whether each key is quoted.
     pub quoted: Vec<'a, bool>,
+    /// Whether each entry is a spread (parallel to keys/values/quoted).
+    pub spreads: Vec<'a, bool>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1023,6 +1049,8 @@ pub struct DerivedLiteralMapExpr<'a> {
 pub struct IrLiteralArrayExpr<'a> {
     /// Array elements as IR expressions.
     pub elements: Vec<'a, IrExpression<'a>>,
+    /// Whether each element is a spread element (parallel to elements).
+    pub spreads: Vec<'a, bool>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1037,6 +1065,8 @@ pub struct IrLiteralMapExpr<'a> {
     pub values: Vec<'a, IrExpression<'a>>,
     /// Whether each key is quoted.
     pub quoted: Vec<'a, bool>,
+    /// Whether each entry is a spread (parallel to keys/values/quoted).
+    pub spreads: Vec<'a, bool>,
     /// Source span.
     pub source_span: Option<Span>,
 }

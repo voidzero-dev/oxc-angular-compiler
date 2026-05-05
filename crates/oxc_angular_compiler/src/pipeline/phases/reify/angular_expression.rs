@@ -11,8 +11,9 @@ use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, BinaryOperator, BinaryOperatorExpr, ConditionalExpr,
     FnParam, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
     LiteralValue, NotExpr, OutputExpression, ParenthesizedExpr, ReadKeyExpr, ReadPropExpr,
-    ReadVarExpr, RegularExpressionLiteralExpr, TaggedTemplateLiteralExpr, TemplateLiteralElement,
-    TemplateLiteralExpr, TypeofExpr, UnaryOperator, UnaryOperatorExpr, VoidExpr,
+    ReadVarExpr, RegularExpressionLiteralExpr, SpreadElementExpr, TaggedTemplateLiteralExpr,
+    TemplateLiteralElement, TemplateLiteralExpr, TypeofExpr, UnaryOperator, UnaryOperatorExpr,
+    VoidExpr,
 };
 
 /// Context for safe navigation expression conversion, providing temp variable allocation.
@@ -306,7 +307,25 @@ fn convert_angular_expression_with_ctx<'a>(
         AngularExpression::LiteralArray(arr) => {
             let mut entries = OxcVec::new_in(allocator);
             for entry in arr.expressions.iter() {
-                entries.push(convert_angular_expression_with_ctx(allocator, entry, root_xref, ctx));
+                if let AngularExpression::SpreadElement(spread) = entry {
+                    let inner = convert_angular_expression_with_ctx(
+                        allocator,
+                        &spread.expression,
+                        root_xref,
+                        ctx,
+                    );
+                    entries.push(OutputExpression::SpreadElement(Box::new_in(
+                        SpreadElementExpr {
+                            expr: Box::new_in(inner, allocator),
+                            source_span: None,
+                        },
+                        allocator,
+                    )));
+                } else {
+                    entries.push(convert_angular_expression_with_ctx(
+                        allocator, entry, root_xref, ctx,
+                    ));
+                }
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: Some(arr.source_span.to_span()) },
@@ -318,19 +337,30 @@ fn convert_angular_expression_with_ctx<'a>(
             use crate::ast::expression::LiteralMapKey;
             let mut entries = OxcVec::new_in(allocator);
             for (i, key) in map.keys.iter().enumerate() {
-                // Only handle property keys; skip spread keys
-                if let LiteralMapKey::Property(prop) = key {
-                    if i < map.values.len() {
-                        entries.push(LiteralMapEntry {
-                            key: prop.key.clone(),
-                            value: convert_angular_expression_with_ctx(
-                                allocator,
-                                &map.values[i],
-                                root_xref,
-                                ctx,
-                            ),
-                            quoted: prop.quoted,
-                        });
+                if i < map.values.len() {
+                    match key {
+                        LiteralMapKey::Property(prop) => {
+                            entries.push(LiteralMapEntry::new(
+                                prop.key.clone(),
+                                convert_angular_expression_with_ctx(
+                                    allocator,
+                                    &map.values[i],
+                                    root_xref,
+                                    ctx,
+                                ),
+                                prop.quoted,
+                            ));
+                        }
+                        LiteralMapKey::Spread(_) => {
+                            entries.push(LiteralMapEntry::spread(
+                                convert_angular_expression_with_ctx(
+                                    allocator,
+                                    &map.values[i],
+                                    root_xref,
+                                    ctx,
+                                ),
+                            ));
+                        }
                     }
                 }
             }

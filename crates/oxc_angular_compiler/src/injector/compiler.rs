@@ -63,11 +63,11 @@ fn build_definition_map<'a>(
 
     // providers: [...] (only if present)
     if let Some(providers) = &metadata.providers {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("providers"),
-            value: providers.clone_in(allocator),
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("providers"),
+            providers.clone_in(allocator),
+            false,
+        ));
     }
 
     // imports: [...] (only if non-empty)
@@ -86,11 +86,7 @@ fn build_definition_map<'a>(
             ))
         };
 
-        entries.push(LiteralMapEntry {
-            key: Ident::from("imports"),
-            value: imports_value,
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(Ident::from("imports"), imports_value, false));
     }
 
     entries

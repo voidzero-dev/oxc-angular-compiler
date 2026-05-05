@@ -53,36 +53,36 @@ fn internal_compile_class_debug_info<'a>(
     let mut entries = Vec::new_in(allocator);
 
     // className
-    entries.push(LiteralMapEntry {
-        key: Ident::from("className"),
-        value: literal_string_atom(allocator, debug_info.class_name.clone()),
-        quoted: false,
-    });
+    entries.push(LiteralMapEntry::new(
+        Ident::from("className"),
+        literal_string_atom(allocator, debug_info.class_name.clone()),
+        false,
+    ));
 
     // Include filePath and lineNumber only if filePath is set
     // (matching Angular's behavior - if filePath is null, downstream consumers
     // will typically ignore lineNumber as well)
     if let Some(file_path) = &debug_info.file_path {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("filePath"),
-            value: literal_string_atom(allocator, file_path.clone()),
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("filePath"),
+            literal_string_atom(allocator, file_path.clone()),
+            false,
+        ));
 
-        entries.push(LiteralMapEntry {
-            key: Ident::from("lineNumber"),
-            value: literal_number(allocator, debug_info.line_number),
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("lineNumber"),
+            literal_number(allocator, debug_info.line_number),
+            false,
+        ));
     }
 
     // Include forbidOrphanRendering only if it's true (to reduce generated code)
     if debug_info.forbid_orphan_rendering {
-        entries.push(LiteralMapEntry {
-            key: Ident::from("forbidOrphanRendering"),
-            value: literal_bool(allocator, true),
-            quoted: false,
-        });
+        entries.push(LiteralMapEntry::new(
+            Ident::from("forbidOrphanRendering"),
+            literal_bool(allocator, true),
+            false,
+        ));
     }
 
     let debug_info_object = OutputExpression::LiteralMap(Box::new_in(
