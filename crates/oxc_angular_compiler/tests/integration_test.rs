@@ -763,6 +763,89 @@ fn test_let_with_pipe_multiple_in_child_view_varoffset() {
 }
 
 // ============================================================================
+// Template literal Tests
+// ============================================================================
+
+#[test]
+fn test_template_literal_with_pipe() {
+    // {{ `${num | percent}` }} - template literal containing a pipe call on a @let variable.
+    // TemplateLiteral was not handled in convert_ast_to_ir and fell through to
+    // store_and_ref_expr, so the inner BindingPipe was never registered with
+    // pipe_creation and the @let variable was resolved against ctx instead of the
+    // local scope.
+    let js = compile_template_to_js(r"@let num = 0.75; {{ `${num | percent}` }}", "TestComponent");
+    assert!(js.contains("ɵɵpipeBind1"), "percent pipe should be registered. Output:\n{js}");
+    insta::assert_snapshot!("template_literal_with_pipe", js);
+}
+
+#[test]
+fn test_template_literal_with_pipe_and_text() {
+    // Template literal with mixed text and pipe: `Value: ${num | percent} done`
+    let js = compile_template_to_js(
+        r"@let num = 0.75; {{ `Value: ${num | percent} done` }}",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("ɵɵpipeBind1"),
+        "percent pipe should be registered in template literal with surrounding text. Output:\n{js}"
+    );
+    insta::assert_snapshot!("template_literal_with_pipe_and_text", js);
+}
+
+#[test]
+fn test_template_literal_without_pipe() {
+    // Template literal without pipe should still work correctly (regression guard).
+    let js =
+        compile_template_to_js(r"@let name = 'world'; {{ `Hello ${name}!` }}", "TestComponent");
+    insta::assert_snapshot!("template_literal_without_pipe", js);
+}
+
+#[test]
+fn test_template_literal_pipe_in_attribute_binding() {
+    // Template literal with pipe used as an attribute binding value.
+    // Real-world pattern: [label]="`${(count() | number)}`"
+    // Before the fix the pipe was silently dropped, producing `${ctx.count()}` instead.
+    let js = compile_template_to_js(
+        r#"<div [title]="`${count() | number} items`"></div>"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("ɵɵpipeBind1"),
+        "number pipe should appear in attribute binding template literal. Output:\n{js}"
+    );
+    insta::assert_snapshot!("template_literal_pipe_in_attribute_binding", js);
+}
+
+#[test]
+fn test_template_literal_multiple_pipes() {
+    // Two pipes inside one template literal. Both must be registered.
+    let js = compile_template_to_js(
+        r"@let a = 0.5; @let b = 1234; {{ `${a | percent} of ${b | number}` }}",
+        "TestComponent",
+    );
+    assert!(
+        js.matches("ɵɵpipeBind1").count() >= 2,
+        "both percent and number pipes should appear. Output:\n{js}"
+    );
+    insta::assert_snapshot!("template_literal_multiple_pipes", js);
+}
+
+#[test]
+fn test_template_literal_pipe_in_child_view() {
+    // Template literal + pipe inside an @if child view.
+    // Pipe must be registered in the child view's create block.
+    let js = compile_template_to_js(
+        r"@let n = 0.75; @if (true) { {{ `${n | percent}` }} }",
+        "TestComponent",
+    );
+    assert!(
+        js.contains("ɵɵpipeBind1"),
+        "percent pipe should be registered in child view template literal. Output:\n{js}"
+    );
+    insta::assert_snapshot!("template_literal_pipe_in_child_view", js);
+}
+
+// ============================================================================
 // @let self-reference / forward-reference Tests
 // ============================================================================
 

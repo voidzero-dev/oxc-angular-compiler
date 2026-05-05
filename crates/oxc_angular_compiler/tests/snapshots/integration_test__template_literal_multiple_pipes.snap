@@ -1,0 +1,18 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0," ");
+    i0.ɵɵtext(1);
+    i0.ɵɵpipe(2,"percent");
+    i0.ɵɵpipe(3,"number");
+  }
+  if ((rf & 2)) {
+    const a_r1 = 0.5;
+    const b_r2 = 1234;
+    i0.ɵɵadvance();
+    i0.ɵɵtextInterpolate1(" ",`${i0.ɵɵpipeBind1(2,1,a_r1)} of ${i0.ɵɵpipeBind1(3,3,b_r2)}`);
+  }
+}

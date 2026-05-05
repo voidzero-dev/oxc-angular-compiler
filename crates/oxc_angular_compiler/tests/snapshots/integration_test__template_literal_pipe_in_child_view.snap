@@ -1,0 +1,27 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: js
+---
+function TestComponent_Conditional_2_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵtext(0);
+    i0.ɵɵpipe(1,"percent");
+  }
+  if ((rf & 2)) {
+    i0.ɵɵnextContext();
+    const n_r1 = i0.ɵɵreadContextLet(0);
+    i0.ɵɵtextInterpolate1(" ",`${i0.ɵɵpipeBind1(1,1,n_r1)}`," ");
+  }
+}
+function TestComponent_Template(rf,ctx) {
+  if ((rf & 1)) {
+    i0.ɵɵdeclareLet(0);
+    i0.ɵɵtext(1," ");
+    i0.ɵɵconditionalCreate(2,TestComponent_Conditional_2_Template,2,3);
+  }
+  if ((rf & 2)) {
+    i0.ɵɵstoreLet(0.75);
+    i0.ɵɵadvance(2);
+    i0.ɵɵconditional((true? 2: -1));
+  }
+}
