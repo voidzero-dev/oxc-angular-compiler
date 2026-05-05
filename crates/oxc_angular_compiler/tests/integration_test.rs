@@ -915,6 +915,45 @@ fn test_array_multiple_spreads() {
     insta::assert_snapshot!("array_multiple_spreads", js);
 }
 
+#[test]
+fn test_array_spread_vs_non_spread_pooling_distinct() {
+    // Two array bindings whose entries are identical except for spread shape: `[a]` vs `[...a]`.
+    // The pure-function pool deduplicates by body key, so if the key generation ignores the
+    // spread metadata on DerivedLiteralArray entries, both bindings collide on the same pooled
+    // helper and one binding gets the other's runtime semantics.
+    let js = compile_template_to_js(
+        r#"<div [title]="[a]"></div><div [id]="[...a]"></div>"#,
+        "TestComponent",
+    );
+    // Each binding must produce its own pure function: one emitting `[a0]`, the other `[...a0]`.
+    assert!(
+        js.contains("[a0]"),
+        "non-spread array binding should emit `[a0]` body. Output:\n{js}"
+    );
+    assert!(
+        js.contains("[...a0]"),
+        "spread array binding should emit `[...a0]` body. Output:\n{js}"
+    );
+}
+
+#[test]
+fn test_object_spread_vs_non_spread_pooling_distinct() {
+    // Object literal counterpart of the array test above. `{k: a}` and `{...a}` would collide
+    // on the same pooled helper if spread metadata is excluded from the key.
+    let js = compile_template_to_js(
+        r#"<div [title]="{k: a}"></div><div [id]="{...a}"></div>"#,
+        "TestComponent",
+    );
+    assert!(
+        js.contains("...a0"),
+        "object spread binding should emit `...a0`. Output:\n{js}"
+    );
+    assert!(
+        js.contains("k: a0") || js.contains("k:a0"),
+        "non-spread object binding should emit `k: a0`. Output:\n{js}"
+    );
+}
+
 // ============================================================================
 // ng-content Tests
 // ============================================================================
