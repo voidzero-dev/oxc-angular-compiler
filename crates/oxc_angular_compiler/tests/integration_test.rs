@@ -773,14 +773,8 @@ fn test_template_literal_with_pipe() {
     // store_and_ref_expr, so the inner BindingPipe was never registered with
     // pipe_creation and the @let variable was resolved against ctx instead of the
     // local scope.
-    let js = compile_template_to_js(
-        r"@let num = 0.75; {{ `${num | percent}` }}",
-        "TestComponent",
-    );
-    assert!(
-        js.contains("ɵɵpipeBind1"),
-        "percent pipe should be registered. Output:\n{js}"
-    );
+    let js = compile_template_to_js(r"@let num = 0.75; {{ `${num | percent}` }}", "TestComponent");
+    assert!(js.contains("ɵɵpipeBind1"), "percent pipe should be registered. Output:\n{js}");
     insta::assert_snapshot!("template_literal_with_pipe", js);
 }
 
@@ -801,10 +795,8 @@ fn test_template_literal_with_pipe_and_text() {
 #[test]
 fn test_template_literal_without_pipe() {
     // Template literal without pipe should still work correctly (regression guard).
-    let js = compile_template_to_js(
-        r"@let name = 'world'; {{ `Hello ${name}!` }}",
-        "TestComponent",
-    );
+    let js =
+        compile_template_to_js(r"@let name = 'world'; {{ `Hello ${name}!` }}", "TestComponent");
     insta::assert_snapshot!("template_literal_without_pipe", js);
 }
 
