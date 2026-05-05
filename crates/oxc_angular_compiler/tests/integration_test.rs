@@ -926,10 +926,7 @@ fn test_array_spread_vs_non_spread_pooling_distinct() {
         "TestComponent",
     );
     // Each binding must produce its own pure function: one emitting `[a0]`, the other `[...a0]`.
-    assert!(
-        js.contains("[a0]"),
-        "non-spread array binding should emit `[a0]` body. Output:\n{js}"
-    );
+    assert!(js.contains("[a0]"), "non-spread array binding should emit `[a0]` body. Output:\n{js}");
     assert!(
         js.contains("[...a0]"),
         "spread array binding should emit `[...a0]` body. Output:\n{js}"
@@ -944,10 +941,7 @@ fn test_object_spread_vs_non_spread_pooling_distinct() {
         r#"<div [title]="{k: a}"></div><div [id]="{...a}"></div>"#,
         "TestComponent",
     );
-    assert!(
-        js.contains("...a0"),
-        "object spread binding should emit `...a0`. Output:\n{js}"
-    );
+    assert!(js.contains("...a0"), "object spread binding should emit `...a0`. Output:\n{js}");
     assert!(
         js.contains("k: a0") || js.contains("k:a0"),
         "non-spread object binding should emit `k: a0`. Output:\n{js}"
