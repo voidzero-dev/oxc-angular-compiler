@@ -736,7 +736,14 @@ fn strip_expression_types(expr_source: &str) -> String {
         oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
 
     let transform_options = oxc_transformer::TransformOptions {
-        typescript: oxc_transformer::TypeScriptOptions::default(),
+        typescript: oxc_transformer::TypeScriptOptions {
+            remove_class_fields_without_initializer: true,
+            ..Default::default()
+        },
+        assumptions: oxc_transformer::CompilerAssumptions {
+            set_public_class_fields: true,
+            ..Default::default()
+        },
         ..Default::default()
     };
     let transformer =

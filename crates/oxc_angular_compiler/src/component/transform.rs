@@ -1210,6 +1210,129 @@ fn build_jit_decorator_text(
     result
 }
 
+/// Collect names of constructor parameters that have modifiers (parameter properties).
+/// These will generate field declarations in oxc 0.129.0 which we need to remove.
+fn collect_parameter_property_names(
+    program: &oxc_ast::ast::Program,
+) -> rustc_hash::FxHashSet<String> {
+    use oxc_ast::ast::{ClassElement, Statement};
+    use rustc_hash::FxHashSet;
+
+    let mut names = FxHashSet::default();
+
+    fn visit_class(class: &oxc_ast::ast::Class, names: &mut FxHashSet<String>) {
+        for element in &class.body.body {
+            if let ClassElement::MethodDefinition(method) = element {
+                if method.kind.is_constructor() {
+                    for param in &method.value.params.items {
+                        if param.accessibility.is_some() || param.readonly || param.r#override {
+                            if let Some(ident) = param.pattern.get_identifier_name() {
+                                names.insert(ident.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for stmt in &program.body {
+        match stmt {
+            Statement::ClassDeclaration(class_decl) => {
+                visit_class(class_decl, &mut names);
+            }
+            Statement::ExportNamedDeclaration(export) => {
+                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+                    &export.declaration
+                {
+                    visit_class(class_decl, &mut names);
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) =
+                    &export.declaration
+                {
+                    visit_class(class_decl, &mut names);
+                }
+            }
+            Statement::VariableDeclaration(var_decl) => {
+                // Handle: let AppComponent = class AppComponent { ... }
+                for declarator in &var_decl.declarations {
+                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) =
+                        &declarator.init
+                    {
+                        visit_class(class_expr, &mut names);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    names
+}
+
+/// Remove field declarations that were generated from parameter properties.
+/// oxc 0.129.0 generates field declarations for parameter properties, but we don't want them in JIT mode.
+fn remove_parameter_property_fields(
+    program: &mut oxc_ast::ast::Program,
+    param_names: &rustc_hash::FxHashSet<String>,
+) {
+    use oxc_ast::ast::{ClassElement, Statement};
+
+    fn visit_class(class: &mut oxc_ast::ast::Class, param_names: &rustc_hash::FxHashSet<String>) {
+        class.body.body.retain(|element| {
+            if let ClassElement::PropertyDefinition(prop) = element {
+                // Remove field if it:
+                // 1. Has no initializer
+                // 2. Has no decorators
+                // 3. Matches a parameter property name
+                if prop.value.is_none() && prop.decorators.is_empty() {
+                    if let oxc_ast::ast::PropertyKey::StaticIdentifier(ident) = &prop.key {
+                        if param_names.contains(ident.name.as_str()) {
+                            return false; // Remove this field
+                        }
+                    }
+                }
+            }
+            true // Keep this element
+        });
+    }
+
+    for stmt in &mut program.body {
+        match stmt {
+            Statement::ClassDeclaration(class_decl) => {
+                visit_class(class_decl, param_names);
+            }
+            Statement::ExportNamedDeclaration(export) => {
+                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+                    &mut export.declaration
+                {
+                    visit_class(class_decl, param_names);
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) =
+                    &mut export.declaration
+                {
+                    visit_class(class_decl, param_names);
+                }
+            }
+            Statement::VariableDeclaration(var_decl) => {
+                // Handle: let AppComponent = class AppComponent { ... }
+                for declarator in &mut var_decl.declarations {
+                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) =
+                        &mut declarator.init
+                    {
+                        visit_class(class_expr, param_names);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Transform an Angular TypeScript file in JIT (Just-In-Time) compilation mode.
 ///
 /// Strip TypeScript syntax from JIT output using oxc_transformer.
@@ -1225,6 +1348,10 @@ fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
 
     let mut program = parser_ret.program;
 
+    // Collect parameter property names before oxc transforms them.
+    // In oxc 0.129.0, parameter properties generate field declarations which we need to remove.
+    let param_property_names = collect_parameter_property_names(&program);
+
     let semantic_ret =
         oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
 
@@ -1237,6 +1364,10 @@ fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
     let transformer =
         oxc_transformer::Transformer::new(allocator, Path::new(path), &transform_options);
     transformer.build_with_scoping(semantic_ret.semantic.into_scoping(), &mut program);
+
+    // Remove field declarations that were generated from parameter properties.
+    // oxc 0.129.0 adds field declarations for parameter properties, but we don't want them in JIT mode.
+    remove_parameter_property_fields(&mut program, &param_property_names);
 
     let codegen_ret = oxc_codegen::Codegen::new().with_source_text(code).build(&program);
 
