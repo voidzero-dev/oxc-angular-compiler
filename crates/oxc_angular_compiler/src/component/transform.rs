@@ -1212,7 +1212,9 @@ fn build_jit_decorator_text(
 
 /// Collect names of constructor parameters that have modifiers (parameter properties).
 /// These will generate field declarations in oxc 0.129.0 which we need to remove.
-fn collect_parameter_property_names(program: &oxc_ast::ast::Program) -> rustc_hash::FxHashSet<String> {
+fn collect_parameter_property_names(
+    program: &oxc_ast::ast::Program,
+) -> rustc_hash::FxHashSet<String> {
     use oxc_ast::ast::{ClassElement, Statement};
     use rustc_hash::FxHashSet;
 
@@ -1240,19 +1242,25 @@ fn collect_parameter_property_names(program: &oxc_ast::ast::Program) -> rustc_ha
                 visit_class(class_decl, &mut names);
             }
             Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) = &export.declaration {
+                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+                    &export.declaration
+                {
                     visit_class(class_decl, &mut names);
                 }
             }
             Statement::ExportDefaultDeclaration(export) => {
-                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) = &export.declaration {
+                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) =
+                    &export.declaration
+                {
                     visit_class(class_decl, &mut names);
                 }
             }
             Statement::VariableDeclaration(var_decl) => {
                 // Handle: let AppComponent = class AppComponent { ... }
                 for declarator in &var_decl.declarations {
-                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) = &declarator.init {
+                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) =
+                        &declarator.init
+                    {
                         visit_class(class_expr, &mut names);
                     }
                 }
@@ -1266,7 +1274,10 @@ fn collect_parameter_property_names(program: &oxc_ast::ast::Program) -> rustc_ha
 
 /// Remove field declarations that were generated from parameter properties.
 /// oxc 0.129.0 generates field declarations for parameter properties, but we don't want them in JIT mode.
-fn remove_parameter_property_fields(program: &mut oxc_ast::ast::Program, param_names: &rustc_hash::FxHashSet<String>) {
+fn remove_parameter_property_fields(
+    program: &mut oxc_ast::ast::Program,
+    param_names: &rustc_hash::FxHashSet<String>,
+) {
     use oxc_ast::ast::{ClassElement, Statement};
 
     fn visit_class(class: &mut oxc_ast::ast::Class, param_names: &rustc_hash::FxHashSet<String>) {
@@ -1294,19 +1305,25 @@ fn remove_parameter_property_fields(program: &mut oxc_ast::ast::Program, param_n
                 visit_class(class_decl, param_names);
             }
             Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) = &mut export.declaration {
+                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+                    &mut export.declaration
+                {
                     visit_class(class_decl, param_names);
                 }
             }
             Statement::ExportDefaultDeclaration(export) => {
-                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) = &mut export.declaration {
+                if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) =
+                    &mut export.declaration
+                {
                     visit_class(class_decl, param_names);
                 }
             }
             Statement::VariableDeclaration(var_decl) => {
                 // Handle: let AppComponent = class AppComponent { ... }
                 for declarator in &mut var_decl.declarations {
-                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) = &mut declarator.init {
+                    if let Some(oxc_ast::ast::Expression::ClassExpression(class_expr)) =
+                        &mut declarator.init
+                    {
                         visit_class(class_expr, param_names);
                     }
                 }
@@ -1338,15 +1355,11 @@ fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
     let semantic_ret =
         oxc_semantic::SemanticBuilder::new().with_excess_capacity(2.0).build(&program);
 
-    let ts_options = oxc_transformer::TypeScriptOptions {
-        only_remove_type_imports: true,
-        ..Default::default()
-    };
+    let ts_options =
+        oxc_transformer::TypeScriptOptions { only_remove_type_imports: true, ..Default::default() };
 
-    let transform_options = oxc_transformer::TransformOptions {
-        typescript: ts_options,
-        ..Default::default()
-    };
+    let transform_options =
+        oxc_transformer::TransformOptions { typescript: ts_options, ..Default::default() };
 
     let transformer =
         oxc_transformer::Transformer::new(allocator, Path::new(path), &transform_options);
