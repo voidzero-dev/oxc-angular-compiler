@@ -123,6 +123,27 @@ generateHmrModule(
 ): string
 ```
 
+##### HMR + reload behavior matrix
+
+The Vite plugin's `handleHotUpdate` hook dispatches every file change
+into one of these branches, mirroring Angular CLI's official behavior
+(`@angular/build` esbuild dev server):
+
+| File                                                                 | Change                                    | Action                                    |
+| -------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------- |
+| External `.html` (templateUrl)                                       | any                                       | `angular:component-update` HMR, no reload |
+| External `.css/.scss/.sass/.less` (styleUrl)                         | any                                       | `angular:component-update` HMR, no reload |
+| Component `.ts`                                                      | inline template only                      | `angular:component-update` HMR, no reload |
+| Component `.ts`                                                      | inline `styles: [...]` only               | `angular:component-update` HMR, no reload |
+| Component `.ts`                                                      | both inline template and styles           | `angular:component-update` HMR, no reload |
+| Component `.ts`                                                      | class body / imports / decorator metadata | full reload                               |
+| Non-component `.ts` (utils, services, constants, lazy `*.routes.ts`) | any                                       | full reload                               |
+| Global stylesheet (no `styleUrl` owner)                              | any                                       | Vite default style HMR                    |
+| Anything in `node_modules/` or `*.spec.ts`                           | any                                       | ignore                                    |
+
+Set `liveReload: false` to disable both HMR and reloads — the plugin
+returns from `handleHotUpdate` without sending any event.
+
 ### Transform Options
 
 ```typescript
