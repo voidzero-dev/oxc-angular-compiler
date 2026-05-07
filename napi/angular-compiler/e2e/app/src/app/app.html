@@ -1,5 +1,7 @@
 <main>
   <h1>{{ title() }}</h1>
   <p class="description">E2E test fixture for HMR testing.</p>
+  <p class="util-value" data-test-util>{{ utilValue }}</p>
   <app-card cardTitle="INPUT_TITLE" [cardValue]="42" />
+  <app-inline-card />
 </main>

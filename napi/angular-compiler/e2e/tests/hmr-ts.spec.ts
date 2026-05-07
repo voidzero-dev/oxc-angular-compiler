@@ -44,9 +44,9 @@ test.describe('TypeScript Component Full Reload', () => {
     // Add a new signal property
     await fileModifier.modifyFile('app.component.ts', (content) => {
       return content.replace(
-        'protected readonly title = signal("E2E_TITLE");',
-        `protected readonly title = signal("E2E_TITLE");
-  protected readonly newProperty = signal("NEW_PROPERTY");`,
+        "protected readonly title = signal('E2E_TITLE')",
+        `protected readonly title = signal('E2E_TITLE')
+  protected readonly newProperty = signal('NEW_PROPERTY')`,
       )
     })
 
@@ -67,7 +67,7 @@ test.describe('TypeScript Component Full Reload', () => {
 
     // Modify the decorator (change selector)
     await fileModifier.modifyFile('app.component.ts', (content) => {
-      return content.replace('selector: "app-root"', 'selector: "app-root-modified"')
+      return content.replace("selector: 'app-root'", "selector: 'app-root-modified'")
     })
 
     // Wait for reload
@@ -88,8 +88,8 @@ test.describe('TypeScript Component Full Reload', () => {
     // Add a new import
     await fileModifier.modifyFile('app.component.ts', (content) => {
       return content.replace(
-        'import { Component, signal } from "@angular/core";',
-        'import { Component, signal, computed } from "@angular/core";',
+        "import { Component, signal } from '@angular/core'",
+        "import { Component, signal, computed } from '@angular/core'",
       )
     })
 

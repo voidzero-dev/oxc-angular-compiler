@@ -9,7 +9,7 @@
  * HMR updates for global stylesheets and prevented PostCSS/Tailwind from
  * processing changes.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -23,6 +23,18 @@ let tempDir: string
 let appDir: string
 let templatePath: string
 let stylePath: string
+let componentPath: string
+
+const COMPONENT_SOURCE = `
+  import { Component } from '@angular/core';
+
+  @Component({
+    selector: 'app-root',
+    templateUrl: './app.component.html',
+    styleUrls: ['./app.component.css'],
+  })
+  export class AppComponent {}
+`
 
 beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'hmr-test-'))
@@ -31,9 +43,11 @@ beforeAll(() => {
 
   templatePath = join(appDir, 'app.component.html')
   stylePath = join(appDir, 'app.component.css')
+  componentPath = join(appDir, 'app.component.ts')
 
   writeFileSync(templatePath, '<h1>Hello</h1>')
   writeFileSync(stylePath, 'h1 { color: red; }')
+  writeFileSync(componentPath, COMPONENT_SOURCE)
 })
 
 afterAll(() => {
@@ -168,28 +182,128 @@ async function setupPluginWithServer(plugin: Plugin) {
  * populating resourceToComponent and componentIds.
  */
 async function transformComponent(plugin: Plugin) {
-  const componentFile = join(appDir, 'app.component.ts')
-  const componentSource = `
-    import { Component } from '@angular/core';
-
-    @Component({
-      selector: 'app-root',
-      templateUrl: './app.component.html',
-      styleUrls: ['./app.component.css'],
-    })
-    export class AppComponent {}
-  `
-
   if (!plugin.transform || typeof plugin.transform === 'function') {
     throw new Error('Expected plugin transform handler')
   }
 
   await plugin.transform.handler.call(
     { error() {}, warn() {} } as any,
-    componentSource,
-    componentFile,
+    COMPONENT_SOURCE,
+    componentPath,
   )
 }
+
+/**
+ * Invoke the Angular component middleware with a synthetic req/res pair and
+ * return the response body. Resolves once `res.end()` is called.
+ */
+async function invokeAngularMiddleware(
+  middleware: (...args: any[]) => void,
+  componentId: string,
+): Promise<string> {
+  const encoded = encodeURIComponent(componentId)
+  const req = { url: `/@ng/component?c=${encoded}&t=${Date.now()}` }
+  let responseBody = ''
+  const res = {
+    setHeader() {},
+    statusCode: 200,
+    end(data: string = '') {
+      responseBody = data ?? ''
+    },
+  }
+  await new Promise<void>((resolve) => {
+    const wrappedRes = {
+      ...res,
+      end(data: string = '') {
+        res.end(data)
+        resolve()
+      },
+    }
+    middleware(req, wrappedRes, resolve)
+  })
+  return responseBody
+}
+
+describe('pendingHmrUpdates race condition', () => {
+  it('preserves pending entry when template file is transiently empty (truncate-then-write race)', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
+
+    // Trigger handleHotUpdate for the template → adds componentFile to pendingHmrUpdates
+    const componentHtmlFile = normalizePath(templatePath)
+    const ctx = createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    // Extract the encoded component ID that handleHotUpdate broadcast via WS
+    const updateMsg = mockServer._wsMessages.find(
+      (m: any) => m.event === 'angular:component-update',
+    )
+    expect(updateMsg, 'expected angular:component-update to be dispatched').toBeDefined()
+    const componentId = decodeURIComponent(updateMsg.data.id)
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    expect(middleware, 'expected middleware to be registered').toBeDefined()
+
+    // Simulate the truncate phase: file is transiently empty
+    writeFileSync(templatePath, '')
+
+    // First HTTP request — file is empty, must return '' but MUST NOT consume
+    // the pending entry so the next request can serve real content.
+    const firstBody = await invokeAngularMiddleware(middleware, componentId)
+    expect(firstBody).toBe('')
+
+    // Restore real content (simulates the second write completing)
+    writeFileSync(templatePath, '<h1>Hello</h1>')
+
+    // Second HTTP request — pending entry must still be present → HMR module returned
+    const secondBody = await invokeAngularMiddleware(middleware, componentId)
+    expect(secondBody, 'expected HMR module to be returned on second request').not.toBe('')
+
+    // Third request — pending entry must have been consumed by the second request
+    const thirdBody = await invokeAngularMiddleware(middleware, componentId)
+    expect(thirdBody, 'expected pending entry to be consumed after successful HMR').toBe('')
+  })
+
+  it('consumes pending entry and dispatches angular:invalidate on compile error', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
+
+    const componentHtmlFile = normalizePath(templatePath)
+    const ctx = createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const updateMsg = mockServer._wsMessages.find(
+      (m: any) => m.event === 'angular:component-update',
+    )
+    expect(updateMsg, 'expected angular:component-update to be dispatched').toBeDefined()
+    const componentId = decodeURIComponent(updateMsg.data.id)
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    expect(middleware, 'expected middleware to be registered').toBeDefined()
+
+    // Rename the component .ts file so readFile(resolvedId) throws ENOENT,
+    // guaranteeing the catch path fires without corrupting templatePath.
+    const hiddenPath = componentPath + '.hidden'
+    renameSync(componentPath, hiddenPath)
+    try {
+      const errorBody = await invokeAngularMiddleware(middleware, componentId)
+      expect(errorBody).toBe('')
+
+      // angular:invalidate must have been dispatched
+      expect(mockServer._wsMessages).toContainEqual(
+        expect.objectContaining({ type: 'custom', event: 'angular:invalidate' }),
+      )
+
+      // Pending entry must have been consumed — subsequent request returns ''
+      const afterErrorBody = await invokeAngularMiddleware(middleware, componentId)
+      expect(afterErrorBody, 'expected pending entry to be consumed after error').toBe('')
+    } finally {
+      renameSync(hiddenPath, componentPath)
+    }
+  })
+})
 
 describe('handleHotUpdate - Issue #185', () => {
   it('should let non-component CSS files pass through to Vite HMR', async () => {
@@ -210,7 +324,7 @@ describe('handleHotUpdate - Issue #185', () => {
     }
   })
 
-  it('should return [] for component CSS files managed by custom watcher', async () => {
+  it('should dispatch angular:component-update for component CSS files', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)
     await transformComponent(plugin)
@@ -222,11 +336,14 @@ describe('handleHotUpdate - Issue #185', () => {
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Component resources MUST be swallowed (return [])
+    // Component resources MUST be swallowed (return []) and dispatch HMR.
     expect(result).toEqual([])
+    expect(mockServer._wsMessages).toContainEqual(
+      expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
+    )
   })
 
-  it('should return [] for component template HTML files managed by custom watcher', async () => {
+  it('should dispatch angular:component-update for component template HTML files', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)
     await transformComponent(plugin)
@@ -237,8 +354,11 @@ describe('handleHotUpdate - Issue #185', () => {
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Component templates MUST be swallowed (return [])
+    // Component templates MUST be swallowed (return []) and dispatch HMR.
     expect(result).toEqual([])
+    expect(mockServer._wsMessages).toContainEqual(
+      expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
+    )
   })
 
   it('should not swallow non-resource HTML files', async () => {
@@ -258,19 +378,55 @@ describe('handleHotUpdate - Issue #185', () => {
     }
   })
 
-  it('should pass through non-style/template files unchanged', async () => {
+  it('should trigger full-reload for plain (non-component) .ts files', async () => {
     const plugin = getAngularPlugin()
-    await setupPluginWithServer(plugin)
+    const mockServer = await setupPluginWithServer(plugin)
 
+    // src/utils.ts is a plain TS module — Angular's runtime HMR can't
+    // refresh captured module bindings, so the only correct fallback is a
+    // full reload (matches Angular CLI behavior).
     const utilFile = normalizePath(join(tempDir, 'src', 'utils.ts'))
     const mockModules = [{ id: utilFile }]
-    const ctx = createMockHmrContext(utilFile, mockModules)
+    const ctx = createMockHmrContext(utilFile, mockModules, mockServer)
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Non-Angular .ts files should pass through with their modules
+    expect(result).toEqual([])
+    expect(mockServer._wsMessages).toContainEqual(expect.objectContaining({ type: 'full-reload' }))
+  })
+
+  it('should ignore .ts files in node_modules', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const depFile = normalizePath(join(tempDir, 'node_modules', 'foo', 'index.ts'))
+    const mockModules = [{ id: depFile }]
+    const ctx = createMockHmrContext(depFile, mockModules, mockServer)
+
+    const result = await callHandleHotUpdate(plugin, ctx)
+
+    // Should fall through to Vite's default HMR — never trigger a reload
+    // for vendor code.
+    expect(mockServer._wsMessages).not.toContainEqual(
+      expect.objectContaining({ type: 'full-reload' }),
+    )
     if (result !== undefined) {
       expect(result).toEqual(mockModules)
     }
+  })
+
+  it('should not act when liveReload is disabled', async () => {
+    const plugin = angular({ liveReload: false }).find(
+      (candidate) => candidate.name === '@oxc-angular/vite',
+    )!
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const utilFile = normalizePath(join(tempDir, 'src', 'utils.ts'))
+    const ctx = createMockHmrContext(utilFile, [{ id: utilFile }], mockServer)
+
+    await callHandleHotUpdate(plugin, ctx)
+
+    // No HMR or full-reload should be sent when liveReload is off.
+    expect(mockServer._wsMessages).toHaveLength(0)
   })
 })
