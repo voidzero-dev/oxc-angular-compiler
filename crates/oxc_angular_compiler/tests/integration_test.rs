@@ -9861,3 +9861,82 @@ export class TestComponent {
     );
     insta::assert_snapshot!("output_from_observable_mixed_with_output", result.code);
 }
+
+/// Host attribute key referencing a same-file `const` must emit `hostAttrs` in
+/// `ɵɵdefineDirective`, matching the official Angular compiler.
+#[test]
+fn host_attribute_identifier_key_emits_host_attrs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+export const MARKER_ATTR = 'data-marker';
+
+@Directive({
+    selector: '[marker]',
+    host: { [MARKER_ATTR]: '' },
+})
+export class MarkerDirective {}
+"#;
+    let result = transform_angular_file(&allocator, "marker.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"hostAttrs:["data-marker",""]"#),
+        "Expected hostAttrs:[\"data-marker\",\"\"] in directive definition.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Host attribute value referencing a same-file `const` must resolve and emit
+/// `hostAttrs` with the resolved string.
+#[test]
+fn host_attribute_identifier_value_emits_host_attrs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+const BTN_TYPE = 'submit';
+
+@Directive({
+    selector: '[d]',
+    host: { type: BTN_TYPE },
+})
+export class D {}
+"#;
+    let result = transform_angular_file(&allocator, "d.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"hostAttrs:["type","submit"]"#),
+        "Expected hostAttrs:[\"type\",\"submit\"] in directive definition.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// An unresolved identifier in a computed host key must be silently dropped —
+/// matching existing behavior for any unrecognized host metadata.
+#[test]
+fn host_attribute_unknown_identifier_dropped() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+@Directive({
+    selector: '[d]',
+    host: { [UNRESOLVED]: '' },
+})
+export class D {}
+"#;
+    let result = transform_angular_file(&allocator, "d.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        !normalized.contains("hostAttrs:"),
+        "Unresolved identifier must not produce hostAttrs entry.\nCode:\n{}",
+        result.code
+    );
+}

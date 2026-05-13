@@ -19,6 +19,7 @@ use super::metadata::{
 use super::transform::ImportMap;
 use crate::directive::{
     extract_host_bindings, extract_host_listeners, extract_input_metadata, extract_output_metadata,
+    StringConsts,
 };
 use crate::output::oxc_converter::convert_oxc_expression;
 
@@ -52,6 +53,7 @@ pub fn extract_component_metadata<'a>(
     implicit_standalone: bool,
     import_map: &ImportMap<'a>,
     source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
 ) -> Option<ComponentMetadata<'a>> {
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
@@ -85,22 +87,22 @@ pub fn extract_component_metadata<'a>(
     // Parse each property in the config object
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            let key_name = get_property_key_name(&prop.key)?;
+            let key_name = get_property_key_name(&prop.key, consts)?;
 
             match key_name.as_str() {
                 "selector" => {
-                    metadata.selector = extract_string_value(&prop.value);
+                    metadata.selector = extract_string_value(&prop.value, consts);
                 }
                 "template" => {
-                    metadata.template = extract_string_value(&prop.value);
+                    metadata.template = extract_string_value(&prop.value, consts);
                 }
                 "templateUrl" => {
-                    metadata.template_url = extract_string_value(&prop.value);
+                    metadata.template_url = extract_string_value(&prop.value, consts);
                 }
                 "styles" => {
                     if let Some(styles) = extract_string_array(allocator, &prop.value) {
                         metadata.styles = styles;
-                    } else if let Some(style) = extract_string_value(&prop.value) {
+                    } else if let Some(style) = extract_string_value(&prop.value, consts) {
                         // Single style string (legacy support)
                         metadata.styles.push(style);
                     }
@@ -108,7 +110,7 @@ pub fn extract_component_metadata<'a>(
                 "styleUrls" | "styleUrl" => {
                     if let Some(urls) = extract_string_array(allocator, &prop.value) {
                         metadata.style_urls = urls;
-                    } else if let Some(url) = extract_string_value(&prop.value) {
+                    } else if let Some(url) = extract_string_value(&prop.value, consts) {
                         metadata.style_urls.push(url);
                     }
                 }
@@ -125,7 +127,7 @@ pub fn extract_component_metadata<'a>(
                     metadata.change_detection = extract_change_detection(&prop.value);
                 }
                 "host" => {
-                    metadata.host = extract_host_metadata(allocator, &prop.value);
+                    metadata.host = extract_host_metadata(allocator, &prop.value, consts);
                 }
                 "imports" => {
                     // For standalone components, we need:
@@ -137,7 +139,7 @@ pub fn extract_component_metadata<'a>(
                 }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
-                    if let Some(export_as) = extract_string_value(&prop.value) {
+                    if let Some(export_as) = extract_string_value(&prop.value, consts) {
                         for part in export_as.as_str().split(',') {
                             let trimmed = part.trim();
                             if !trimmed.is_empty() {
@@ -175,7 +177,7 @@ pub fn extract_component_metadata<'a>(
                     // Extract host directives array
                     // Handles both simple identifiers and complex objects with inputs/outputs
                     metadata.host_directives =
-                        extract_host_directives(allocator, &prop.value, import_map);
+                        extract_host_directives(allocator, &prop.value, import_map, consts);
                 }
                 "signals" => {
                     // Extract signals flag (true if component uses signal-based inputs)
@@ -341,16 +343,31 @@ fn is_component_call(callee: &Expression<'_>) -> bool {
 }
 
 /// Get the name of a property key as a string.
-fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
+///
+/// Resolves same-file `const` identifiers in computed keys (`[FOO]: bar`) so the
+/// emitted component metadata matches the official Angular compiler's output.
+fn get_property_key_name<'a>(
+    key: &PropertyKey<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.clone().into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.clone().into()),
+        // Computed identifier reference: `[FOO]: bar` — resolve against same-file consts.
+        PropertyKey::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
     }
 }
 
 /// Extract a string value from an expression.
-fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
+///
+/// Resolves same-file `const` identifier references in value position
+/// (`host: { type: FOO }`) so the emitted metadata matches the official
+/// Angular compiler's output.
+fn extract_string_value<'a>(
+    expr: &Expression<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<Ident<'a>> {
     match expr {
         Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
@@ -359,6 +376,7 @@ fn extract_string_value<'a>(expr: &Expression<'a>) -> Option<Ident<'a>> {
             // Angular evaluates template literals, so we need cooked, not raw
             tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into))
         }
+        Expression::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => None,
     }
 }
@@ -474,6 +492,7 @@ fn extract_change_detection(expr: &Expression<'_>) -> ChangeDetectionStrategy {
 fn extract_host_metadata<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
+    consts: &StringConsts<'a>,
 ) -> Option<HostMetadata<'a>> {
     let Expression::ObjectExpression(obj) = expr else {
         return None;
@@ -489,10 +508,10 @@ fn extract_host_metadata<'a>(
 
     for prop in &obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-            let Some(key_name) = get_property_key_name(&prop.key) else {
+            let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                 continue;
             };
-            let Some(value) = extract_string_value(&prop.value) else {
+            let Some(value) = extract_string_value(&prop.value, consts) else {
                 continue;
             };
 
@@ -539,6 +558,7 @@ fn extract_host_directives<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
     import_map: &ImportMap<'a>,
+    consts: &StringConsts<'a>,
 ) -> Vec<'a, HostDirectiveMetadata<'a>> {
     let mut result = Vec::new_in(allocator);
 
@@ -547,7 +567,7 @@ fn extract_host_directives<'a>(
     };
 
     for element in &arr.elements {
-        if let Some(meta) = extract_single_host_directive(allocator, element, import_map) {
+        if let Some(meta) = extract_single_host_directive(allocator, element, import_map, consts) {
             result.push(meta);
         }
     }
@@ -565,6 +585,7 @@ fn extract_single_host_directive<'a>(
     allocator: &'a Allocator,
     element: &ArrayExpressionElement<'a>,
     import_map: &ImportMap<'a>,
+    consts: &StringConsts<'a>,
 ) -> Option<HostDirectiveMetadata<'a>> {
     match element {
         // Simple identifier: TooltipDirective
@@ -587,7 +608,7 @@ fn extract_single_host_directive<'a>(
 
             for prop in &obj.properties {
                 if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    let Some(key_name) = get_property_key_name(&prop.key) else {
+                    let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                         continue;
                     };
 
@@ -1149,6 +1170,7 @@ mod tests {
 
         // Build import map from the program body
         let import_map = build_import_map(&allocator, &parser_ret.program.body, None);
+        let consts = crate::directive::collect_string_consts(&parser_ret.program);
 
         // Find the first class declaration (handles plain, export default, and export named)
         let mut found_metadata = None;
@@ -1173,6 +1195,7 @@ mod tests {
                     implicit_standalone,
                     &import_map,
                     Some(code),
+                    &consts,
                 ) {
                     found_metadata = Some(metadata);
                     break;
