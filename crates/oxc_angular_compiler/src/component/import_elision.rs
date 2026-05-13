@@ -245,10 +245,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 // real code, e.g. function signatures expressed as
                 // tuple types in component decorator metadata.
                 //
-                // Use `as_ts_type()` (the safe `Option`-returning
-                // sibling of `to_ts_type`) for inherited variants, and
-                // unpack the wrapped type for each of the three named
-                // variants explicitly.
+                // `TSTupleElement` adds `TSOptionalType` and `TSRestType` on top of the
+                // inherited `TSType` variants. Use `as_ts_type()` for the common inherited
+                // path and unpack the two named variants explicitly.
+                // `TSNamedTupleMember` is an inherited `TSType` variant and is handled in
+                // the `TSType::TSNamedTupleMember` arm of `collect_computed_keys_from_ts_type`.
                 for element in &tuple_type.element_types {
                     if let Some(ty) = element.as_ts_type() {
                         Self::collect_computed_keys_from_ts_type(ty, result);
@@ -256,27 +257,10 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     }
                     match element {
                         oxc_ast::ast::TSTupleElement::TSOptionalType(opt) => {
-                            Self::collect_computed_keys_from_ts_type(
-                                &opt.type_annotation,
-                                result,
-                            );
+                            Self::collect_computed_keys_from_ts_type(&opt.type_annotation, result);
                         }
                         oxc_ast::ast::TSTupleElement::TSRestType(rest) => {
-                            Self::collect_computed_keys_from_ts_type(
-                                &rest.type_annotation,
-                                result,
-                            );
-                        }
-                        oxc_ast::ast::TSTupleElement::TSNamedTupleMember(named) => {
-                            // `named.element_type` is itself a
-                            // `TSTupleElement`; recurse into its
-                            // inherited TSType (named members
-                            // can't nest per the TS spec, so we
-                            // only need the inherited-variant
-                            // branch here).
-                            if let Some(inner) = named.element_type.as_ts_type() {
-                                Self::collect_computed_keys_from_ts_type(inner, result);
-                            }
+                            Self::collect_computed_keys_from_ts_type(&rest.type_annotation, result);
                         }
                         _ => {}
                     }
@@ -290,10 +274,6 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 }
             }
             TSType::TSNamedTupleMember(named) => {
-                // Named tuple members (`[label: T]`) are inherited TSType variants,
-                // so they reach here via the `as_ts_type()` branch in the TSTupleType
-                // handler. The unreachable match arm added there is a no-op; traversal
-                // must happen here instead.
                 if let Some(inner) = named.element_type.as_ts_type() {
                     Self::collect_computed_keys_from_ts_type(inner, result);
                 }
