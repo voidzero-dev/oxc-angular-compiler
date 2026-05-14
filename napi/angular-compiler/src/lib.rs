@@ -734,7 +734,9 @@ pub struct ComponentUrls {
 ///
 /// A `ComponentUrls` containing all template and style URLs found.
 pub fn extract_component_urls_sync(source: String, filename: String) -> ComponentUrls {
-    use oxc_angular_compiler::{build_import_map, collect_string_consts, extract_component_metadata};
+    use oxc_angular_compiler::{
+        build_import_map, collect_string_consts, extract_component_metadata,
+    };
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
     use oxc_span::SourceType;

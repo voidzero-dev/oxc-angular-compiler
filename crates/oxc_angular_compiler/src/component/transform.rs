@@ -26,7 +26,6 @@ use super::decorator::{
     collect_constructor_decorator_spans, collect_member_decorator_spans,
     extract_component_metadata, find_component_decorator, find_component_decorator_span,
 };
-use crate::directive::collect_string_consts;
 use super::definition::{const_value_to_expression, generate_component_definitions};
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
@@ -37,6 +36,7 @@ use crate::class_metadata::{
     R3ClassMetadata, build_ctor_params_metadata, build_decorator_metadata_array,
     build_prop_decorators_metadata, compile_class_metadata,
 };
+use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     extract_content_queries, extract_directive_metadata, extract_view_queries,

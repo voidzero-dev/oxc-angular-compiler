@@ -18,8 +18,8 @@ use super::metadata::{
 };
 use super::transform::ImportMap;
 use crate::directive::{
-    extract_host_bindings, extract_host_listeners, extract_input_metadata, extract_output_metadata,
-    StringConsts,
+    StringConsts, extract_host_bindings, extract_host_listeners, extract_input_metadata,
+    extract_output_metadata,
 };
 use crate::output::oxc_converter::convert_oxc_expression;
 
@@ -364,10 +364,7 @@ fn get_property_key_name<'a>(
 /// Resolves same-file `const` identifier references in value position
 /// (`host: { type: FOO }`) so the emitted metadata matches the official
 /// Angular compiler's output.
-fn extract_string_value<'a>(
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Ident<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>, consts: &StringConsts<'a>) -> Option<Ident<'a>> {
     match expr {
         Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
         Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {

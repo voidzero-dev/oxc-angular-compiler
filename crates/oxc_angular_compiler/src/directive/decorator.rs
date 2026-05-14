@@ -155,8 +155,7 @@ pub fn extract_directive_metadata<'a>(
                         }
                     }
                     "host" => {
-                        host_from_decorator =
-                            extract_host_metadata(allocator, &prop.value, consts);
+                        host_from_decorator = extract_host_metadata(allocator, &prop.value, consts);
                     }
                     "hostDirectives" => {
                         let host_directives =
@@ -521,10 +520,7 @@ fn get_property_key_name<'a>(
 /// Resolves same-file `const` identifier references in value position
 /// (`host: { type: FOO }`) so the emitted metadata matches the official
 /// Angular compiler's output.
-fn extract_string_value<'a>(
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Ident<'a>> {
+fn extract_string_value<'a>(expr: &Expression<'a>, consts: &StringConsts<'a>) -> Option<Ident<'a>> {
     match expr {
         Expression::Identifier(id) => consts.get(id.name.as_str()).cloned(),
         _ => literal_string_from_expression(expr),
