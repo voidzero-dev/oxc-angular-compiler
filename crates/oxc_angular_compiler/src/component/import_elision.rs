@@ -235,8 +235,35 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 Self::collect_computed_keys_from_ts_type(&array_type.element_type, result);
             }
             TSType::TSTupleType(tuple_type) => {
+                // `TSTupleElement` inherits the full set of `TSType`
+                // variants AND adds three of its own: `TSOptionalType`
+                // (`[number?]`), `TSRestType` (`[...string[]]`), and
+                // `TSNamedTupleMember` (`[name: string]`). The previous
+                // `element.to_ts_type()` call panicked with
+                // `Option::unwrap() on a None value` whenever a tuple
+                // contained any of those three variants — common in
+                // real code, e.g. function signatures expressed as
+                // tuple types in component decorator metadata.
+                //
+                // `TSTupleElement` adds `TSOptionalType` and `TSRestType` on top of the
+                // inherited `TSType` variants. Use `as_ts_type()` for the common inherited
+                // path and unpack the two named variants explicitly.
+                // `TSNamedTupleMember` is an inherited `TSType` variant and is handled in
+                // the `TSType::TSNamedTupleMember` arm of `collect_computed_keys_from_ts_type`.
                 for element in &tuple_type.element_types {
-                    Self::collect_computed_keys_from_ts_type(element.to_ts_type(), result);
+                    if let Some(ty) = element.as_ts_type() {
+                        Self::collect_computed_keys_from_ts_type(ty, result);
+                        continue;
+                    }
+                    match element {
+                        oxc_ast::ast::TSTupleElement::TSOptionalType(opt) => {
+                            Self::collect_computed_keys_from_ts_type(&opt.type_annotation, result);
+                        }
+                        oxc_ast::ast::TSTupleElement::TSRestType(rest) => {
+                            Self::collect_computed_keys_from_ts_type(&rest.type_annotation, result);
+                        }
+                        _ => {}
+                    }
                 }
             }
             TSType::TSTypeReference(type_ref) => {
@@ -244,6 +271,11 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     for ty in &type_args.params {
                         Self::collect_computed_keys_from_ts_type(ty, result);
                     }
+                }
+            }
+            TSType::TSNamedTupleMember(named) => {
+                if let Some(inner) = named.element_type.as_ts_type() {
+                    Self::collect_computed_keys_from_ts_type(inner, result);
                 }
             }
             TSType::TSParenthesizedType(paren_type) => {
@@ -1958,6 +1990,83 @@ class MyComponent {
             !type_only.contains("myKey"),
             "myKey in tuple element type literal should be preserved"
         );
+    }
+
+    #[test]
+    fn test_computed_key_in_optional_tuple_element_preserved() {
+        // TSOptionalType (`[number?]`) in a tuple previously caused a panic via
+        // `to_ts_type()` (which called `unwrap()` on None). The fix uses
+        // `as_ts_type()` and handles the three named TSTupleElement variants.
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() pair: [string?, { [myKey]: number }?];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in optional tuple element type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_rest_tuple_element_preserved() {
+        // TSRestType (`[...T[]]`) in a tuple previously caused a panic via
+        // `to_ts_type()`. The fix explicitly unwraps `TSRestType`.
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() pair: [string, ...{ [myKey]: number }[]];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey inside rest tuple element type should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_computed_key_in_named_tuple_member_preserved() {
+        // TSNamedTupleMember (`[name: T]`) in a tuple previously caused a panic
+        // via `to_ts_type()`. The fix explicitly unwraps `TSNamedTupleMember`.
+        let source = r#"
+import { Component, Input } from '@angular/core';
+import { myKey } from './keys';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() pair: [label: string, item: { [myKey]: number }];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(
+            !type_only.contains("myKey"),
+            "myKey in named tuple member type literal should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_tuple_with_mixed_element_kinds_no_panic() {
+        // Regression: a tuple with optional, rest, and named members together
+        // must not panic (TSOptionalType/TSRestType previously hit the unwrap in to_ts_type).
+        let source = r#"
+import { Component, Input } from '@angular/core';
+
+@Component({ selector: 'test' })
+class MyComponent {
+    @Input() data: [label: string, value?: number, ...rest: string[]];
+}
+"#;
+        let type_only = analyze_source(source);
+        assert!(!type_only.contains("Component"), "Component should be preserved (decorator)");
     }
 
     #[test]
