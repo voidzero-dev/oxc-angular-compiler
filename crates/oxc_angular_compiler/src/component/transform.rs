@@ -36,6 +36,7 @@ use crate::class_metadata::{
     R3ClassMetadata, build_ctor_params_metadata, build_decorator_metadata_array,
     build_prop_decorators_metadata, compile_class_metadata,
 };
+use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     extract_content_queries, extract_directive_metadata, extract_view_queries,
@@ -1825,6 +1826,11 @@ pub fn transform_angular_file(
     let import_map =
         build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
 
+    // Collect file-scope string consts so decorator metadata can resolve identifier
+    // references (e.g. `host: { [ATTR_NAME]: '' }`) the same way the official
+    // Angular compiler does.
+    let string_consts = collect_string_consts(&parser_ret.program);
+
     #[cfg(feature = "cross_file_elision")]
     let mut import_map =
         build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
@@ -1872,6 +1878,7 @@ pub fn transform_angular_file(
                 implicit_standalone,
                 &import_map,
                 Some(source),
+                &string_consts,
             ) {
                 // 3. Resolve external styles and merge into metadata
                 resolve_styles(allocator, &mut metadata, resolved_resources);
@@ -2106,9 +2113,13 @@ pub fn transform_angular_file(
                 // definitions. This prevents Angular's JIT runtime from processing
                 // the directive and creating conflicting property definitions (like
                 // ɵfac getters) that interfere with the AOT-compiled assignments.
-                if let Some(mut directive_metadata) =
-                    extract_directive_metadata(allocator, class, implicit_standalone, Some(source))
-                {
+                if let Some(mut directive_metadata) = extract_directive_metadata(
+                    allocator,
+                    class,
+                    implicit_standalone,
+                    Some(source),
+                    &string_consts,
+                ) {
                     // Track decorator span for removal
                     if let Some(span) = find_directive_decorator_span(class) {
                         decorator_spans_to_remove.push(span);

@@ -734,7 +734,9 @@ pub struct ComponentUrls {
 ///
 /// A `ComponentUrls` containing all template and style URLs found.
 pub fn extract_component_urls_sync(source: String, filename: String) -> ComponentUrls {
-    use oxc_angular_compiler::{build_import_map, extract_component_metadata};
+    use oxc_angular_compiler::{
+        build_import_map, collect_string_consts, extract_component_metadata,
+    };
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
     use oxc_span::SourceType;
@@ -747,6 +749,7 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
 
     // Build import map for component metadata extraction
     let import_map = build_import_map(&allocator, &program.body, None);
+    let string_consts = collect_string_consts(program);
 
     let mut template_urls = Vec::new();
     let mut style_urls = Vec::new();
@@ -769,9 +772,14 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
         if let Some(class) = class {
             // Extract metadata from @Component decorator
             // Use implicit_standalone=true (v19+ default) since it doesn't affect URL extraction
-            if let Some(metadata) =
-                extract_component_metadata(&allocator, class, true, &import_map, Some(&source))
-            {
+            if let Some(metadata) = extract_component_metadata(
+                &allocator,
+                class,
+                true,
+                &import_map,
+                Some(&source),
+                &string_consts,
+            ) {
                 // Collect template URL
                 if let Some(template_url) = &metadata.template_url {
                     template_urls.push(template_url.to_string());
@@ -1489,9 +1497,9 @@ pub fn extract_component_metadata_sync(
     use oxc_angular_compiler::output::emitter::JsEmitter;
     use oxc_angular_compiler::{
         ChangeDetectionStrategy as RustChangeDetection, QueryPredicate,
-        ViewEncapsulation as RustViewEncapsulation, build_import_map, extract_component_metadata,
-        extract_content_queries, extract_input_metadata, extract_output_metadata,
-        extract_view_queries,
+        ViewEncapsulation as RustViewEncapsulation, build_import_map, collect_string_consts,
+        extract_component_metadata, extract_content_queries, extract_input_metadata,
+        extract_output_metadata, extract_view_queries,
     };
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
@@ -1507,6 +1515,7 @@ pub fn extract_component_metadata_sync(
 
     // Build import map for component metadata extraction
     let import_map = build_import_map(&allocator, &program.body, None);
+    let string_consts = collect_string_consts(program);
 
     let mut results = Vec::new();
     let emitter = JsEmitter::new();
@@ -1534,6 +1543,7 @@ pub fn extract_component_metadata_sync(
                 implicit_standalone,
                 &import_map,
                 Some(&source),
+                &string_consts,
             ) {
                 // Convert encapsulation to string
                 let encapsulation = match metadata.encapsulation {
