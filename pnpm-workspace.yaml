@@ -5,6 +5,15 @@ packages:
   - 'napi/angular-compiler/e2e/compare'
   - 'napi/angular-compiler/benchmarks/*'
 
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  core-js: true
+  esbuild: true
+  lmdb: true
+  msgpackr-extract: true
+  protobufjs: true
+
 catalog:
   '@napi-rs/cli': 3.6.2
   '@oxc-node/cli': 0.1.0
