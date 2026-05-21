@@ -1,6 +1,7 @@
 import { Component, signal } from '@angular/core'
 
 import { Card } from './card.component'
+import { DuoFirst, DuoSecond } from './duo.components'
 import { InlineCard } from './inline-card.component'
 import { UTIL_VALUE } from './util'
 
@@ -8,7 +9,7 @@ import { UTIL_VALUE } from './util'
   selector: 'app-root',
   templateUrl: './app.html',
   styleUrl: './app.css',
-  imports: [Card, InlineCard],
+  imports: [Card, InlineCard, DuoFirst, DuoSecond],
 })
 export class App {
   protected readonly title = signal('E2E_TITLE')
