@@ -30,7 +30,7 @@ test.describe('Multi-component file HMR', () => {
     const sentinelId = await hmrDetector.addSentinel()
     await expect(page.locator('app-duo-first h3')).toContainText('DUO_FIRST_TITLE')
 
-    await fileModifier.modifyFile('duo.components.ts', (content) =>
+    await fileModifier.modifyFile('duo.component.ts', (content) =>
       content.replace('DUO_FIRST_TITLE', 'DUO_FIRST_HMR'),
     )
     await waitForHmr()
@@ -50,7 +50,7 @@ test.describe('Multi-component file HMR', () => {
     const sentinelId = await hmrDetector.addSentinel()
     await expect(page.locator('app-duo-second h3')).toContainText('DUO_SECOND_TITLE')
 
-    await fileModifier.modifyFile('duo.components.ts', (content) =>
+    await fileModifier.modifyFile('duo.component.ts', (content) =>
       content.replace('DUO_SECOND_TITLE', 'DUO_SECOND_HMR'),
     )
     await waitForHmr()
@@ -72,7 +72,7 @@ test.describe('Multi-component file HMR', () => {
       .evaluate((el) => getComputedStyle(el).color)
     expect(before).toMatch(/rgb\(/)
 
-    await fileModifier.modifyFile('duo.components.ts', (content) =>
+    await fileModifier.modifyFile('duo.component.ts', (content) =>
       content.replace('--duo-second-color: steelblue', '--duo-second-color: green'),
     )
     await waitForHmr()
@@ -91,7 +91,7 @@ test.describe('Multi-component file HMR', () => {
     hmrDetector,
   }) => {
     const sentinelId = await hmrDetector.addSentinel()
-    await fileModifier.modifyFile('duo.components.ts', (content) =>
+    await fileModifier.modifyFile('duo.component.ts', (content) =>
       content.replace(
         "first-component-in-multi-component-file'",
         "first-component-in-multi-component-file-MODIFIED'",

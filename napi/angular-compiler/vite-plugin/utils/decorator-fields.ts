@@ -218,11 +218,7 @@ function locateFieldInsideArgs(
     // valid at the @Component's immediate object-literal depth
     // (`['paren', 'brace']`) — anything deeper is a nested literal that
     // isn't the component's metadata.
-    if (
-      stack.length === 2 &&
-      stack[1] === 'brace' &&
-      isFieldKeyAt(code, i, field, closeParen)
-    ) {
+    if (stack.length === 2 && stack[1] === 'brace' && isFieldKeyAt(code, i, field, closeParen)) {
       let j = i + field.length
       while (j < closeParen && WS_RE.test(code[j])) j++
       if (code[j] === ':') {
@@ -400,10 +396,7 @@ export function locateTemplateInArgs(
  * styles value can be an array literal (`[…]`) or a bare string (`'…'`,
  * `"…"`, `` `…` ``) — Angular's `styles` is typed `string | string[]`.
  */
-export function locateStylesFieldFor(
-  code: string,
-  className: string,
-): [number, number] | null {
+export function locateStylesFieldFor(code: string, className: string): [number, number] | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateStylesInArgs(code, found.argsRange) : null
 }
@@ -413,10 +406,7 @@ export function locateStylesFieldFor(
  * that decorates the class named `className`. Convenience wrapper that
  * finds the decorator by className and delegates to `locateTemplateInArgs`.
  */
-export function locateTemplateStringFor(
-  code: string,
-  className: string,
-): [number, number] | null {
+export function locateTemplateStringFor(code: string, className: string): [number, number] | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateTemplateInArgs(code, found.argsRange) : null
 }

@@ -1,7 +1,7 @@
 import { Component, signal } from '@angular/core'
 
 import { Card } from './card.component'
-import { DuoFirst, DuoSecond } from './duo.components'
+import { DuoFirst, DuoSecond } from './duo.component'
 import { InlineCard } from './inline-card.component'
 import { UTIL_VALUE } from './util'
 

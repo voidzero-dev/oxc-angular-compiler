@@ -291,10 +291,7 @@ describe('pendingHmrUpdates race condition', () => {
 
     // Edit only FirstComponent's template — stripped form should match the
     // cached stripped form, so the HMR (not full-reload) branch fires.
-    const editedSource = originalSource.replace(
-      '<div>First</div>',
-      '<div>First Edited</div>',
-    )
+    const editedSource = originalSource.replace('<div>First</div>', '<div>First Edited</div>')
     writeFileSync(multiComponentPath, editedSource)
 
     const ctx = createMockHmrContext(multiComponentPath, [{ id: multiComponentPath }], mockServer)
@@ -339,10 +336,7 @@ describe('pendingHmrUpdates race condition', () => {
     )
 
     // Trigger a hot update so both components are queued in pendingHmrUpdates.
-    writeFileSync(
-      multiComponentPath,
-      source.replace('<p>A</p>', '<p>A!</p>'),
-    )
+    writeFileSync(multiComponentPath, source.replace('<p>A</p>', '<p>A!</p>'))
     const ctx = createMockHmrContext(multiComponentPath, [{ id: multiComponentPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
 
@@ -351,14 +345,8 @@ describe('pendingHmrUpdates race condition', () => {
 
     // Request the HMR module for BOTH components — each should resolve with
     // a non-empty payload that mentions its own className.
-    const aBody = await invokeAngularMiddleware(
-      middleware,
-      `${multiComponentPath}@AComponent`,
-    )
-    const bBody = await invokeAngularMiddleware(
-      middleware,
-      `${multiComponentPath}@BComponent`,
-    )
+    const aBody = await invokeAngularMiddleware(middleware, `${multiComponentPath}@AComponent`)
+    const bBody = await invokeAngularMiddleware(middleware, `${multiComponentPath}@BComponent`)
 
     expect(aBody, 'expected non-empty HMR body for AComponent').not.toBe('')
     expect(bBody, 'expected non-empty HMR body for BComponent').not.toBe('')
@@ -366,7 +354,7 @@ describe('pendingHmrUpdates race condition', () => {
     expect(bBody).toContain('BComponent')
   })
 
-  it('dispatches HMR for both components when only one component\'s inline styles change', async () => {
+  it("dispatches HMR for both components when only one component's inline styles change", async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)
 
@@ -383,18 +371,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
-      source,
-      multiStylesPath,
-    )
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiStylesPath)
 
     // Edit only YComponent's styles. Stripping wipes BOTH components' styles
     // (and templates), so old and new stripped forms must still match.
-    writeFileSync(
-      multiStylesPath,
-      source.replace('.y { color: blue }', '.y { color: green }'),
-    )
+    writeFileSync(multiStylesPath, source.replace('.y { color: blue }', '.y { color: green }'))
 
     const ctx = createMockHmrContext(multiStylesPath, [{ id: multiStylesPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
@@ -433,11 +414,7 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
-      source,
-      multiUrlPath,
-    )
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiUrlPath)
 
     // Edit just first.component.html. resourceToComponent maps it to
     // multi-url.component.ts; dispatchAllComponentsInFile must fan out to
@@ -475,11 +452,7 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
-      originalSource,
-      stalePath,
-    )
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, originalSource, stalePath)
 
     // Trigger an HMR-eligible edit so a pending entry is queued for both
     // components (including DropComponent).
@@ -496,26 +469,16 @@ describe('pendingHmrUpdates race condition', () => {
       export class KeepComponent {}
     `
     writeFileSync(stalePath, reducedSource)
-    await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
-      reducedSource,
-      stalePath,
-    )
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, reducedSource, stalePath)
 
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
 
     // A request for the now-gone DropComponent must return '' and NOT trigger
     // a phantom HMR module / error / invalidate event.
-    const dropBody = await invokeAngularMiddleware(
-      middleware,
-      `${stalePath}@DropComponent`,
-    )
+    const dropBody = await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)
     expect(dropBody).toBe('')
     // A second request must also return '' (pending slot consumed first time).
-    const dropBody2 = await invokeAngularMiddleware(
-      middleware,
-      `${stalePath}@DropComponent`,
-    )
+    const dropBody2 = await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)
     expect(dropBody2).toBe('')
   })
 
@@ -536,18 +499,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
-      source,
-      multiReloadPath,
-    )
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiReloadPath)
 
     // Change a class member, NOT the template/styles. The stripped form will
     // differ from the cached one → full reload, no HMR.
-    writeFileSync(
-      multiReloadPath,
-      source.replace('value = 1', 'value = 2'),
-    )
+    writeFileSync(multiReloadPath, source.replace('value = 1', 'value = 2'))
 
     const ctx = createMockHmrContext(multiReloadPath, [{ id: multiReloadPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
@@ -555,7 +511,10 @@ describe('pendingHmrUpdates race condition', () => {
     const componentUpdates = mockServer._wsMessages.filter(
       (m: any) => m.event === 'angular:component-update',
     )
-    expect(componentUpdates, 'expected no component-update events for non-template change').toHaveLength(0)
+    expect(
+      componentUpdates,
+      'expected no component-update events for non-template change',
+    ).toHaveLength(0)
 
     const fullReload = mockServer._wsMessages.find((m: any) => m.type === 'full-reload')
     expect(fullReload, 'expected a full-reload event').toBeDefined()

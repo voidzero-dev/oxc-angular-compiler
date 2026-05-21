@@ -197,22 +197,21 @@ describe('decorator-fields utils', () => {
     // inside another field's string/template literal must not be picked up.
     it('ignores `styles:` text inside a template literal that precedes the real styles', () => {
       const src =
-        '@Component({ template: `<pre>const cfg = { styles: [\'fake\'] }</pre>`, styles: [\'real\'] })\nexport class Foo {}'
+        "@Component({ template: `<pre>const cfg = { styles: ['fake'] }</pre>`, styles: ['real'] })\nexport class Foo {}"
       const range = locateStylesFieldFor(src, 'Foo')!
       expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
     })
 
     it('returns null when the only `styles:` text in the args is inside a template literal', () => {
-      const src =
-        '@Component({ template: `<pre>{ styles: [\'fake\'] }</pre>` })\nexport class Bar {}'
+      const src = "@Component({ template: `<pre>{ styles: ['fake'] }</pre>` })\nexport class Bar {}"
       expect(locateStylesFieldFor(src, 'Bar')).toBeNull()
     })
 
-    it('ignores `styles:` inside a `${...}` interpolation\'s nested object literal', () => {
+    it("ignores `styles:` inside a `${...}` interpolation's nested object literal", () => {
       // `${ ... { styles: [...] } ... }` inside a template literal must not
       // be treated as a top-level @Component metadata property.
       const src =
-        '@Component({ template: `${doThing({ styles: [\'fake\'] })}`, styles: [\'real\'] })\nexport class Baz {}'
+        "@Component({ template: `${doThing({ styles: ['fake'] })}`, styles: ['real'] })\nexport class Baz {}"
       const range = locateStylesFieldFor(src, 'Baz')!
       expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
     })
@@ -253,7 +252,7 @@ describe('decorator-fields utils', () => {
       expect(multi.slice(range[0], range[1] + 1)).toBe(`'<second/>'`)
     })
 
-    it('ignores `template:` text appearing inside another field\'s string literal', () => {
+    it("ignores `template:` text appearing inside another field's string literal", () => {
       // The `styles` array contains a string with literal `template:` text;
       // the real `template:` field comes after. The naive regex would match
       // the inner one first.
@@ -397,7 +396,8 @@ class Foo {}`
     })
 
     it('ignores `@Component(...)` text inside a backtick template preceding the real decorator', () => {
-      const src = '`Use @Component({ template: \'fake\' })`\n@Component({ template: \'<real/>\' })\nclass Foo {}'
+      const src =
+        "`Use @Component({ template: 'fake' })`\n@Component({ template: '<real/>' })\nclass Foo {}"
       const range = locateTemplateStringFor(src, 'Foo')!
       expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
     })
