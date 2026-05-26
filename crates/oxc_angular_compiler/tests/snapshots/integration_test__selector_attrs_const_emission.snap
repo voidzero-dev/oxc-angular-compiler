@@ -26,3 +26,8 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:BadgeComponent,selecto
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(BadgeComponent,
       {className:"BadgeComponent",filePath:"badge.component.ts",lineNumber:9}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(BadgeComponent,
+      [{type:Component,args:[{selector:"span[bitBadge]",template:"<ng-content></ng-content>",
+          standalone:true}]}],null,null));
+})();

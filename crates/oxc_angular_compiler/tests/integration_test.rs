@@ -6271,12 +6271,25 @@ export class TestComponent {}
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
-    let normalized = result.code.replace([' ', '\n', '\t'], "");
-    // Angular TS compiler omits standalone when true (runtime defaults to true via ?? true)
+    // Scope the check to the ɵɵdefineComponent({...}) literal. The setClassMetadata
+    // emission (now on by default, matching ngc) faithfully preserves the user's
+    // source `standalone: true` for TestBed — that's expected and not what this test
+    // is asserting against.
+    let define_start = result
+        .code
+        .find("ɵɵdefineComponent(")
+        .expect("expected ɵɵdefineComponent call in output");
+    let define_end = result.code[define_start..]
+        .find("});")
+        .map(|i| define_start + i)
+        .unwrap_or(result.code.len());
+    let define_block = &result.code[define_start..define_end];
+    let normalized_define = define_block.replace([' ', '\n', '\t'], "");
     assert!(
-        !normalized.contains("standalone:true"),
-        "Standalone component should NOT emit `standalone:true` (runtime defaults to true). Output:\n{}",
-        result.code
+        !normalized_define.contains("standalone:true"),
+        "ɵɵdefineComponent should NOT emit `standalone:true` (runtime defaults to true). \
+         defineComponent block:\n{}",
+        define_block
     );
 }
 

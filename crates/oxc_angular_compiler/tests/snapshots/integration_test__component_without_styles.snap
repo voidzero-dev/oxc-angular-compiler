@@ -23,3 +23,8 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:NoStylesComponent,sele
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(NoStylesComponent,
       {className:"NoStylesComponent",filePath:"no-styles.component.ts",lineNumber:8}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(NoStylesComponent,
+      [{type:Component,args:[{selector:"app-no-styles",template:"<div>No styles</div>"}]}],
+      null,null));
+})();

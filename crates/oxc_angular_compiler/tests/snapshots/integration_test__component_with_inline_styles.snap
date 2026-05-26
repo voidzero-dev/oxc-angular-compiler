@@ -24,3 +24,8 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:StyledComponent,select
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(StyledComponent,
       {className:"StyledComponent",filePath:"styled.component.ts",lineNumber:9}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(StyledComponent,
+      [{type:Component,args:[{selector:"app-styled",template:"<div class=\"container\">Hello</div>",
+          styles:[".container { color: red; }"]}]}],null,null));
+})();

@@ -173,10 +173,12 @@ pub struct TransformOptions {
 
     /// Emit setClassMetadata() calls for TestBed support.
     ///
-    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard.
-    /// This preserves original decorator information for TestBed's recompilation APIs.
+    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in
+    /// `(typeof ngDevMode === "undefined" || ngDevMode) && …`. Production bundles
+    /// tree-shake the guarded call. Preserves original decorator information for
+    /// TestBed's recompilation APIs.
     ///
-    /// Default: false (metadata is dev-only and usually stripped in production)
+    /// Default: true — matches `ngc`, which always emits class metadata.
     pub emit_class_metadata: bool,
 
     /// Minify final component styles before emitting them into `styles: [...]`.
@@ -231,8 +233,9 @@ impl Default for TransformOptions {
             tsconfig_path: None,
             // Resolved imports for host directives
             resolved_imports: None,
-            // Class metadata for TestBed support (disabled by default)
-            emit_class_metadata: false,
+            // Class metadata for TestBed support — matches ngc, which always emits
+            // it; production bundles strip the guarded call via tree-shaking.
+            emit_class_metadata: true,
             minify_component_styles: false,
         }
     }

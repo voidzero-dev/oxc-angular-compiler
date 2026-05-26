@@ -112,16 +112,14 @@ export interface PluginOptions {
   /**
    * Emit `ɵsetClassMetadata()` calls for TestBed support.
    *
-   * When `true`, the original decorator metadata is preserved on the compiled class
-   * (wrapped in `ngDevMode` checks). This is required for TestBed APIs that
-   * recompile components with provider overrides, since TestBed walks the
-   * preserved metadata. Resolved `templateUrl`/`styleUrls` are inlined into the
-   * metadata as `template`/`styles` to satisfy Angular's JIT compiler check
-   * (`componentNeedsResolution`).
+   * Mirrors `ngc`'s behavior: when enabled, the original decorator metadata is
+   * preserved on the compiled class wrapped in `(typeof ngDevMode === "undefined"
+   * || ngDevMode) && …`, so production bundles tree-shake it away. Required for
+   * TestBed APIs that recompile components with provider overrides. Resolved
+   * `templateUrl`/`styleUrls` are inlined into the metadata as `template`/`styles`
+   * to satisfy Angular's JIT `componentNeedsResolution` check.
    *
-   * Default: `false` (metadata is dev-only and usually stripped in production).
-   *
-   * Vitest/component-test setups typically need this enabled.
+   * Default: `true` — matches `ngc`, which always emits class metadata.
    */
   emitClassMetadata?: boolean
 }
@@ -198,7 +196,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     zoneless: options.zoneless ?? false,
     fileReplacements,
     angularVersion: options.angularVersion,
-    emitClassMetadata: options.emitClassMetadata ?? false,
+    emitClassMetadata: options.emitClassMetadata ?? true,
   }
 
   let resolvedConfig: ResolvedConfig
