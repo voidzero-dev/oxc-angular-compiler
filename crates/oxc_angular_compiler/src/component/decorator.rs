@@ -1029,7 +1029,8 @@ fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Ident<'a>> {
 fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Option<Ident<'a>> {
     // Get the type annotation (directly on FormalParameter)
     let type_annotation = param.type_annotation.as_ref()?;
-    let ts_type = &type_annotation.type_annotation;
+    // Narrow `T | null` unions to `T` to match the reference compiler.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
 
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
@@ -2632,6 +2633,136 @@ mod tests {
             let dep = &deps[0];
             assert!(dep.optional, "Should have optional flag");
             assert_eq!(dep.token.as_ref().unwrap().as_str(), "OptionalService");
+        });
+    }
+
+    #[test]
+    fn test_component_optional_with_nullable_type() {
+        // Regression test for issue #285:
+        // `@Optional() svc: MyService | null` is the canonical optional-DI pattern,
+        // but the union with `null` previously caused token extraction to fail and
+        // emit `ɵɵinvalidFactoryDep`, which throws at runtime.
+        //
+        // Angular's reference compiler filters out `null` literal type nodes from
+        // the union; when exactly one type remains it becomes the token.
+        let code = r#"
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                constructor(
+                    @Optional() private svc: MyService | null,
+                ) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.constructor_deps.as_ref().unwrap();
+            assert_eq!(deps.len(), 1);
+            let dep = &deps[0];
+            assert!(dep.optional, "Should have optional flag");
+            assert_eq!(
+                dep.token.as_ref().expect("token should resolve to MyService").as_str(),
+                "MyService",
+                "null should be filtered from the union, leaving MyService as the token",
+            );
+        });
+    }
+
+    #[test]
+    fn test_component_nullable_type_without_decorator() {
+        // Bare `svc: MyService | null` (no `@Optional()`) should also have its
+        // token resolved to `MyService`. Token resolution is independent of
+        // optionality — `@Optional()` only controls the inject flag.
+        let code = r#"
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                constructor(
+                    private svc: MyService | null,
+                ) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.constructor_deps.as_ref().unwrap();
+            assert_eq!(deps.len(), 1);
+            let dep = &deps[0];
+            assert!(!dep.optional, "Should not have optional flag");
+            assert_eq!(
+                dep.token.as_ref().expect("token should resolve to MyService").as_str(),
+                "MyService",
+            );
+        });
+    }
+
+    #[test]
+    fn test_component_nullable_type_null_first() {
+        // `null` can appear in either position of the union — both must be filtered.
+        let code = r#"
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                constructor(
+                    @Optional() private svc: null | MyService,
+                ) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.constructor_deps.as_ref().unwrap();
+            let dep = &deps[0];
+            assert_eq!(dep.token.as_ref().unwrap().as_str(), "MyService");
+        });
+    }
+
+    #[test]
+    fn test_component_parenthesized_nullable_type() {
+        // Parenthesized nullable union: `(MyService | null)`.
+        // oxc preserves `TSParenthesizedType` in the AST, so the resolver must
+        // unwrap it before checking for unions, or the dependency falls through
+        // to `ɵɵinvalidFactoryDep` (issue #285 follow-up).
+        let code = r#"
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                constructor(
+                    @Optional() private svc: (MyService | null),
+                ) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.constructor_deps.as_ref().unwrap();
+            let dep = &deps[0];
+            assert_eq!(
+                dep.token.as_ref().expect("token should resolve to MyService").as_str(),
+                "MyService",
+            );
+        });
+    }
+
+    #[test]
+    fn test_component_paren_around_inner_type_in_union() {
+        // Parens around just the non-null side: `(MyService) | null`.
+        let code = r#"
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                constructor(
+                    @Optional() private svc: (MyService) | null,
+                ) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.constructor_deps.as_ref().unwrap();
+            let dep = &deps[0];
+            assert_eq!(dep.token.as_ref().unwrap().as_str(), "MyService");
         });
     }
 

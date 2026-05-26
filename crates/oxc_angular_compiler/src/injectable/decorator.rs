@@ -640,7 +640,8 @@ fn extract_param_token<'a>(
 ) -> Option<OutputExpression<'a>> {
     // First try to get the type annotation (directly on FormalParameter, not on pattern)
     let type_annotation = param.type_annotation.as_ref()?;
-    let ts_type = &type_annotation.type_annotation;
+    // Narrow `T | null` unions to `T` to match the reference compiler.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
 
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
@@ -915,6 +916,32 @@ mod tests {
 
         // Third dep: @Inject(DOCUMENT) - token should be DOCUMENT, not Document
         assert!(deps[2].token.is_some(), "Third dep should have token");
+    }
+
+    #[test]
+    fn test_injectable_optional_with_nullable_type() {
+        // Regression test for issue #285:
+        // `@Optional() svc: MyService | null` must resolve the token to `MyService`.
+        let allocator = Allocator::default();
+        let source = r#"
+            @Injectable()
+            class MyService {
+                constructor(@Optional() private svc: OtherService | null) {}
+            }
+        "#;
+
+        let metadata = parse_and_extract(&allocator, source).expect("Should have metadata");
+        let deps = metadata.deps.as_ref().expect("Should have constructor deps");
+        assert_eq!(deps.len(), 1);
+        let dep = &deps[0];
+        assert!(dep.optional, "Should have optional flag");
+        let token = dep.token.as_ref().expect("token should resolve to OtherService");
+        match token {
+            crate::output::ast::OutputExpression::ReadVar(var) => {
+                assert_eq!(var.name.as_str(), "OtherService");
+            }
+            other => panic!("expected ReadVar token, got {:?}", other),
+        }
     }
 
     #[test]
