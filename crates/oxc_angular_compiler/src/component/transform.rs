@@ -2920,22 +2920,30 @@ fn compile_component_full<'a>(
 }
 
 /// Resolve template content from inline or external source.
+///
+/// Precedence matches Angular's AOT compiler (`parseTemplateDeclaration` in
+/// `compiler-cli/src/ngtsc/annotations/component/src/resources.ts`): when both
+/// `templateUrl` and inline `template` are present, **`templateUrl` wins** and
+/// the inline `template` is silently ignored. Angular's reference checks
+/// `component.has('templateUrl')` first and returns immediately, so the inline
+/// branch is never reached. (ngc's JIT runtime diverges — it prefers inline via
+/// `componentNeedsResolution` — but OXC is AOT-equivalent.)
 fn resolve_template(
     metadata: &ComponentMetadata<'_>,
     resources: Option<&ResolvedResources>,
 ) -> Option<String> {
-    // Prefer inline template
-    if let Some(template) = &metadata.template {
-        return Some(template.to_string());
-    }
-
-    // Try to resolve from external resources
+    // ngc AOT precedence: templateUrl first, falling through to inline only when
+    // no resolved content is available.
     if let Some(template_url) = &metadata.template_url {
         if let Some(resources) = resources {
             if let Some(template) = resources.templates.get(template_url.as_str()) {
                 return Some(template.clone());
             }
         }
+    }
+
+    if let Some(template) = &metadata.template {
+        return Some(template.to_string());
     }
 
     None

@@ -667,4 +667,105 @@ export class DoubleTemplateComponent {}
         !metadata.contains("templateUrl"),
         "templateUrl literal should not appear after inlining. Got:\n{metadata}"
     );
+
+    // ngc AOT prefers `templateUrl` content over inline `template` when both
+    // are present — see `parseTemplateDeclaration` in
+    // `compiler-cli/src/ngtsc/annotations/component/src/resources.ts` which
+    // checks `component.has('templateUrl')` first and returns immediately.
+    // OXC is an AOT-equivalent single-file compiler so it must match that
+    // precedence (ngc JIT diverges, preferring inline — irrelevant here).
+    assert!(
+        metadata.contains("<from-url></from-url>"),
+        "templateUrl content should win in AOT mode (ngc parity). Got:\n{metadata}"
+    );
+    assert!(
+        !metadata.contains("<inline></inline>"),
+        "Inline template should be discarded when templateUrl is also present \
+         (matches ngc AOT `parseTemplateDeclaration`). Got:\n{metadata}"
+    );
+}
+
+/// Resource-key inlining must apply ONLY to `@Component` decorators. Angular's
+/// reference impl gates on `if (dec.name !== 'Component') return dec;` at the
+/// top of `transformDecoratorResources`. If we don't check the decorator name,
+/// other decorators that happen to use resource-shaped keys (legal TypeScript,
+/// just nonsensical) get their literals corrupted.
+///
+/// This test exercises that via a constructor parameter decorator — `@Inject`
+/// metadata goes through `build_decorator_metadata_array` with `decorator_idx == 0`
+/// and would hit the resource-rewriting path without a name check.
+#[test]
+fn non_component_decorator_with_resource_shaped_keys_passes_through_untouched() {
+    let source = r#"
+import { Component, Inject } from '@angular/core';
+
+@Component({
+    selector: 'test-cmp',
+    template: '<div></div>',
+})
+export class CtorComponent {
+    constructor(@Inject({ templateUrl: './bogus.html', styleUrls: ['./bogus.css'] }) service: any) {}
+}
+"#;
+
+    let resources = ResolvedResources { templates: HashMap::new(), styles: HashMap::new() };
+    let code = run_with_resources(source, resources);
+
+    // The `@Inject(...)` literal lands inside the ctorParameters → decorators
+    // → args array of setClassMetadata. Its `templateUrl` / `styleUrls` keys
+    // must survive verbatim — they're an opaque DI token, not a component config.
+    assert!(
+        code.contains("templateUrl:\"./bogus.html\"") || code.contains("templateUrl: './bogus.html'"),
+        "@Inject's templateUrl literal must survive verbatim in ctorParameters. Got:\n{code}"
+    );
+    assert!(
+        code.contains("styleUrls:[\"./bogus.css\"]") || code.contains("styleUrls:['./bogus.css']"),
+        "@Inject's styleUrls literal must survive verbatim in ctorParameters. Got:\n{code}"
+    );
+}
+
+/// Spread elements in the source decorator literal (`@Component({ ...config, … })`)
+/// pass through verbatim to `setClassMetadata`. This is a known limitation: OXC
+/// doesn't statically evaluate the spread argument, so resource fields living
+/// inside the spread can leak past `componentNeedsResolution` at runtime.
+///
+/// Angular's reference impl operates on a `Map<string, ts.Expression>` already
+/// produced by the annotation handler, which has resolved spreads upstream.
+/// Until OXC has equivalent pre-extraction spread resolution, the safe behavior
+/// is "preserve unchanged" — anything else would risk losing genuine user data.
+/// This test locks that in so a future change can't silently regress it.
+#[test]
+fn spread_elements_in_component_decorator_pass_through_unchanged() {
+    let source = r#"
+import { Component } from '@angular/core';
+
+const baseConfig = { changeDetection: 0 };
+
+@Component({
+    ...baseConfig,
+    selector: 'test-cmp',
+    templateUrl: './tmpl.html',
+})
+export class SpreadComponent {}
+"#;
+
+    let mut templates = HashMap::new();
+    templates.insert("./tmpl.html".to_string(), "<p></p>".to_string());
+    let resources = ResolvedResources { templates, styles: HashMap::new() };
+
+    let code = run_with_resources(source, resources);
+    let metadata = extract_metadata_args(&code);
+
+    assert!(
+        metadata.contains("...baseConfig"),
+        "Spread element must be preserved verbatim. Got:\n{metadata}"
+    );
+    assert!(
+        !metadata.contains("templateUrl"),
+        "templateUrl outside the spread must still be inlined. Got:\n{metadata}"
+    );
+    assert!(
+        metadata.contains("template:\"<p></p>\""),
+        "Resolved template content must be present. Got:\n{metadata}"
+    );
 }

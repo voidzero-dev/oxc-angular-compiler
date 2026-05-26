@@ -84,13 +84,22 @@ pub fn build_decorator_metadata_array<'a>(
         if let Expression::CallExpression(call) = &decorator.expression
             && !call.arguments.is_empty()
         {
+            // Gate resource inlining on the decorator's name, matching Angular's
+            // `if (dec.name !== 'Component') return dec;` at the top of
+            // `transformDecoratorResources`. Without this, other decorators that
+            // happen to use resource-shaped keys (e.g. `@Inject({ templateUrl: … })`,
+            // legal TS even if nonsensical) get their literals stripped.
+            let is_component_decorator =
+                get_decorator_name(decorator).is_some_and(|n| n == "Component");
+
             let mut args = AllocVec::new_in(allocator);
             for (arg_idx, arg) in call.arguments.iter().enumerate() {
                 let expr = arg.to_expression();
                 if let Some(mut converted) = convert_oxc_expression(allocator, expr, source_text) {
-                    // Inline resolved templates/styles into the first arg of the first decorator
-                    // (the @Component config). Other decorators / other args are left alone.
-                    if decorator_idx == 0 && arg_idx == 0 {
+                    // Inline resolved templates/styles into the first arg of the
+                    // first @Component decorator. Other decorators / other args
+                    // are left alone.
+                    if is_component_decorator && decorator_idx == 0 && arg_idx == 0 {
                         inline_component_resources(
                             allocator,
                             &mut converted,
