@@ -108,6 +108,22 @@ export interface PluginOptions {
 
   /** Optional callback to transform template content before compilation. Applied during both initial build and HMR. */
   templateTransform?: (content: string, filePath: string) => string
+
+  /**
+   * Emit `ɵsetClassMetadata()` calls for TestBed support.
+   *
+   * When `true`, the original decorator metadata is preserved on the compiled class
+   * (wrapped in `ngDevMode` checks). This is required for TestBed APIs that
+   * recompile components with provider overrides, since TestBed walks the
+   * preserved metadata. Resolved `templateUrl`/`styleUrls` are inlined into the
+   * metadata as `template`/`styles` to satisfy Angular's JIT compiler check
+   * (`componentNeedsResolution`).
+   *
+   * Default: `false` (metadata is dev-only and usually stripped in production).
+   *
+   * Vitest/component-test setups typically need this enabled.
+   */
+  emitClassMetadata?: boolean
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -182,6 +198,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     zoneless: options.zoneless ?? false,
     fileReplacements,
     angularVersion: options.angularVersion,
+    emitClassMetadata: options.emitClassMetadata ?? false,
   }
 
   let resolvedConfig: ResolvedConfig
@@ -618,6 +635,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             hmr: pluginOptions.liveReload && watchMode && !isSSR,
             angularVersion: pluginOptions.angularVersion,
             minifyComponentStyles: getMinifyComponentStyles(this as any),
+            emitClassMetadata: pluginOptions.emitClassMetadata,
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)

@@ -2021,6 +2021,8 @@ pub fn transform_angular_file(
                                             allocator,
                                             &[decorator],
                                             Some(source),
+                                            Some(template),
+                                            Some(metadata.styles.as_slice()),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,
