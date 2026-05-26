@@ -84,16 +84,14 @@ export class ComponentWithExternalResource {}
 "#;
 
     let mut templates = HashMap::new();
-    templates.insert("test_cmp_template.html".to_string(), "<span>Test template</span>\n".to_string());
+    templates
+        .insert("test_cmp_template.html".to_string(), "<span>Test template</span>\n".to_string());
     let resources = ResolvedResources { templates, styles: HashMap::new() };
 
     let code = run_with_resources(source, resources);
     let metadata = extract_metadata_args(&code);
 
-    assert!(
-        !metadata.contains("templateUrl"),
-        "templateUrl should be removed. Got:\n{metadata}"
-    );
+    assert!(!metadata.contains("templateUrl"), "templateUrl should be removed. Got:\n{metadata}");
     assert!(
         metadata.contains(r#"template:"<span>Test template</span>\n""#)
             || metadata.contains("template: \"<span>Test template</span>\\n\""),
@@ -127,8 +125,7 @@ export class InlineComponent {}
         "Inline template should be preserved verbatim. Got:\n{metadata}"
     );
     assert!(
-        metadata.contains(r#"selector:"test-cmp""#)
-            || metadata.contains("selector: \"test-cmp\""),
+        metadata.contains(r#"selector:"test-cmp""#) || metadata.contains("selector: \"test-cmp\""),
         "Selector should be preserved. Got:\n{metadata}"
     );
 }
@@ -157,13 +154,9 @@ export class StyledComponent {}
     let code = run_with_resources(source, resources);
     let metadata = extract_metadata_args(&code);
 
+    assert!(!metadata.contains("styleUrls"), "styleUrls should be removed. Got:\n{metadata}");
     assert!(
-        !metadata.contains("styleUrls"),
-        "styleUrls should be removed. Got:\n{metadata}"
-    );
-    assert!(
-        metadata.contains(r#""div { color: red; }""#)
-            || metadata.contains("'div { color: red; }'"),
+        metadata.contains(r#""div { color: red; }""#) || metadata.contains("'div { color: red; }'"),
         "Resolved style content for a.css should be inlined. Got:\n{metadata}"
     );
     assert!(
@@ -200,8 +193,7 @@ export class StyledComponent {}
         "styleUrl should be removed. Got:\n{metadata}"
     );
     assert!(
-        metadata.contains(r#""div { color: red; }""#)
-            || metadata.contains("'div { color: red; }'"),
+        metadata.contains(r#""div { color: red; }""#) || metadata.contains("'div { color: red; }'"),
         "Resolved style content should be inlined. Got:\n{metadata}"
     );
 }
@@ -230,10 +222,7 @@ export class EmptyStylesComponent {}
     let code = run_with_resources(source, resources);
     let metadata = extract_metadata_args(&code);
 
-    assert!(
-        !metadata.contains("styleUrls"),
-        "styleUrls should be removed. Got:\n{metadata}"
-    );
+    assert!(!metadata.contains("styleUrls"), "styleUrls should be removed. Got:\n{metadata}");
     assert!(
         !metadata.contains("styles:"),
         "When all resolved styles are empty/whitespace, the styles key should be omitted. Got:\n{metadata}"
@@ -715,7 +704,8 @@ export class CtorComponent {
     // → args array of setClassMetadata. Its `templateUrl` / `styleUrls` keys
     // must survive verbatim — they're an opaque DI token, not a component config.
     assert!(
-        code.contains("templateUrl:\"./bogus.html\"") || code.contains("templateUrl: './bogus.html'"),
+        code.contains("templateUrl:\"./bogus.html\"")
+            || code.contains("templateUrl: './bogus.html'"),
         "@Inject's templateUrl literal must survive verbatim in ctorParameters. Got:\n{code}"
     );
     assert!(

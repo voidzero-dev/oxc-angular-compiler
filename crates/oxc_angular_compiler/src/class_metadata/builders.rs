@@ -220,10 +220,7 @@ fn inline_component_resources<'a>(
                 continue;
             }
             style_entries.push(OutputExpression::Literal(Box::new_in(
-                LiteralExpr {
-                    value: LiteralValue::String(*style),
-                    source_span: None,
-                },
+                LiteralExpr { value: LiteralValue::String(*style), source_span: None },
                 allocator,
             )));
         }
@@ -400,13 +397,8 @@ pub fn build_prop_decorators_metadata<'a>(
         }
 
         // Build decorators array for this property
-        let decorators_array = build_decorator_metadata_array(
-            allocator,
-            &angular_decorators,
-            source_text,
-            None,
-            None,
-        );
+        let decorators_array =
+            build_decorator_metadata_array(allocator, &angular_decorators, source_text, None, None);
 
         prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
     }

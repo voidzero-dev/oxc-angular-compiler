@@ -6275,10 +6275,8 @@ export class TestComponent {}
     // emission (now on by default, matching ngc) faithfully preserves the user's
     // source `standalone: true` for TestBed — that's expected and not what this test
     // is asserting against.
-    let define_start = result
-        .code
-        .find("ɵɵdefineComponent(")
-        .expect("expected ɵɵdefineComponent call in output");
+    let define_start =
+        result.code.find("ɵɵdefineComponent(").expect("expected ɵɵdefineComponent call in output");
     let define_end = result.code[define_start..]
         .find("});")
         .map(|i| define_start + i)
