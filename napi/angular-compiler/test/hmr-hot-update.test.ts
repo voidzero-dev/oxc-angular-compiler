@@ -265,6 +265,261 @@ describe('pendingHmrUpdates race condition', () => {
     expect(thirdBody, 'expected pending entry to be consumed after successful HMR').toBe('')
   })
 
+  it('dispatches an HMR event per component when a multi-component .ts file changes (inline template edit)', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Two @Component classes in one file with inline templates.
+    const multiComponentPath = join(appDir, 'multi.component.ts')
+    const originalSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-first', template: '<div>First</div>' })
+      export class FirstComponent {}
+      @Component({ selector: 'app-second', template: '<div>Second</div>' })
+      export class SecondComponent {}
+    `
+    writeFileSync(multiComponentPath, originalSource)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {} } as any,
+      originalSource,
+      multiComponentPath,
+    )
+
+    // Edit only FirstComponent's template — stripped form should match the
+    // cached stripped form, so the HMR (not full-reload) branch fires.
+    const editedSource = originalSource.replace('<div>First</div>', '<div>First Edited</div>')
+    writeFileSync(multiComponentPath, editedSource)
+
+    const ctx = createMockHmrContext(multiComponentPath, [{ id: multiComponentPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    // Both components in the file should receive an HMR event (we
+    // conservatively dispatch all components when the strip-equality check
+    // passes — per-component diffing is a future optimization).
+    const updateMsgs = mockServer._wsMessages.filter(
+      (m: any) => m.event === 'angular:component-update',
+    )
+    const componentIds = updateMsgs.map((m: any) => decodeURIComponent(m.data.id))
+    expect(componentIds).toContain(`${multiComponentPath}@FirstComponent`)
+    expect(componentIds).toContain(`${multiComponentPath}@SecondComponent`)
+
+    // The plugin must NOT have dispatched a full reload.
+    const fullReload = mockServer._wsMessages.find((m: any) => m.type === 'full-reload')
+    expect(fullReload, 'expected no full-reload for inline template change').toBeUndefined()
+  })
+
+  it('serves the correct per-component HMR module via the @ng/component endpoint', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const multiComponentPath = join(appDir, 'multi-endpoint.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-a', template: '<p>A</p>' })
+      export class AComponent {}
+      @Component({ selector: 'app-b', template: '<p>B</p>' })
+      export class BComponent {}
+    `
+    writeFileSync(multiComponentPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {} } as any,
+      source,
+      multiComponentPath,
+    )
+
+    // Trigger a hot update so both components are queued in pendingHmrUpdates.
+    writeFileSync(multiComponentPath, source.replace('<p>A</p>', '<p>A!</p>'))
+    const ctx = createMockHmrContext(multiComponentPath, [{ id: multiComponentPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    expect(middleware, 'expected middleware to be registered').toBeDefined()
+
+    // Request the HMR module for BOTH components — each should resolve with
+    // a non-empty payload that mentions its own className.
+    const aBody = await invokeAngularMiddleware(middleware, `${multiComponentPath}@AComponent`)
+    const bBody = await invokeAngularMiddleware(middleware, `${multiComponentPath}@BComponent`)
+
+    expect(aBody, 'expected non-empty HMR body for AComponent').not.toBe('')
+    expect(bBody, 'expected non-empty HMR body for BComponent').not.toBe('')
+    expect(aBody).toContain('AComponent')
+    expect(bBody).toContain('BComponent')
+  })
+
+  it("dispatches HMR for both components when only one component's inline styles change", async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const multiStylesPath = join(appDir, 'multi-styles.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-x', template: '<x/>', styles: ['.x { color: red }'] })
+      export class XComponent {}
+      @Component({ selector: 'app-y', template: '<y/>', styles: ['.y { color: blue }'] })
+      export class YComponent {}
+    `
+    writeFileSync(multiStylesPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiStylesPath)
+
+    // Edit only YComponent's styles. Stripping wipes BOTH components' styles
+    // (and templates), so old and new stripped forms must still match.
+    writeFileSync(multiStylesPath, source.replace('.y { color: blue }', '.y { color: green }'))
+
+    const ctx = createMockHmrContext(multiStylesPath, [{ id: multiStylesPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentIds = mockServer._wsMessages
+      .filter((m: any) => m.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+    expect(componentIds).toContain(`${multiStylesPath}@XComponent`)
+    expect(componentIds).toContain(`${multiStylesPath}@YComponent`)
+
+    const fullReload = mockServer._wsMessages.find((m: any) => m.type === 'full-reload')
+    expect(fullReload, 'expected no full-reload for inline styles change').toBeUndefined()
+  })
+
+  it('external templateUrl HMR fans out to every component in a multi-component file', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Two components in one file, each with its own templateUrl.
+    const externalDir = appDir
+    const firstHtmlPath = join(externalDir, 'first.component.html')
+    const secondHtmlPath = join(externalDir, 'second.component.html')
+    const multiUrlPath = join(externalDir, 'multi-url.component.ts')
+    writeFileSync(firstHtmlPath, '<p>First</p>')
+    writeFileSync(secondHtmlPath, '<p>Second</p>')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-first', templateUrl: './first.component.html' })
+      export class FirstComponent {}
+      @Component({ selector: 'app-second', templateUrl: './second.component.html' })
+      export class SecondComponent {}
+    `
+    writeFileSync(multiUrlPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiUrlPath)
+
+    // Edit just first.component.html. resourceToComponent maps it to
+    // multi-url.component.ts; dispatchAllComponentsInFile must fan out to
+    // BOTH FirstComponent and SecondComponent (over-dispatch is safe —
+    // Angular's runtime no-ops replaceMetadata when nothing changed).
+    writeFileSync(firstHtmlPath, '<p>First edited</p>')
+    const ctx = createMockHmrContext(
+      normalizePath(firstHtmlPath),
+      [{ id: normalizePath(firstHtmlPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentIds = mockServer._wsMessages
+      .filter((m: any) => m.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+    expect(componentIds).toContain(`${multiUrlPath}@FirstComponent`)
+    expect(componentIds).toContain(`${multiUrlPath}@SecondComponent`)
+  })
+
+  it('consumes a stale pending slot when the requested className is no longer in the file', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const stalePath = join(appDir, 'stale.component.ts')
+    const originalSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-keep', template: '<keep/>' })
+      export class KeepComponent {}
+      @Component({ selector: 'app-drop', template: '<drop/>' })
+      export class DropComponent {}
+    `
+    writeFileSync(stalePath, originalSource)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, originalSource, stalePath)
+
+    // Trigger an HMR-eligible edit so a pending entry is queued for both
+    // components (including DropComponent).
+    writeFileSync(stalePath, originalSource.replace('<keep/>', '<keep-edited/>'))
+    const ctx = createMockHmrContext(stalePath, [{ id: stalePath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    // Now re-transform with DropComponent removed. The prune logic must drop
+    // the cached pending entry for DropComponent so a later request for it
+    // doesn't loop.
+    const reducedSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-keep', template: '<keep-edited/>' })
+      export class KeepComponent {}
+    `
+    writeFileSync(stalePath, reducedSource)
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, reducedSource, stalePath)
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+
+    // A request for the now-gone DropComponent must return '' and NOT trigger
+    // a phantom HMR module / error / invalidate event.
+    const dropBody = await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)
+    expect(dropBody).toBe('')
+    // A second request must also return '' (pending slot consumed first time).
+    const dropBody2 = await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)
+    expect(dropBody2).toBe('')
+  })
+
+  it('triggers full reload when a multi-component .ts changes outside template/styles', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const multiReloadPath = join(appDir, 'multi-reload.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-r1', template: '<r1/>' })
+      export class R1Component { value = 1; }
+      @Component({ selector: 'app-r2', template: '<r2/>' })
+      export class R2Component {}
+    `
+    writeFileSync(multiReloadPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiReloadPath)
+
+    // Change a class member, NOT the template/styles. The stripped form will
+    // differ from the cached one → full reload, no HMR.
+    writeFileSync(multiReloadPath, source.replace('value = 1', 'value = 2'))
+
+    const ctx = createMockHmrContext(multiReloadPath, [{ id: multiReloadPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentUpdates = mockServer._wsMessages.filter(
+      (m: any) => m.event === 'angular:component-update',
+    )
+    expect(
+      componentUpdates,
+      'expected no component-update events for non-template change',
+    ).toHaveLength(0)
+
+    const fullReload = mockServer._wsMessages.find((m: any) => m.type === 'full-reload')
+    expect(fullReload, 'expected a full-reload event').toBeDefined()
+  })
+
   it('consumes pending entry and dispatches angular:invalidate on compile error', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)

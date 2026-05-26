@@ -35,6 +35,14 @@ import { buildOptimizerPlugin } from './angular-build-optimizer-plugin.js'
 import { jitPlugin } from './angular-jit-plugin.js'
 import { angularLinkerPlugin } from './angular-linker-plugin.js'
 import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
+import {
+  emptyDelimitedRange,
+  locateComponentDecorators,
+  locateStylesFieldFor,
+  locateStylesInArgs,
+  locateTemplateInArgs,
+  locateTemplateStringFor,
+} from './utils/decorator-fields.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -182,26 +190,29 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   let inlineBuild: InlineBuildMinifyOptions | undefined
   let outputMinify: unknown
 
-  // Track component IDs for HMR
-  const componentIds = new Map<string, string>()
+  // For each component .ts file, the set of component class names declared
+  // inside it. A file can legally have multiple @Component classes — Angular
+  // emits per-component HMR updates and we mirror that here.
+  const componentsByFile = new Map<string, Set<string>>()
 
-  // Reverse mapping: resource file path → component file path
+  // Reverse mapping: resource file path → component file path. Multi-component
+  // files almost always use inline templates, so a single owner per resource is
+  // sufficient in practice; if a templateUrl/styleUrl is shared across multiple
+  // components in the same file, only one will receive the HMR event.
   const resourceToComponent = new Map<string, string>()
 
   // Cache for resolved resources
   const resourceCache = new Map<string, string>()
 
-  // Component files queued for HMR delivery. Populated by `handleHotUpdate`
-  // when an external resource or inline template/style change is detected,
-  // and consumed by the `@ng/component` HTTP endpoint, which reads it to
-  // decide whether to serve the update module or an empty response.
+  // Component IDs (`filePath@ClassName`) queued for HMR delivery. Populated by
+  // `handleHotUpdate` when an external resource or inline template/style change
+  // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
+  // it to decide whether to serve the update module or an empty response.
   const pendingHmrUpdates = new Set<string>()
 
-  // Cache inline template content per .ts file for detecting template-only changes
+  // Per-component caches keyed by `filePath@ClassName`. A multi-component file
+  // contributes one entry per component to each map.
   const inlineTemplateCache = new Map<string, string>()
-
-  // Cache the inline styles array per .ts file. Used by the HMR endpoint to
-  // serve fresh inline styles to ɵɵreplaceMetadata when the styles change.
   const inlineStylesCache = new Map<string, string[]>()
 
   // Cache the source of each component .ts file with its `template:` and
@@ -404,6 +415,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             }
 
             const fileId = decodedComponentId.slice(0, atIndex)
+            const className = decodedComponentId.slice(atIndex + 1)
             const resolvedId = resolve(process.cwd(), fileId)
 
             // Only return an HMR update module if `handleHotUpdate` queued
@@ -412,7 +424,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             // ɵɵreplaceMetadata from being called unnecessarily during
             // initial load, which would re-create views and cause errors
             // with @Required() decorators.
-            if (!pendingHmrUpdates.has(fileId)) {
+            if (!pendingHmrUpdates.has(decodedComponentId)) {
+              res.setHeader('Content-Type', 'text/javascript')
+              res.setHeader('Cache-Control', 'no-cache')
+              res.end('')
+              return
+            }
+
+            // If the requested className isn't (or is no longer) in the
+            // file, the pending slot is stale and would otherwise stick
+            // around indefinitely because the transient-empty preservation
+            // logic below assumes a future save will resolve it. Consume
+            // and return empty.
+            if (!componentsByFile.get(resolvedId)?.has(className)) {
+              pendingHmrUpdates.delete(decodedComponentId)
               res.setHeader('Content-Type', 'text/javascript')
               res.setHeader('Cache-Control', 'no-cache')
               res.end('')
@@ -433,12 +458,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   templateContent = options.templateTransform(templateContent, templatePath)
                 }
               } else {
-                templateContent = extractInlineTemplate(source)
+                templateContent = extractInlineTemplate(source, className)
               }
 
               if (templateContent) {
-                const className = componentIds.get(resolvedId) ?? 'Component'
-
                 // Read fresh style content. External styleUrls are read from
                 // disk and run through Vite's preprocessCSS (so SCSS/LESS
                 // resolve correctly); inline styles are extracted from the
@@ -468,7 +491,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   }
                 } else {
                   // No external styleUrls — fall back to inline `styles: […]`.
-                  const inlineStyles = extractInlineStyles(source)
+                  const inlineStyles = extractInlineStyles(source, className)
                   if (inlineStyles !== null && inlineStyles.length > 0) {
                     styles = inlineStyles
                   }
@@ -484,7 +507,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // transiently empty (truncate phase of an atomic write on
                 // Linux), the next inotify event's request would find no
                 // pending entry and deliver no HMR.
-                pendingHmrUpdates.delete(fileId)
+                pendingHmrUpdates.delete(decodedComponentId)
                 res.setHeader('Content-Type', 'text/javascript')
                 res.setHeader('Cache-Control', 'no-cache')
                 res.end(result.hmrModule)
@@ -497,7 +520,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
               // Consume the pending slot on error to prevent repeated failed
               // compilations on every subsequent browser request.
-              pendingHmrUpdates.delete(fileId)
+              pendingHmrUpdates.delete(decodedComponentId)
 
               // Send angular:invalidate event to trigger graceful full reload
               // This matches Angular's HMR error fallback pattern
@@ -607,9 +630,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             this.warn(warning.message)
           }
 
-          // Track component IDs for HMR
+          // Track component IDs for HMR — one entry per @Component class.
           if (pluginOptions.liveReload) {
-            // templateUpdates is a plain object (NAPI HashMap → JS object)
+            // templateUpdates is keyed by `filePath@ClassName` (NAPI HashMap → JS object).
             const templateUpdateKeys = Object.keys(result.templateUpdates)
             debugTransform(
               'transform %s templateUpdates=%O deps=%O',
@@ -617,24 +640,52 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               templateUpdateKeys,
               dependencies,
             )
+            const classNamesInFile = new Set<string>()
             for (const componentId of templateUpdateKeys) {
-              const [, className] = componentId.split('@')
-              componentIds.set(actualId, className)
+              const atIdx = componentId.indexOf('@')
+              if (atIdx === -1) continue
+              classNamesInFile.add(componentId.slice(atIdx + 1))
+            }
+            // Prune cache entries for components that USED to be in this file
+            // but no longer are (e.g. a class was renamed or removed). Without
+            // this, the HMR endpoint could find a stale `pendingHmrUpdates`
+            // entry pointing at a className that's gone, fail to extract a
+            // template for it, and orphan the slot forever.
+            const previouslyInFile = componentsByFile.get(actualId)
+            if (previouslyInFile) {
+              for (const oldClass of previouslyInFile) {
+                if (classNamesInFile.has(oldClass)) continue
+                const staleKey = `${actualId}@${oldClass}`
+                inlineTemplateCache.delete(staleKey)
+                inlineStylesCache.delete(staleKey)
+                pendingHmrUpdates.delete(staleKey)
+                debugHmr('pruned stale cache entries for %s', staleKey)
+              }
+            }
+
+            componentsByFile.set(actualId, classNamesInFile)
+            for (const className of classNamesInFile) {
               debugHmr('registered: %s -> %s', actualId, className)
             }
 
-            // Cache inline template / styles for detecting template-only or
-            // styles-only changes in handleHotUpdate, and the metadata-stripped
-            // source for cheaply diffing whether anything else changed.
-            const inlineTemplate = extractInlineTemplate(code)
-            if (inlineTemplate !== null) {
-              inlineTemplateCache.set(actualId, inlineTemplate)
-            }
-            const inlineStyles = extractInlineStyles(code)
-            if (inlineStyles !== null) {
-              inlineStylesCache.set(actualId, inlineStyles)
-            } else {
-              inlineStylesCache.delete(actualId)
+            // Cache per-component inline template / styles for detecting
+            // template/styles-only changes in handleHotUpdate, and the
+            // metadata-stripped (whole-file) source for cheaply diffing
+            // whether anything else changed.
+            for (const className of classNamesInFile) {
+              const cacheKey = `${actualId}@${className}`
+              const inlineTemplate = extractInlineTemplate(code, className)
+              if (inlineTemplate !== null) {
+                inlineTemplateCache.set(cacheKey, inlineTemplate)
+              } else {
+                inlineTemplateCache.delete(cacheKey)
+              }
+              const inlineStyles = extractInlineStyles(code, className)
+              if (inlineStyles !== null) {
+                inlineStylesCache.set(cacheKey, inlineStyles)
+              } else {
+                inlineStylesCache.delete(cacheKey)
+              }
             }
             componentMetadataCache.set(actualId, stripComponentMetadata(code))
           }
@@ -652,21 +703,25 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
         const normalizedFile = normalizePath(ctx.file)
 
-        // Helper: dispatch a component HMR update for the owning component
-        // (used by both external resource and inline template/style branches).
-        // Returns true if dispatched.
-        const dispatchComponentUpdate = (componentFile: string): boolean => {
-          if (!componentIds.has(componentFile)) return false
+        // Helper: dispatch an HMR update for a specific component (identified
+        // by its componentFile + className). Used by both external resource
+        // and inline template/style branches. Returns true if dispatched.
+        const dispatchComponentUpdate = (componentFile: string, className: string): boolean => {
+          const classNames = componentsByFile.get(componentFile)
+          if (!classNames || !classNames.has(className)) return false
+
+          const componentId = `${componentFile}@${className}`
           // The HMR HTTP endpoint reads this set to decide whether to serve
           // the update module or an empty response.
-          pendingHmrUpdates.add(componentFile)
+          pendingHmrUpdates.add(componentId)
 
           // Invalidate the component's module so the next request reads fresh
-          // template/style content.
+          // template/style content. Module is per-file; safe to invalidate
+          // once even if multiple components share it (subsequent dispatch
+          // calls for siblings will no-op the invalidation).
           const mod = ctx.server.moduleGraph.getModuleById(componentFile)
           if (mod) ctx.server.moduleGraph.invalidateModule(mod)
 
-          const componentId = `${componentFile}@${componentIds.get(componentFile)}`
           const encodedId = encodeURIComponent(componentId)
           debugHmr('sending angular:component-update id=%s', encodedId)
           ctx.server.ws.send({
@@ -675,6 +730,22 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             data: { id: encodedId, timestamp: Date.now() },
           })
           return true
+        }
+
+        // Dispatch an HMR event for every component in the given file. Used
+        // when a whole-file diff (or external resource) tells us the change
+        // is contained within template/styles but we can't cheaply attribute
+        // it to a specific component. Angular's runtime no-ops
+        // ɵɵreplaceMetadata when the metadata didn't actually change, so
+        // over-dispatching is safe.
+        const dispatchAllComponentsInFile = (componentFile: string): boolean => {
+          const classNames = componentsByFile.get(componentFile)
+          if (!classNames || classNames.size === 0) return false
+          let dispatched = false
+          for (const className of classNames) {
+            if (dispatchComponentUpdate(componentFile, className)) dispatched = true
+          }
+          return dispatched
         }
 
         // ------------------------------------------------------------
@@ -690,7 +761,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           if (resourceToComponent.has(normalizedFile)) {
             const componentFile = resourceToComponent.get(normalizedFile)!
             resourceCache.delete(normalizedFile)
-            if (dispatchComponentUpdate(componentFile)) {
+            // resourceToComponent only tracks one owner per resource; if a
+            // templateUrl/styleUrl is shared across multiple components in
+            // the same file, only the registered owner receives HMR.
+            if (dispatchAllComponentsInFile(componentFile)) {
               debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
               return []
             }
@@ -702,7 +776,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // ------------------------------------------------------------
         // Branch 2: component .ts (has @Component decorator)
         // ------------------------------------------------------------
-        // The transform pass populates componentIds for every component .ts.
+        // The transform pass populates componentsByFile for every component .ts.
         // A change here is either:
         //   (a) only the inline `template:` and/or `styles:` fields changed
         //       → HMR (no reload), matching Angular CLI's behavior.
@@ -710,20 +784,32 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         //       → full reload, since Angular's runtime can't safely hot-swap
         //       class definitions.
         const isTsFile = ANGULAR_TS_REGEX.test(ctx.file)
-        if (isTsFile && componentIds.has(ctx.file)) {
-          // If a pending update was already registered for this component
-          // (e.g. an external template change just invalidated the .ts module
-          // via the graph), the resource branch has it covered.
-          if (pendingHmrUpdates.has(ctx.file)) {
+        if (isTsFile && componentsByFile.has(ctx.file)) {
+          // If a pending update is already queued for ANY component in this
+          // file (e.g. an external template change just invalidated the .ts
+          // module via the graph), the resource branch has it covered.
+          const fileClassNames = componentsByFile.get(ctx.file)!
+          let alreadyPending = false
+          for (const className of fileClassNames) {
+            if (pendingHmrUpdates.has(`${ctx.file}@${className}`)) {
+              alreadyPending = true
+              break
+            }
+          }
+          if (alreadyPending) {
             debugHmr('component .ts: pending HMR already queued, skip')
             return []
           }
 
-          // Strip-based check: if the source with `template:` and `styles:`
-          // decorator fields stripped is byte-identical to the cached stripped
-          // form, the diff is contained entirely in those fields and we can
-          // HMR. This covers inline-template-only, inline-style-only, and
-          // both-at-once changes uniformly.
+          // Strip-based check: if the source with EVERY @Component's
+          // `template:` and `styles:` fields stripped is byte-identical to
+          // the cached stripped form, the diff is contained entirely in
+          // those fields (for one or more components in the file) and we
+          // can HMR. This covers inline-template-only, inline-style-only,
+          // and both-at-once changes uniformly, including the multi-component
+          // case (a single edit to one component's template still satisfies
+          // the equality because the other components' stripped fields are
+          // identical before/after).
           const cachedStripped = componentMetadataCache.get(ctx.file)
           if (cachedStripped !== undefined) {
             let newContent: string
@@ -735,16 +821,27 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const newStripped = stripComponentMetadata(newContent)
             if (newStripped === cachedStripped) {
               debugHmr('inline template/styles-only change, dispatching HMR for %s', ctx.file)
-              const newTemplate = extractInlineTemplate(newContent)
-              if (newTemplate !== null) inlineTemplateCache.set(ctx.file, newTemplate)
-              const newStyles = extractInlineStyles(newContent)
-              if (newStyles !== null) {
-                inlineStylesCache.set(ctx.file, newStyles)
-              } else {
-                inlineStylesCache.delete(ctx.file)
+              // Refresh per-component caches with the new contents.
+              for (const className of fileClassNames) {
+                const cacheKey = `${ctx.file}@${className}`
+                const newTemplate = extractInlineTemplate(newContent, className)
+                if (newTemplate !== null) {
+                  inlineTemplateCache.set(cacheKey, newTemplate)
+                } else {
+                  inlineTemplateCache.delete(cacheKey)
+                }
+                const newStyles = extractInlineStyles(newContent, className)
+                if (newStyles !== null) {
+                  inlineStylesCache.set(cacheKey, newStyles)
+                } else {
+                  inlineStylesCache.delete(cacheKey)
+                }
               }
               componentMetadataCache.set(ctx.file, newStripped)
-              dispatchComponentUpdate(ctx.file)
+              // Conservatively dispatch HMR for every component in the file —
+              // Angular's runtime no-ops if a component's metadata didn't
+              // actually change. Per-component diffing is an easy follow-up.
+              dispatchAllComponentsInFile(ctx.file)
               return []
             }
           }
@@ -843,35 +940,40 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 }
 
 /**
- * Extract inline template from @Component decorator.
+ * Extract the inline template from the `@Component({...})` decorator that
+ * decorates the class named `className`. Returns null if no such decorator
+ * exists or the decorator has no inline `template:` string literal.
  */
-function extractInlineTemplate(code: string): string | null {
-  // Simple regex to extract inline template
-  const templateMatch = code.match(/template\s*:\s*`([^`]*)`/s)
-  if (templateMatch) {
-    return templateMatch[1]
-  }
-
-  const templateQuoteMatch = code.match(/template\s*:\s*['"]([^'"]*)['"]/)
-  if (templateQuoteMatch) {
-    return templateQuoteMatch[1]
-  }
-
-  return null
+function extractInlineTemplate(code: string, className: string): string | null {
+  const range = locateTemplateStringFor(code, className)
+  if (!range) return null
+  // Slice excludes the outer quotes/backticks — raw inner contents.
+  return code.slice(range[0] + 1, range[1])
 }
 
 /**
- * Extract inline styles array from @Component decorator.
+ * Extract the inline styles from the `@Component({...})` decorator that
+ * decorates the class named `className`, as a positional array.
  *
- * Handles `styles: [\`…\`]`, `styles: ['…']`, and `styles: ["…"]` and
- * combinations thereof. Returns null if no `styles:` array is present.
+ * Handles both Angular forms — `styles: string | string[]`:
+ *   - Array of literals (`['…']`, `["…"]`, `` [`…`] ``, or any mix) → each
+ *     literal becomes one element, preserving order (HMR delivery is positional).
+ *   - Bare single literal (`'…'`, `"…"`, or `` `…` ``) → returned as a
+ *     one-element array.
+ *
+ * Returns null if the named decorator has no `styles:` field or its value is
+ * something other than a string/array literal (e.g. a variable reference).
  */
-function extractInlineStyles(code: string): string[] | null {
-  const arrMatch = code.match(/styles\s*:\s*\[([\s\S]*?)\]/)
-  if (!arrMatch) return null
-  const body = arrMatch[1]
-  // Match each string literal in the array body. Order matters for HMR
-  // delivery since styles are positional.
+function extractInlineStyles(code: string, className: string): string[] | null {
+  const range = locateStylesFieldFor(code, className)
+  if (!range) return null
+  const opener = code[range[0]]
+  if (opener !== '[') {
+    // Bare string form — return the inner contents as a single element.
+    return [code.slice(range[0] + 1, range[1])]
+  }
+  // Array form — walk string literals inside the array body in order.
+  const body = code.slice(range[0] + 1, range[1])
   const stringRe = /`([\s\S]*?)`|'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"/g
   const styles: string[] = []
   let m: RegExpExecArray | null
@@ -882,22 +984,31 @@ function extractInlineStyles(code: string): string[] | null {
 }
 
 /**
- * Replace the inline `template:` and `styles:` decorator fields with empty
- * placeholders. Used to detect "only template and/or styles changed" — if
- * the stripped form of the old and new source is byte-identical, the diff
- * is contained within those fields and we can dispatch an HMR component
- * update instead of a full reload.
- *
- * Note: each replace targets the FIRST occurrence only. This assumes one
- * `@Component` decorator per file (Angular convention). Files with multiple
- * components fall through to full-reload, which is the safe default.
+ * Empty the `template:` and `styles:` field values of *every* `@Component(...)`
+ * in the source, returning the result. Used to detect "only template/styles
+ * changed somewhere in the file" — if the stripped form of the old and new
+ * source is byte-identical, the diff is contained within those fields and we
+ * can dispatch HMR (one event per component in the file) instead of a full
+ * reload.
  */
 function stripComponentMetadata(code: string): string {
-  return code
-    .replace(/template\s*:\s*`[\s\S]*?`/, 'template:``')
-    .replace(/template\s*:\s*'(?:\\.|[^'\\])*'/, "template:''")
-    .replace(/template\s*:\s*"(?:\\.|[^"\\])*"/, 'template:""')
-    .replace(/styles\s*:\s*\[[\s\S]*?\]/, 'styles:[]')
+  // Enumerate decorators ONCE (O(N) walk of source) and look up each one's
+  // template + styles range directly from its argsRange. Calling the
+  // className-based locators per decorator would re-enumerate inside each,
+  // giving O(N²).
+  //
+  // Splice from highest start → lowest so earlier offsets stay valid as we
+  // mutate the string from the end backwards.
+  const decorators = locateComponentDecorators(code)
+  const ranges: Array<[number, number]> = []
+  for (const d of decorators) {
+    const tpl = locateTemplateInArgs(code, d.argsRange)
+    if (tpl) ranges.push(tpl)
+    const styles = locateStylesInArgs(code, d.argsRange)
+    if (styles) ranges.push(styles)
+  }
+  ranges.sort((a, b) => b[0] - a[0])
+  return ranges.reduce((acc, range) => emptyDelimitedRange(acc, range), code)
 }
 
 export { angular as default }
