@@ -26,8 +26,9 @@ use crate::output::oxc_converter::convert_oxc_expression;
 /// via `ResolvedResources`), the first argument of the first decorator (the
 /// component config object literal) is rewritten so that `templateUrl` becomes
 /// `template` (with content inlined) and `styleUrls`/`styleUrl` are folded into
-/// the `styles` array. This matches `@analogjs/vite-plugin-angular`'s behavior
-/// and is required for TestBed JIT recompilation, since Angular's
+/// the `styles` array. This matches Angular's `transformDecoratorResources` (see
+/// `inline_component_resources` below for the source-cited semantics) and is
+/// required for TestBed JIT recompilation, since Angular's
 /// `componentNeedsResolution(metadata)` check throws when `templateUrl` is set
 /// without a sibling `template` field, or when `styleUrls?.length > 0`, even
 /// though the AOT-compiled `ɵcmp` already has the template baked in.
