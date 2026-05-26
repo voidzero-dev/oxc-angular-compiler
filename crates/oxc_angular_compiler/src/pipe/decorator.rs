@@ -351,7 +351,8 @@ fn extract_param_token<'a>(
 ) -> Option<OutputExpression<'a>> {
     // First try to get the type annotation (directly on FormalParameter, not on pattern)
     let type_annotation = param.type_annotation.as_ref()?;
-    let ts_type = &type_annotation.type_annotation;
+    // Narrow `T | null` unions to `T` to match the reference compiler.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
 
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
@@ -566,6 +567,32 @@ mod tests {
         with_extracted_metadata(code, false, |meta| {
             let meta = meta.expect("Expected metadata");
             assert!(!meta.standalone);
+        });
+    }
+
+    #[test]
+    fn test_pipe_optional_with_nullable_type() {
+        // Regression test for issue #285:
+        // `@Optional() svc: MyService | null` must resolve the token to `MyService`.
+        let code = r#"
+            @Pipe({ name: 'myPipe' })
+            class MyPipe {
+                constructor(@Optional() private svc: MyService | null) {}
+            }
+        "#;
+        assert_metadata(code, |meta| {
+            let deps = meta.deps.as_ref().expect("Should have deps");
+            assert_eq!(deps.len(), 1);
+            let dep = &deps[0];
+            assert!(dep.optional);
+            let token = dep.token.as_ref().expect("token should resolve to MyService");
+            let token: &crate::output::ast::OutputExpression<'_> = token;
+            match token {
+                crate::output::ast::OutputExpression::ReadVar(var) => {
+                    assert_eq!(var.name.as_str(), "MyService");
+                }
+                other => panic!("expected ReadVar token, got {:?}", other),
+            }
         });
     }
 

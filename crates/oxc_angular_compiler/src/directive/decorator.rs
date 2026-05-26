@@ -394,7 +394,8 @@ fn extract_param_token<'a>(
 ) -> Option<OutputExpression<'a>> {
     // Get the type annotation (directly on FormalParameter)
     let type_annotation = param.type_annotation.as_ref()?;
-    let ts_type = &type_annotation.type_annotation;
+    // Narrow `T | null` unions to `T` to match the reference compiler.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
 
     // Handle TSTypeReference: SomeClass, SomeModule, etc.
     if let oxc_ast::ast::TSType::TSTypeReference(type_ref) = ts_type {
@@ -1533,6 +1534,30 @@ mod tests {
         "#;
         assert_directive_metadata(code, |meta| {
             assert!(meta.uses_inheritance, "Should have inheritance");
+        });
+    }
+
+    #[test]
+    fn test_directive_optional_with_nullable_type() {
+        // Regression test for issue #285:
+        // `@Optional() svc: MyService | null` must resolve the token to `MyService`.
+        let code = r#"
+            @Directive({ selector: '[myDir]' })
+            class MyDirective {
+                constructor(@Optional() private svc: MyService | null) {}
+            }
+        "#;
+        assert_directive_metadata(code, |meta| {
+            let deps = meta.deps.as_ref().expect("Directive should have deps");
+            assert_eq!(deps.len(), 1);
+            let dep = &deps[0];
+            assert!(dep.optional, "Should have optional flag");
+            let token = dep.token.as_ref().expect("token should resolve to MyService");
+            if let crate::output::ast::OutputExpression::ReadVar(var) = token {
+                assert_eq!(var.name.as_str(), "MyService");
+            } else {
+                panic!("expected ReadVar token, got {:?}", token);
+            }
         });
     }
 

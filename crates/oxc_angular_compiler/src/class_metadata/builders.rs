@@ -361,7 +361,9 @@ fn build_param_type_expression<'a>(
 /// Used to get the type name for namespace-prefixed references in metadata.
 fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Ident<'a>> {
     let type_annotation = param.type_annotation.as_ref()?;
-    match &type_annotation.type_annotation {
+    // Narrow `T | null` unions to `T` so optional-DI patterns expose the type.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
+    match ts_type {
         TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
             TSTypeName::IdentifierReference(id) => Some(id.name.into()),
             TSTypeName::QualifiedName(qualified) => Some(qualified.right.name.into()),
@@ -381,8 +383,11 @@ fn extract_param_type_expression<'a>(
     // Get the type annotation from the formal parameter
     let type_annotation = param.type_annotation.as_ref()?;
 
+    // Narrow `T | null` unions to `T` so optional-DI patterns expose the type.
+    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
+
     // Extract the type name from the annotation
-    match &type_annotation.type_annotation {
+    match ts_type {
         TSType::TSTypeReference(type_ref) => {
             // Handle simple type references like SomeService
             match &type_ref.type_name {
