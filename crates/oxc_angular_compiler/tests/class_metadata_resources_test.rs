@@ -580,3 +580,91 @@ export class EmptyStyleUrlComponent {}
         "Empty styleUrl should produce no styles key and no leftover styleUrl. Got:\n{metadata}"
     );
 }
+
+/// Property ordering after `templateUrl` → `template` should match Angular's
+/// reference `transformDecoratorResources`. Angular uses `Map.delete('templateUrl')`
+/// followed by `Map.set('template', …)`, which appends `template` at the end of
+/// the Map's insertion order when no existing `template` key is present.
+///
+/// Concretely, source `{ selector, templateUrl, encapsulation }` must emit
+/// `{ selector, encapsulation, template }` — not `{ selector, template, encapsulation }`.
+/// This is the form `e2e/compare` checks against ngc's output via string equality.
+#[test]
+fn template_replacement_lands_at_end_matching_angular_map_semantics() {
+    let source = r#"
+import { Component, ViewEncapsulation } from '@angular/core';
+
+@Component({
+    selector: 'test-cmp',
+    templateUrl: './tmpl.html',
+    encapsulation: ViewEncapsulation.None,
+})
+export class OrderedComponent {}
+"#;
+
+    let mut templates = HashMap::new();
+    templates.insert("./tmpl.html".to_string(), "<p></p>".to_string());
+    let resources = ResolvedResources { templates, styles: HashMap::new() };
+
+    let code = run_with_resources(source, resources);
+    let metadata = extract_metadata_args(&code);
+
+    let normalized = metadata.replace([' ', '\n', '\t'], "");
+    let selector_pos = normalized.find("selector:").expect("selector should be present");
+    let encapsulation_pos =
+        normalized.find("encapsulation:").expect("encapsulation should be present");
+    let template_pos = normalized.find("template:").expect("template should be present");
+
+    assert!(
+        selector_pos < encapsulation_pos,
+        "Source ordering of non-resource keys should be preserved. Got:\n{metadata}"
+    );
+    assert!(
+        encapsulation_pos < template_pos,
+        "Resolved template should appear AFTER all surviving source keys (Angular's \
+         Map.delete + Map.set appends template to end of insertion order). Got:\n{metadata}"
+    );
+    assert!(
+        !normalized.contains("templateUrl"),
+        "templateUrl literal should not appear. Got:\n{metadata}"
+    );
+}
+
+/// If the source decorator illegally contains BOTH inline `template` and
+/// `templateUrl`, Angular's `Map.delete('templateUrl')` + `Map.set('template', …)`
+/// semantics produce a single `template` key (Map.set on an existing key
+/// overwrites in place; the original position is preserved). OXC must not emit
+/// duplicate `template:` literals — that's invalid JS object syntax in strict mode
+/// and a divergence from `ngc`'s output that would fail the e2e string-equality
+/// comparison.
+#[test]
+fn source_with_both_template_and_template_url_emits_single_template_key() {
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'test-cmp',
+    template: '<inline></inline>',
+    templateUrl: './tmpl.html',
+})
+export class DoubleTemplateComponent {}
+"#;
+
+    let mut templates = HashMap::new();
+    templates.insert("./tmpl.html".to_string(), "<from-url></from-url>".to_string());
+    let resources = ResolvedResources { templates, styles: HashMap::new() };
+
+    let code = run_with_resources(source, resources);
+    let metadata = extract_metadata_args(&code);
+
+    let template_count = metadata.matches("template:").count();
+    assert_eq!(
+        template_count, 1,
+        "Expected exactly ONE `template:` key in setClassMetadata (Angular's \
+         Map.set semantics overwrite, not duplicate). Got {template_count} in:\n{metadata}"
+    );
+    assert!(
+        !metadata.contains("templateUrl"),
+        "templateUrl literal should not appear after inlining. Got:\n{metadata}"
+    );
+}

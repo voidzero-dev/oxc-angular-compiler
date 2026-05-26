@@ -131,19 +131,24 @@ pub fn build_decorator_metadata_array<'a>(
 /// inlined into the `setClassMetadata` args.
 ///
 /// Mirrors Angular's `transformDecoratorResources` (in
-/// `compiler-cli/src/ngtsc/annotations/component/src/resources.ts`):
+/// `compiler-cli/src/ngtsc/annotations/component/src/resources.ts`), which
+/// operates on a `Map<string, ts.Expression>` and uses `Map.delete` /
+/// `Map.set` semantics:
 ///
-/// - Bail out unchanged when the source decorator has none of `templateUrl`,
-///   `styleUrls`, `styleUrl`, or `styles`.
-/// - Replace `templateUrl: "..."` in place with `template: "<inlined content>"`.
-/// - Drop all of `styleUrls`, `styleUrl`, and (pre-existing) `styles`; re-emit
-///   one consolidated `styles` array at the end if any non-empty styles remain.
-///
-/// `inlined_styles` is the FINAL canonical style list — the caller is
-/// responsible for merging inline source styles with resolved-from-URL content
-/// (which `resolve_styles` already does into `ComponentMetadata::styles`). We
-/// therefore drop the source-side `styles:[...]` to avoid duplicating
-/// already-included entries.
+/// - **Fast path**: bail out unchanged when the source has none of `templateUrl`,
+///   `styleUrls`, `styleUrl`, or `styles` — preserves the original AST for
+///   best source-map fidelity.
+/// - **`templateUrl` → `template`**: when present, `templateUrl` is deleted and
+///   `template` is set to the inlined content. If the source already had a
+///   `template` key (illegal but possible), the existing entry is overwritten
+///   *in place* with the inlined value (matches `Map.set` on an existing key).
+///   Otherwise the new `template` is appended at the end (matches `Map.set` on
+///   a fresh key).
+/// - **`styleUrls` / `styleUrl` / existing `styles`**: all deleted; the
+///   consolidated `styles` array (whitespace-only entries filtered) is appended
+///   at the end. `inlined_styles` is the FINAL canonical list — the caller is
+///   responsible for merging inline + resolved content (which `resolve_styles`
+///   already does into `ComponentMetadata::styles`).
 fn inline_component_resources<'a>(
     allocator: &'a Allocator,
     expr: &mut OutputExpression<'a>,
@@ -154,48 +159,54 @@ fn inline_component_resources<'a>(
         return;
     };
 
-    // Angular's fast-path: if the source decorator has none of the resource
-    // keys, there's nothing to substitute and we preserve the original AST.
-    let has_resource_field = map_box
+    // Fast-path: no resource fields → preserve original AST.
+    let has_template_url = map_box.entries.iter().any(|e| e.key.as_str() == "templateUrl");
+    let has_style_field = map_box
         .entries
         .iter()
-        .any(|e| matches!(e.key.as_str(), "templateUrl" | "styleUrls" | "styleUrl" | "styles"));
-    if !has_resource_field {
+        .any(|e| matches!(e.key.as_str(), "styleUrls" | "styleUrl" | "styles"));
+    if !has_template_url && !has_style_field {
         return;
     }
 
     let original_entries = std::mem::replace(&mut map_box.entries, AllocVec::new_in(allocator));
 
+    // First pass: drop the deleted keys; if both `templateUrl` and `template`
+    // existed in source, overwrite the existing `template` in place (Map.set
+    // semantics).
+    let mut template_emitted = false;
     for entry in original_entries {
         match entry.key.as_str() {
-            "templateUrl" if inlined_template.is_some() => {
-                let tpl = inlined_template.unwrap();
-                map_box.entries.push(LiteralMapEntry::new(
-                    Ident::from("template"),
-                    OutputExpression::Literal(Box::new_in(
-                        LiteralExpr {
-                            value: LiteralValue::String(Ident::from(tpl)),
-                            source_span: None,
-                        },
-                        allocator,
-                    )),
-                    false,
-                ));
+            "templateUrl" | "styleUrls" | "styleUrl" | "styles" => {
+                // Dropped — replacements (if any) are emitted below.
             }
-            // Drop all style-shaped keys; the consolidated `styles` entry is
-            // appended below from `inlined_styles`, which already contains the
-            // merged inline + resolved content.
-            "styleUrls" | "styleUrl" | "styles" => {}
+            "template" if has_template_url && inlined_template.is_some() => {
+                // Overwrite-in-place: emit the inlined value at the source
+                // `template` key's original position.
+                map_box.entries.push(build_template_entry(allocator, inlined_template.unwrap()));
+                template_emitted = true;
+            }
             _ => map_box.entries.push(entry),
         }
     }
 
+    // If `templateUrl` was in source but no source `template` slot received
+    // the in-place overwrite, append the resolved template at the end —
+    // matching `Map.set('template', …)` on a key that didn't previously exist.
+    if has_template_url
+        && !template_emitted
+        && let Some(tpl) = inlined_template
+    {
+        map_box.entries.push(build_template_entry(allocator, tpl));
+    }
+
+    // Styles are *always* appended at the end (we always delete the pre-existing
+    // `styles`/`styleUrl(s)`, mirroring Angular's unconditional `metadata.delete`
+    // for all three keys before `metadata.set('styles', …)`).
     if let Some(styles) = inlined_styles {
         let mut style_entries = AllocVec::new_in(allocator);
         for style in styles {
-            // Match Angular's `style.trim().length > 0` filter — empty or
-            // whitespace-only styles are dropped so they don't trip
-            // `componentNeedsResolution` or pollute output.
+            // Match Angular's `style.trim().length > 0` filter.
             if style.as_str().trim().is_empty() {
                 continue;
             }
@@ -218,6 +229,18 @@ fn inline_component_resources<'a>(
             ));
         }
     }
+}
+
+/// Build a `template: "…"` map entry from the inlined content.
+fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> LiteralMapEntry<'a> {
+    LiteralMapEntry::new(
+        Ident::from("template"),
+        OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(Ident::from(content)), source_span: None },
+            allocator,
+        )),
+        false,
+    )
 }
 
 /// Build constructor parameters metadata.
