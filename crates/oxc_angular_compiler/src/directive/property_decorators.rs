@@ -392,9 +392,7 @@ pub(crate) fn try_parse_signal_output<'a>(
 /// expression, matching ngc's `tryParseInitializerApi` which recurses through
 /// `isAsExpression` and `isParenthesizedExpression` (e.g. `x = input(0) as any`,
 /// `x = (input(0))`).
-pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(
-    expr: &'b Expression<'a>,
-) -> &'b Expression<'a> {
+pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
     match expr {
         Expression::TSAsExpression(e) => unwrap_initializer_api_expr(&e.expression),
         Expression::ParenthesizedExpression(e) => unwrap_initializer_api_expr(&e.expression),

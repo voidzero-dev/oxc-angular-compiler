@@ -2319,8 +2319,10 @@ pub fn transform_angular_file(
                         compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
                         class.body.span.end,
                     ));
-                    class_definitions
-                        .insert(class_name, (property_assignments, String::new(), decls_after_class));
+                    class_definitions.insert(
+                        class_name,
+                        (property_assignments, String::new(), decls_after_class),
+                    );
                 } else if let Some(mut pipe_metadata) =
                     extract_pipe_metadata(allocator, class, implicit_standalone, Some(source))
                 {

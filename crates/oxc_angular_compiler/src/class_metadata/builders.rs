@@ -556,7 +556,11 @@ fn build_signal_input_decorator<'a>(
     input: &R3InputMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut config = AllocVec::new_in(allocator);
-    config.push(LiteralMapEntry::new(Ident::from("isSignal"), bool_literal(allocator, true), false));
+    config.push(LiteralMapEntry::new(
+        Ident::from("isSignal"),
+        bool_literal(allocator, true),
+        false,
+    ));
     config.push(LiteralMapEntry::new(
         Ident::from("alias"),
         string_literal(allocator, input.binding_property_name.clone()),
@@ -609,7 +613,11 @@ fn build_signal_query_decorator<'a>(
     {
         options.push(LiteralMapEntry::spread(source_options));
     }
-    options.push(LiteralMapEntry::new(Ident::from("isSignal"), bool_literal(allocator, true), false));
+    options.push(LiteralMapEntry::new(
+        Ident::from("isSignal"),
+        bool_literal(allocator, true),
+        false,
+    ));
     args.push(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: options, source_span: None },
         allocator,
@@ -638,7 +646,9 @@ fn signal_query_decorator_name(callee: &Expression<'_>) -> Option<&'static str> 
             if member.property.name == "required" {
                 match &member.object {
                     Expression::Identifier(id) => name_of(id.name.as_str()),
-                    Expression::StaticMemberExpression(inner) => name_of(inner.property.name.as_str()),
+                    Expression::StaticMemberExpression(inner) => {
+                        name_of(inner.property.name.as_str())
+                    }
                     _ => None,
                 }
             } else {

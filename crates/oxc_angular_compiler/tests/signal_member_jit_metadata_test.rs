@@ -100,7 +100,8 @@ fn aliased_signal_input_uses_alias() {
 
 #[test]
 fn signal_output_emits_output_prop_decorator() {
-    let md = metadata_region(&compile(&component("  readonly changed = output<string>();", "output")));
+    let md =
+        metadata_region(&compile(&component("  readonly changed = output<string>();", "output")));
     assert!(md.contains("changed"), "prop key missing:\n{md}");
     assert!(md.contains("Output"), "synthetic Output decorator missing:\n{md}");
     // output() lowers to `Output("<bindingName>")` (a single string arg).
@@ -145,10 +146,7 @@ fn classic_input_output_unchanged_and_not_signal() {
     assert!(md.contains("foo"), "classic @Input prop key missing:\n{md}");
     assert!(md.contains("bar"), "classic @Output prop key missing:\n{md}");
     assert!(md.contains("type:Input"), "classic Input type missing:\n{md}");
-    assert!(
-        !md.contains("isSignal"),
-        "classic decorators must not gain an isSignal flag:\n{md}"
-    );
+    assert!(!md.contains("isSignal"), "classic decorators must not gain an isSignal flag:\n{md}");
 }
 
 #[test]
@@ -173,14 +171,20 @@ fn signal_input_detected_through_as_cast() {
     // ngc unwraps `as` expressions when detecting initializer APIs:
     // `foo = input(0) as any` is still recognized as a signal input.
     let md = metadata_region(&compile(&component("  readonly value = input(0) as any;", "input")));
-    assert!(md.contains("Input") && md.contains("isSignal:true"), "input behind `as` cast not detected:\n{md}");
+    assert!(
+        md.contains("Input") && md.contains("isSignal:true"),
+        "input behind `as` cast not detected:\n{md}"
+    );
 }
 
 #[test]
 fn signal_input_detected_through_parentheses() {
     // ngc unwraps parenthesized initializers: `foo = (input(0))`.
     let md = metadata_region(&compile(&component("  readonly value = (input(0));", "input")));
-    assert!(md.contains("Input") && md.contains("isSignal:true"), "parenthesized input not detected:\n{md}");
+    assert!(
+        md.contains("Input") && md.contains("isSignal:true"),
+        "parenthesized input not detected:\n{md}"
+    );
 }
 
 #[test]
@@ -195,7 +199,10 @@ fn namespaced_required_signal_input_detected() {
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
     let md = metadata_region(&result.code);
-    assert!(md.contains("Input") && md.contains("isSignal:true"), "core.input.required not detected:\n{md}");
+    assert!(
+        md.contains("Input") && md.contains("isSignal:true"),
+        "core.input.required not detected:\n{md}"
+    );
     assert!(md.contains("required:true"), "required flag missing for core.input.required:\n{md}");
 }
 
@@ -299,8 +306,7 @@ const CLASSIC_MEMBERS: &str = "\
   @HostBinding('class.active') active = true;\n\
   @HostListener('click', ['$event']) onClick(_e: unknown) {}";
 
-const CLASSIC_IMPORTS: &str =
-    "Input, Output, EventEmitter, ViewChild, ViewChildren, ContentChild, ContentChildren, \
+const CLASSIC_IMPORTS: &str = "Input, Output, EventEmitter, ViewChild, ViewChildren, ContentChild, ContentChildren, \
      HostBinding, HostListener, ElementRef";
 
 fn assert_classic_decorators(raw: &str) {
@@ -371,7 +377,10 @@ fn mixed_classic_and_signal_members_coexist() {
     assert!(md.contains("classic:[{type:Input}]"), "classic @Input:\n{md}");
     assert!(md.contains("sig:[{type:i0.Input,args:[{isSignal:true"), "signal input:\n{md}");
     assert!(md.contains("sigOut:[{type:i0.Output"), "signal output:\n{md}");
-    assert!(md.contains("vc:[{type:i0.ViewChild,args:[\"ref\",{isSignal:true}]}]"), "signal query:\n{md}");
+    assert!(
+        md.contains("vc:[{type:i0.ViewChild,args:[\"ref\",{isSignal:true}]}]"),
+        "signal query:\n{md}"
+    );
 }
 
 #[test]
@@ -402,7 +411,10 @@ fn namespaced_required_signal_model_detected() {
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
     assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
     let md = metadata_region(&result.code);
-    assert!(md.contains("Input") && md.contains("isSignal:true"), "core.model.required input not detected:\n{md}");
+    assert!(
+        md.contains("Input") && md.contains("isSignal:true"),
+        "core.model.required input not detected:\n{md}"
+    );
     assert!(md.contains("Output"), "core.model.required output not detected:\n{md}");
     assert!(md.contains("required:true"), "required flag missing for core.model.required:\n{md}");
 }
