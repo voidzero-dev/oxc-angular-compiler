@@ -280,7 +280,9 @@ pub fn extract_ng_module_metadata<'a>(
 }
 
 /// Find the @NgModule decorator in a list of decorators.
-fn find_ng_module_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
+pub(crate) fn find_ng_module_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+) -> Option<&'a Decorator<'a>> {
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_ng_module_call(&call.callee),
         Expression::Identifier(id) => id.name == "NgModule",

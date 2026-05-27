@@ -229,6 +229,61 @@ fn directive_emits_set_class_metadata_with_signal_input() {
 }
 
 #[test]
+fn pipe_emits_set_class_metadata() {
+    let allocator = Allocator::default();
+    let source = "import { Pipe } from '@angular/core';\n\n\
+        @Pipe({ name: 'foo', standalone: true })\n\
+        export class FooPipe { transform(v: unknown) { return v; } }\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result = transform_angular_file(&allocator, "foo.pipe.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains("Pipe"), "Pipe decorator metadata missing:\n{md}");
+    assert!(md.contains("name:\"foo\""), "Pipe name arg missing:\n{md}");
+}
+
+#[test]
+fn injectable_emits_set_class_metadata() {
+    let allocator = Allocator::default();
+    let source = "import { Injectable } from '@angular/core';\n\n\
+        @Injectable({ providedIn: 'root' })\n\
+        export class FooService {}\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result = transform_angular_file(&allocator, "foo.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains("Injectable"), "Injectable decorator metadata missing:\n{md}");
+}
+
+#[test]
+fn injectable_with_ctor_di_emits_namespaced_ctor_parameters() {
+    // ctorParameters must namespace-prefix imported token types (e.g. i0.Injector),
+    // matching ngc — verified the import_map path handles this without explicit deps.
+    let allocator = Allocator::default();
+    let source = "import { Injectable, Injector } from '@angular/core';\n\n\
+        @Injectable()\n\
+        export class FooService { constructor(private inj: Injector) {} }\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result = transform_angular_file(&allocator, "foo.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains(".Injector"), "ctorParameters should namespace-prefix Injector:\n{md}");
+}
+
+#[test]
+fn ng_module_emits_set_class_metadata() {
+    let allocator = Allocator::default();
+    let source = "import { NgModule } from '@angular/core';\n\n\
+        @NgModule({ declarations: [], imports: [] })\n\
+        export class FooModule {}\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result = transform_angular_file(&allocator, "foo.module.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains("NgModule"), "NgModule decorator metadata missing:\n{md}");
+}
+
+#[test]
 fn directive_no_metadata_when_emit_disabled() {
     let allocator = Allocator::default();
     let source = "import { Directive, input } from '@angular/core';\n\n\

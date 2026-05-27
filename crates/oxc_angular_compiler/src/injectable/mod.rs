@@ -21,6 +21,7 @@ pub use decorator::{
     DependencyMetadata, InjectableMetadata, ProvidedInValue, UseClassMetadata, UseExistingMetadata,
     UseFactoryMetadata, extract_injectable_metadata, find_injectable_decorator_span,
 };
+pub(crate) use decorator::find_injectable_decorator;
 pub use definition::{
     InjectableDefinition, generate_injectable_definition,
     generate_injectable_definition_from_decorator,

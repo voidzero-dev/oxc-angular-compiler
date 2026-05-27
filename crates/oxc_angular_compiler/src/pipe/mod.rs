@@ -17,6 +17,7 @@ mod metadata;
 
 pub use compiler::{PipeCompileResult, compile_pipe, compile_pipe_from_metadata};
 pub use decorator::{PipeMetadata, extract_pipe_metadata, find_pipe_decorator_span};
+pub(crate) use decorator::find_pipe_decorator;
 pub use definition::{
     FullPipeDefinition, PipeDefinition, generate_full_pipe_definition_from_decorator,
     generate_pipe_definition, generate_pipe_definition_from_decorator,
