@@ -108,6 +108,20 @@ export interface PluginOptions {
 
   /** Optional callback to transform template content before compilation. Applied during both initial build and HMR. */
   templateTransform?: (content: string, filePath: string) => string
+
+  /**
+   * Emit `ɵsetClassMetadata()` calls for TestBed support.
+   *
+   * Mirrors `ngc`'s behavior: when enabled, the original decorator metadata is
+   * preserved on the compiled class wrapped in `(typeof ngDevMode === "undefined"
+   * || ngDevMode) && …`, so production bundles tree-shake it away. Required for
+   * TestBed APIs that recompile components with provider overrides. Resolved
+   * `templateUrl`/`styleUrls` are inlined into the metadata as `template`/`styles`
+   * to satisfy Angular's JIT `componentNeedsResolution` check.
+   *
+   * Default: `true` — matches `ngc`, which always emits class metadata.
+   */
+  emitClassMetadata?: boolean
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -182,6 +196,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     zoneless: options.zoneless ?? false,
     fileReplacements,
     angularVersion: options.angularVersion,
+    emitClassMetadata: options.emitClassMetadata ?? true,
   }
 
   let resolvedConfig: ResolvedConfig
@@ -618,6 +633,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             hmr: pluginOptions.liveReload && watchMode && !isSSR,
             angularVersion: pluginOptions.angularVersion,
             minifyComponentStyles: getMinifyComponentStyles(this as any),
+            emitClassMetadata: pluginOptions.emitClassMetadata,
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)

@@ -35,3 +35,9 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:MyComponent,selectors:
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(MyComponent,
       {className:"MyComponent",filePath:"test.component.ts",lineNumber:22}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(MyComponent,
+      [{type:Component,args:[{selector:"my-component",template:"",hostDirectives:[{directive:HostDir,
+          inputs:["valueAlias","colorAlias: customColorAlias"],outputs:["openedAlias",
+              "closedAlias: customClosedAlias"]}],standalone:false}]}],null,null));
+})();

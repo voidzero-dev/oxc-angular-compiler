@@ -49,3 +49,8 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:ExternalComponent,sele
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(ExternalComponent,
       {className:"ExternalComponent",filePath:"test.component.ts",lineNumber:9}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(ExternalComponent,
+      [{type:Component,args:[{selector:"app-external",template:"<div class=\"container\"><h2>{{ title }}</h2><ul>@for (item of items; track item) { <li>{{ item }}</li> }</ul></div>",
+          standalone:true}]}],null,null));
+})();

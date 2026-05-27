@@ -173,10 +173,12 @@ pub struct TransformOptions {
 
     /// Emit setClassMetadata() calls for TestBed support.
     ///
-    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard.
-    /// This preserves original decorator information for TestBed's recompilation APIs.
+    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in
+    /// `(typeof ngDevMode === "undefined" || ngDevMode) && …`. Production bundles
+    /// tree-shake the guarded call. Preserves original decorator information for
+    /// TestBed's recompilation APIs.
     ///
-    /// Default: false (metadata is dev-only and usually stripped in production)
+    /// Default: true — matches `ngc`, which always emits class metadata.
     pub emit_class_metadata: bool,
 
     /// Minify final component styles before emitting them into `styles: [...]`.
@@ -231,8 +233,9 @@ impl Default for TransformOptions {
             tsconfig_path: None,
             // Resolved imports for host directives
             resolved_imports: None,
-            // Class metadata for TestBed support (disabled by default)
-            emit_class_metadata: false,
+            // Class metadata for TestBed support — matches ngc, which always emits
+            // it; production bundles strip the guarded call via tree-shaking.
+            emit_class_metadata: true,
             minify_component_styles: false,
         }
     }
@@ -2047,6 +2050,8 @@ pub fn transform_angular_file(
                                             allocator,
                                             &[decorator],
                                             Some(source),
+                                            Some(template),
+                                            Some(metadata.styles.as_slice()),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,
@@ -2941,22 +2946,30 @@ fn compile_component_full<'a>(
 }
 
 /// Resolve template content from inline or external source.
+///
+/// Precedence matches Angular's AOT compiler (`parseTemplateDeclaration` in
+/// `compiler-cli/src/ngtsc/annotations/component/src/resources.ts`): when both
+/// `templateUrl` and inline `template` are present, **`templateUrl` wins** and
+/// the inline `template` is silently ignored. Angular's reference checks
+/// `component.has('templateUrl')` first and returns immediately, so the inline
+/// branch is never reached. (ngc's JIT runtime diverges — it prefers inline via
+/// `componentNeedsResolution` — but OXC is AOT-equivalent.)
 fn resolve_template(
     metadata: &ComponentMetadata<'_>,
     resources: Option<&ResolvedResources>,
 ) -> Option<String> {
-    // Prefer inline template
-    if let Some(template) = &metadata.template {
-        return Some(template.to_string());
-    }
-
-    // Try to resolve from external resources
+    // ngc AOT precedence: templateUrl first, falling through to inline only when
+    // no resolved content is available.
     if let Some(template_url) = &metadata.template_url {
         if let Some(resources) = resources {
             if let Some(template) = resources.templates.get(template_url.as_str()) {
                 return Some(template.clone());
             }
         }
+    }
+
+    if let Some(template) = &metadata.template {
+        return Some(template.to_string());
     }
 
     None

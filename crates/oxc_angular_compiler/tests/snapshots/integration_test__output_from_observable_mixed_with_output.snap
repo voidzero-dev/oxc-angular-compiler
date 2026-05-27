@@ -23,3 +23,8 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selector
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(TestComponent,
       {className:"TestComponent",filePath:"test.component.ts",lineNumber:10}));
 })();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(TestComponent,
+      [{type:Component,args:[{selector:"test-comp",standalone:true,template:""}]}],
+      null,null));
+})();

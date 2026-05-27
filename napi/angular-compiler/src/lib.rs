@@ -184,10 +184,12 @@ pub struct TransformOptions {
 
     /// Emit setClassMetadata() calls for TestBed support.
     ///
-    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard.
-    /// This preserves original decorator information for TestBed's recompilation APIs.
+    /// When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard
+    /// (`(typeof ngDevMode === "undefined" || ngDevMode) && …`). Production bundles
+    /// tree-shake the guarded call. Preserves original decorator information for
+    /// TestBed's recompilation APIs.
     ///
-    /// Default: false (metadata is dev-only and usually stripped in production)
+    /// Default: true — matches `ngc`, which always emits class metadata.
     pub emit_class_metadata: Option<bool>,
 
     /// Minify final component styles before emitting them into `styles: [...]`.
@@ -236,7 +238,7 @@ impl From<TransformOptions> for RustTransformOptions {
             // Resolved imports for host directives
             resolved_imports: options.resolved_imports,
             // Class metadata for TestBed support
-            emit_class_metadata: options.emit_class_metadata.unwrap_or(false),
+            emit_class_metadata: options.emit_class_metadata.unwrap_or(true),
             minify_component_styles: options.minify_component_styles.unwrap_or(false),
         }
     }
@@ -1987,8 +1989,13 @@ pub fn compile_class_metadata_sync(
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
     let decorator_ref = decorator;
-    let decorators_expr =
-        core_build_decorator_metadata_array(&allocator, &[decorator_ref], Some(&source));
+    let decorators_expr = core_build_decorator_metadata_array(
+        &allocator,
+        &[decorator_ref],
+        Some(&source),
+        None,
+        None,
+    );
 
     // Build constructor parameters metadata
     // This standalone API doesn't have full transform pipeline context (constructor deps

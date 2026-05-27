@@ -820,10 +820,12 @@ export interface TransformOptions {
   /**
    * Emit setClassMetadata() calls for TestBed support.
    *
-   * When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard.
-   * This preserves original decorator information for TestBed's recompilation APIs.
+   * When true, generates `ɵɵsetClassMetadata()` calls wrapped in a dev-mode guard
+   * (`(typeof ngDevMode === "undefined" || ngDevMode) && …`). Production bundles
+   * tree-shake the guarded call. Preserves original decorator information for
+   * TestBed's recompilation APIs.
    *
-   * Default: false (metadata is dev-only and usually stripped in production)
+   * Default: true — matches `ngc`, which always emits class metadata.
    */
   emitClassMetadata?: boolean
   /**

@@ -20,14 +20,28 @@ use crate::output::oxc_converter::convert_oxc_expression;
 /// Build the decorators metadata array expression.
 ///
 /// Creates: `[{ type: Component, args: [{ selector: '...', ... }] }]`
+///
+/// When `inlined_template` and/or `inlined_styles` are provided (typically for
+/// `@Component` decorators with `templateUrl`/`styleUrls`/`styleUrl` resolved
+/// via `ResolvedResources`), the first argument of the first decorator (the
+/// component config object literal) is rewritten so that `templateUrl` becomes
+/// `template` (with content inlined) and `styleUrls`/`styleUrl` are folded into
+/// the `styles` array. This matches Angular's `transformDecoratorResources` (see
+/// `inline_component_resources` below for the source-cited semantics) and is
+/// required for TestBed JIT recompilation, since Angular's
+/// `componentNeedsResolution(metadata)` check throws when `templateUrl` is set
+/// without a sibling `template` field, or when `styleUrls?.length > 0`, even
+/// though the AOT-compiled `ɵcmp` already has the template baked in.
 pub fn build_decorator_metadata_array<'a>(
     allocator: &'a Allocator,
     decorators: &[&Decorator<'a>],
     source_text: Option<&'a str>,
+    inlined_template: Option<&'a str>,
+    inlined_styles: Option<&[Ident<'a>]>,
 ) -> OutputExpression<'a> {
     let mut decorator_entries = AllocVec::new_in(allocator);
 
-    for decorator in decorators {
+    for (decorator_idx, decorator) in decorators.iter().enumerate() {
         let mut map_entries = AllocVec::new_in(allocator);
 
         // Get decorator type name
@@ -71,10 +85,29 @@ pub fn build_decorator_metadata_array<'a>(
         if let Expression::CallExpression(call) = &decorator.expression
             && !call.arguments.is_empty()
         {
+            // Gate resource inlining on the decorator's name, matching Angular's
+            // `if (dec.name !== 'Component') return dec;` at the top of
+            // `transformDecoratorResources`. Without this, other decorators that
+            // happen to use resource-shaped keys (e.g. `@Inject({ templateUrl: … })`,
+            // legal TS even if nonsensical) get their literals stripped.
+            let is_component_decorator =
+                get_decorator_name(decorator).is_some_and(|n| n == "Component");
+
             let mut args = AllocVec::new_in(allocator);
-            for arg in &call.arguments {
+            for (arg_idx, arg) in call.arguments.iter().enumerate() {
                 let expr = arg.to_expression();
-                if let Some(converted) = convert_oxc_expression(allocator, expr, source_text) {
+                if let Some(mut converted) = convert_oxc_expression(allocator, expr, source_text) {
+                    // Inline resolved templates/styles into the first arg of the
+                    // first @Component decorator. Other decorators / other args
+                    // are left alone.
+                    if is_component_decorator && decorator_idx == 0 && arg_idx == 0 {
+                        inline_component_resources(
+                            allocator,
+                            &mut converted,
+                            inlined_template,
+                            inlined_styles,
+                        );
+                    }
                     args.push(converted);
                 }
             }
@@ -102,6 +135,119 @@ pub fn build_decorator_metadata_array<'a>(
         LiteralArrayExpr { entries: decorator_entries, source_span: None },
         allocator,
     ))
+}
+
+/// Rewrite the `@Component` config map so external resource references are
+/// inlined into the `setClassMetadata` args.
+///
+/// Mirrors Angular's `transformDecoratorResources` (in
+/// `compiler-cli/src/ngtsc/annotations/component/src/resources.ts`), which
+/// operates on a `Map<string, ts.Expression>` and uses `Map.delete` /
+/// `Map.set` semantics:
+///
+/// - **Fast path**: bail out unchanged when the source has none of `templateUrl`,
+///   `styleUrls`, `styleUrl`, or `styles` — preserves the original AST for
+///   best source-map fidelity.
+/// - **`templateUrl` → `template`**: when present, `templateUrl` is deleted and
+///   `template` is set to the inlined content. If the source already had a
+///   `template` key (illegal but possible), the existing entry is overwritten
+///   *in place* with the inlined value (matches `Map.set` on an existing key).
+///   Otherwise the new `template` is appended at the end (matches `Map.set` on
+///   a fresh key).
+/// - **`styleUrls` / `styleUrl` / existing `styles`**: all deleted; the
+///   consolidated `styles` array (whitespace-only entries filtered) is appended
+///   at the end. `inlined_styles` is the FINAL canonical list — the caller is
+///   responsible for merging inline + resolved content (which `resolve_styles`
+///   already does into `ComponentMetadata::styles`).
+fn inline_component_resources<'a>(
+    allocator: &'a Allocator,
+    expr: &mut OutputExpression<'a>,
+    inlined_template: Option<&'a str>,
+    inlined_styles: Option<&[Ident<'a>]>,
+) {
+    let OutputExpression::LiteralMap(map_box) = expr else {
+        return;
+    };
+
+    // Fast-path: no resource fields → preserve original AST.
+    let has_template_url = map_box.entries.iter().any(|e| e.key.as_str() == "templateUrl");
+    let has_style_field = map_box
+        .entries
+        .iter()
+        .any(|e| matches!(e.key.as_str(), "styleUrls" | "styleUrl" | "styles"));
+    if !has_template_url && !has_style_field {
+        return;
+    }
+
+    let original_entries = std::mem::replace(&mut map_box.entries, AllocVec::new_in(allocator));
+
+    // First pass: drop the deleted keys; if both `templateUrl` and `template`
+    // existed in source, overwrite the existing `template` in place (Map.set
+    // semantics).
+    let mut template_emitted = false;
+    for entry in original_entries {
+        match entry.key.as_str() {
+            "templateUrl" | "styleUrls" | "styleUrl" | "styles" => {
+                // Dropped — replacements (if any) are emitted below.
+            }
+            "template" if has_template_url && inlined_template.is_some() => {
+                // Overwrite-in-place: emit the inlined value at the source
+                // `template` key's original position.
+                map_box.entries.push(build_template_entry(allocator, inlined_template.unwrap()));
+                template_emitted = true;
+            }
+            _ => map_box.entries.push(entry),
+        }
+    }
+
+    // If `templateUrl` was in source but no source `template` slot received
+    // the in-place overwrite, append the resolved template at the end —
+    // matching `Map.set('template', …)` on a key that didn't previously exist.
+    if has_template_url
+        && !template_emitted
+        && let Some(tpl) = inlined_template
+    {
+        map_box.entries.push(build_template_entry(allocator, tpl));
+    }
+
+    // Styles are *always* appended at the end (we always delete the pre-existing
+    // `styles`/`styleUrl(s)`, mirroring Angular's unconditional `metadata.delete`
+    // for all three keys before `metadata.set('styles', …)`).
+    if let Some(styles) = inlined_styles {
+        let mut style_entries = AllocVec::new_in(allocator);
+        for style in styles {
+            // Match Angular's `style.trim().length > 0` filter.
+            if style.as_str().trim().is_empty() {
+                continue;
+            }
+            style_entries.push(OutputExpression::Literal(Box::new_in(
+                LiteralExpr { value: LiteralValue::String(*style), source_span: None },
+                allocator,
+            )));
+        }
+        if !style_entries.is_empty() {
+            map_box.entries.push(LiteralMapEntry::new(
+                Ident::from("styles"),
+                OutputExpression::LiteralArray(Box::new_in(
+                    LiteralArrayExpr { entries: style_entries, source_span: None },
+                    allocator,
+                )),
+                false,
+            ));
+        }
+    }
+}
+
+/// Build a `template: "…"` map entry from the inlined content.
+fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> LiteralMapEntry<'a> {
+    LiteralMapEntry::new(
+        Ident::from("template"),
+        OutputExpression::Literal(Box::new_in(
+            LiteralExpr { value: LiteralValue::String(Ident::from(content)), source_span: None },
+            allocator,
+        )),
+        false,
+    )
 }
 
 /// Build constructor parameters metadata.
@@ -157,8 +303,13 @@ pub fn build_ctor_params_metadata<'a>(
         // Extract decorators from the parameter
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
-            let decorators_array =
-                build_decorator_metadata_array(allocator, &param_decorators, source_text);
+            let decorators_array = build_decorator_metadata_array(
+                allocator,
+                &param_decorators,
+                source_text,
+                None,
+                None,
+            );
             map_entries.push(LiteralMapEntry::new(
                 Ident::from("decorators"),
                 decorators_array,
@@ -248,7 +399,7 @@ pub fn build_prop_decorators_metadata<'a>(
 
         // Build decorators array for this property
         let decorators_array =
-            build_decorator_metadata_array(allocator, &angular_decorators, source_text);
+            build_decorator_metadata_array(allocator, &angular_decorators, source_text, None, None);
 
         prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
     }
