@@ -229,7 +229,10 @@ impl EmitterContext {
     /// Returns `None` if no source file information was provided or no mappings exist.
     ///
     /// See: `packages/compiler/src/output/abstract_emitter.ts:126-184`
-    pub fn to_source_map(&self, generated_file: Option<&str>) -> Option<oxc_sourcemap::OwnedSourceMap> {
+    pub fn to_source_map(
+        &self,
+        generated_file: Option<&str>,
+    ) -> Option<oxc_sourcemap::OwnedSourceMap> {
         // Need source file to generate a source map
         let source_file = self.source_file.as_ref()?;
         let source_url = &source_file.url;
