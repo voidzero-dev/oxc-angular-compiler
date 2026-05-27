@@ -10818,3 +10818,127 @@ export class TestComponent {}const TOKEN = 'tok';\n";
         result.code
     );
 }
+
+/// A top-level function referenced from decorator metadata as a *value*
+/// (e.g. `useFactory: makeFactory`) is NOT called at class-definition time —
+/// Angular's injector calls it later, when the provider is actually resolved.
+/// So later-declared bindings reachable only through that function's body
+/// must NOT be hoisted. Hoisting them would create a NEW TDZ that didn't
+/// exist in the original source.
+///
+/// Regression test for PR #302 Codex review: BFS function-body chasing
+/// branch must only fire when the function is eagerly called.
+#[test]
+fn component_provider_useFactory_function_value_does_not_hoist_body_deps() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useFactory: makeFactory }] })
+class TestComponent {}
+function makeFactory() { return TOKEN; }
+const TOKEN = TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos > class_pos,
+        "`const TOKEN` must NOT be hoisted — `makeFactory` is stored as a value, not \
+         called at module load. Hoisting `TOKEN` above the class would TDZ on \
+         `TestComponent`. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `Expression::ChainExpression` (optional chaining, `TOKEN?.id` or `f?.()`)
+/// must contribute identifier references to the decorator-metadata symbol
+/// scan, so that the referenced top-level binding gets hoisted.
+///
+/// Regression test for PR #302 Codex review: the catch-all `_ => {}` arm
+/// in `collect_expr_symbols` was silently dropping `ChainExpression`.
+#[test]
+fn component_provider_optional_chain_token_is_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN?.id, useValue: 1 }] })
+class TestComponent {}
+const TOKEN = { id: 'tok' };
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (referenced via `TOKEN?.id` in providers) must be \
+         hoisted above the class. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Top-level destructuring patterns must be indexed: `const { TOKEN } = X;`
+/// binds `TOKEN`, and decorator metadata referencing `TOKEN` must hoist that
+/// declaration above the class.
+///
+/// Regression test for PR #302 Codex review: `collect_top_level_bindings`
+/// only handled `BindingPattern::BindingIdentifier`, ignoring object/array
+/// destructuring patterns entirely.
+#[test]
+fn component_provider_destructured_top_level_token_is_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const TOKENS = { TOKEN: 'tok' };
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 1 }] })
+class TestComponent {}
+const { TOKEN } = TOKENS;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result.code.find("const { TOKEN }").unwrap_or_else(|| {
+        panic!("Expected `const {{ TOKEN }}` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "`const {{ TOKEN }}` (destructured from `TOKENS`) must be hoisted \
+         above the class. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const { TOKEN }").count(),
+        1,
+        "`const {{ TOKEN }}` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}

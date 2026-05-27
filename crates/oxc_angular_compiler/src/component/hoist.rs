@@ -35,7 +35,7 @@
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BindingPattern, Class, Declaration, Decorator,
+    Argument, ArrayExpressionElement, BindingPattern, ChainElement, Class, Declaration, Decorator,
     ExportDefaultDeclarationKind, Expression, IdentifierReference, ObjectPropertyKind, Program,
     Statement,
 };
@@ -58,6 +58,15 @@ struct StmtInfo {
     /// Symbols referenced inside any declarator's initializer in this
     /// statement. Used to drive transitive hoisting.
     init_symbols: HashSet<SymbolId>,
+    /// Subset of `init_symbols` that appears as a *direct callee* (the
+    /// callee of `CallExpression` / `NewExpression`, including the inner
+    /// call of an optional `f?.()`) somewhere in the initializer. Used to
+    /// seed the "eagerly called" closure: if `f` is in this set and `f` is
+    /// a top-level function, the function body's references fire at module
+    /// load when this statement evaluates. Symbols referenced but never
+    /// called (e.g. `useFactory: f` — Angular's injector invokes `f` lazily)
+    /// do NOT belong here.
+    init_called_symbols: HashSet<SymbolId>,
 }
 
 /// One statement scheduled for hoisting, keyed by its `stmt_start`. Multiple
@@ -90,21 +99,58 @@ pub fn collect_hoist_edits<'a>(
     // Step 1: index top-level bindings (keyed by SymbolId).
     //   - `symbol_to_stmt`: binding SymbolId → containing statement's `start`.
     //   - `stmt_info`: statement start → end/delete bounds and the union of
-    //     symbol references across the statement's initializers.
+    //     symbol references across the statement's initializers, plus the
+    //     subset that appears as a *direct callee* in the initializer.
     //   - `fn_body_symbol_refs`: top-level function SymbolId → set of symbol
     //     references in its body. Top-level function *declarations* are
     //     JS-hoisted so they never need physical hoisting, but if a hoisted
     //     initializer *calls* them (`const PROVIDERS = makeProviders()`), the
     //     function body runs at module load and any later-declared binding it
     //     touches still TDZ-throws. The BFS consults this map to chase
-    //     identifiers through function-call boundaries.
-    let (symbol_to_stmt, stmt_info, fn_body_symbol_refs) =
+    //     identifiers through function-call boundaries — but only when the
+    //     function is actually invoked, not merely referenced as a value.
+    //   - `fn_body_called_symbols`: top-level function SymbolId → set of
+    //     symbols directly called in its body. Seeds the transitive
+    //     "eagerly called" closure.
+    let (symbol_to_stmt, stmt_info, fn_body_symbol_refs, fn_body_called_symbols) =
         collect_top_level_bindings(program, source, semantic);
     if symbol_to_stmt.is_empty() && fn_body_symbol_refs.is_empty() {
         return Vec::new();
     }
 
-    // Step 2: for every Angular-decorated class, BFS through binding
+    // Step 2a: gather per-class decorator-metadata symbols (both the full
+    // reference set and the "direct callee" subset). The direct-callee
+    // subsets across all classes plus every top-level initializer's
+    // direct-callee subset seed the `eagerly_called` closure, expanded
+    // through `fn_body_called_symbols` to fixed point.
+    //
+    // The closure represents "every top-level function whose body runs at
+    // module load". In the BFS the function-body-chasing branch fires
+    // only for symbols in this set — otherwise a function stored as a
+    // value (`useFactory: makeFactory`) would pull its body's references
+    // into the hoist plan and introduce a fresh TDZ that didn't exist
+    // before. See PR #302 review (Codex).
+    let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>)> = Vec::new();
+    let mut decorator_called: HashSet<SymbolId> = HashSet::new();
+    for stmt in &program.body {
+        let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
+        if !has_angular_decorator(class) {
+            continue;
+        }
+        let mut direct: HashSet<SymbolId> = HashSet::new();
+        for decorator in &class.decorators {
+            collect_decorator_symbols(decorator, semantic, &mut direct, &mut decorator_called);
+        }
+        if direct.is_empty() {
+            continue;
+        }
+        classes.push((class, stmt_start_pos, direct));
+    }
+
+    let eagerly_called =
+        compute_eagerly_called(&stmt_info, &decorator_called, &fn_body_called_symbols);
+
+    // Step 2b: for every Angular-decorated class, BFS through binding
     // initializers starting from the symbols directly referenced in the
     // decorator metadata. The plan is keyed by `stmt_start` (not symbol) so
     // multi-declarator statements collapse into a single entry, and the
@@ -115,20 +161,7 @@ pub fn collect_hoist_edits<'a>(
     // class. See PR #302 review.
     let mut plan: HashMap<u32, PlanEntry> = HashMap::new();
 
-    for stmt in &program.body {
-        let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
-        if !has_angular_decorator(class) {
-            continue;
-        }
-
-        let mut direct: HashSet<SymbolId> = HashSet::new();
-        for decorator in &class.decorators {
-            collect_decorator_symbols(decorator, semantic, &mut direct);
-        }
-        if direct.is_empty() {
-            continue;
-        }
-
+    for (class, stmt_start_pos, direct) in classes {
         let class_body_end = class.body.span.end;
         let effective_start = effective_class_start(class, stmt_start_pos);
 
@@ -176,16 +209,19 @@ pub fn collect_hoist_edits<'a>(
                         worklist.push(s);
                     }
                 }
-            } else if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
-                // The symbol resolves to a top-level function declaration.
+            } else if eagerly_called.contains(&symbol) {
+                // The symbol resolves to a top-level function declaration
+                // that is *actually called* (transitively) at module load.
                 // Don't hoist the function itself (JS already hoists fn
-                // decls), but if its body references later bindings, those
-                // references fire whenever the function is called — and a
-                // hoisted initializer *will* call it at module load. Chase
-                // them through the worklist. See PR #302 review (Codex).
-                for &s in body_refs {
-                    if !visited.contains(&s) {
-                        worklist.push(s);
+                // decls), but its body's identifier reads fire whenever
+                // it runs — and "eagerly_called" guarantees it does run
+                // at module load. Chase those references. See PR #302
+                // review (Codex).
+                if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
+                    for &s in body_refs {
+                        if !visited.contains(&s) {
+                            worklist.push(s);
+                        }
                     }
                 }
             }
@@ -200,7 +236,13 @@ pub fn collect_hoist_edits<'a>(
     // emitted *before* their dependents in the hoisted prelude. Within a
     // single bucket (same `insert_at`), this guarantees that e.g. `const
     // TOKEN` precedes `const PROVIDERS = [{ provide: TOKEN, ... }]`.
-    let order = topological_order(&plan, &symbol_to_stmt, &stmt_info, &fn_body_symbol_refs);
+    let order = topological_order(
+        &plan,
+        &symbol_to_stmt,
+        &stmt_info,
+        &fn_body_symbol_refs,
+        &eagerly_called,
+    );
 
     // Step 4: emit edits. Group by `insert_at` so multiple statements headed
     // to the same class become a single insert edit whose text is the
@@ -249,6 +291,7 @@ fn topological_order(
     symbol_to_stmt: &HashMap<SymbolId, u32>,
     stmt_info: &HashMap<u32, StmtInfo>,
     fn_body_symbol_refs: &HashMap<SymbolId, HashSet<SymbolId>>,
+    eagerly_called: &HashSet<SymbolId>,
 ) -> Vec<u32> {
     let plan_starts: HashSet<u32> = plan.keys().copied().collect();
 
@@ -258,19 +301,20 @@ fn topological_order(
     // already TDZ-safe.
     //
     // The "effective init symbols" of a planned statement are the transitive
-    // closure of its direct `init_symbols` through `fn_body_symbol_refs`: if
-    // the initializer calls a function, the function body's identifier reads
-    // also count as references that fire when the hoisted statement
-    // evaluates. So `const PROVIDERS = makeProviders()` with `function
-    // makeProviders() { return [{ provide: TOKEN }]; }` must end up after
-    // `const TOKEN` in the hoisted prelude. See PR #302 review (Codex).
+    // closure of its direct `init_symbols` through `fn_body_symbol_refs`,
+    // **restricted to functions in `eagerly_called`**. If the initializer
+    // calls a function (directly or transitively), the function body's
+    // identifier reads count as references that fire when the hoisted
+    // statement evaluates. Functions only stored as values are NOT expanded
+    // — their bodies don't run at module load. See PR #302 review (Codex).
     let mut deps: HashMap<u32, Vec<u32>> = HashMap::with_capacity(plan_starts.len());
     for &start in &plan_starts {
         let Some(info) = stmt_info.get(&start) else {
             deps.insert(start, Vec::new());
             continue;
         };
-        let effective = expand_through_functions(&info.init_symbols, fn_body_symbol_refs);
+        let effective =
+            expand_through_functions(&info.init_symbols, fn_body_symbol_refs, eagerly_called);
         let mut edges: Vec<u32> = effective
             .iter()
             .filter_map(|s| symbol_to_stmt.get(s))
@@ -324,15 +368,15 @@ fn topological_order(
 }
 
 /// Take a set of symbol references and expand it transitively through
-/// `fn_body_symbol_refs`: every time we encounter a symbol that resolves to a
-/// top-level function, we add the function body's own symbol references
-/// (and recurse). The result is the union of every symbol that the
-/// initial set "reaches" via function calls — what would actually fire if
-/// you ran the initializer at module load. A `seen` set guards against
-/// mutual recursion between top-level functions.
+/// `fn_body_symbol_refs`, but only across functions that are in
+/// `eagerly_called`. A function only stored as a value (never invoked at
+/// module load) doesn't run, so its body's reads must not count toward the
+/// hoist plan — chasing them would invent a fresh TDZ. The `seen` set guards
+/// against mutual recursion between top-level functions.
 fn expand_through_functions(
     seed: &HashSet<SymbolId>,
     fn_body_symbol_refs: &HashMap<SymbolId, HashSet<SymbolId>>,
+    eagerly_called: &HashSet<SymbolId>,
 ) -> HashSet<SymbolId> {
     let mut out: HashSet<SymbolId> = HashSet::new();
     let mut worklist: Vec<SymbolId> = seed.iter().copied().collect();
@@ -342,9 +386,59 @@ fn expand_through_functions(
             continue;
         }
         out.insert(symbol);
+        if !eagerly_called.contains(&symbol) {
+            continue;
+        }
         if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
             for &s in body_refs {
                 if !seen.contains(&s) {
+                    worklist.push(s);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Compute the transitive closure of "top-level functions that actually run
+/// at module load". Seeded with every direct callee in either:
+/// * a top-level `VariableDeclaration` initializer (`stmt_info[*].init_called_symbols`)
+/// * Angular decorator metadata on any class (`decorator_called`).
+///
+/// Expanded through `fn_body_called_symbols`: if `f` is in the set and `f`
+/// directly calls `g`, then `g` is too. Fixed-point — runs until the worklist
+/// drains. A function stored as a value (referenced but not called) is NOT
+/// added.
+///
+/// Used by both the BFS (to gate the function-body-chasing branch) and the
+/// topological sort (to gate `expand_through_functions`). Without this, a
+/// `useFactory: makeFactory` in providers — where Angular invokes
+/// `makeFactory` lazily at injection time, NOT at class-definition time —
+/// would still pull in `makeFactory`'s body refs and hoist them above the
+/// class, sometimes inventing a new TDZ.
+fn compute_eagerly_called(
+    stmt_info: &HashMap<u32, StmtInfo>,
+    decorator_called: &HashSet<SymbolId>,
+    fn_body_called_symbols: &HashMap<SymbolId, HashSet<SymbolId>>,
+) -> HashSet<SymbolId> {
+    let mut out: HashSet<SymbolId> = HashSet::new();
+    let mut worklist: Vec<SymbolId> = Vec::new();
+    for info in stmt_info.values() {
+        for &s in &info.init_called_symbols {
+            if out.insert(s) {
+                worklist.push(s);
+            }
+        }
+    }
+    for &s in decorator_called {
+        if out.insert(s) {
+            worklist.push(s);
+        }
+    }
+    while let Some(symbol) = worklist.pop() {
+        if let Some(calls) = fn_body_called_symbols.get(&symbol) {
+            for &s in calls {
+                if out.insert(s) {
                     worklist.push(s);
                 }
             }
@@ -426,7 +520,7 @@ fn resolve_symbol(id: &IdentifierReference<'_>, semantic: &Semantic<'_>) -> Opti
 }
 
 /// Walk top-level statements and index every variable binding identifier
-/// they declare, returning three complementary maps:
+/// they declare, returning four complementary maps:
 /// * `symbol_to_stmt`: binding `SymbolId` → containing statement's `start`.
 /// * `stmt_info`: statement `start` → end/delete bounds and the union of
 ///   symbol references across every declarator's initializer. Used to drive
@@ -434,6 +528,10 @@ fn resolve_symbol(id: &IdentifierReference<'_>, semantic: &Semantic<'_>) -> Opti
 /// * `fn_body_symbol_refs`: top-level function `SymbolId` → symbols
 ///   referenced in its body. Used to chase TDZ-relevant identifiers across
 ///   function-call boundaries.
+/// * `fn_body_called_symbols`: top-level function `SymbolId` → symbols of
+///   functions/`new` targets directly invoked inside its body. Feeds
+///   `compute_eagerly_called` so the BFS only chases bodies that are
+///   eagerly reachable from the decorator metadata's call graph.
 ///
 /// Only `VariableDeclaration` (const/let/var) and the `export` form of it are
 /// considered:
@@ -448,11 +546,17 @@ fn collect_top_level_bindings<'a>(
     program: &Program<'a>,
     source: &str,
     semantic: &Semantic<'a>,
-) -> (HashMap<SymbolId, u32>, HashMap<u32, StmtInfo>, HashMap<SymbolId, HashSet<SymbolId>>) {
+) -> (
+    HashMap<SymbolId, u32>,
+    HashMap<u32, StmtInfo>,
+    HashMap<SymbolId, HashSet<SymbolId>>,
+    HashMap<SymbolId, HashSet<SymbolId>>,
+) {
     let bytes = source.as_bytes();
     let mut symbol_to_stmt: HashMap<SymbolId, u32> = HashMap::new();
     let mut stmt_info: HashMap<u32, StmtInfo> = HashMap::new();
     let mut fn_body_symbol_refs: HashMap<SymbolId, HashSet<SymbolId>> = HashMap::new();
+    let mut fn_body_called_symbols: HashMap<SymbolId, HashSet<SymbolId>> = HashMap::new();
 
     for stmt in &program.body {
         let var_decl = match stmt {
@@ -470,18 +574,29 @@ fn collect_top_level_bindings<'a>(
                 stmt_end: span.end,
                 delete_end: end_with_trailing_newline(span.end, bytes),
                 init_symbols: HashSet::new(),
+                init_called_symbols: HashSet::new(),
             };
 
             for declarator in &decl.declarations {
-                if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                // Walk the declarator's `BindingPattern` recursively so that
+                // destructuring forms (`const { TOKEN } = obj;`, `const [a, b]
+                // = arr;`, `const { a: { b } } = obj;`, …) also index every
+                // binding identifier they introduce. Without this, decorator
+                // metadata referencing such a binding never resolves to its
+                // declaring statement and the hoist is skipped. See PR #302
+                // Codex review.
+                for_each_binding_identifier(&declarator.id, &mut |id| {
                     if let Some(symbol_id) = id.symbol_id.get() {
                         symbol_to_stmt.insert(symbol_id, stmt_start);
                     }
-                }
-                // Destructuring patterns are deliberately ignored — see
-                // collect_top_level_bindings docstring above.
+                });
                 if let Some(init) = &declarator.init {
-                    collect_expr_symbols(init, semantic, &mut info.init_symbols);
+                    collect_expr_symbols(
+                        init,
+                        semantic,
+                        &mut info.init_symbols,
+                        &mut info.init_called_symbols,
+                    );
                 }
             }
             stmt_info.insert(stmt_start, info);
@@ -509,14 +624,59 @@ fn collect_top_level_bindings<'a>(
             if let (Some(id), Some(body)) = (&func.id, &func.body) {
                 let Some(fn_symbol) = id.symbol_id.get() else { continue };
                 let mut refs: HashSet<SymbolId> = HashSet::new();
-                let mut visitor = FunctionBodyIdentVisitor { semantic, out: &mut refs };
+                let mut called: HashSet<SymbolId> = HashSet::new();
+                let mut visitor =
+                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
                 visitor.visit_function_body(body);
                 fn_body_symbol_refs.insert(fn_symbol, refs);
+                fn_body_called_symbols.insert(fn_symbol, called);
             }
         }
     }
 
-    (symbol_to_stmt, stmt_info, fn_body_symbol_refs)
+    (symbol_to_stmt, stmt_info, fn_body_symbol_refs, fn_body_called_symbols)
+}
+
+/// Walk a `BindingPattern` and invoke `f` for every nested `BindingIdentifier`
+/// it introduces. Handles `BindingIdentifier` (the simple `const x` case),
+/// `ObjectPattern` (each `BindingProperty`'s `value`, plus `rest`),
+/// `ArrayPattern` (each element `Option<BindingPattern>`, plus `rest`), and
+/// `AssignmentPattern` (the `left` pattern of `const { x = 1 } = obj`).
+/// Default expressions on `AssignmentPattern` (e.g. `const { x = SOMETHING }
+/// = obj`) are nested *inside* the binding pattern but are NOT walked here —
+/// a deliberate conservative choice. In the rare case where a default
+/// expression references a later-declared top-level binding, that binding
+/// will not be transitively hoisted. Decorator metadata almost never uses
+/// destructured names with such defaults, so this gap is accepted rather
+/// than implemented.
+fn for_each_binding_identifier<'a>(
+    pat: &BindingPattern<'a>,
+    f: &mut impl FnMut(&oxc_ast::ast::BindingIdentifier<'a>),
+) {
+    match pat {
+        BindingPattern::BindingIdentifier(id) => f(id),
+        BindingPattern::ObjectPattern(obj) => {
+            for prop in &obj.properties {
+                for_each_binding_identifier(&prop.value, f);
+            }
+            if let Some(rest) = &obj.rest {
+                for_each_binding_identifier(&rest.argument, f);
+            }
+        }
+        BindingPattern::ArrayPattern(arr) => {
+            for el in &arr.elements {
+                if let Some(el) = el {
+                    for_each_binding_identifier(el, f);
+                }
+            }
+            if let Some(rest) = &arr.rest {
+                for_each_binding_identifier(&rest.argument, f);
+            }
+        }
+        BindingPattern::AssignmentPattern(assign) => {
+            for_each_binding_identifier(&assign.left, f);
+        }
+    }
 }
 
 /// AST visitor that collects every `IdentifierReference` reachable from a
@@ -524,9 +684,16 @@ fn collect_top_level_bindings<'a>(
 /// the same "lazy bodies are opaque" rule the existing expression walker
 /// uses: nested function/arrow expressions inside the body don't run when
 /// the outer function is called, so their bodies are skipped.
+///
+/// `called` receives the subset of `out` that appears as a *direct callee*
+/// of a `CallExpression` / `NewExpression` (including the inner call of a
+/// `f?.()` chain) inside the body. Used to drive the "eagerly called"
+/// closure: if function `f` is called at module load, then the symbols
+/// `f`'s body directly calls fire too, transitively.
 struct FunctionBodyIdentVisitor<'a, 'b> {
     semantic: &'b Semantic<'a>,
     out: &'b mut HashSet<SymbolId>,
+    called: &'b mut HashSet<SymbolId>,
 }
 
 impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
@@ -534,6 +701,18 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         if let Some(symbol) = resolve_symbol(it, self.semantic) {
             self.out.insert(symbol);
         }
+    }
+
+    fn visit_call_expression(&mut self, it: &oxc_ast::ast::CallExpression<'a>) {
+        record_direct_callee(&it.callee, self.semantic, self.called);
+        // Continue default traversal so identifier references inside callee
+        // and arguments still feed `self.out`.
+        oxc_ast_visit::walk::walk_call_expression(self, it);
+    }
+
+    fn visit_new_expression(&mut self, it: &oxc_ast::ast::NewExpression<'a>) {
+        record_direct_callee(&it.callee, self.semantic, self.called);
+        oxc_ast_visit::walk::walk_new_expression(self, it);
     }
 
     // Nested function/arrow expressions only execute when *they* are called,
@@ -572,10 +751,13 @@ fn end_with_trailing_newline(end: u32, bytes: &[u8]) -> u32 {
 
 /// Collect symbols referenced inside the decorator argument expressions.
 /// Only the decorator's call arguments (i.e. the metadata object) are walked.
+/// `called` receives the subset of `out` that appears as a *direct callee*
+/// of a call/new expression — used to drive the "eagerly called" closure.
 fn collect_decorator_symbols<'a>(
     decorator: &Decorator<'a>,
     semantic: &Semantic<'a>,
     out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
 ) {
     let Expression::CallExpression(call) = &decorator.expression else {
         return;
@@ -583,11 +765,11 @@ fn collect_decorator_symbols<'a>(
     for arg in &call.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
-                collect_expr_symbols(&spread.argument, semantic, out);
+                collect_expr_symbols(&spread.argument, semantic, out, called);
             }
             other => {
                 if let Some(expr) = argument_to_expression(other) {
-                    collect_expr_symbols(expr, semantic, out);
+                    collect_expr_symbols(expr, semantic, out, called);
                 }
             }
         }
@@ -615,6 +797,7 @@ fn collect_expr_symbols<'a>(
     expr: &Expression<'a>,
     semantic: &Semantic<'a>,
     out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
 ) {
     use Expression as E;
     match expr {
@@ -625,7 +808,7 @@ fn collect_expr_symbols<'a>(
         }
         E::ArrayExpression(arr) => {
             for el in &arr.elements {
-                collect_array_element_symbols(el, semantic, out);
+                collect_array_element_symbols(el, semantic, out, called);
             }
         }
         E::ObjectExpression(obj) => {
@@ -636,25 +819,28 @@ fn collect_expr_symbols<'a>(
                         // key identifier; static keys don't.
                         if p.computed {
                             if let Some(key_expr) = p.key.as_expression() {
-                                collect_expr_symbols(key_expr, semantic, out);
+                                collect_expr_symbols(key_expr, semantic, out, called);
                             }
                         }
-                        collect_expr_symbols(&p.value, semantic, out);
+                        collect_expr_symbols(&p.value, semantic, out, called);
                     }
                     ObjectPropertyKind::SpreadProperty(spread) => {
-                        collect_expr_symbols(&spread.argument, semantic, out);
+                        collect_expr_symbols(&spread.argument, semantic, out, called);
                     }
                 }
             }
         }
         E::CallExpression(call) => {
-            collect_expr_symbols(&call.callee, semantic, out);
+            record_direct_callee(&call.callee, semantic, called);
+            collect_expr_symbols(&call.callee, semantic, out, called);
             for arg in &call.arguments {
                 match arg {
-                    Argument::SpreadElement(s) => collect_expr_symbols(&s.argument, semantic, out),
+                    Argument::SpreadElement(s) => {
+                        collect_expr_symbols(&s.argument, semantic, out, called);
+                    }
                     other => {
                         if let Some(e) = argument_to_expression(other) {
-                            collect_expr_symbols(e, semantic, out);
+                            collect_expr_symbols(e, semantic, out, called);
                         }
                     }
                 }
@@ -663,74 +849,87 @@ fn collect_expr_symbols<'a>(
             // is erased; they're irrelevant at runtime.
         }
         E::NewExpression(new) => {
-            collect_expr_symbols(&new.callee, semantic, out);
+            record_direct_callee(&new.callee, semantic, called);
+            collect_expr_symbols(&new.callee, semantic, out, called);
             for arg in &new.arguments {
                 match arg {
-                    Argument::SpreadElement(s) => collect_expr_symbols(&s.argument, semantic, out),
+                    Argument::SpreadElement(s) => {
+                        collect_expr_symbols(&s.argument, semantic, out, called);
+                    }
                     other => {
                         if let Some(e) = argument_to_expression(other) {
-                            collect_expr_symbols(e, semantic, out);
+                            collect_expr_symbols(e, semantic, out, called);
                         }
                     }
                 }
             }
         }
         E::ConditionalExpression(cond) => {
-            collect_expr_symbols(&cond.test, semantic, out);
-            collect_expr_symbols(&cond.consequent, semantic, out);
-            collect_expr_symbols(&cond.alternate, semantic, out);
+            collect_expr_symbols(&cond.test, semantic, out, called);
+            collect_expr_symbols(&cond.consequent, semantic, out, called);
+            collect_expr_symbols(&cond.alternate, semantic, out, called);
         }
         E::LogicalExpression(log) => {
-            collect_expr_symbols(&log.left, semantic, out);
-            collect_expr_symbols(&log.right, semantic, out);
+            collect_expr_symbols(&log.left, semantic, out, called);
+            collect_expr_symbols(&log.right, semantic, out, called);
         }
         E::BinaryExpression(bin) => {
-            collect_expr_symbols(&bin.left, semantic, out);
-            collect_expr_symbols(&bin.right, semantic, out);
+            collect_expr_symbols(&bin.left, semantic, out, called);
+            collect_expr_symbols(&bin.right, semantic, out, called);
         }
         E::UnaryExpression(un) => {
-            collect_expr_symbols(&un.argument, semantic, out);
+            collect_expr_symbols(&un.argument, semantic, out, called);
         }
         E::SequenceExpression(seq) => {
             for e in &seq.expressions {
-                collect_expr_symbols(e, semantic, out);
+                collect_expr_symbols(e, semantic, out, called);
             }
         }
         E::ParenthesizedExpression(p) => {
-            collect_expr_symbols(&p.expression, semantic, out);
+            collect_expr_symbols(&p.expression, semantic, out, called);
         }
         E::TemplateLiteral(tpl) => {
             for e in &tpl.expressions {
-                collect_expr_symbols(e, semantic, out);
+                collect_expr_symbols(e, semantic, out, called);
             }
         }
         E::TaggedTemplateExpression(tagged) => {
-            collect_expr_symbols(&tagged.tag, semantic, out);
+            record_direct_callee(&tagged.tag, semantic, called);
+            collect_expr_symbols(&tagged.tag, semantic, out, called);
             for e in &tagged.quasi.expressions {
-                collect_expr_symbols(e, semantic, out);
+                collect_expr_symbols(e, semantic, out, called);
             }
         }
         E::StaticMemberExpression(member) => {
-            collect_expr_symbols(&member.object, semantic, out);
+            collect_expr_symbols(&member.object, semantic, out, called);
         }
         E::ComputedMemberExpression(member) => {
-            collect_expr_symbols(&member.object, semantic, out);
-            collect_expr_symbols(&member.expression, semantic, out);
+            collect_expr_symbols(&member.object, semantic, out, called);
+            collect_expr_symbols(&member.expression, semantic, out, called);
         }
         E::PrivateFieldExpression(member) => {
-            collect_expr_symbols(&member.object, semantic, out);
+            collect_expr_symbols(&member.object, semantic, out, called);
         }
-        E::AwaitExpression(a) => collect_expr_symbols(&a.argument, semantic, out),
+        E::AwaitExpression(a) => collect_expr_symbols(&a.argument, semantic, out, called),
         E::YieldExpression(y) => {
             if let Some(arg) = &y.argument {
-                collect_expr_symbols(arg, semantic, out);
+                collect_expr_symbols(arg, semantic, out, called);
             }
         }
-        E::TSAsExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out),
-        E::TSSatisfiesExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out),
-        E::TSNonNullExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out),
-        E::TSTypeAssertion(ts) => collect_expr_symbols(&ts.expression, semantic, out),
-        E::TSInstantiationExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out),
+        E::TSAsExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        E::TSSatisfiesExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        E::TSNonNullExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        E::TSTypeAssertion(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        E::TSInstantiationExpression(ts) => {
+            collect_expr_symbols(&ts.expression, semantic, out, called);
+        }
+        // Optional-chaining expressions (`TOKEN?.id`, `f?.()`). The inner
+        // `ChainElement` mirrors a small subset of `Expression`; dispatch
+        // each variant to the same logic the matching `Expression` arm
+        // uses so identifier references inside the chain are collected.
+        E::ChainExpression(chain) => {
+            collect_chain_element_symbols(&chain.expression, semantic, out, called);
+        }
         // Class expressions inside metadata are exceedingly rare and their
         // bodies aren't eagerly evaluated; treat them as opaque.
         E::ClassExpression(_) => {}
@@ -742,19 +941,95 @@ fn collect_expr_symbols<'a>(
     }
 }
 
+/// If `callee` is a *direct* identifier reference (peeling through
+/// parentheses and TS type-only wrappers), record its symbol in `called`.
+/// Member callees (`foo.bar()`) and other complex expressions are skipped
+/// — only direct callees of `CallExpression`/`NewExpression` count as
+/// eager invocations of a top-level function.
+fn record_direct_callee<'a>(
+    callee: &Expression<'a>,
+    semantic: &Semantic<'a>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use Expression as E;
+    let mut cur = callee;
+    loop {
+        match cur {
+            E::Identifier(id) => {
+                if let Some(symbol) = resolve_symbol(id, semantic) {
+                    called.insert(symbol);
+                }
+                return;
+            }
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return,
+        }
+    }
+}
+
+/// Mirror of [`collect_expr_symbols`] for the small set of node kinds that
+/// can appear directly inside an `Expression::ChainExpression`. Without this,
+/// optional-chaining (`TOKEN?.id`, `f?.()`) would be silently dropped by
+/// the catch-all in `collect_expr_symbols` — and decorator metadata
+/// referencing the chained binding wouldn't hoist it.
+fn collect_chain_element_symbols<'a>(
+    el: &ChainElement<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    match el {
+        ChainElement::CallExpression(call) => {
+            record_direct_callee(&call.callee, semantic, called);
+            collect_expr_symbols(&call.callee, semantic, out, called);
+            for arg in &call.arguments {
+                match arg {
+                    Argument::SpreadElement(s) => {
+                        collect_expr_symbols(&s.argument, semantic, out, called);
+                    }
+                    other => {
+                        if let Some(e) = argument_to_expression(other) {
+                            collect_expr_symbols(e, semantic, out, called);
+                        }
+                    }
+                }
+            }
+        }
+        ChainElement::StaticMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        ChainElement::ComputedMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+            collect_expr_symbols(&member.expression, semantic, out, called);
+        }
+        ChainElement::PrivateFieldExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        ChainElement::TSNonNullExpression(ts) => {
+            collect_expr_symbols(&ts.expression, semantic, out, called);
+        }
+    }
+}
+
 fn collect_array_element_symbols<'a>(
     el: &ArrayExpressionElement<'a>,
     semantic: &Semantic<'a>,
     out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
 ) {
     match el {
         ArrayExpressionElement::SpreadElement(spread) => {
-            collect_expr_symbols(&spread.argument, semantic, out);
+            collect_expr_symbols(&spread.argument, semantic, out, called);
         }
         ArrayExpressionElement::Elision(_) => {}
         other => {
             if let Some(expr) = array_element_to_expression(other) {
-                collect_expr_symbols(expr, semantic, out);
+                collect_expr_symbols(expr, semantic, out, called);
             }
         }
     }
