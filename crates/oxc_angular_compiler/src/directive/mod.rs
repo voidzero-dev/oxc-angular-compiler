@@ -39,5 +39,6 @@ pub use property_decorators::{
 };
 pub(crate) use property_decorators::{
     try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
+    unwrap_initializer_api_expr,
 };
 pub use query::{create_content_queries_function, create_view_queries_function};

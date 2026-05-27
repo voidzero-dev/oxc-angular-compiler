@@ -165,3 +165,53 @@ fn no_metadata_when_emit_disabled() {
         result.code
     );
 }
+
+// ─── ngc parity: detector edge cases ───────────────────────────────────────────
+
+#[test]
+fn signal_input_detected_through_as_cast() {
+    // ngc unwraps `as` expressions when detecting initializer APIs:
+    // `foo = input(0) as any` is still recognized as a signal input.
+    let md = metadata_region(&compile(&component("  readonly value = input(0) as any;", "input")));
+    assert!(md.contains("Input") && md.contains("isSignal:true"), "input behind `as` cast not detected:\n{md}");
+}
+
+#[test]
+fn signal_input_detected_through_parentheses() {
+    // ngc unwraps parenthesized initializers: `foo = (input(0))`.
+    let md = metadata_region(&compile(&component("  readonly value = (input(0));", "input")));
+    assert!(md.contains("Input") && md.contains("isSignal:true"), "parenthesized input not detected:\n{md}");
+}
+
+#[test]
+fn namespaced_required_signal_input_detected() {
+    // ngc handles `core.input.required()` (namespace import + `.required()`).
+    let allocator = Allocator::default();
+    let source = "import * as core from '@angular/core';\n\n\
+        @core.Component({ selector: 'c', template: '<span>x</span>', standalone: true })\n\
+        export class C { readonly value = core.input.required<string>(); }\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains("Input") && md.contains("isSignal:true"), "core.input.required not detected:\n{md}");
+    assert!(md.contains("required:true"), "required flag missing for core.input.required:\n{md}");
+}
+
+#[test]
+fn namespaced_required_signal_model_detected() {
+    // ngc handles `core.model.required()` → Input(isSignal) + Output.
+    let allocator = Allocator::default();
+    let source = "import * as core from '@angular/core';\n\n\
+        @core.Component({ selector: 'c', template: '<span>x</span>', standalone: true })\n\
+        export class C { readonly value = core.model.required<string>(); }\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    let md = metadata_region(&result.code);
+    assert!(md.contains("Input") && md.contains("isSignal:true"), "core.model.required input not detected:\n{md}");
+    assert!(md.contains("Output"), "core.model.required output not detected:\n{md}");
+    assert!(md.contains("required:true"), "required flag missing for core.model.required:\n{md}");
+}

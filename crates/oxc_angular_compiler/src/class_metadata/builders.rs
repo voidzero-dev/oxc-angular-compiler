@@ -13,7 +13,7 @@ use oxc_str::Ident;
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::directive::{
     R3InputMetadata, StringConsts, resolve_template_literal, try_parse_signal_input,
-    try_parse_signal_model, try_parse_signal_output,
+    try_parse_signal_model, try_parse_signal_output, unwrap_initializer_api_expr,
 };
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
@@ -586,7 +586,7 @@ fn build_signal_query_decorator<'a>(
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
-    let Expression::CallExpression(call) = value else {
+    let Expression::CallExpression(call) = unwrap_initializer_api_expr(value) else {
         return None;
     };
     let decorator_name = signal_query_decorator_name(&call.callee)?;

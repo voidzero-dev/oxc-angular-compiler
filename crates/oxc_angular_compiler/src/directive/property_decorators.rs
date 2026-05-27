@@ -228,8 +228,8 @@ pub(crate) fn try_parse_signal_model<'a>(
     value: &Expression<'a>,
     property_name: Ident<'a>,
 ) -> Option<ModelMapping<'a>> {
-    // Check if the value is a call expression
-    let call_expr = match value {
+    // Check if the value is a call expression (unwrapping `as`/parenthesized).
+    let call_expr = match unwrap_initializer_api_expr(value) {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
@@ -240,11 +240,12 @@ pub(crate) fn try_parse_signal_model<'a>(
         Expression::Identifier(id) if id.name == "model" => false,
         // model.required() - member expression call
         Expression::StaticMemberExpression(member) => {
-            // Check for model.required
+            // Check for model.required / core.model.required
             if member.property.name == "required" {
-                match &member.object {
-                    Expression::Identifier(id) if id.name == "model" => true,
-                    _ => return None,
+                if is_initializer_fn_reference(&member.object, "model") {
+                    true
+                } else {
+                    return None;
                 }
             } else if member.property.name == "model" {
                 // Handle namespaced calls like `core.model()`
@@ -326,7 +327,7 @@ pub(crate) fn try_parse_signal_output<'a>(
     value: &Expression<'a>,
     property_name: Ident<'a>,
 ) -> Option<(Ident<'a>, Ident<'a>)> {
-    let call_expr = match value {
+    let call_expr = match unwrap_initializer_api_expr(value) {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
@@ -387,13 +388,41 @@ pub(crate) fn try_parse_signal_output<'a>(
 /// ```
 ///
 /// Based on Angular's `input_function.ts` in the compiler-cli.
+/// Unwrap `as`/`satisfies`/parenthesized wrappers around an initializer-API call
+/// expression, matching ngc's `tryParseInitializerApi` which recurses through
+/// `isAsExpression` and `isParenthesizedExpression` (e.g. `x = input(0) as any`,
+/// `x = (input(0))`).
+pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(
+    expr: &'b Expression<'a>,
+) -> &'b Expression<'a> {
+    match expr {
+        Expression::TSAsExpression(e) => unwrap_initializer_api_expr(&e.expression),
+        Expression::ParenthesizedExpression(e) => unwrap_initializer_api_expr(&e.expression),
+        _ => expr,
+    }
+}
+
+/// Returns `true` when `object` is the `input`/`model`/etc. reference for a
+/// namespaced call, i.e. either a bare `<fn>` identifier or `<ns>.<fn>` member
+/// access. Used to recognize `<fn>.required()` and `core.<fn>.required()`.
+fn is_initializer_fn_reference(object: &Expression<'_>, function_name: &str) -> bool {
+    match object {
+        Expression::Identifier(id) => id.name == function_name,
+        Expression::StaticMemberExpression(member) => {
+            member.property.name == function_name
+                && matches!(&member.object, Expression::Identifier(_))
+        }
+        _ => false,
+    }
+}
+
 pub(crate) fn try_parse_signal_input<'a>(
     _allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
 ) -> Option<R3InputMetadata<'a>> {
-    // Check if the value is a call expression
-    let call_expr = match value {
+    // Check if the value is a call expression (unwrapping `as`/parenthesized).
+    let call_expr = match unwrap_initializer_api_expr(value) {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
@@ -404,11 +433,12 @@ pub(crate) fn try_parse_signal_input<'a>(
         Expression::Identifier(id) if id.name == "input" => false,
         // input.required() - member expression call
         Expression::StaticMemberExpression(member) => {
-            // Check for input.required
+            // Check for input.required / core.input.required
             if member.property.name == "required" {
-                match &member.object {
-                    Expression::Identifier(id) if id.name == "input" => true,
-                    _ => return None,
+                if is_initializer_fn_reference(&member.object, "input") {
+                    true
+                } else {
+                    return None;
                 }
             } else if member.property.name == "input" {
                 // Handle namespaced calls like `core.input()`
@@ -870,8 +900,8 @@ fn try_parse_signal_query<'a>(
     property_name: Ident<'a>,
     source_text: Option<&'a str>,
 ) -> Option<(SignalQueryType, R3QueryMetadata<'a>)> {
-    // Check if the value is a call expression
-    let call_expr = match value {
+    // Check if the value is a call expression (unwrapping `as`/parenthesized).
+    let call_expr = match unwrap_initializer_api_expr(value) {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
