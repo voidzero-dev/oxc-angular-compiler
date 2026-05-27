@@ -118,6 +118,25 @@ pub fn collect_hoist_edits<'a>(
         return Vec::new();
     }
 
+    // Reverse view of `symbol_to_stmt` ∩ `fn_body_symbol_refs` keyed by
+    // `stmt_start`. A statement like `const make = () => TestComponent;`
+    // declares a fn-valued binding `make` whose body refs are indexed in
+    // `fn_body_symbol_refs[make]`, but the statement's plain `init_symbols`
+    // is empty (arrow bodies are lazy in `collect_expr_symbols`). When the
+    // binding's symbol enters some class's `eagerly_called` (because a
+    // decorator invokes `make()`), the arrow body fires at module load and
+    // its reads become TDZ-relevant to that statement.
+    //
+    // Computed once here so the BFS safe-skip guard, the cascade un-planning
+    // pass, and the topological sort can all consult the same map. See
+    // PR #302 Round 6 follow-on review.
+    let mut stmt_fn_valued_bindings: HashMap<u32, Vec<SymbolId>> = HashMap::new();
+    for (&sym, &stmt_start) in &symbol_to_stmt {
+        if fn_body_symbol_refs.contains_key(&sym) {
+            stmt_fn_valued_bindings.entry(stmt_start).or_default().push(sym);
+        }
+    }
+
     // Index every top-level class declaration by its binding `SymbolId` →
     // the class's `span.start`. Used by the BFS to refuse hoisting any
     // statement whose initializer references a class that lives at-or-after
@@ -255,6 +274,25 @@ pub fn collect_hoist_edits<'a>(
                 // #3310709319 and Codex P2 review #3311493528 on PR #302.
                 let mut stmt_called: HashSet<SymbolId> =
                     info.init_called_symbols.iter().copied().collect();
+                // Fold in any fn-valued binding declared by this statement
+                // whose binding symbol is in THIS class's `eagerly_called`
+                // set. When a decorator (or a chain of hoisted initializers)
+                // invokes such a binding (`const make = () => …` called as
+                // `make()`), the arrow/function body fires at module load
+                // — its body refs are TDZ-relevant exactly like body refs of
+                // a top-level function declaration the initializer calls.
+                // Without this, `const make = () => TestComponent;` invoked
+                // by `providers: make()` would slip past the guard because
+                // the initializer's plain `init_symbols` / `init_called_symbols`
+                // are empty (arrow bodies are lazy in `collect_expr_symbols`).
+                // See PR #302 Round 6 follow-on review.
+                if let Some(fn_syms) = stmt_fn_valued_bindings.get(&stmt_start) {
+                    for &fn_sym in fn_syms {
+                        if eagerly_called.contains(&fn_sym) {
+                            stmt_called.insert(fn_sym);
+                        }
+                    }
+                }
                 let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
                 close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
 
@@ -332,6 +370,38 @@ pub fn collect_hoist_edits<'a>(
                 for &s in &info.init_symbols {
                     if !visited.contains(&s) {
                         worklist.push(s);
+                    }
+                }
+
+                // Function-valued bindings act as BOTH a binding (planned
+                // above) AND a function (their body refs fire when called).
+                // `index_fn_valued_binding` populates `fn_body_symbol_refs`
+                // for `const make = () => …` / `const make = function … {}`
+                // shapes. If the decorator metadata called `make()` (or a
+                // hoisted initializer's `init_called_symbols` closure
+                // promoted `make` into `eagerly_called`), the body refs
+                // ALSO need chasing — otherwise the arrow body's reads
+                // (e.g. `TOKEN` inside `() => [{ provide: TOKEN, … }]`)
+                // never enter the worklist and stay declared below the
+                // class, throwing TDZ when the hoisted `make()` runs at
+                // module load. Mirror the `else if eagerly_called` branch
+                // below; defer otherwise so a later eager-set promotion
+                // belatedly chases the body via the existing now_eager
+                // sweep at the top of this match arm. See PR #302 Codex P2
+                // review #3311913006.
+                if fn_body_symbol_refs.contains_key(&symbol) {
+                    if eagerly_called.contains(&symbol) {
+                        if chased_fn_bodies.insert(symbol) {
+                            if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
+                                for &s in body_refs {
+                                    if !visited.contains(&s) {
+                                        worklist.push(s);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        deferred_fns.insert(symbol);
                     }
                 }
             } else if eagerly_called.contains(&symbol) {
@@ -423,10 +493,30 @@ pub fn collect_hoist_edits<'a>(
             // set the planner used.
             let mut stmt_called: HashSet<SymbolId> =
                 info.init_called_symbols.iter().copied().collect();
+            // Mirror the BFS safe-skip guard: fold in fn-valued bindings
+            // this statement declares whose binding symbol is in
+            // `combined_eagerly_called` (no per-class scoping here — the
+            // cascade runs after the BFS unions per-class eager sets). Then
+            // seed the closure with those binding symbols so
+            // `expand_through_functions` descends into their arrow/function
+            // bodies. Without this, `const make = () => BACKREF;` planned
+            // for a class that calls `make()` would not see its body's
+            // dependency on `BACKREF` (whose own statement was guard-
+            // skipped), so the cascade would fail to drop `make` and the
+            // hoisted `make()` would TDZ on `BACKREF`. See PR #302 Round 6
+            // follow-on review.
+            let mut seed: HashSet<SymbolId> = info.init_symbols.clone();
+            if let Some(fn_syms) = stmt_fn_valued_bindings.get(&start) {
+                for &fn_sym in fn_syms {
+                    if combined_eagerly_called.contains(&fn_sym) {
+                        stmt_called.insert(fn_sym);
+                        seed.insert(fn_sym);
+                    }
+                }
+            }
             let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
             close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
-            let closure =
-                expand_through_functions(&info.init_symbols, &fn_body_symbol_refs, &stmt_called);
+            let closure = expand_through_functions(&seed, &fn_body_symbol_refs, &stmt_called);
             for s in &closure {
                 // Function symbols and unresolved refs have no
                 // `symbol_to_stmt` entry — they can't be a variable
@@ -489,12 +579,58 @@ pub fn collect_hoist_edits<'a>(
     // emitted *before* their dependents in the hoisted prelude. Within a
     // single bucket (same `insert_at`), this guarantees that e.g. `const
     // TOKEN` precedes `const PROVIDERS = [{ provide: TOKEN, ... }]`.
+    //
+    // Precompute `stmt_eager_sets`: per-S closure of
+    // `info.init_called_symbols` under `fn_body_called_symbols`. This is
+    // the same shape the cascade un-planning loop computes for its
+    // `stmt_called` set — passing it (instead of the global
+    // `combined_eagerly_called`) into `topological_order` makes the two
+    // passes reason against the same eager-evaluation set. The global
+    // union can over-expand: a function `make` eagerly called only by
+    // class B leaks into class A's `makeRef = make` closure when
+    // computing topo edges, forming a spurious edge that may invert
+    // ordering or trigger the cycle-break. See PR #302 Cursor Low review
+    // #3311962888.
+    //
+    // `stmt_fn_valued_bindings` (computed once near the top of this
+    // function) is consulted here too — see the doc comment on
+    // `topological_order` for why each statement's fn-valued binding
+    // symbols seed the topo edges.
+    let mut stmt_eager_sets: HashMap<u32, HashSet<SymbolId>> = HashMap::with_capacity(plan.len());
+    for &start in plan.keys() {
+        let Some(info) = stmt_info.get(&start) else {
+            stmt_eager_sets.insert(start, HashSet::new());
+            continue;
+        };
+        let mut stmt_called: HashSet<SymbolId> = info.init_called_symbols.iter().copied().collect();
+        let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
+        close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
+        // Function-valued bindings declared by this statement are part
+        // of THIS statement's eager-call surface when their initializer
+        // is invoked at module load (i.e. the binding's symbol is in
+        // some class's `eagerly_called`). Including them here lets
+        // `expand_through_functions` chase through the arrow/function
+        // body's refs to find dependency edges to other planned
+        // statements — without this the binding's body refs are invisible
+        // to the topo sort, mirroring the same issue Bug 1 fixed in the
+        // BFS pop branch.
+        if let Some(fn_syms) = stmt_fn_valued_bindings.get(&start) {
+            for &fn_sym in fn_syms {
+                if combined_eagerly_called.contains(&fn_sym) {
+                    stmt_called.insert(fn_sym);
+                }
+            }
+        }
+        stmt_eager_sets.insert(start, stmt_called);
+    }
+
     let order = topological_order(
         &plan,
         &symbol_to_stmt,
         &stmt_info,
         &fn_body_symbol_refs,
-        &combined_eagerly_called,
+        &stmt_eager_sets,
+        &stmt_fn_valued_bindings,
     );
 
     // Step 4: emit edits. Group by `insert_at` so multiple statements headed
@@ -539,14 +675,30 @@ pub fn collect_hoist_edits<'a>(
 /// ascending `stmt_start` so the result is deterministic. Cycles (which would
 /// require ill-formed source where two consts reference each other) are
 /// broken silently — they can't produce a valid evaluation order anyway.
+///
+/// `stmt_eager_sets` is the per-planned-statement closure of
+/// `init_called_symbols` under `fn_body_called_symbols`, matching the
+/// shape the cascade un-planning loop uses. Passing per-S sets instead of
+/// the global `combined_eagerly_called` keeps the cascade and topo
+/// passes reasoning against the same eager-evaluation surface — see PR
+/// #302 Cursor Low review #3311962888.
+///
+/// `stmt_fn_valued_bindings` maps each planned `stmt_start` to the
+/// function-valued binding symbols it declares (e.g. `make` for
+/// `const make = () => TOKEN;`). Their `fn_body_symbol_refs` entries are
+/// chased to surface body-ref dependencies that are invisible to the
+/// statement's plain `init_symbols` — see PR #302 Codex P2 review
+/// #3311913006.
 fn topological_order(
     plan: &HashMap<u32, PlanEntry>,
     symbol_to_stmt: &HashMap<SymbolId, u32>,
     stmt_info: &HashMap<u32, StmtInfo>,
     fn_body_symbol_refs: &HashMap<SymbolId, HashSet<SymbolId>>,
-    eagerly_called: &HashSet<SymbolId>,
+    stmt_eager_sets: &HashMap<u32, HashSet<SymbolId>>,
+    stmt_fn_valued_bindings: &HashMap<u32, Vec<SymbolId>>,
 ) -> Vec<u32> {
     let plan_starts: HashSet<u32> = plan.keys().copied().collect();
+    let empty_eager: HashSet<SymbolId> = HashSet::new();
 
     // Adjacency list: stmt_start -> stmt_starts it depends on (must come
     // *before* it). Filter to only edges that land inside the plan; deps that
@@ -555,19 +707,32 @@ fn topological_order(
     //
     // The "effective init symbols" of a planned statement are the transitive
     // closure of its direct `init_symbols` through `fn_body_symbol_refs`,
-    // **restricted to functions in `eagerly_called`**. If the initializer
-    // calls a function (directly or transitively), the function body's
-    // identifier reads count as references that fire when the hoisted
-    // statement evaluates. Functions only stored as values are NOT expanded
-    // — their bodies don't run at module load. See PR #302 review (Codex).
+    // **restricted to functions in this statement's per-S eager-call set**.
+    // If the initializer calls a function (directly or transitively), the
+    // function body's identifier reads count as references that fire when
+    // the hoisted statement evaluates. Functions only stored as values are
+    // NOT expanded — their bodies don't run at module load. See PR #302
+    // review (Codex).
+    //
+    // Function-valued binding symbols this statement declares (e.g. `make`
+    // in `const make = () => TOKEN;`) are added to the seed so the
+    // expansion descends into their arrow/function bodies — those body
+    // refs are dependencies of THIS statement at runtime, but invisible
+    // to plain `init_symbols` because arrow bodies are lazy.
     let mut deps: HashMap<u32, Vec<u32>> = HashMap::with_capacity(plan_starts.len());
     for &start in &plan_starts {
         let Some(info) = stmt_info.get(&start) else {
             deps.insert(start, Vec::new());
             continue;
         };
-        let effective =
-            expand_through_functions(&info.init_symbols, fn_body_symbol_refs, eagerly_called);
+        let eager = stmt_eager_sets.get(&start).unwrap_or(&empty_eager);
+        let mut seed: HashSet<SymbolId> = info.init_symbols.clone();
+        if let Some(fn_syms) = stmt_fn_valued_bindings.get(&start) {
+            for &fn_sym in fn_syms {
+                seed.insert(fn_sym);
+            }
+        }
+        let effective = expand_through_functions(&seed, fn_body_symbol_refs, eager);
         let mut edges: Vec<u32> = effective
             .iter()
             .filter_map(|s| symbol_to_stmt.get(s))

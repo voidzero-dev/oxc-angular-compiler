@@ -11649,3 +11649,272 @@ const make = () => TestComponent, other = 0;
         result.code
     );
 }
+
+/// Codex P2 review #3311913006: a top-level `const make = () => DEP`
+/// populates BOTH `symbol_to_stmt[make]` (binding) AND
+/// `fn_body_symbol_refs[make]` (because `index_fn_valued_binding` indexes
+/// arrow/function-valued bindings as if they were function declarations).
+/// When the BFS pops `make` and `eagerly_called.contains(&make)` (because
+/// decorator metadata called `make()`), the `if let Some(&stmt_start) =
+/// symbol_to_stmt.get(&make)` branch fires first and plans `make`'s
+/// statement — then the `else if eagerly_called.contains(&symbol)` body-
+/// chase NEVER runs. Result: `TOKEN`, which `make`'s arrow body reads, is
+/// never pushed onto the worklist and stays declared below the class. At
+/// runtime, hoisted `makeProviders()` reads `TOKEN` in TDZ.
+///
+/// Required: when the BFS pops a symbol that has BOTH a `symbol_to_stmt`
+/// entry AND a `fn_body_symbol_refs` entry, AND is in `eagerly_called`,
+/// the binding-planning branch must ALSO chase the function body refs —
+/// the symbol acts as both a binding AND a function.
+///
+/// Assert: `const TOKEN` appears before `const makeProviders` in output,
+/// and `const makeProviders` appears before `class TestComponent` — the
+/// chase must reach `TOKEN` so it gets hoisted too.
+#[test]
+fn component_eager_fn_valued_const_chases_body_refs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: makeProviders() })
+class TestComponent {}
+const makeProviders = () => [{ provide: TOKEN, useValue: 0 }];
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let make_pos = result.code.find("const makeProviders").unwrap_or_else(|| {
+        panic!("Expected `const makeProviders` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < make_pos,
+        "`const TOKEN` (read inside `makeProviders`'s arrow body which is \
+         eagerly invoked by decorator metadata) must be hoisted above \
+         `const makeProviders`. token@{token_pos} make@{make_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        make_pos < class_pos,
+        "`const makeProviders` must be hoisted above `class TestComponent`. \
+         make@{make_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Cursor Low review #3311962888: lock in symmetric per-stmt eager-call
+/// reasoning between the cascade un-planning pass and `topological_order`.
+/// The cascade was changed to compute a per-S `stmt_called` (closure of
+/// `init_called_symbols` under `fn_body_called_symbols`); the topo sort
+/// was still passing the global `combined_eagerly_called`. The asymmetry
+/// can in principle create spurious dependency edges between planned
+/// statements; in practice the cycle-break path is contrived. This test
+/// is a regression guardrail: build a case where class A only references
+/// `makeRef = make` as a value and class B eagerly calls `make()`. The
+/// cascade decides A's hoist is safe; the topological sort must emit A's
+/// statement in an order consistent with the cascade's view (i.e. not
+/// reorder or drop it).
+///
+/// Locks in symmetric per-stmt eager-call reasoning between cascade and
+/// topological_order — see PR #302 Cursor review #3311962888.
+#[test]
+fn component_topo_uses_per_stmt_eager_set() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'a', template: '', providers: [{ provide: 'x', useFactory: makeRef }] })
+class A {}
+@Component({ selector: 'b', template: '', providers: [make()] })
+class B {}
+const makeRef = make;
+function make() { return BACKREF; }
+const BACKREF = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let make_ref_pos = result.code.find("const makeRef").unwrap_or_else(|| {
+        panic!("Expected `const makeRef` to be present.\nCode:\n{}", result.code)
+    });
+    let a_pos = result
+        .code
+        .find("class A")
+        .unwrap_or_else(|| panic!("Expected `class A` to be present.\nCode:\n{}", result.code));
+
+    // The cascade pass already proves A is safe to hoist; symmetric topo
+    // must agree — `const makeRef` must precede `class A`.
+    assert!(
+        make_ref_pos < a_pos,
+        "`const makeRef = make;` must be hoisted above `class A` — A only \
+         references `makeRef` as a value. The topological sort must reason \
+         against the same per-stmt eager-call set the cascade used, so the \
+         global `make` eager-call (from class B) doesn't introduce a \
+         spurious edge that reorders A's hoist. makeRef@{make_ref_pos} \
+         a@{a_pos}\nCode:\n{}",
+        result.code
+    );
+    // Basic ordering invariant: a single `const makeRef` survives.
+    assert_eq!(
+        result.code.matches("const makeRef").count(),
+        1,
+        "`const makeRef` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Follow-on adversarial finding (Round 6): a function-valued `const`
+/// binding whose ARROW BODY reads a top-level class can escape BOTH the
+/// safe-skip guard AND the cascade un-planning when the binding ITSELF
+/// is eagerly called from a decorator.
+///
+/// Trace:
+/// - `decorator_called = {make}`. Per-class `eagerly_called = {make}`.
+/// - BFS pops `make`. `symbol_to_stmt[make]` is present → enter the
+///   binding branch.
+/// - Safe-skip guard inspects `info.init_symbols` (refs in the
+///   *initializer expression*). For `const make = () => TestComponent;`,
+///   the initializer is an `ArrowFunctionExpression` — `collect_expr_symbols`
+///   treats arrow bodies as lazy, so `init_symbols = {}` and
+///   `init_called_symbols = {}`. Guard passes.
+/// - Plan adds `const make = () => TestComponent;`. The Round-5 fix then
+///   chases `fn_body_symbol_refs[make] = {TestComponent}`, pushing
+///   `TestComponent` onto the worklist. BFS pops `TestComponent` — it's
+///   a class, not a binding, not in `eagerly_called` — falls through.
+///
+/// Result: `make` is hoisted above the class. At Ivy decorator-eval time,
+/// hoisted `make()` reads `TestComponent` in TDZ → ReferenceError.
+///
+/// Fix: the safe-skip guard must also include the body refs of every
+/// fn-valued binding declared by this statement whose binding symbol is
+/// in the per-class `eagerly_called` set — those body refs fire when the
+/// binding is invoked at module load.
+///
+/// Assert: `class TestComponent` precedes `const make` in the output —
+/// `make`'s hoisting must be blocked because its body reads
+/// `TestComponent`.
+#[test]
+fn component_eager_fn_valued_const_reading_class_blocks_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+const make = () => TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let make_pos = result
+        .code
+        .find("const make")
+        .unwrap_or_else(|| panic!("Expected `const make` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < make_pos,
+        "`class TestComponent` must precede `const make` — `make`'s arrow \
+         body reads `TestComponent`, and the decorator eagerly invokes \
+         `make()`. Hoisting `make` above the class introduces a fresh TDZ \
+         on `TestComponent`. class@{class_pos} make@{make_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const make").count(),
+        1,
+        "`const make` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Round 6 transitive variant: the cascade un-planning loop must also
+/// consult fn-valued bindings' body refs.
+///
+/// Trace:
+/// - `@Component({ providers: make() }) class TestComponent {}`.
+/// - `const make = () => BACKREF;` — guard passes (arrow body lazy),
+///   `make` planned.
+/// - Body chase pushes `BACKREF`. BFS pops `BACKREF`. Its stmt's
+///   `init_symbols = {TestComponent}` → safe-skip blocks. `BACKREF` is
+///   NOT planned.
+/// - Cascade pass for `make`: `info.init_symbols = {}` (arrow body lazy),
+///   so `expand_through_functions(init_symbols={}, …)` returns empty
+///   closure. The cascade never sees that `make`'s body reads `BACKREF`,
+///   which isn't planned → cascade doesn't drop `make`.
+/// - Result: `make` is hoisted above the class, `BACKREF` stays below;
+///   at runtime hoisted `make()` reads `BACKREF` in TDZ.
+///
+/// Fix: the cascade un-planning loop's closure seed must include each
+/// fn-valued binding's symbol (so `expand_through_functions` descends
+/// into its body), gated by `combined_eagerly_called` — only when the
+/// binding's symbol is actually eagerly invoked somewhere.
+///
+/// Assert: `class TestComponent` precedes BOTH `const make` and
+/// `const BACKREF` in the output — neither got hoisted.
+#[test]
+fn component_eager_fn_valued_const_transitive_class_ref_unplans() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+const make = () => BACKREF;
+const BACKREF = TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let make_pos = result
+        .code
+        .find("const make")
+        .unwrap_or_else(|| panic!("Expected `const make` to be present.\nCode:\n{}", result.code));
+    let backref_pos = result.code.find("const BACKREF").unwrap_or_else(|| {
+        panic!("Expected `const BACKREF` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        class_pos < make_pos,
+        "`class TestComponent` must precede `const make` — `make`'s arrow \
+         body reads `BACKREF` which transitively reads `TestComponent`. \
+         Hoisting `make` introduces a TDZ. class@{class_pos} \
+         make@{make_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        class_pos < backref_pos,
+        "`class TestComponent` must precede `const BACKREF` — `BACKREF` \
+         directly reads `TestComponent`. The original guard already \
+         blocks `BACKREF`'s hoist; this assertion locks that in. \
+         class@{class_pos} backref@{backref_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const make").count(),
+        1,
+        "`const make` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const BACKREF").count(),
+        1,
+        "`const BACKREF` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
