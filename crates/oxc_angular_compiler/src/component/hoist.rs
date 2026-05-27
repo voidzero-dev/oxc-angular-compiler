@@ -716,6 +716,23 @@ fn collect_top_level_bindings<'a>(
                         &mut info.init_called_symbols,
                     );
                 }
+                // Destructuring defaults (`const { x = FALLBACK } = obj`)
+                // fire at evaluation time of THIS statement whenever the
+                // matching property is missing/undefined. They read the
+                // default expression's identifiers eagerly, so any later-
+                // declared top-level binding referenced by a default is
+                // TDZ-relevant exactly like the `init` itself. Walk every
+                // nested `AssignmentPattern::right` in the binding pattern
+                // and feed its refs into the statement's eager sets. See
+                // PR #302 Codex review #3311274924.
+                for_each_pattern_default(&declarator.id, &mut |expr| {
+                    collect_expr_symbols(
+                        expr,
+                        semantic,
+                        &mut info.init_symbols,
+                        &mut info.init_called_symbols,
+                    );
+                });
             }
             stmt_info.insert(stmt_start, info);
             continue;
@@ -769,12 +786,14 @@ fn collect_top_level_bindings<'a>(
 /// `ArrayPattern` (each element `Option<BindingPattern>`, plus `rest`), and
 /// `AssignmentPattern` (the `left` pattern of `const { x = 1 } = obj`).
 /// Default expressions on `AssignmentPattern` (e.g. `const { x = SOMETHING }
-/// = obj`) are nested *inside* the binding pattern but are NOT walked here —
-/// a deliberate conservative choice. In the rare case where a default
-/// expression references a later-declared top-level binding, that binding
-/// will not be transitively hoisted. Decorator metadata almost never uses
-/// destructured names with such defaults, so this gap is accepted rather
-/// than implemented.
+/// = obj`) are NOT visited by this helper — it only enumerates binding
+/// identifiers. Those defaults ARE chased separately by
+/// [`for_each_pattern_default`], which callers run at every site where a
+/// pattern's defaults evaluate eagerly: at declarator sites in
+/// `collect_top_level_bindings`, and at IIFE / parameter-default call sites
+/// in [`walk_param_defaults`] / [`walk_iife_callee_body`]. Keeping the two
+/// concerns split lets each call site decide whether the defaults are
+/// TDZ-relevant for that context.
 fn for_each_binding_identifier<'a>(
     pat: &BindingPattern<'a>,
     f: &mut impl FnMut(&oxc_ast::ast::BindingIdentifier<'a>),
@@ -903,6 +922,21 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
 
     fn visit_call_expression(&mut self, it: &oxc_ast::ast::CallExpression<'a>) {
         record_direct_callee(&it.callee, self.semantic, self.called);
+        // IIFE detection mirrors the `collect_expr_symbols` arm: when the
+        // callee is `(() => ...)` / `(function() { ... })`, the body runs
+        // eagerly at this call site, so its identifier reads contribute to
+        // the eager-evaluation set. Without this, `visit_arrow_function`
+        // / `visit_function` (intentional no-ops below) would silently drop
+        // the IIFE body inside an eagerly-called function — TDZ regression.
+        // See PR #302 Cursor review #3311313158.
+        if walk_iife_callee_body(&it.callee, self.semantic, self.out, self.called) {
+            // Body handled; only the arguments still need to flow into
+            // `self.out` / `self.called`.
+            for arg in &it.arguments {
+                self.visit_argument(arg);
+            }
+            return;
+        }
         // Continue default traversal so identifier references inside callee
         // and arguments still feed `self.out`.
         oxc_ast_visit::walk::walk_call_expression(self, it);
@@ -910,6 +944,13 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
 
     fn visit_new_expression(&mut self, it: &oxc_ast::ast::NewExpression<'a>) {
         record_direct_callee(&it.callee, self.semantic, self.called);
+        // Symmetric IIFE handling for `new (function() { ... })()`.
+        if walk_iife_callee_body(&it.callee, self.semantic, self.out, self.called) {
+            for arg in &it.arguments {
+                self.visit_argument(arg);
+            }
+            return;
+        }
         oxc_ast_visit::walk::walk_new_expression(self, it);
     }
 

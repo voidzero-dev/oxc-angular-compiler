@@ -11155,3 +11155,112 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+/// A destructuring binding `const { TOKEN = FALLBACK } = {}` introduces
+/// `TOKEN` (used in decorator metadata) but its initializer is `{}`, so the
+/// `FALLBACK` default fires when the destructuring statement evaluates.
+/// The hoister must chase defaults inside the binding pattern, otherwise
+/// `FALLBACK` stays below the class and the hoisted destructuring throws
+/// `ReferenceError: Cannot access 'FALLBACK' before initialization` at
+/// runtime.
+///
+/// Regression test for Codex P2 review #3311274924 on PR #302.
+#[test]
+fn component_destructured_default_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 0 }] })
+class TestComponent {}
+const { TOKEN = FALLBACK } = {};
+const FALLBACK = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let fallback_pos = result.code.find("const FALLBACK").unwrap_or_else(|| {
+        panic!("Expected `const FALLBACK` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result.code.find("const { TOKEN").unwrap_or_else(|| {
+        panic!("Expected `const {{ TOKEN ...` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        fallback_pos < token_pos,
+        "`const FALLBACK` must precede `const {{ TOKEN = FALLBACK }} = {{}}` so the \
+         destructuring default can read it. fallback@{fallback_pos} token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos < class_pos,
+        "`const {{ TOKEN ... }}` must be hoisted above the class. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        fallback_pos < class_pos,
+        "`const FALLBACK` must also be hoisted above the class. \
+         fallback@{fallback_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+
+    assert_eq!(
+        result.code.matches("const FALLBACK").count(),
+        1,
+        "`const FALLBACK` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const { TOKEN").count(),
+        1,
+        "destructuring statement should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `provideThing` is eagerly called from the decorator. Its body contains an
+/// IIFE `(() => [TOKEN])()` whose body executes at the call site, so the
+/// `TOKEN` reference is TDZ-relevant. `FunctionBodyIdentVisitor` must walk
+/// IIFE callee bodies the same way `collect_expr_symbols` does, or `TOKEN`
+/// is left below the class and the eagerly-called function throws at module
+/// init.
+///
+/// Regression test for Cursor review #3311313158 on PR #302.
+#[test]
+fn component_eager_fn_body_iife_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [provideThing()] })
+class TestComponent {}
+function provideThing() { return (() => [TOKEN])(); }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside an IIFE in the body of an eagerly-called \
+         function) must be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
