@@ -499,7 +499,8 @@ fn extract_host_metadata<'a>(
             let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                 continue;
             };
-            let Some(value) = crate::directive::extract_string_value(allocator, &prop.value, consts)
+            let Some(value) =
+                crate::directive::extract_string_value(allocator, &prop.value, consts)
             else {
                 continue;
             };
