@@ -10942,3 +10942,143 @@ const { TOKEN } = TOKENS;
         result.code
     );
 }
+
+/// A multi-declarator `const TOKEN = 'tok', BACKREF = TestComponent;`
+/// statement is referenced (via `TOKEN`) in the decorator metadata. The
+/// statement's *other* declarator initializer references `TestComponent`
+/// itself, which lives below. Hoisting the whole statement above the class
+/// would put `BACKREF = TestComponent` ahead of `class TestComponent`,
+/// introducing a *new* TDZ on the class.
+///
+/// The safe-skip guard refuses to hoist a statement when any of its
+/// initializer symbols resolves to a top-level class declared at position
+/// `>= effective_start` of the class being protected.
+///
+/// Regression test for Codex review #3310709319 on PR #302.
+#[test]
+fn component_provider_multi_declarator_with_class_self_ref_skips_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 1 }] })
+class TestComponent {}
+const TOKEN = 'tok', BACKREF = TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    // The original `const TOKEN = 'tok', BACKREF = TestComponent;` statement
+    // must remain in its original position (below the class). It must NOT be
+    // duplicated/hoisted above the class.
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` must not be duplicated (no hoist + keep). \
+         Hoisting this multi-declarator statement would put \
+         `BACKREF = TestComponent` ahead of the class.\nCode:\n{}",
+        result.code
+    );
+    if let Some(token_pos) = result.code.find("const TOKEN") {
+        assert!(
+            token_pos > class_pos,
+            "`const TOKEN ... BACKREF = TestComponent` must NOT be hoisted \
+             above the class — that would introduce a new TDZ on `TestComponent`. \
+             token@{token_pos} class@{class_pos}\nCode:\n{}",
+            result.code
+        );
+    }
+}
+
+/// `providers: (() => [{ provide: TOKEN, useValue: 1 }])()` — the IIFE
+/// is invoked *eagerly* at class-definition time, so the references inside
+/// the arrow body must be treated as eager. The general lazy-bodies rule
+/// (skip arrow/function bodies) doesn't apply when the function is its own
+/// callee.
+///
+/// Regression test for Codex review #3310709326 on PR #302.
+#[test]
+fn component_provider_iife_metadata_hoists_inner_token() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: (() => [{ provide: TOKEN, useValue: 1 }])() })
+class TestComponent {}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (referenced inside an IIFE in `providers`) must be \
+         hoisted above the class — the IIFE runs eagerly. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `foo` is referenced as a value (`useFactory: foo`) in TestComponent's
+/// decorator metadata — NOT called there. The global `eagerly_called`
+/// closure adds `foo` because *another* top-level statement
+/// (`const X = foo()`) calls it. The BFS for TestComponent must not chase
+/// `foo`'s body just because some unrelated module-level statement happens
+/// to invoke `foo`. Otherwise it pulls in `TOKEN` and hoists
+/// `const TOKEN = TestComponent;` above the class → new TDZ on the class.
+///
+/// Per-class eagerly_called scoping (seeded only from THIS class's
+/// `decorator_called`) prevents this leak.
+///
+/// Regression test for Cursor review #3310734461 on PR #302.
+#[test]
+fn component_provider_useFactory_value_does_not_chase_global_eager_caller() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+function foo() { return TOKEN; }
+const X = foo();
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useFactory: foo }] })
+class TestComponent {}
+const TOKEN = TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    // `const TOKEN = TestComponent;` must NOT be hoisted above the class —
+    // that would put `TestComponent` reference ahead of its own declaration.
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` must not be duplicated.\nCode:\n{}",
+        result.code
+    );
+    if let Some(token_pos) = result.code.find("const TOKEN") {
+        assert!(
+            token_pos > class_pos,
+            "`const TOKEN = TestComponent` must NOT be hoisted above the class \
+             — that would introduce a new TDZ on `TestComponent`. \
+             `foo` is referenced as a value in `useFactory: foo`, not called \
+             by this class's decorator metadata. \
+             token@{token_pos} class@{class_pos}\nCode:\n{}",
+            result.code
+        );
+    }
+}

@@ -118,37 +118,44 @@ pub fn collect_hoist_edits<'a>(
         return Vec::new();
     }
 
+    // Index every top-level class declaration by its binding `SymbolId` →
+    // the class's `span.start`. Used by the BFS to refuse hoisting any
+    // statement whose initializer references a class that lives at-or-after
+    // the protect site — see the safe-skip guard near `plan.entry(...)`.
+    // Regression for Codex review #3310709319 on PR #302.
+    let top_level_class_positions = collect_top_level_class_positionss(program);
+
     // Step 2a: gather per-class decorator-metadata symbols (both the full
-    // reference set and the "direct callee" subset). The direct-callee
-    // subsets across all classes plus every top-level initializer's
-    // direct-callee subset seed the `eagerly_called` closure, expanded
-    // through `fn_body_called_symbols` to fixed point.
+    // reference set and the "direct callee" subset). Each class gets its
+    // OWN `decorator_called` set; it seeds a *per-class* `eagerly_called`
+    // closure computed inside the BFS loop below.
     //
-    // The closure represents "every top-level function whose body runs at
-    // module load". In the BFS the function-body-chasing branch fires
-    // only for symbols in this set — otherwise a function stored as a
-    // value (`useFactory: makeFactory`) would pull its body's references
-    // into the hoist plan and introduce a fresh TDZ that didn't exist
-    // before. See PR #302 review (Codex).
-    let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>)> = Vec::new();
-    let mut decorator_called: HashSet<SymbolId> = HashSet::new();
+    // Why per-class (not global): the `eagerly_called` closure represents
+    // "every top-level function whose body runs at module load *because of
+    // this class's evaluation*". If `function foo() { return TOKEN; }` is
+    // called by `const X = foo()` elsewhere in the module but only
+    // referenced as a *value* in this class's metadata
+    // (`useFactory: foo`), foo's body does NOT fire when this class
+    // evaluates — and chasing TOKEN would invent a new TDZ on the class
+    // (when `TOKEN = TestComponent`). A global `eagerly_called` (seeded
+    // from every module-init call site) over-reaches across classes. See
+    // PR #302 review (Cursor #3310734461).
+    let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>, HashSet<SymbolId>)> = Vec::new();
     for stmt in &program.body {
         let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
         if !has_angular_decorator(class) {
             continue;
         }
         let mut direct: HashSet<SymbolId> = HashSet::new();
+        let mut decorator_called: HashSet<SymbolId> = HashSet::new();
         for decorator in &class.decorators {
             collect_decorator_symbols(decorator, semantic, &mut direct, &mut decorator_called);
         }
         if direct.is_empty() {
             continue;
         }
-        classes.push((class, stmt_start_pos, direct));
+        classes.push((class, stmt_start_pos, direct, decorator_called));
     }
-
-    let eagerly_called =
-        compute_eagerly_called(&stmt_info, &decorator_called, &fn_body_called_symbols);
 
     // Step 2b: for every Angular-decorated class, BFS through binding
     // initializers starting from the symbols directly referenced in the
@@ -160,13 +167,43 @@ pub fn collect_hoist_edits<'a>(
     // depended on HashMap iteration order and could land *after* the earlier
     // class. See PR #302 review.
     let mut plan: HashMap<u32, PlanEntry> = HashMap::new();
+    // Union of per-class `eagerly_called` sets for all classes that
+    // contributed to the plan. The topological sort's edge expansion
+    // (`expand_through_functions`) must see every function whose body
+    // could fire at module load *for some class in the plan*, so that
+    // dependency edges between planned statements are computed against
+    // the same eager-evaluation set used to plan them.
+    let mut combined_eagerly_called: HashSet<SymbolId> = HashSet::new();
 
-    for (class, stmt_start_pos, direct) in classes {
+    for (class, stmt_start_pos, direct, decorator_called) in classes {
         let class_body_end = class.body.span.end;
         let effective_start = effective_class_start(class, stmt_start_pos);
 
+        // Per-class `eagerly_called`, seeded only from THIS class's
+        // decorator metadata direct-callees and closed through
+        // `fn_body_called_symbols`. As the BFS visits new binding
+        // statements, we splice each statement's `init_called_symbols`
+        // into the set and re-close — so a hoisted binding whose
+        // initializer calls `g()` makes `g` (and everything `g`
+        // transitively calls) eagerly evaluated for the chase.
+        let mut eagerly_called: HashSet<SymbolId> = HashSet::new();
+        let mut call_worklist: Vec<SymbolId> = Vec::new();
+        for &s in &decorator_called {
+            if eagerly_called.insert(s) {
+                call_worklist.push(s);
+            }
+        }
+        close_eagerly_called(&mut eagerly_called, &mut call_worklist, &fn_body_called_symbols);
+
         let mut worklist: Vec<SymbolId> = direct.into_iter().collect();
         let mut visited: HashSet<SymbolId> = HashSet::new();
+        // Track function symbols whose bodies we've already chased so we
+        // can belatedly chase them if they become eagerly_called *after*
+        // the BFS has already popped them.
+        let mut chased_fn_bodies: HashSet<SymbolId> = HashSet::new();
+        // Functions popped before they became eagerly_called — their body
+        // refs need to be re-pushed when they do.
+        let mut deferred_fns: HashSet<SymbolId> = HashSet::new();
         while let Some(symbol) = worklist.pop() {
             if !visited.insert(symbol) {
                 continue;
@@ -183,6 +220,33 @@ pub fn collect_hoist_edits<'a>(
                     continue;
                 }
 
+                // Safe-skip guard: if hoisting this statement would put any
+                // of its initializer's references to a top-level class
+                // ahead of that class's declaration, don't hoist. The
+                // user's existing TDZ on the directly-referenced binding
+                // (e.g. `TOKEN`) is *not* fixed here — but at least we
+                // don't *introduce* a new TDZ on the class.
+                //
+                // Concretely guards against the multi-declarator case
+                // `const TOKEN = 'tok', BACKREF = TestComponent;` where
+                // hoisting the whole statement above `class TestComponent`
+                // would leave `BACKREF = TestComponent` reading a not-yet-
+                // declared class. The conservative alternative — splitting
+                // the statement into per-declarator emissions — is out of
+                // scope; this safe-skip is the minimal "no regressions"
+                // defense.
+                //
+                // The check uses `>=`: a class declared at exactly
+                // `effective_start` is itself the class we're protecting
+                // — definitely blocking. Regression for Codex review
+                // #3310709319 on PR #302.
+                let stmt_references_later_class = info.init_symbols.iter().any(|s| {
+                    top_level_class_positions.get(s).is_some_and(|&pos| pos >= effective_start)
+                });
+                if stmt_references_later_class {
+                    continue;
+                }
+
                 plan.entry(stmt_start)
                     .and_modify(|p| {
                         if effective_start < p.insert_at {
@@ -194,6 +258,41 @@ pub fn collect_hoist_edits<'a>(
                         delete_end: info.delete_end,
                         insert_at: effective_start,
                     });
+
+                // The hoisted statement's initializer also runs at module
+                // load. Any function it calls (directly or transitively
+                // through `fn_body_called_symbols`) joins the eagerly-
+                // called set, so its body refs are chased too. Belatedly
+                // chase any function we already popped from the worklist
+                // *before* it became eagerly_called.
+                let mut newly_called: Vec<SymbolId> = Vec::new();
+                for &s in &info.init_called_symbols {
+                    if eagerly_called.insert(s) {
+                        newly_called.push(s);
+                    }
+                }
+                close_eagerly_called(
+                    &mut eagerly_called,
+                    &mut newly_called,
+                    &fn_body_called_symbols,
+                );
+                // Belated chase: any fn we already saw but skipped because
+                // it wasn't eagerly_called at the time. Re-push its body
+                // refs onto the worklist.
+                let now_eager: Vec<SymbolId> =
+                    deferred_fns.iter().copied().filter(|s| eagerly_called.contains(s)).collect();
+                for s in now_eager {
+                    deferred_fns.remove(&s);
+                    if chased_fn_bodies.insert(s) {
+                        if let Some(body_refs) = fn_body_symbol_refs.get(&s) {
+                            for &r in body_refs {
+                                if !visited.contains(&r) {
+                                    worklist.push(r);
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // Transitive hoist: if this binding's initializer references
                 // another later-declared binding, that one must move above
@@ -211,20 +310,32 @@ pub fn collect_hoist_edits<'a>(
                 }
             } else if eagerly_called.contains(&symbol) {
                 // The symbol resolves to a top-level function declaration
-                // that is *actually called* (transitively) at module load.
-                // Don't hoist the function itself (JS already hoists fn
-                // decls), but its body's identifier reads fire whenever
-                // it runs — and "eagerly_called" guarantees it does run
-                // at module load. Chase those references. See PR #302
-                // review (Codex).
-                if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
-                    for &s in body_refs {
-                        if !visited.contains(&s) {
-                            worklist.push(s);
+                // that is *actually called* (transitively) at module load
+                // *for this class*. Don't hoist the function itself (JS
+                // already hoists fn decls), but its body's identifier
+                // reads fire whenever it runs. Chase those references.
+                // See PR #302 review (Codex).
+                if chased_fn_bodies.insert(symbol) {
+                    if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
+                        for &s in body_refs {
+                            if !visited.contains(&s) {
+                                worklist.push(s);
+                            }
                         }
                     }
                 }
+            } else if fn_body_symbol_refs.contains_key(&symbol) {
+                // Top-level function not (yet) in eagerly_called for this
+                // class. Defer — if a later visit promotes it (because some
+                // planned binding's initializer calls it), we'll belatedly
+                // chase its body. See PR #302 review (Cursor).
+                deferred_fns.insert(symbol);
             }
+        }
+        // Fold this class's eagerly_called into the combined set used by
+        // the topological sort below.
+        for s in eagerly_called {
+            combined_eagerly_called.insert(s);
         }
     }
 
@@ -241,7 +352,7 @@ pub fn collect_hoist_edits<'a>(
         &symbol_to_stmt,
         &stmt_info,
         &fn_body_symbol_refs,
-        &eagerly_called,
+        &combined_eagerly_called,
     );
 
     // Step 4: emit edits. Group by `insert_at` so multiple statements headed
@@ -400,51 +511,37 @@ fn expand_through_functions(
     out
 }
 
-/// Compute the transitive closure of "top-level functions that actually run
-/// at module load". Seeded with every direct callee in either:
-/// * a top-level `VariableDeclaration` initializer (`stmt_info[*].init_called_symbols`)
-/// * Angular decorator metadata on any class (`decorator_called`).
+/// Close the `eagerly_called` set under `fn_body_called_symbols`: pop each
+/// symbol from `worklist`, for every function it directly calls, insert
+/// into `eagerly_called` and (if newly inserted) push onto the worklist.
+/// Runs until the worklist drains.
 ///
-/// Expanded through `fn_body_called_symbols`: if `f` is in the set and `f`
-/// directly calls `g`, then `g` is too. Fixed-point — runs until the worklist
-/// drains. A function stored as a value (referenced but not called) is NOT
-/// added.
+/// Used by the per-class BFS in [`collect_hoist_edits`]. The caller seeds
+/// `eagerly_called` and `worklist` with that class's `decorator_called`
+/// (plus, on incremental updates, the `init_called_symbols` of newly
+/// planned bindings); we extend the closure to fixed point. A function
+/// stored as a value (referenced but not called) is NOT added — that's
+/// what prevents `useFactory: makeFactory` from invoking `makeFactory`'s
+/// body refs at class-init time.
 ///
-/// Used by both the BFS (to gate the function-body-chasing branch) and the
-/// topological sort (to gate `expand_through_functions`). Without this, a
-/// `useFactory: makeFactory` in providers — where Angular invokes
-/// `makeFactory` lazily at injection time, NOT at class-definition time —
-/// would still pull in `makeFactory`'s body refs and hoist them above the
-/// class, sometimes inventing a new TDZ.
-fn compute_eagerly_called(
-    stmt_info: &HashMap<u32, StmtInfo>,
-    decorator_called: &HashSet<SymbolId>,
+/// Per-class scoping: the seed is THIS class's call graph only. A function
+/// invoked elsewhere in the module but only referenced as a value in this
+/// class's metadata does not enter this class's set. See PR #302 review
+/// (Cursor #3310734461).
+fn close_eagerly_called(
+    eagerly_called: &mut HashSet<SymbolId>,
+    worklist: &mut Vec<SymbolId>,
     fn_body_called_symbols: &HashMap<SymbolId, HashSet<SymbolId>>,
-) -> HashSet<SymbolId> {
-    let mut out: HashSet<SymbolId> = HashSet::new();
-    let mut worklist: Vec<SymbolId> = Vec::new();
-    for info in stmt_info.values() {
-        for &s in &info.init_called_symbols {
-            if out.insert(s) {
-                worklist.push(s);
-            }
-        }
-    }
-    for &s in decorator_called {
-        if out.insert(s) {
-            worklist.push(s);
-        }
-    }
+) {
     while let Some(symbol) = worklist.pop() {
         if let Some(calls) = fn_body_called_symbols.get(&symbol) {
             for &s in calls {
-                if out.insert(s) {
+                if eagerly_called.insert(s) {
                     worklist.push(s);
                 }
             }
         }
     }
-    out
 }
 
 /// Compute the effective start of a class statement, ignoring trailing
@@ -455,6 +552,26 @@ fn compute_eagerly_called(
 /// of which decorators end up being stripped.
 fn effective_class_start(class: &Class<'_>, stmt_start: u32) -> u32 {
     class.decorators.iter().map(|d| d.span.start).min().map_or(stmt_start, |d| d.min(stmt_start))
+}
+
+/// Index every top-level class declaration by its binding `SymbolId` →
+/// the class's `span.start`. Covers plain `ClassDeclaration`,
+/// `export class …`, and `export default class …` (only the named form —
+/// anonymous default-exported classes have no `id`).
+///
+/// Used by the BFS safe-skip guard in [`collect_hoist_edits`] to refuse
+/// hoisting a statement whose initializer references a class declared
+/// at-or-after the protect site, which would introduce a new TDZ on the
+/// class itself.
+fn collect_top_level_class_positionss(program: &Program<'_>) -> HashMap<SymbolId, u32> {
+    let mut out: HashMap<SymbolId, u32> = HashMap::new();
+    for stmt in &program.body {
+        let Some((class, _)) = class_of(stmt) else { continue };
+        let Some(id) = &class.id else { continue };
+        let Some(symbol) = id.symbol_id.get() else { continue };
+        out.insert(symbol, class.span.start);
+    }
+    out
 }
 
 /// Locate the inner class declaration of a top-level statement, returning the
@@ -530,8 +647,9 @@ fn resolve_symbol(id: &IdentifierReference<'_>, semantic: &Semantic<'_>) -> Opti
 ///   function-call boundaries.
 /// * `fn_body_called_symbols`: top-level function `SymbolId` → symbols of
 ///   functions/`new` targets directly invoked inside its body. Feeds
-///   `compute_eagerly_called` so the BFS only chases bodies that are
-///   eagerly reachable from the decorator metadata's call graph.
+///   `close_eagerly_called` so each class's BFS only chases bodies that
+///   are eagerly reachable from that class's decorator-metadata call
+///   graph.
 ///
 /// Only `VariableDeclaration` (const/let/var) and the `export` form of it are
 /// considered:
@@ -832,7 +950,17 @@ fn collect_expr_symbols<'a>(
         }
         E::CallExpression(call) => {
             record_direct_callee(&call.callee, semantic, called);
-            collect_expr_symbols(&call.callee, semantic, out, called);
+            // IIFE detection: `(() => ...)()` or `(function() { ... })()` —
+            // the function body runs *eagerly* at this call site, so its
+            // identifier reads contribute to the eager-evaluation set. The
+            // default `ArrowFunctionExpression` / `FunctionExpression`
+            // arms below treat bodies as lazy; for IIFEs we walk the body
+            // explicitly via `FunctionBodyIdentVisitor` instead.
+            //
+            // Regression for Codex review #3310709326 on PR #302.
+            if !walk_iife_callee_body(&call.callee, semantic, out, called) {
+                collect_expr_symbols(&call.callee, semantic, out, called);
+            }
             for arg in &call.arguments {
                 match arg {
                     Argument::SpreadElement(s) => {
@@ -850,7 +978,11 @@ fn collect_expr_symbols<'a>(
         }
         E::NewExpression(new) => {
             record_direct_callee(&new.callee, semantic, called);
-            collect_expr_symbols(&new.callee, semantic, out, called);
+            // Symmetric IIFE handling for `new (function() { ... })()` —
+            // exceedingly rare but covered for consistency.
+            if !walk_iife_callee_body(&new.callee, semantic, out, called) {
+                collect_expr_symbols(&new.callee, semantic, out, called);
+            }
             for arg in &new.arguments {
                 match arg {
                     Argument::SpreadElement(s) => {
@@ -972,6 +1104,52 @@ fn record_direct_callee<'a>(
     }
 }
 
+/// If `callee` is the function expression of an IIFE
+/// (`(() => …)()` or `(function() {…})()`, after peeling parens and TS
+/// wrappers), walk its body eagerly via `FunctionBodyIdentVisitor` and
+/// return `true`. The IIFE body runs at the call site, so its identifier
+/// reads contribute to the eager-evaluation set — unlike a function stored
+/// as a value, where the lazy-bodies rule in [`collect_expr_symbols`] is
+/// correct.
+///
+/// Returns `false` when the callee is not a function/arrow expression; the
+/// caller then falls through to the normal `collect_expr_symbols` descent
+/// (which is a no-op for these node kinds anyway, but still correct).
+///
+/// Regression for Codex review #3310709326 on PR #302.
+fn walk_iife_callee_body<'a>(
+    callee: &Expression<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) -> bool {
+    use Expression as E;
+    let mut cur = callee;
+    loop {
+        match cur {
+            E::ArrowFunctionExpression(arrow) => {
+                let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                visitor.visit_function_body(&arrow.body);
+                return true;
+            }
+            E::FunctionExpression(func) => {
+                if let Some(body) = &func.body {
+                    let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                    visitor.visit_function_body(body);
+                }
+                return true;
+            }
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return false,
+        }
+    }
+}
+
 /// Mirror of [`collect_expr_symbols`] for the small set of node kinds that
 /// can appear directly inside an `Expression::ChainExpression`. Without this,
 /// optional-chaining (`TOKEN?.id`, `f?.()`) would be silently dropped by
@@ -986,7 +1164,9 @@ fn collect_chain_element_symbols<'a>(
     match el {
         ChainElement::CallExpression(call) => {
             record_direct_callee(&call.callee, semantic, called);
-            collect_expr_symbols(&call.callee, semantic, out, called);
+            if !walk_iife_callee_body(&call.callee, semantic, out, called) {
+                collect_expr_symbols(&call.callee, semantic, out, called);
+            }
             for arg in &call.arguments {
                 match arg {
                     Argument::SpreadElement(s) => {
