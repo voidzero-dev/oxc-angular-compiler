@@ -11264,3 +11264,388 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+/// The safe-skip guard must refuse to hoist a `var TOKEN = make()` initializer
+/// when the eagerly-called `make()`'s body reads a later-declared top-level
+/// class. Without the fix, hoisting `var TOKEN = make()` above
+/// `class TestComponent` invents a fresh TDZ on the class: `make()` runs at
+/// the hoisted initializer's evaluation time and reads `TestComponent` before
+/// the class binding is initialized.
+///
+/// The user's existing TDZ on `TOKEN` is NOT our problem to fix — we must
+/// just not introduce a NEW class TDZ. So we only assert that `class
+/// TestComponent` still precedes `var TOKEN`.
+///
+/// Regression test for Codex P2 review #3311493528 on PR #302.
+#[test]
+fn component_eager_fn_body_class_ref_blocks_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class TestComponent {}
+var TOKEN = make();
+function make() { return TestComponent; }
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < token_pos,
+        "`var TOKEN = make()` must NOT be hoisted above the class because \
+         `make()`'s body reads `TestComponent`. Hoisting would invent a fresh \
+         class TDZ. class@{class_pos} token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("var TOKEN").count(),
+        1,
+        "`var TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// A decorator-metadata `AssignmentExpression` (`(cached = TOKEN)`) carries
+/// identifier references on both its `left` and `right`. The
+/// `collect_expr_symbols` walker must not silently drop these — otherwise
+/// `TOKEN` never enters the BFS and stays declared below the class, while
+/// the class's emitted Ivy definition reads `TOKEN` eagerly.
+///
+/// Regression test for Cursor Low review #3311551145 on PR #302.
+#[test]
+fn component_assignment_expression_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+let cached;
+@Component({ selector: 'x', template: '', providers: [(cached = TOKEN)] })
+class TestComponent {}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read by an AssignmentExpression in decorator \
+         metadata) must be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Finding 1: transitive dependency cascade. The BFS pops `TOKEN` whose
+/// only directly-called function is `make()`; the closure of
+/// `init_called_symbols` brings in nothing class-relevant from `make`'s
+/// body (it just calls `BACKREF` whose binding is a non-function const).
+/// So the safe-skip guard at `TOKEN`'s site passes — `TOKEN`'s statement
+/// is planned. The BFS then pushes `make`'s body refs onto the worklist,
+/// pops `BACKREF`, and *its* guard detects `BACKREF = TestComponent` reading
+/// a later class — so `BACKREF` is skipped. But `TOKEN`'s plan entry is
+/// still there, leaving the runtime broken: hoisted `var TOKEN = make()`
+/// invokes `make()` which reads not-yet-initialized `BACKREF`, which the
+/// guard correctly identified would read `TestComponent` if it ran.
+///
+/// Required: when a dependency is guard-skipped, every transitively
+/// dependent already-planned statement must be un-planned too. Without
+/// the fix, `var TOKEN` lands above `class TestComponent` in the output.
+///
+/// Regression test for Codex P2 review (Finding 1) on PR #302.
+#[test]
+fn component_eager_fn_body_transitive_class_ref_unplans_chain() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class TestComponent {}
+var TOKEN = make();
+function make() { return BACKREF; }
+const BACKREF = TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+    let backref_pos = result.code.find("const BACKREF").unwrap_or_else(|| {
+        panic!("Expected `const BACKREF` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        class_pos < token_pos,
+        "`var TOKEN = make()` must NOT be hoisted above the class because \
+         its transitive dep `BACKREF` reads `TestComponent`. class@{class_pos} \
+         token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        class_pos < backref_pos,
+        "`const BACKREF = TestComponent` must NOT be hoisted above the class. \
+         class@{class_pos} backref@{backref_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Finding 2: function-valued `const`/`let` bindings hide eager class
+/// reads. The BFS pops `TOKEN` whose `init_called_symbols = {make}`.
+/// `make` is a `const` arrow, not a function decl — so it's missing from
+/// `fn_body_*` maps. The closure expansion finds nothing; the guard
+/// passes; `TOKEN` gets hoisted above the class. At runtime: hoisted
+/// `make()` reads `TestComponent` in TDZ.
+///
+/// Required: top-level `const`/`let`/`var` bindings whose initializer is
+/// *directly* an `ArrowFunctionExpression` / `FunctionExpression` (after
+/// peeling parens / TS wrappers) must be indexed into `fn_body_*` maps
+/// keyed by the binding symbol, so the existing safe-skip guard catches
+/// the transitive class read.
+///
+/// Regression test for Codex P2 review (Finding 2) on PR #302.
+#[test]
+fn component_eager_fn_value_const_arrow_class_ref_blocks_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class TestComponent {}
+var TOKEN = make();
+const make = () => TestComponent;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < token_pos,
+        "`var TOKEN = make()` must NOT be hoisted above the class because \
+         the `const make = () => TestComponent` arrow body reads the class. \
+         class@{class_pos} token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Finding 3: member-call shapes `fn.call(...)` / `fn.apply(...)` aren't
+/// recognized as eager calls. `record_direct_callee` peels parens / TS
+/// wrappers but stops at `StaticMemberExpression`, so `make.call(null)`
+/// records nothing in `called`. The guard's `stmt_called` is empty, the
+/// transitive class-ref check never inspects `make`'s body, and `TOKEN`
+/// gets hoisted above the class. At runtime: hoisted `make.call(null)`
+/// reads `TestComponent` in TDZ.
+///
+/// Required: extend `record_direct_callee` (or a wrapper) to recognize
+/// the static call shapes `fn.call(...)`, `fn.apply(...)`, and
+/// `fn.bind(...)()` on top-level function symbols.
+///
+/// Regression test for Codex P2 review (Finding 3) on PR #302.
+#[test]
+fn component_eager_member_call_class_ref_blocks_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class TestComponent {}
+var TOKEN = make.call(null);
+function make() { return TestComponent; }
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < token_pos,
+        "`var TOKEN = make.call(null)` must NOT be hoisted above the class \
+         because `make()`'s body reads `TestComponent`. class@{class_pos} \
+         token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Codex P3 review Finding 1: cross-class `insert_at` ordering. Two
+/// `@Component`-decorated classes (C1 first, C2 second) with an
+/// undecorated `class Mid` between them. C1 plans `var TOKEN = make()` at
+/// `insert_at = pos_C1`; its BFS chases `make`'s body to `X` but the
+/// safe-skip guard rejects `X` for C1 because `X = Mid` reads class `Mid`
+/// which is declared *after* C1. C2's BFS reaches `X` independently (via
+/// `useValue: X`) and the safe-skip passes for C2 (Mid is declared
+/// *before* C2). So `X` lands in the plan at `insert_at = pos_C2 >
+/// pos_C1`.
+///
+/// The cascade un-planning loop previously treated "X is in plan" as a
+/// safe dep — but X's `insert_at` is *later* than TOKEN's, so at runtime
+/// hoisted TOKEN runs before hoisted X and `make()` TDZ-reads `X`. The
+/// fix changes the cascade check to "dep planned at an `insert_at` ≤ S's
+/// `insert_at`" (drop S otherwise).
+///
+/// We assert `class C1` precedes `var TOKEN = make()`: TOKEN must NOT be
+/// hoisted because its dep X can't be hoisted to the same insertion
+/// position. (TOKEN's user-authored TDZ on X persists — not our problem;
+/// we just must not introduce a fresh hoist-induced TDZ between the two
+/// hoisted statements.)
+#[test]
+fn component_cascade_cross_class_insert_order_unplans_dependent() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'a', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class C1 {}
+var TOKEN = make();
+function make() { return X; }
+class Mid {}
+@Component({ selector: 'b', template: '', providers: [{ provide: 'y', useValue: X }] })
+class C2 {}
+const X = Mid;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let c1_pos = result
+        .code
+        .find("class C1")
+        .unwrap_or_else(|| panic!("Expected `class C1` to be present.\nCode:\n{}", result.code));
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        c1_pos < token_pos,
+        "`var TOKEN = make()` must NOT be hoisted above `class C1` because \
+         its transitive dep `X` is only planned at `insert_at` for \
+         `class C2`, which is *later* in source. Hoisting TOKEN above C1 \
+         leaves it running before the hoisted X lands. c1@{c1_pos} \
+         token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Codex P3 review Finding 2: per-S eager-call set. Class A uses
+/// `makeRef` as a value (`useFactory: makeRef`); class B *calls* `make()`
+/// (`providers: [make()]`). The cascade pass currently uses
+/// `combined_eagerly_called` (the union across all classes) so `make` —
+/// only eagerly invoked from B — over-expands A's `makeRef` statement
+/// closure through `make`'s body refs. A's safe hoist gets dropped even
+/// though A never calls `make`.
+///
+/// With the fix, the cascade computes a per-S eager-call set from
+/// `info.init_called_symbols` closed under `fn_body_called_symbols`. A's
+/// statement `const makeRef = make;` calls nothing, so its eager set is
+/// empty and the closure doesn't chase `make`'s body. A's `makeRef` hoist
+/// survives.
+#[test]
+fn component_cascade_value_only_ref_does_not_over_expand() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'a', template: '', providers: [{ provide: 'x', useFactory: makeRef }] })
+class A {}
+@Component({ selector: 'b', template: '', providers: [make()] })
+class B {}
+const makeRef = make;
+function make() { return BACKREF; }
+const BACKREF = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let a_pos = result
+        .code
+        .find("class A")
+        .unwrap_or_else(|| panic!("Expected `class A` to be present.\nCode:\n{}", result.code));
+    let make_ref_pos = result.code.find("const makeRef").unwrap_or_else(|| {
+        panic!("Expected `const makeRef` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        make_ref_pos < a_pos,
+        "`const makeRef = make;` must be hoisted above `class A` because A \
+         only references `makeRef` as a value — A never *calls* `make`, so \
+         `make`'s body refs are irrelevant to A's safe-skip. The cascade \
+         must compute a per-S eager-call set so `make`'s eager evaluation \
+         from class B doesn't bleed into A's closure. makeRef@{make_ref_pos} \
+         a@{a_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Codex P3 review Finding 3: multi-declarator function-valued bindings.
+/// `index_fn_valued_binding` currently only runs when
+/// `decl.declarations.len() == 1`. The shape
+/// `const make = () => TestComponent, other = 0;` skips indexing, so
+/// `make`'s arrow body is never visible to the safe-skip guard. An eager
+/// caller (`var TOKEN = make()`) then hoists above the class and TDZ-reads
+/// `TestComponent` at runtime.
+///
+/// The fix lifts the indexing into the per-declarator loop so each
+/// declarator with a plain identifier binding and a direct arrow/function
+/// initializer gets indexed regardless of how many siblings share the
+/// statement. Assert `class TestComponent` precedes `var TOKEN`.
+#[test]
+fn component_multi_declarator_fn_valued_binding_blocks_caller_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: 'x', useValue: TOKEN }] })
+class TestComponent {}
+var TOKEN = make();
+const make = () => TestComponent, other = 0;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("var TOKEN")
+        .unwrap_or_else(|| panic!("Expected `var TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < token_pos,
+        "`var TOKEN = make()` must NOT be hoisted above the class because \
+         the multi-declarator binding `const make = () => TestComponent, \
+         other = 0;` declares `make` whose arrow body reads `TestComponent`. \
+         class@{class_pos} token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+}

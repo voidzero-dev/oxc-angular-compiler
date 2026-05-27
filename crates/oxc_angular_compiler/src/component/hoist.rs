@@ -236,12 +236,38 @@ pub fn collect_hoist_edits<'a>(
                 // scope; this safe-skip is the minimal "no regressions"
                 // defense.
                 //
+                // The guard ALSO refuses to hoist when the initializer
+                // eagerly calls a function whose body reads a later class.
+                // Without this transitive check, `var TOKEN = make()`
+                // with `function make() { return TestComponent; }` would
+                // be hoisted above `class TestComponent` — the hoisted
+                // initializer then invokes `make()` which reads
+                // `TestComponent` before its class binding is initialized,
+                // throwing `ReferenceError: Cannot access 'TestComponent'
+                // before initialization`. We close `info.init_called_symbols`
+                // under `fn_body_called_symbols` (same shape as the BFS's
+                // per-class `eagerly_called` set) and consult each
+                // function's `fn_body_symbol_refs` for class refs.
+                //
                 // The check uses `>=`: a class declared at exactly
                 // `effective_start` is itself the class we're protecting
                 // — definitely blocking. Regression for Codex review
-                // #3310709319 on PR #302.
+                // #3310709319 and Codex P2 review #3311493528 on PR #302.
+                let mut stmt_called: HashSet<SymbolId> =
+                    info.init_called_symbols.iter().copied().collect();
+                let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
+                close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
+
                 let stmt_references_later_class = info.init_symbols.iter().any(|s| {
                     top_level_class_positions.get(s).is_some_and(|&pos| pos >= effective_start)
+                }) || stmt_called.iter().any(|f| {
+                    fn_body_symbol_refs.get(f).is_some_and(|refs| {
+                        refs.iter().any(|s| {
+                            top_level_class_positions
+                                .get(s)
+                                .is_some_and(|&pos| pos >= effective_start)
+                        })
+                    })
                 });
                 if stmt_references_later_class {
                     continue;
@@ -336,6 +362,122 @@ pub fn collect_hoist_edits<'a>(
         // the topological sort below.
         for s in eagerly_called {
             combined_eagerly_called.insert(s);
+        }
+    }
+
+    if plan.is_empty() {
+        return Vec::new();
+    }
+
+    // Step 2c: cascade un-planning. The per-class BFS plans a statement S
+    // when S's *immediate* `init_symbols` / closed `init_called_symbols`
+    // pass the safe-skip guard. But a transitive dependency reached only
+    // by chasing through `fn_body_symbol_refs` may itself get guard-skipped
+    // when the BFS later pops it — leaving S planned with a missing dep.
+    //
+    // Example (Finding 1 of Codex P2 review on PR #302):
+    //
+    //   class TestComponent { ... }              // ← class C
+    //   var TOKEN = make();                       // ← S: passes guard
+    //   function make() { return BACKREF; }       // ← make's body
+    //   const BACKREF = TestComponent;            // ← D: guard SKIPS
+    //
+    // S's immediate `init_called_symbols = {make}`. `make`'s body refs are
+    // {BACKREF}, which is *not* a class — guard passes, S is planned. Then
+    // BFS visits `make`, chases body → pushes BACKREF onto worklist. Pop
+    // BACKREF: its `init_symbols = {TestComponent}` and `TestComponent`'s
+    // position is `>= effective_start` → guard SKIPS BACKREF. But S
+    // stayed planned. At runtime, hoisted `var TOKEN = make()` calls
+    // `make()`, which reads not-yet-initialized `BACKREF`, which reads
+    // not-yet-initialized `TestComponent`. TDZ.
+    //
+    // Fix (Approach B from the review): after BFS, compute each planned
+    // statement's *full* dependency closure (through eagerly-called fn
+    // bodies via `combined_eagerly_called`). If any closure symbol resolves
+    // to a top-level binding whose own statement is NOT in the plan AND
+    // would have needed hoisting (its position is at-or-after S's
+    // `insert_at`), drop S. Iterate to fixed point so the un-plan can
+    // cascade: dropping S may itself orphan another planned T that
+    // depended only on S.
+    //
+    // Function-symbol deps (e.g. `make` itself) are NOT flagged here
+    // because `symbol_to_stmt.get(&make)` returns None — top-level
+    // function declarations are JS-hoisted, not handled by the variable
+    // planner. The chase-through-fn-bodies in `expand_through_functions`
+    // bridges to the variable bindings they read.
+    loop {
+        let plan_starts_snapshot: HashSet<u32> = plan.keys().copied().collect();
+        let mut to_remove: Vec<u32> = Vec::new();
+        for (&start, entry) in &plan {
+            let Some(info) = stmt_info.get(&start) else { continue };
+            // Finding 2 (Codex P3 review): use a *per-S* eager-call set —
+            // the closure of THIS statement's `init_called_symbols` under
+            // `fn_body_called_symbols` — instead of the global
+            // `combined_eagerly_called`. The global union over-expands: if
+            // class B eagerly calls `make` and class A only references
+            // `makeRef = make` as a *value*, the global set pulls A's
+            // closure through `make`'s body refs as if A called `make`,
+            // which can drop A's safe hoist. The per-S set matches the
+            // shape used by the safe-skip guard's `stmt_called` so the
+            // cascade un-planning reasons against the same eager-evaluation
+            // set the planner used.
+            let mut stmt_called: HashSet<SymbolId> =
+                info.init_called_symbols.iter().copied().collect();
+            let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
+            close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
+            let closure =
+                expand_through_functions(&info.init_symbols, &fn_body_symbol_refs, &stmt_called);
+            for s in &closure {
+                // Function symbols and unresolved refs have no
+                // `symbol_to_stmt` entry — they can't be a variable
+                // binding the planner would have moved. Skip.
+                let Some(&dep_start) = symbol_to_stmt.get(s) else { continue };
+                // Self-references (multi-declarator stmt referencing its own
+                // sibling) don't count.
+                if dep_start == start {
+                    continue;
+                }
+                // Dep is in the plan — only safe if its `insert_at` is at
+                // or before S's `insert_at`. Finding 1 (Codex P3 review):
+                // two planned statements can target *different* `insert_at`
+                // positions (one per decorated class). If S targets
+                // `insert_at = pos_C1` and its dep `D` is planned only for
+                // class C2 with `D.insert_at = pos_C2 > pos_C1`, hoisted S
+                // runs before hoisted D at runtime — fresh TDZ on D. The
+                // snapshot-membership check we used before missed this; we
+                // must consult the dep's *current* `insert_at` and unplan
+                // S when the ordering is wrong.
+                if plan_starts_snapshot.contains(&dep_start) {
+                    if let Some(dep_entry) = plan.get(&dep_start)
+                        && dep_entry.insert_at <= entry.insert_at
+                    {
+                        continue;
+                    }
+                    // Fall through — dep's `insert_at` is *after* S's,
+                    // treat the dep as unsafe and unplan S. (Lowering the
+                    // dep's `insert_at` instead is the alternative; we
+                    // pick "drop S" for simplicity — the user's existing
+                    // TDZ on the dep persists, but we don't introduce a
+                    // fresh class TDZ via partial hoisting.)
+                    to_remove.push(start);
+                    break;
+                }
+                // Dep is declared *before* the class we're hoisting in
+                // front of — already initialized when S evaluates.
+                if dep_start <= entry.insert_at {
+                    continue;
+                }
+                // Dep would have to be hoisted but isn't planned — S is
+                // unsafe. Flag and stop scanning this S.
+                to_remove.push(start);
+                break;
+            }
+        }
+        if to_remove.is_empty() {
+            break;
+        }
+        for s in to_remove {
+            plan.remove(&s);
         }
     }
 
@@ -696,6 +838,33 @@ fn collect_top_level_bindings<'a>(
             };
 
             for declarator in &decl.declarations {
+                // Per-declarator: if the declarator's `id` is a plain
+                // `BindingIdentifier` AND its `init` is *directly* an
+                // arrow/function expression (after peeling parens / TS
+                // wrappers), index that binding symbol as if it were a
+                // function declaration — populate `fn_body_symbol_refs` /
+                // `fn_body_called_symbols` so the BFS safe-skip guard can
+                // chase eager calls through it. Handles both single- and
+                // multi-declarator cases (`const make = () => DEP;` and
+                // `const make = () => DEP, other = 0;`). Destructured /
+                // patterned bindings are skipped — the function-value shape
+                // only appears with a plain identifier binding in practice.
+                // Run this BEFORE collecting `init_symbols` so the indexing
+                // happens before the normal binding/init flow. See PR #302
+                // Codex P2 Finding 3.
+                if let (BindingPattern::BindingIdentifier(id), Some(init)) =
+                    (&declarator.id, &declarator.init)
+                    && let Some(fn_symbol) = id.symbol_id.get()
+                {
+                    index_fn_valued_binding(
+                        init,
+                        fn_symbol,
+                        semantic,
+                        &mut fn_body_symbol_refs,
+                        &mut fn_body_called_symbols,
+                    );
+                }
+
                 // Walk the declarator's `BindingPattern` recursively so that
                 // destructuring forms (`const { TOKEN } = obj;`, `const [a, b]
                 // = arr;`, `const { a: { b } } = obj;`, …) also index every
@@ -922,6 +1091,8 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
 
     fn visit_call_expression(&mut self, it: &oxc_ast::ast::CallExpression<'a>) {
         record_direct_callee(&it.callee, self.semantic, self.called);
+        record_indirect_callee(&it.callee, self.semantic, self.called);
+        record_bind_callee(&it.callee, self.semantic, self.called);
         // IIFE detection mirrors the `collect_expr_symbols` arm: when the
         // callee is `(() => ...)` / `(function() { ... })`, the body runs
         // eagerly at this call site, so its identifier reads contribute to
@@ -944,6 +1115,8 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
 
     fn visit_new_expression(&mut self, it: &oxc_ast::ast::NewExpression<'a>) {
         record_direct_callee(&it.callee, self.semantic, self.called);
+        record_indirect_callee(&it.callee, self.semantic, self.called);
+        record_bind_callee(&it.callee, self.semantic, self.called);
         // Symmetric IIFE handling for `new (function() { ... })()`.
         if walk_iife_callee_body(&it.callee, self.semantic, self.out, self.called) {
             for arg in &it.arguments {
@@ -1071,6 +1244,8 @@ fn collect_expr_symbols<'a>(
         }
         E::CallExpression(call) => {
             record_direct_callee(&call.callee, semantic, called);
+            record_indirect_callee(&call.callee, semantic, called);
+            record_bind_callee(&call.callee, semantic, called);
             // IIFE detection: `(() => ...)()` or `(function() { ... })()` —
             // the function body runs *eagerly* at this call site, so its
             // identifier reads contribute to the eager-evaluation set. The
@@ -1099,6 +1274,8 @@ fn collect_expr_symbols<'a>(
         }
         E::NewExpression(new) => {
             record_direct_callee(&new.callee, semantic, called);
+            record_indirect_callee(&new.callee, semantic, called);
+            record_bind_callee(&new.callee, semantic, called);
             // Symmetric IIFE handling for `new (function() { ... })()` —
             // exceedingly rare but covered for consistency.
             if !walk_iife_callee_body(&new.callee, semantic, out, called) {
@@ -1183,14 +1360,206 @@ fn collect_expr_symbols<'a>(
         E::ChainExpression(chain) => {
             collect_chain_element_symbols(&chain.expression, semantic, out, called);
         }
+        // `(x = TOKEN)` — both sides carry refs that fire at evaluation
+        // time. The `right` is a regular expression; the `left` is an
+        // `AssignmentTarget` (bare identifier, member, or pattern-shaped)
+        // walked via the dedicated helper. Without this, decorator metadata
+        // shaped `providers: [(cached = TOKEN)]` silently dropped `TOKEN`
+        // — Cursor Low review #3311551145 on PR #302.
+        E::AssignmentExpression(assign) => {
+            collect_expr_symbols(&assign.right, semantic, out, called);
+            collect_assignment_target_symbols(&assign.left, semantic, out, called);
+        }
+        // `x++`, `--y[k]`, etc. The `argument` is a `SimpleAssignmentTarget`
+        // — bare identifiers and member expressions, never patterns.
+        E::UpdateExpression(update) => {
+            collect_simple_assignment_target_symbols(&update.argument, semantic, out, called);
+        }
         // Class expressions inside metadata are exceedingly rare and their
         // bodies aren't eagerly evaluated; treat them as opaque.
         E::ClassExpression(_) => {}
         // Function and arrow bodies run lazily — references inside don't
         // affect class-init evaluation.
         E::ArrowFunctionExpression(_) | E::FunctionExpression(_) => {}
-        // Literals and `this`/`super` carry no identifier references.
+        // Remaining variants carry no identifier references we can resolve
+        // to a top-level binding: literals (string/number/boolean/null/regex/
+        // big-int/template no-substitution), `this`, `Super`, `MetaProperty`
+        // (`import.meta` / `new.target`), `ImportExpression` (dynamic import
+        // takes a string literal in practice), and `JSX*` / `V8IntrinsicExpression`
+        // which aren't valid in TS source we transform.
         _ => {}
+    }
+}
+
+/// Walk an `AssignmentTarget` (the `left` of an `AssignmentExpression`,
+/// or a nested element inside an array/object pattern target) and feed
+/// every identifier reference into `out` / `called`. Member arms mirror
+/// the corresponding `Expression::*MemberExpression` arms in
+/// [`collect_expr_symbols`]; pattern arms recurse through their nested
+/// targets and defaults so e.g. `({ x = TOKEN } = obj)` chases `TOKEN`.
+fn collect_assignment_target_symbols<'a>(
+    target: &oxc_ast::ast::AssignmentTarget<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use oxc_ast::ast::AssignmentTarget as T;
+    match target {
+        T::AssignmentTargetIdentifier(id) => {
+            if let Some(symbol) = resolve_symbol(id, semantic) {
+                out.insert(symbol);
+            }
+        }
+        T::ComputedMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+            collect_expr_symbols(&member.expression, semantic, out, called);
+        }
+        T::StaticMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        T::PrivateFieldExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        T::TSAsExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSSatisfiesExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSNonNullExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSTypeAssertion(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::ArrayAssignmentTarget(arr) => {
+            for el in arr.elements.iter().flatten() {
+                collect_assignment_target_maybe_default_symbols(el, semantic, out, called);
+            }
+            if let Some(rest) = &arr.rest {
+                collect_assignment_target_symbols(&rest.target, semantic, out, called);
+            }
+        }
+        T::ObjectAssignmentTarget(obj) => {
+            for prop in &obj.properties {
+                collect_assignment_target_property_symbols(prop, semantic, out, called);
+            }
+            if let Some(rest) = &obj.rest {
+                collect_assignment_target_symbols(&rest.target, semantic, out, called);
+            }
+        }
+    }
+}
+
+/// `SimpleAssignmentTarget` is the subset of `AssignmentTarget` allowed
+/// as the `argument` of `++`/`--`. Same shape minus the pattern variants.
+fn collect_simple_assignment_target_symbols<'a>(
+    target: &oxc_ast::ast::SimpleAssignmentTarget<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use oxc_ast::ast::SimpleAssignmentTarget as T;
+    match target {
+        T::AssignmentTargetIdentifier(id) => {
+            if let Some(symbol) = resolve_symbol(id, semantic) {
+                out.insert(symbol);
+            }
+        }
+        T::ComputedMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+            collect_expr_symbols(&member.expression, semantic, out, called);
+        }
+        T::StaticMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        T::PrivateFieldExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        T::TSAsExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSSatisfiesExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSNonNullExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        T::TSTypeAssertion(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+    }
+}
+
+/// Helper for array-pattern element / object-pattern property values:
+/// either a plain `AssignmentTarget` or an `AssignmentTargetWithDefault`
+/// (`[a = X]`, `{ p: a = X }`) whose `init` default evaluates at
+/// destructuring time.
+fn collect_assignment_target_maybe_default_symbols<'a>(
+    el: &oxc_ast::ast::AssignmentTargetMaybeDefault<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use oxc_ast::ast::AssignmentTargetMaybeDefault as D;
+    match el {
+        D::AssignmentTargetWithDefault(with_default) => {
+            collect_assignment_target_symbols(&with_default.binding, semantic, out, called);
+            collect_expr_symbols(&with_default.init, semantic, out, called);
+        }
+        // The remaining variants inherit from `AssignmentTarget`. The
+        // `AssignmentTarget` variants are matched implicitly by the parent
+        // enum's `inherit_variants!` macro; cast back through the helper.
+        D::AssignmentTargetIdentifier(id) => {
+            if let Some(symbol) = resolve_symbol(id, semantic) {
+                out.insert(symbol);
+            }
+        }
+        D::ComputedMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+            collect_expr_symbols(&member.expression, semantic, out, called);
+        }
+        D::StaticMemberExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        D::PrivateFieldExpression(member) => {
+            collect_expr_symbols(&member.object, semantic, out, called);
+        }
+        D::TSAsExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        D::TSSatisfiesExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        D::TSNonNullExpression(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        D::TSTypeAssertion(ts) => collect_expr_symbols(&ts.expression, semantic, out, called),
+        D::ArrayAssignmentTarget(arr) => {
+            for el in arr.elements.iter().flatten() {
+                collect_assignment_target_maybe_default_symbols(el, semantic, out, called);
+            }
+            if let Some(rest) = &arr.rest {
+                collect_assignment_target_symbols(&rest.target, semantic, out, called);
+            }
+        }
+        D::ObjectAssignmentTarget(obj) => {
+            for prop in &obj.properties {
+                collect_assignment_target_property_symbols(prop, semantic, out, called);
+            }
+            if let Some(rest) = &obj.rest {
+                collect_assignment_target_symbols(&rest.target, semantic, out, called);
+            }
+        }
+    }
+}
+
+/// `({ foo } = obj)` shorthand vs. `({ foo: bar } = obj)` long form.
+/// The shorthand carries an optional `init` default; the long form carries
+/// a key (possibly computed — `{ [TOKEN]: x }`) and a `binding` that's a
+/// nested target with optional default.
+fn collect_assignment_target_property_symbols<'a>(
+    prop: &oxc_ast::ast::AssignmentTargetProperty<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use oxc_ast::ast::AssignmentTargetProperty as P;
+    match prop {
+        P::AssignmentTargetPropertyIdentifier(ident) => {
+            if let Some(symbol) = resolve_symbol(&ident.binding, semantic) {
+                out.insert(symbol);
+            }
+            if let Some(init) = &ident.init {
+                collect_expr_symbols(init, semantic, out, called);
+            }
+        }
+        P::AssignmentTargetPropertyProperty(prop) => {
+            if prop.computed
+                && let Some(key_expr) = prop.name.as_expression()
+            {
+                collect_expr_symbols(key_expr, semantic, out, called);
+            }
+            collect_assignment_target_maybe_default_symbols(&prop.binding, semantic, out, called);
+        }
     }
 }
 
@@ -1221,6 +1590,157 @@ fn record_direct_callee<'a>(
             E::TSTypeAssertion(ts) => cur = &ts.expression,
             E::TSInstantiationExpression(ts) => cur = &ts.expression,
             _ => return,
+        }
+    }
+}
+
+/// Recognize a small set of *indirect* call shapes whose immediate effect
+/// is to invoke a top-level function:
+///
+/// * `fn.call(...)` — `Function.prototype.call`
+/// * `fn.apply(...)` — `Function.prototype.apply`
+///
+/// In both cases the static member's `object` must be a *direct identifier*
+/// (`fn`) — we resolve through the semantic model and record the symbol
+/// in `called`. Anything more nested (`obj.fn.call(...)`,
+/// `getFn().call(...)`) is out of scope and falls through.
+///
+/// The shape `fn.bind(...)()` is handled at the call site by inspecting
+/// the *outer* call's callee: if it's a `CallExpression` whose own callee
+/// is `Identifier.bind`, the inner identifier is the bound function and
+/// will eventually invoke at the outer call site. See [`record_bind_callee`].
+///
+/// Used alongside [`record_direct_callee`] at every call/new site so the
+/// guard's `init_called_symbols` reflects the actual eager-invocation set.
+/// Regression for Codex P2 review (Finding 3) on PR #302.
+fn record_indirect_callee<'a>(
+    callee: &Expression<'a>,
+    semantic: &Semantic<'a>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use Expression as E;
+    let mut cur = callee;
+    let member = loop {
+        match cur {
+            E::StaticMemberExpression(member) => break member,
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return,
+        }
+    };
+    let prop = member.property.name.as_str();
+    if prop != "call" && prop != "apply" {
+        return;
+    }
+    let E::Identifier(id) = &member.object else { return };
+    if let Some(symbol) = resolve_symbol(id, semantic) {
+        called.insert(symbol);
+    }
+}
+
+/// Handle the `fn.bind(...)()` shape. Called from the call site of the
+/// *outer* `CallExpression` — its `callee` is the inner `fn.bind(...)`
+/// `CallExpression`. If the inner call's callee is `Identifier.bind`
+/// (a `StaticMemberExpression` whose `object` is a direct identifier and
+/// `property` is `"bind"`), record the identifier's symbol in `called`.
+/// Only one level of bind is covered; nested `fn.bind(a).bind(b)()` falls
+/// through.
+fn record_bind_callee<'a>(
+    outer_callee: &Expression<'a>,
+    semantic: &Semantic<'a>,
+    called: &mut HashSet<SymbolId>,
+) {
+    use Expression as E;
+    let mut cur = outer_callee;
+    let inner_call = loop {
+        match cur {
+            E::CallExpression(call) => break call,
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return,
+        }
+    };
+    let mut bind_callee = &inner_call.callee;
+    let member = loop {
+        match bind_callee {
+            E::StaticMemberExpression(member) => break member,
+            E::ParenthesizedExpression(p) => bind_callee = &p.expression,
+            E::TSAsExpression(ts) => bind_callee = &ts.expression,
+            E::TSSatisfiesExpression(ts) => bind_callee = &ts.expression,
+            E::TSNonNullExpression(ts) => bind_callee = &ts.expression,
+            E::TSTypeAssertion(ts) => bind_callee = &ts.expression,
+            E::TSInstantiationExpression(ts) => bind_callee = &ts.expression,
+            _ => return,
+        }
+    };
+    if member.property.name.as_str() != "bind" {
+        return;
+    }
+    let E::Identifier(id) = &member.object else { return };
+    if let Some(symbol) = resolve_symbol(id, semantic) {
+        called.insert(symbol);
+    }
+}
+
+/// If `init` is *directly* an `ArrowFunctionExpression` or
+/// `FunctionExpression` (after peeling parens / TS wrappers), index the
+/// binding `fn_symbol` as if it were a function declaration: record body
+/// identifier refs into `fn_body_symbol_refs[fn_symbol]`, direct callees
+/// into `fn_body_called_symbols[fn_symbol]`, and walk parameter defaults
+/// into both. Returns `true` when indexing happened.
+///
+/// This makes `const make = () => DEP` visible to the BFS safe-skip guard
+/// the same way `function make() { return DEP; }` is. See PR #302 Codex
+/// P2 (Finding 2).
+fn index_fn_valued_binding<'a>(
+    init: &Expression<'a>,
+    fn_symbol: SymbolId,
+    semantic: &Semantic<'a>,
+    fn_body_symbol_refs: &mut HashMap<SymbolId, HashSet<SymbolId>>,
+    fn_body_called_symbols: &mut HashMap<SymbolId, HashSet<SymbolId>>,
+) -> bool {
+    use Expression as E;
+    let mut cur = init;
+    loop {
+        match cur {
+            E::ArrowFunctionExpression(arrow) => {
+                let mut refs: HashSet<SymbolId> = HashSet::new();
+                let mut called: HashSet<SymbolId> = HashSet::new();
+                let mut visitor =
+                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
+                visitor.visit_function_body(&arrow.body);
+                walk_param_defaults(&arrow.params, semantic, &mut refs, &mut called);
+                fn_body_symbol_refs.insert(fn_symbol, refs);
+                fn_body_called_symbols.insert(fn_symbol, called);
+                return true;
+            }
+            E::FunctionExpression(func) => {
+                let Some(body) = &func.body else { return false };
+                let mut refs: HashSet<SymbolId> = HashSet::new();
+                let mut called: HashSet<SymbolId> = HashSet::new();
+                let mut visitor =
+                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
+                visitor.visit_function_body(body);
+                walk_param_defaults(&func.params, semantic, &mut refs, &mut called);
+                fn_body_symbol_refs.insert(fn_symbol, refs);
+                fn_body_called_symbols.insert(fn_symbol, called);
+                return true;
+            }
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return false,
         }
     }
 }
@@ -1290,6 +1810,8 @@ fn collect_chain_element_symbols<'a>(
     match el {
         ChainElement::CallExpression(call) => {
             record_direct_callee(&call.callee, semantic, called);
+            record_indirect_callee(&call.callee, semantic, called);
+            record_bind_callee(&call.callee, semantic, called);
             if !walk_iife_callee_body(&call.callee, semantic, out, called) {
                 collect_expr_symbols(&call.callee, semantic, out, called);
             }
