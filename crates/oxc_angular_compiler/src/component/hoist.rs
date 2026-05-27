@@ -36,8 +36,8 @@ use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, ChainElement, Class, Declaration, Decorator,
-    ExportDefaultDeclarationKind, Expression, IdentifierReference, ObjectPropertyKind, Program,
-    Statement,
+    ExportDefaultDeclarationKind, Expression, FormalParameters, IdentifierReference,
+    ObjectPropertyKind, Program, Statement,
 };
 use oxc_ast_visit::Visit;
 use oxc_semantic::Semantic;
@@ -746,6 +746,14 @@ fn collect_top_level_bindings<'a>(
                 let mut visitor =
                     FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
                 visitor.visit_function_body(body);
+                // Parameter defaults (`function f(x = TOKEN)`) evaluate at
+                // call time, before the body runs. If this function is
+                // eagerly called from a hoisted initializer, any later-
+                // declared binding read by a default is just as TDZ-relevant
+                // as a body ref. Walk the `FormalParameter::initializer`
+                // directly, plus any nested `AssignmentPattern::right` inside
+                // destructured params (`function f({ a = X } = {})`).
+                walk_param_defaults(&func.params, semantic, &mut refs, &mut called);
                 fn_body_symbol_refs.insert(fn_symbol, refs);
                 fn_body_called_symbols.insert(fn_symbol, called);
             }
@@ -794,6 +802,78 @@ fn for_each_binding_identifier<'a>(
         BindingPattern::AssignmentPattern(assign) => {
             for_each_binding_identifier(&assign.left, f);
         }
+    }
+}
+
+/// Walk a `BindingPattern` and invoke `f` for every default-value
+/// `Expression` it carries — i.e. the `right` of every nested
+/// `AssignmentPattern`. Used to chase TDZ-relevant identifier reads inside
+/// parameter destructuring defaults like `function f({ a = X } = {})`,
+/// where the inner `a = X` is an `AssignmentPattern` whose `right` is the
+/// `X` default expression.
+///
+/// `FormalParameter`'s top-level default (`function f(x = TOKEN)`) lives on
+/// `FormalParameter::initializer`, NOT inside an `AssignmentPattern`, so
+/// callers walk that separately and use this helper to cover the *nested*
+/// pattern-default case only.
+fn for_each_pattern_default<'a, 'src>(
+    pat: &'src BindingPattern<'a>,
+    f: &mut impl FnMut(&'src Expression<'a>),
+) {
+    match pat {
+        BindingPattern::BindingIdentifier(_) => {}
+        BindingPattern::ObjectPattern(obj) => {
+            for prop in &obj.properties {
+                for_each_pattern_default(&prop.value, f);
+            }
+            if let Some(rest) = &obj.rest {
+                for_each_pattern_default(&rest.argument, f);
+            }
+        }
+        BindingPattern::ArrayPattern(arr) => {
+            for el in &arr.elements {
+                if let Some(el) = el {
+                    for_each_pattern_default(el, f);
+                }
+            }
+            if let Some(rest) = &arr.rest {
+                for_each_pattern_default(&rest.argument, f);
+            }
+        }
+        BindingPattern::AssignmentPattern(assign) => {
+            f(&assign.right);
+            for_each_pattern_default(&assign.left, f);
+        }
+    }
+}
+
+/// Walk every parameter default expression of a function/arrow's
+/// `FormalParameters` and feed the refs / direct callees into the same
+/// `out` / `called` sets the body visitor populates. Defaults are
+/// evaluated at call time before the body runs, so for an eagerly-called
+/// function they're as relevant as body refs.
+///
+/// Two default shapes are covered:
+/// * `param.initializer` — the top-level default for a `FormalParameter`
+///   (e.g. the `= TOKEN` in `function f(token = TOKEN)`).
+/// * `AssignmentPattern.right` nested anywhere inside the parameter's
+///   `BindingPattern` (e.g. the inner `= X` in
+///   `function f({ a = X } = {})`).
+///
+/// See PR #302 Codex review (#3311099883).
+fn walk_param_defaults<'a>(
+    params: &FormalParameters<'a>,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    for param in &params.items {
+        if let Some(init) = &param.initializer {
+            collect_expr_symbols(init, semantic, out, called);
+        }
+        for_each_pattern_default(&param.pattern, &mut |expr| {
+            collect_expr_symbols(expr, semantic, out, called);
+        });
     }
 }
 
@@ -1130,6 +1210,10 @@ fn walk_iife_callee_body<'a>(
             E::ArrowFunctionExpression(arrow) => {
                 let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
                 visitor.visit_function_body(&arrow.body);
+                // Parameter defaults evaluate at IIFE invocation time, before
+                // the body runs — symmetric with top-level function decls
+                // in `collect_top_level_bindings`. See PR #302 Codex P2.
+                walk_param_defaults(&arrow.params, semantic, out, called);
                 return true;
             }
             E::FunctionExpression(func) => {
@@ -1137,6 +1221,7 @@ fn walk_iife_callee_body<'a>(
                     let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
                     visitor.visit_function_body(body);
                 }
+                walk_param_defaults(&func.params, semantic, out, called);
                 return true;
             }
             E::ParenthesizedExpression(p) => cur = &p.expression,

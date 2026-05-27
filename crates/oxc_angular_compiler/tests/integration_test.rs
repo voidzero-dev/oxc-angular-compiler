@@ -11082,3 +11082,76 @@ const TOKEN = TestComponent;
         );
     }
 }
+
+/// When a hoisted initializer eagerly calls a top-level function whose
+/// *parameter default expression* reads a later-declared binding, the
+/// param-default reference is just as TDZ-relevant as a body reference:
+/// defaults evaluate at call time, before the function body runs.
+///
+/// Here, the BFS sees `PROVIDERS = makeProviders()`, marks `makeProviders`
+/// as eagerly called, and must chase BOTH `makeProviders`'s body refs AND
+/// the refs inside its parameter default `token = TOKEN`. Otherwise `TOKEN`
+/// is left below the class and the hoisted `const PROVIDERS = makeProviders()`
+/// throws `ReferenceError: Cannot access 'TOKEN' before initialization` when
+/// the parameter default fires.
+///
+/// Regression test for Codex P2 review on PR #302.
+#[test]
+fn component_provider_eager_call_chases_param_default_refs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: PROVIDERS })
+class TestComponent {}
+const PROVIDERS = makeProviders();
+function makeProviders(token = TOKEN) { return [{ provide: token }]; }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let providers_pos = result.code.find("const PROVIDERS").unwrap_or_else(|| {
+        panic!("Expected `const PROVIDERS` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read by makeProviders's parameter default at call time) \
+         must be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        providers_pos < class_pos,
+        "`const PROVIDERS` must be hoisted above the class. \
+         providers@{providers_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos < providers_pos,
+        "`const TOKEN` must precede `const PROVIDERS` so the parameter default \
+         `token = TOKEN` can read it when `makeProviders()` runs at module init. \
+         token@{token_pos} providers@{providers_pos}\nCode:\n{}",
+        result.code
+    );
+
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const PROVIDERS").count(),
+        1,
+        "`const PROVIDERS` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
