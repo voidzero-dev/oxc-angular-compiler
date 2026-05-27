@@ -337,7 +337,7 @@ pub struct TemplateCompileOutput {
     pub code: String,
 
     /// Source map (if sourcemap option was enabled).
-    pub map: Option<oxc_sourcemap::SourceMap>,
+    pub map: Option<oxc_sourcemap::OwnedSourceMap>,
 }
 
 impl TemplateCompileOutput {
@@ -347,7 +347,7 @@ impl TemplateCompileOutput {
     }
 
     /// Create a new template compile output with code and source map.
-    pub fn with_source_map(code: String, map: Option<oxc_sourcemap::SourceMap>) -> Self {
+    pub fn with_source_map(code: String, map: Option<oxc_sourcemap::OwnedSourceMap>) -> Self {
         Self { code, map }
     }
 }

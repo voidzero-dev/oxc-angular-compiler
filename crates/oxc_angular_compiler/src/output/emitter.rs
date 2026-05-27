@@ -229,7 +229,10 @@ impl EmitterContext {
     /// Returns `None` if no source file information was provided or no mappings exist.
     ///
     /// See: `packages/compiler/src/output/abstract_emitter.ts:126-184`
-    pub fn to_source_map(&self, generated_file: Option<&str>) -> Option<oxc_sourcemap::SourceMap> {
+    pub fn to_source_map(
+        &self,
+        generated_file: Option<&str>,
+    ) -> Option<oxc_sourcemap::OwnedSourceMap> {
         // Need source file to generate a source map
         let source_file = self.source_file.as_ref()?;
         let source_url = &source_file.url;
@@ -297,7 +300,7 @@ impl EmitterContext {
             }
         }
 
-        if has_mappings { Some(builder.into_sourcemap()) } else { None }
+        if has_mappings { Some(builder.into_owned_sourcemap()) } else { None }
     }
 
     /// Generate source and source map together.
@@ -307,7 +310,7 @@ impl EmitterContext {
     pub fn to_source_with_map(
         &self,
         generated_file: Option<&str>,
-    ) -> (String, Option<oxc_sourcemap::SourceMap>) {
+    ) -> (String, Option<oxc_sourcemap::OwnedSourceMap>) {
         (self.to_source(), self.to_source_map(generated_file))
     }
 }
@@ -408,7 +411,7 @@ impl JsEmitter {
         expr: &OutputExpression<'a>,
         source_file: Arc<ParseSourceFile>,
         generated_file: Option<&str>,
-    ) -> (String, Option<oxc_sourcemap::SourceMap>) {
+    ) -> (String, Option<oxc_sourcemap::OwnedSourceMap>) {
         let mut ctx = EmitterContext::with_source_file(source_file);
         self.visit_expression(expr, &mut ctx);
         ctx.to_source_with_map(generated_file)
@@ -423,7 +426,7 @@ impl JsEmitter {
         stmts: &[OutputStatement<'a>],
         source_file: Arc<ParseSourceFile>,
         generated_file: Option<&str>,
-    ) -> (String, Option<oxc_sourcemap::SourceMap>) {
+    ) -> (String, Option<oxc_sourcemap::OwnedSourceMap>) {
         let mut ctx = EmitterContext::with_source_file(source_file);
         self.visit_all_statements(stmts, &mut ctx);
         ctx.to_source_with_map(generated_file)
@@ -1640,7 +1643,7 @@ mod tests {
         let map = ctx.to_source_map(Some("test.js")).expect("should generate source map");
 
         // Verify the source map has the expected structure
-        assert!(map.get_sources().any(|s| s.as_ref() == "test.ts"));
+        assert!(map.get_sources().any(|s| s == "test.ts"));
         assert!(map.get_tokens().count() > 0);
     }
 
