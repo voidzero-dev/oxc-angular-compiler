@@ -283,6 +283,97 @@ fn ng_module_emits_set_class_metadata() {
     assert!(md.contains("NgModule"), "NgModule decorator metadata missing:\n{md}");
 }
 
+// ─── classic decorator coverage (regression guards) ────────────────────────────
+
+/// Full classic decorator set on a component — verified byte-for-byte against ngc.
+const CLASSIC_MEMBERS: &str = "\
+  @Input() a = 0;\n\
+  @Input('aliasB') b = 0;\n\
+  @Input({ alias: 'aliasC', required: true }) c = 0;\n\
+  @Output() d = new EventEmitter();\n\
+  @Output('aliasE') e = new EventEmitter();\n\
+  @ViewChild('ref') vc: unknown;\n\
+  @ViewChildren('refs') vcs: unknown;\n\
+  @ContentChild('cc', { read: ElementRef }) cc: unknown;\n\
+  @ContentChildren('ccs', { descendants: true }) ccs: unknown;\n\
+  @HostBinding('class.active') active = true;\n\
+  @HostListener('click', ['$event']) onClick(_e: unknown) {}";
+
+const CLASSIC_IMPORTS: &str =
+    "Input, Output, EventEmitter, ViewChild, ViewChildren, ContentChild, ContentChildren, \
+     HostBinding, HostListener, ElementRef";
+
+fn assert_classic_decorators(raw: &str) {
+    // The emitter wraps long setClassMetadata across lines; strip whitespace so the
+    // assertions match regardless of wrapping (no string literal here contains spaces).
+    let md: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let md = md.as_str();
+    assert!(md.contains("a:[{type:Input}]"), "plain @Input:\n{md}");
+    assert!(md.contains("b:[{type:Input,args:[\"aliasB\"]}]"), "aliased @Input:\n{md}");
+    assert!(
+        md.contains("c:[{type:Input,args:[{alias:\"aliasC\",required:true}]}]"),
+        "@Input config object:\n{md}"
+    );
+    assert!(md.contains("d:[{type:Output}]"), "plain @Output:\n{md}");
+    assert!(md.contains("e:[{type:Output,args:[\"aliasE\"]}]"), "aliased @Output:\n{md}");
+    assert!(md.contains("vc:[{type:ViewChild,args:[\"ref\"]}]"), "@ViewChild:\n{md}");
+    assert!(md.contains("vcs:[{type:ViewChildren,args:[\"refs\"]}]"), "@ViewChildren:\n{md}");
+    assert!(
+        md.contains("cc:[{type:ContentChild,args:[\"cc\",{read:ElementRef}]}]"),
+        "@ContentChild with read:\n{md}"
+    );
+    assert!(
+        md.contains("ccs:[{type:ContentChildren,args:[\"ccs\",{descendants:true}]}]"),
+        "@ContentChildren with descendants:\n{md}"
+    );
+    assert!(
+        md.contains("active:[{type:HostBinding,args:[\"class.active\"]}]"),
+        "@HostBinding:\n{md}"
+    );
+    assert!(
+        md.contains("onClick:[{type:HostListener,args:[\"click\",[\"$event\"]]}]"),
+        "@HostListener with args:\n{md}"
+    );
+    // Classic decorators reference the bare imported symbol, not `i0.Input`.
+    assert!(!md.contains("isSignal"), "classic decorators must not carry isSignal:\n{md}");
+}
+
+#[test]
+fn component_classic_decorators_match_ngc() {
+    let md = metadata_region(&compile(&component(CLASSIC_MEMBERS, CLASSIC_IMPORTS)));
+    assert_classic_decorators(&md);
+}
+
+#[test]
+fn directive_classic_decorators_match_ngc() {
+    let allocator = Allocator::default();
+    let source = format!(
+        "import {{ Directive, {CLASSIC_IMPORTS} }} from '@angular/core';\n\n\
+         @Directive({{ selector: '[appFoo]' }})\n\
+         export class FooDirective {{\n{CLASSIC_MEMBERS}\n}}\n"
+    );
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result =
+        transform_angular_file(&allocator, "foo.directive.ts", &source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    assert_classic_decorators(&metadata_region(&result.code));
+}
+
+#[test]
+fn mixed_classic_and_signal_members_coexist() {
+    let raw = metadata_region(&compile(&component(
+        "  @Input() classic = 0;\n  readonly sig = input('x');\n  readonly sigOut = output<string>();\n  readonly vc = viewChild('ref');",
+        "Input, input, output, viewChild",
+    )));
+    let md: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
+    let md = md.as_str();
+    // Classic input emitted bare; signal members synthesized with isSignal.
+    assert!(md.contains("classic:[{type:Input}]"), "classic @Input:\n{md}");
+    assert!(md.contains("sig:[{type:i0.Input,args:[{isSignal:true"), "signal input:\n{md}");
+    assert!(md.contains("sigOut:[{type:i0.Output"), "signal output:\n{md}");
+    assert!(md.contains("vc:[{type:i0.ViewChild,args:[\"ref\",{isSignal:true}]}]"), "signal query:\n{md}");
+}
+
 #[test]
 fn directive_no_metadata_when_emit_disabled() {
     let allocator = Allocator::default();
