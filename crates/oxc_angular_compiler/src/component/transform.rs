@@ -27,6 +27,7 @@ use super::decorator::{
     extract_component_metadata, find_component_decorator, find_component_decorator_span,
 };
 use super::definition::{const_value_to_expression, generate_component_definitions};
+use super::hoist::collect_hoist_edits;
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
@@ -2566,6 +2567,13 @@ pub fn transform_angular_file(
             }
         }
     }
+
+    // 5e. TDZ-safe hoisting of top-level bindings referenced by decorator
+    // metadata but declared after the decorated class. Without this, the
+    // emitted `ɵcmp` static field's `ɵɵProvidersFeature` would evaluate the
+    // reference at class-definition time and throw `ReferenceError`. See
+    // issue #287.
+    edits.extend(collect_hoist_edits(&parser_ret.program, source));
 
     // Apply all edits in one pass
     if options.sourcemap {

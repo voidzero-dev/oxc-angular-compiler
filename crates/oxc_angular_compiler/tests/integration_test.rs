@@ -10295,3 +10295,246 @@ export class UnresolvedComponent {}
         result.code
     );
 }
+
+// =============================================================================
+// Issue #287: TDZ-safe hoisting of consts referenced by emitted Ivy definitions
+// =============================================================================
+// When `@Component` metadata references a `const` (or other binding) declared
+// *after* the class, the emitted Ivy definition (`ɵcmp` static field) evaluates
+// the providers array eagerly in the class body. Because the const is still in
+// the temporal dead zone at that point, this throws `ReferenceError: Cannot
+// access 'TOKEN' before initialization` at module load.
+//
+// Angular's official compiler hoists such consts above the class declaration.
+// These tests pin that behavior.
+
+/// A `const` referenced by `providers` and declared after the class must be
+/// hoisted above the class so the eagerly-evaluated `ɵɵProvidersFeature` does
+/// not hit the TDZ at class-init time.
+#[test]
+fn component_providers_const_after_class_is_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 1 }] })
+export class TestComponent {}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The const TOKEN must appear before `class TestComponent` in the output
+    // so it is initialized before the static `ɵcmp` field evaluates providers.
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` must be hoisted above `class TestComponent`. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+
+    // Must only appear once: the original must have been deleted from its
+    // original location.
+    let count = result.code.matches("const TOKEN").count();
+    assert_eq!(
+        count, 1,
+        "`const TOKEN` should appear exactly once (original deleted). Got {count}.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `viewProviders` is also evaluated eagerly via `ɵɵProvidersFeature` — consts
+/// it references must be hoisted too.
+#[test]
+fn component_view_providers_const_after_class_is_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'x',
+    template: '',
+    viewProviders: [{ provide: VIEW_TOKEN, useValue: 2 }],
+})
+export class TestComponent {}
+const VIEW_TOKEN = 'view-tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result.code.find("const VIEW_TOKEN").unwrap_or_else(|| {
+        panic!("Expected `const VIEW_TOKEN` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "`const VIEW_TOKEN` must be hoisted above `class TestComponent`. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Multiple distinct providers consts after the class — all referenced by
+/// metadata — must be hoisted, preserving their original relative order.
+#[test]
+fn component_multiple_provider_consts_after_class_are_hoisted_in_order() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'x',
+    template: '',
+    providers: [
+        { provide: TOKEN_A, useValue: 1 },
+        { provide: TOKEN_B, useValue: 2 },
+    ],
+})
+export class TestComponent {}
+const TOKEN_A = 'a';
+const TOKEN_B = 'b';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let a_pos = result.code.find("const TOKEN_A").expect("TOKEN_A missing");
+    let b_pos = result.code.find("const TOKEN_B").expect("TOKEN_B missing");
+    let class_pos = result.code.find("class TestComponent").expect("class missing");
+    assert!(
+        a_pos < class_pos && b_pos < class_pos,
+        "Both consts must be hoisted above the class. \
+         a@{a_pos} b@{b_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        a_pos < b_pos,
+        "Relative order of consts must be preserved (A before B).\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `useFactory` referencing a const declared later still hoists the const,
+/// because the const is captured in the providers array argument which
+/// `ɵɵProvidersFeature` evaluates at class-init time. Note: identifiers
+/// referenced *inside* the factory's arrow-function body fire lazily when the
+/// factory is invoked, so they don't need hoisting — only top-level metadata
+/// references do.
+#[test]
+fn component_use_factory_dependency_const_is_hoisted_when_referenced_at_top_level() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'x',
+    template: '',
+    providers: [{ provide: TOKEN, useFactory: () => 'val', deps: [DEP_TOKEN] }],
+})
+export class TestComponent {}
+const TOKEN = 'tok';
+const DEP_TOKEN = 'dep';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").expect("class missing");
+    let token_pos = result.code.find("const TOKEN").expect("TOKEN missing");
+    let dep_pos = result.code.find("const DEP_TOKEN").expect("DEP_TOKEN missing");
+    assert!(token_pos < class_pos, "TOKEN (provider key) must be hoisted.\nCode:\n{}", result.code);
+    assert!(
+        dep_pos < class_pos,
+        "DEP_TOKEN (deps array entry) must be hoisted.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Two `@Component` classes in the same file that both reference the same
+/// later-declared const must hoist it exactly once, ahead of the earliest
+/// referencing class.
+#[test]
+fn component_shared_provider_const_is_hoisted_once_for_multiple_classes() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'a', template: '', providers: [{ provide: SHARED, useValue: 1 }] })
+export class A {}
+@Component({ selector: 'b', template: '', providers: [{ provide: SHARED, useValue: 2 }] })
+export class B {}
+const SHARED = 'shared';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let count = result.code.matches("const SHARED").count();
+    assert_eq!(count, 1, "`const SHARED` should appear exactly once.\nCode:\n{}", result.code);
+
+    let shared_pos = result.code.find("const SHARED").unwrap();
+    let a_pos = result.code.find("class A").unwrap();
+    let b_pos = result.code.find("class B").unwrap();
+    assert!(
+        shared_pos < a_pos && shared_pos < b_pos,
+        "const must be hoisted above both classes.\nshared@{shared_pos} a@{a_pos} b@{b_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Identifiers referenced *only* inside a factory function body fire when
+/// the factory is invoked, never at class-definition time. They do NOT need
+/// to be hoisted. This guards against over-hoisting that could break code
+/// that relies on the original declaration order (e.g. a const initialized
+/// using values not yet computed at module load).
+#[test]
+fn component_const_referenced_only_inside_factory_body_is_not_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'x',
+    template: '',
+    providers: [{ provide: 'k', useFactory: () => LAZY_VALUE }],
+})
+export class TestComponent {}
+const LAZY_VALUE = 'lazy';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let lazy_pos = result.code.find("const LAZY_VALUE").expect("LAZY_VALUE missing");
+    let class_pos = result.code.find("class TestComponent").expect("class missing");
+    assert!(
+        lazy_pos > class_pos,
+        "Const referenced only inside the factory body should NOT be hoisted.\n\
+         lazy@{lazy_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// A const declared *before* the class must NOT be moved — only post-class
+/// declarations need hoisting. The compiler must not pointlessly rewrite
+/// already-valid code.
+#[test]
+fn component_provider_const_before_class_is_not_hoisted() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const TOKEN = 'tok';
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 1 }] })
+export class TestComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The const must still appear once (we did not duplicate it).
+    let count = result.code.matches("const TOKEN").count();
+    assert_eq!(count, 1, "`const TOKEN` should still appear once.\nCode:\n{}", result.code);
+
+    // And it must come before the class (its original position).
+    let token_pos = result.code.find("const TOKEN").unwrap();
+    let class_pos = result.code.find("class TestComponent").unwrap();
+    assert!(token_pos < class_pos, "Order should be preserved.\nCode:\n{}", result.code);
+}
