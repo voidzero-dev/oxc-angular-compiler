@@ -37,4 +37,7 @@ pub use property_decorators::{
     extract_content_queries, extract_host_bindings, extract_host_listeners, extract_input_metadata,
     extract_output_metadata, extract_view_queries,
 };
+pub(crate) use property_decorators::{
+    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
+};
 pub use query::{create_content_queries_function, create_view_queries_function};

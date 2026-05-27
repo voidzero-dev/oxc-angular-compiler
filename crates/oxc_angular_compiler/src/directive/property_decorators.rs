@@ -202,12 +202,12 @@ fn parse_input_config<'a>(
 /// Metadata for a model() signal, which creates both an input and an output.
 ///
 /// Based on Angular's `ModelMapping` in `model_function.ts`.
-struct ModelMapping<'a> {
+pub(crate) struct ModelMapping<'a> {
     /// The input metadata (signal-based).
-    input: R3InputMetadata<'a>,
+    pub(crate) input: R3InputMetadata<'a>,
     /// The output metadata (class property name, binding property name).
     /// Output binding name is always `inputName + "Change"`.
-    output: (Ident<'a>, Ident<'a>),
+    pub(crate) output: (Ident<'a>, Ident<'a>),
 }
 
 /// Try to detect and parse a signal-based model from a property initializer.
@@ -223,7 +223,7 @@ struct ModelMapping<'a> {
 /// ```
 ///
 /// Based on Angular's `model_function.ts` in the compiler-cli.
-fn try_parse_signal_model<'a>(
+pub(crate) fn try_parse_signal_model<'a>(
     allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
@@ -322,7 +322,7 @@ fn try_parse_signal_model<'a>(
 /// the observable expression is irrelevant for metadata extraction.
 ///
 /// Based on Angular's `output_function.ts` in the compiler-cli.
-fn try_parse_signal_output<'a>(
+pub(crate) fn try_parse_signal_output<'a>(
     value: &Expression<'a>,
     property_name: Ident<'a>,
 ) -> Option<(Ident<'a>, Ident<'a>)> {
@@ -387,7 +387,7 @@ fn try_parse_signal_output<'a>(
 /// ```
 ///
 /// Based on Angular's `input_function.ts` in the compiler-cli.
-fn try_parse_signal_input<'a>(
+pub(crate) fn try_parse_signal_input<'a>(
     _allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,

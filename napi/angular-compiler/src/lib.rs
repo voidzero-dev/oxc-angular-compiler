@@ -2013,8 +2013,12 @@ pub fn compile_class_metadata_sync(
     );
 
     // Build property decorators metadata
-    let prop_decorators_expr =
-        core_build_prop_decorators_metadata(&allocator, class, Some(&source));
+    let prop_decorators_expr = core_build_prop_decorators_metadata(
+        &allocator,
+        class,
+        Some(&source),
+        &mut namespace_registry,
+    );
 
     // Create R3ClassMetadata
     let metadata = R3ClassMetadata {

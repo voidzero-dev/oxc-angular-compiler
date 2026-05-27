@@ -2065,6 +2065,7 @@ pub fn transform_angular_file(
                                             allocator,
                                             class,
                                             Some(source),
+                                            &mut file_namespace_registry,
                                         ),
                                     };
 

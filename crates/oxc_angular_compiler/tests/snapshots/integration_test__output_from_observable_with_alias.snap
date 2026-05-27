@@ -24,5 +24,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selector
 (() =>{
   (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(TestComponent,
       [{type:Component,args:[{selector:"test-comp",standalone:true,template:""}]}],
-      null,null));
+      null,{_clicked:[{type:i0.Output,args:["clicked"]}]}));
 })();
