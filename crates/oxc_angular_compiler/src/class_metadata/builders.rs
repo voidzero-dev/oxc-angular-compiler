@@ -591,16 +591,14 @@ fn build_signal_query_decorator<'a>(
     };
     let decorator_name = signal_query_decorator_name(&call.callee)?;
 
+    // Predicate: the first positional argument (required), reused as-is. A query with
+    // no locator is invalid (ngc errors); skip synthesis rather than emit a malformed
+    // decorator.
+    let predicate =
+        convert_oxc_expression(allocator, call.arguments.first()?.to_expression(), source_text)?;
     let mut args = AllocVec::new_in(allocator);
+    args.push(predicate);
 
-    // Predicate: the first positional argument, reused as-is.
-    if let Some(first) = call.arguments.first()
-        && let Some(predicate) = convert_oxc_expression(allocator, first.to_expression(), source_text)
-    {
-        args.push(predicate);
-    }
-
-    // Options: merge the source options object (if any) with `isSignal: true`.
     // Options: `{ ...<sourceOptions>, isSignal: true }`. Spread the second positional
     // argument verbatim (matching Angular's `factory.createSpreadAssignment(callArgs[1])`),
     // which preserves any options expression, object literal or not.
