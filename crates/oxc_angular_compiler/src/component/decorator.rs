@@ -6,7 +6,7 @@
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
-    MethodDefinitionKind, ObjectPropertyKind, PropertyKey, TemplateLiteral,
+    MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
@@ -91,18 +91,22 @@ pub fn extract_component_metadata<'a>(
 
             match key_name.as_str() {
                 "selector" => {
-                    metadata.selector = extract_string_value(allocator, &prop.value, consts);
+                    metadata.selector =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts);
                 }
                 "template" => {
-                    metadata.template = extract_string_value(allocator, &prop.value, consts);
+                    metadata.template =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts);
                 }
                 "templateUrl" => {
-                    metadata.template_url = extract_string_value(allocator, &prop.value, consts);
+                    metadata.template_url =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts);
                 }
                 "styles" => {
                     if let Some(styles) = extract_string_array(allocator, &prop.value, consts) {
                         metadata.styles = styles;
-                    } else if let Some(style) = extract_string_value(allocator, &prop.value, consts)
+                    } else if let Some(style) =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
                     {
                         // Single style string (legacy support)
                         metadata.styles.push(style);
@@ -111,7 +115,9 @@ pub fn extract_component_metadata<'a>(
                 "styleUrls" | "styleUrl" => {
                     if let Some(urls) = extract_string_array(allocator, &prop.value, consts) {
                         metadata.style_urls = urls;
-                    } else if let Some(url) = extract_string_value(allocator, &prop.value, consts) {
+                    } else if let Some(url) =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                    {
                         metadata.style_urls.push(url);
                     }
                 }
@@ -140,7 +146,9 @@ pub fn extract_component_metadata<'a>(
                 }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
-                    if let Some(export_as) = extract_string_value(allocator, &prop.value, consts) {
+                    if let Some(export_as) =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                    {
                         for part in export_as.as_str().split(',') {
                             let trimmed = part.trim();
                             if !trimmed.is_empty() {
@@ -360,54 +368,6 @@ fn get_property_key_name<'a>(
     }
 }
 
-/// Extract a string value from an expression.
-///
-/// Resolves same-file `const` identifier references in value position
-/// (`host: { type: FOO }`) and folds `${...}` interpolations inside template
-/// literals (`` template: `<button class="${twBtn}">x</button>` ``) against
-/// the same const map, matching the official Angular compiler's partial
-/// evaluator.
-fn extract_string_value<'a>(
-    allocator: &'a Allocator,
-    expr: &Expression<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Ident<'a>> {
-    match expr {
-        Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
-        Expression::TemplateLiteral(tpl) => resolve_template_literal(allocator, tpl, consts),
-        Expression::Identifier(id) => consts.get(id.name.as_str()).cloned(),
-        _ => None,
-    }
-}
-
-/// Fold a template literal against the const map.
-///
-/// Empty-interpolation literals (`` `hello` ``) reduce to the cooked quasi.
-/// Otherwise the quasi/expression sequence is interleaved, with each `${...}`
-/// recursively partial-evaluated via `extract_string_value`. If any
-/// interpolation can't fold to a string, the whole literal returns `None` —
-/// matching Angular's all-or-nothing semantics for static metadata.
-fn resolve_template_literal<'a>(
-    allocator: &'a Allocator,
-    tpl: &TemplateLiteral<'a>,
-    consts: &StringConsts<'a>,
-) -> Option<Ident<'a>> {
-    if tpl.expressions.is_empty() {
-        return tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into));
-    }
-    let mut buf = String::new();
-    // `quasis.len() == expressions.len() + 1`; interleave them.
-    for (i, quasi) in tpl.quasis.iter().enumerate() {
-        let cooked = quasi.value.cooked.as_ref()?;
-        buf.push_str(cooked.as_str());
-        if let Some(expr) = tpl.expressions.get(i) {
-            let resolved = extract_string_value(allocator, expr, consts)?;
-            buf.push_str(resolved.as_str());
-        }
-    }
-    Some(Ident::from(allocator.alloc_str(&buf)))
-}
-
 /// Extract a boolean value from an expression.
 fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     match expr {
@@ -432,21 +392,12 @@ fn extract_string_array<'a>(
 
     let mut result = Vec::new_in(allocator);
     for element in &arr.elements {
-        match element {
-            ArrayExpressionElement::StringLiteral(lit) => {
-                result.push(lit.value.clone().into());
-            }
-            ArrayExpressionElement::TemplateLiteral(tpl) => {
-                if let Some(value) = resolve_template_literal(allocator, tpl, consts) {
-                    result.push(value);
-                }
-            }
-            ArrayExpressionElement::Identifier(id) => {
-                if let Some(value) = consts.get(id.name.as_str()) {
-                    result.push(value.clone());
-                }
-            }
-            _ => {}
+        // ArrayExpressionElement variants that can hold a value expression all
+        // carry one — funnel them through `as_expression()` and let the shared
+        // resolver decide which shapes fold.
+        let Some(elem_expr) = element.as_expression() else { continue };
+        if let Some(value) = crate::directive::extract_string_value(allocator, elem_expr, consts) {
+            result.push(value);
         }
     }
 
@@ -548,7 +499,8 @@ fn extract_host_metadata<'a>(
             let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                 continue;
             };
-            let Some(value) = extract_string_value(allocator, &prop.value, consts) else {
+            let Some(value) = crate::directive::extract_string_value(allocator, &prop.value, consts)
+            else {
                 continue;
             };
 
