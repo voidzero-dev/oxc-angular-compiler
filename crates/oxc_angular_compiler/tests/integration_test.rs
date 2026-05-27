@@ -10271,6 +10271,13 @@ export class AppComponent {}
 /// An interpolated `${...}` whose identifier is NOT a known const must NOT
 /// crash and must NOT produce a partial/garbage selector — the field is
 /// dropped (same fallback as today for any unresolvable identifier).
+///
+/// Scope: this test asserts ONLY on the `ɵcmp` selectors field. Since #299
+/// turned `emit_class_metadata` on by default, the raw `${UNRESOLVED}-tag`
+/// template literal is intentionally preserved verbatim inside
+/// `ɵsetClassMetadata(..., [{ type: Component, args: [...] }], ...)` to
+/// mirror ngc's behavior — that's metadata for runtime tooling and is not
+/// the compiled selector itself.
 #[test]
 fn component_template_literal_unresolved_identifier_drops_field() {
     let allocator = Allocator::default();
@@ -10288,11 +10295,22 @@ export class UnresolvedComponent {}
     // Must not crash.
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
-    // Must not emit a selector containing an unresolved literal.
+    // The unresolved interpolation must not appear inside the `ɵcmp`'s
+    // `selectors:` slot — that's the compiled selector that actually drives
+    // template matching.
+    let cmp_start = result.code.find("ɵɵdefineComponent({").expect("ɵcmp missing");
+    let cmp_section = &result.code[cmp_start..];
+    let cmp_end = cmp_section.find("})").expect("ɵcmp not terminated");
+    let cmp_def = &cmp_section[..cmp_end];
     assert!(
-        !result.code.contains("${UNRESOLVED}-tag"),
-        "Unresolved interpolation must not leak verbatim into selectors.\nCode:\n{}",
-        result.code
+        !cmp_def.contains("${UNRESOLVED}-tag"),
+        "Unresolved interpolation must not leak verbatim into ɵcmp.\nɵcmp:\n{cmp_def}"
+    );
+    // And the compiled selector must fall back to the default tag, matching
+    // ngc's behavior when a metadata interpolation can't be resolved.
+    assert!(
+        cmp_def.contains(r#"selectors:[["ng-component"]]"#),
+        "Selector should fall back to `ng-component`.\nɵcmp:\n{cmp_def}"
     );
 }
 
