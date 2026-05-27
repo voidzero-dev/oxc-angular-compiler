@@ -9,7 +9,7 @@ use oxc_allocator::{Allocator, Box, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration, Decorator,
     Expression, MethodDefinitionKind, ObjectPropertyKind, Program, PropertyKey, Statement,
-    VariableDeclarationKind,
+    TemplateLiteral, VariableDeclarationKind,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
@@ -126,7 +126,8 @@ pub fn extract_directive_metadata<'a>(
 
                 match key_name.as_str() {
                     "selector" => {
-                        if let Some(selector) = extract_string_value(&prop.value, consts) {
+                        if let Some(selector) = extract_string_value(allocator, &prop.value, consts)
+                        {
                             builder = builder.selector(selector);
                         }
                     }
@@ -136,7 +137,9 @@ pub fn extract_directive_metadata<'a>(
                         }
                     }
                     "exportAs" => {
-                        if let Some(export_as) = extract_string_value(&prop.value, consts) {
+                        if let Some(export_as) =
+                            extract_string_value(allocator, &prop.value, consts)
+                        {
                             // exportAs can be comma-separated: "foo, bar"
                             for part in export_as.as_str().split(',') {
                                 let trimmed = part.trim();
@@ -460,8 +463,18 @@ pub type StringConsts<'a> = HashMap<&'a str, Ident<'a>>;
 ///
 /// Matches both bare `const X = '...'` and `export const X = '...'`. Reassignment
 /// kinds (`let`/`var`) are skipped — only `const` is safe to fold.
-pub fn collect_string_consts<'a>(program: &Program<'a>) -> StringConsts<'a> {
-    let mut map = StringConsts::default();
+///
+/// Resolution is iterative so that chained consts like
+/// `const A = 'a'; const B = `${A}-b`;` fold to their final string values,
+/// matching the official Angular compiler's partial evaluator.
+pub fn collect_string_consts<'a>(
+    allocator: &'a Allocator,
+    program: &Program<'a>,
+) -> StringConsts<'a> {
+    // Collect every top-level `const` binding's name + initializer up front so
+    // we can iterate to a fixed point. Each pending entry is dropped from the
+    // worklist as soon as its initializer folds successfully.
+    let mut pending: std::vec::Vec<(&'a str, &Expression<'a>)> = std::vec::Vec::new();
     for stmt in &program.body {
         let decl = match stmt {
             Statement::VariableDeclaration(d) => d.as_ref(),
@@ -479,9 +492,26 @@ pub fn collect_string_consts<'a>(program: &Program<'a>) -> StringConsts<'a> {
                 continue;
             };
             let Some(init) = &vd.init else { continue };
-            if let Some(value) = literal_string_from_expression(init) {
-                map.insert(id.name.as_str(), value);
+            pending.push((id.name.as_str(), init));
+        }
+    }
+
+    let mut map = StringConsts::default();
+    loop {
+        let before = map.len();
+        pending.retain(|(name, init)| {
+            if map.contains_key(name) {
+                return false;
             }
+            if let Some(value) = extract_string_value(allocator, init, &map) {
+                map.insert(name, value);
+                false
+            } else {
+                true
+            }
+        });
+        if map.len() == before {
+            break;
         }
     }
     map
@@ -497,6 +527,32 @@ fn literal_string_from_expression<'a>(expr: &Expression<'a>) -> Option<Ident<'a>
         }
         _ => None,
     }
+}
+
+/// Fold a template literal whose `${...}` interpolations reference known
+/// string consts. Returns `None` if any interpolation can't be statically
+/// resolved to a string — matching Angular's all-or-nothing partial evaluator
+/// for static metadata fields.
+fn resolve_template_literal<'a>(
+    allocator: &'a Allocator,
+    tpl: &TemplateLiteral<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<Ident<'a>> {
+    if tpl.expressions.is_empty() {
+        return tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(Into::into));
+    }
+    let mut buf = String::new();
+    // A TemplateLiteral has `quasis.len() == expressions.len() + 1`: the
+    // interleaving is quasi[0], expr[0], quasi[1], expr[1], …, quasi[n].
+    for (i, quasi) in tpl.quasis.iter().enumerate() {
+        let cooked = quasi.value.cooked.as_ref()?;
+        buf.push_str(cooked.as_str());
+        if let Some(expr) = tpl.expressions.get(i) {
+            let resolved = extract_string_value(allocator, expr, consts)?;
+            buf.push_str(resolved.as_str());
+        }
+    }
+    Some(Ident::from(allocator.alloc_str(&buf)))
 }
 
 /// Get the name of a property key as a string.
@@ -519,11 +575,17 @@ fn get_property_key_name<'a>(
 /// Extract a string value from an expression.
 ///
 /// Resolves same-file `const` identifier references in value position
-/// (`host: { type: FOO }`) so the emitted metadata matches the official
-/// Angular compiler's output.
-fn extract_string_value<'a>(expr: &Expression<'a>, consts: &StringConsts<'a>) -> Option<Ident<'a>> {
+/// (`host: { type: FOO }`) and folds `${...}` interpolations inside template
+/// literals against the same const map so the emitted metadata matches the
+/// official Angular compiler's partial evaluator.
+pub(crate) fn extract_string_value<'a>(
+    allocator: &'a Allocator,
+    expr: &Expression<'a>,
+    consts: &StringConsts<'a>,
+) -> Option<Ident<'a>> {
     match expr {
         Expression::Identifier(id) => consts.get(id.name.as_str()).cloned(),
+        Expression::TemplateLiteral(tpl) => resolve_template_literal(allocator, tpl, consts),
         _ => literal_string_from_expression(expr),
     }
 }
@@ -555,7 +617,7 @@ fn extract_host_metadata<'a>(
             let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                 continue;
             };
-            let Some(value) = extract_string_value(&prop.value, consts) else {
+            let Some(value) = extract_string_value(allocator, &prop.value, consts) else {
                 continue;
             };
 
@@ -945,7 +1007,7 @@ mod tests {
         let allocator = Allocator::default();
         let source_type = SourceType::tsx();
         let parser_ret = Parser::new(&allocator, code, source_type).parse();
-        let consts = collect_string_consts(&parser_ret.program);
+        let consts = collect_string_consts(&allocator, &parser_ret.program);
 
         let mut found_metadata = None;
         for stmt in &parser_ret.program.body {

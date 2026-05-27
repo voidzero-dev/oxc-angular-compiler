@@ -749,7 +749,7 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
 
     // Build import map for component metadata extraction
     let import_map = build_import_map(&allocator, &program.body, None);
-    let string_consts = collect_string_consts(program);
+    let string_consts = collect_string_consts(&allocator, program);
 
     let mut template_urls = Vec::new();
     let mut style_urls = Vec::new();
@@ -1515,7 +1515,7 @@ pub fn extract_component_metadata_sync(
 
     // Build import map for component metadata extraction
     let import_map = build_import_map(&allocator, &program.body, None);
-    let string_consts = collect_string_consts(program);
+    let string_consts = collect_string_consts(&allocator, program);
 
     let mut results = Vec::new();
     let emitter = JsEmitter::new();

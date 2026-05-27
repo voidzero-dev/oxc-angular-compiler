@@ -9,8 +9,8 @@ use std::path::Path;
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, Declaration, ExportDefaultDeclarationKind, Expression,
-    ImportDeclarationSpecifier, ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
+    Argument, Declaration, ExportDefaultDeclarationKind, Expression, ImportDeclarationSpecifier,
+    ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -1097,12 +1097,18 @@ fn build_ctor_parameters_text(params: &[JitCtorParam]) -> Option<String> {
 /// - `templateUrl: './path'` → `template: __NG_CLI_RESOURCE__N`
 /// - `styleUrl: './path'` → `styles: [__NG_CLI_RESOURCE__N]`
 /// - `styleUrls: ['./a', './b']` → `styles: [__NG_CLI_RESOURCE__N, __NG_CLI_RESOURCE__M]`
-fn build_jit_decorator_text(
+///
+/// `consts` and `allocator` enable folding the same identifier and template-
+/// literal interpolation shapes as the AOT metadata extraction path (e.g.
+/// `` templateUrl: `${DIR}/x.html` `` with a same-file `const DIR = '...'`).
+fn build_jit_decorator_text<'a>(
+    allocator: &'a Allocator,
     source: &str,
-    decorator: &oxc_ast::ast::Decorator<'_>,
+    decorator: &oxc_ast::ast::Decorator<'a>,
     decorator_kind: AngularDecoratorKind,
     resource_counter: &mut u32,
     resource_imports: &mut std::vec::Vec<(String, String)>, // (import_name, specifier)
+    consts: &crate::directive::StringConsts<'a>,
 ) -> String {
     let expr_start = decorator.expression.span().start as usize;
     let expr_end = decorator.expression.span().end as usize;
@@ -1139,10 +1145,14 @@ fn build_jit_decorator_text(
 
             match key_name {
                 Some("templateUrl") => {
-                    // Extract the URL string value
-                    if let Expression::StringLiteral(s) = &prop.value {
+                    // Resolve the URL through the same const/template-literal
+                    // folder used by AOT extraction so JIT and AOT accept the
+                    // same metadata shapes.
+                    if let Some(url) =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                    {
                         let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
-                        let specifier = format!("angular:jit:template:file;{}", s.value.as_str());
+                        let specifier = format!("angular:jit:template:file;{}", url.as_str());
                         resource_imports.push((import_name.clone(), specifier));
 
                         // Replace the entire property: `templateUrl: './app.html'` → `template: __NG_CLI_RESOURCE__0`
@@ -1155,9 +1165,11 @@ fn build_jit_decorator_text(
                 }
                 Some("styleUrl") => {
                     // Single style URL
-                    if let Expression::StringLiteral(s) = &prop.value {
+                    if let Some(url) =
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                    {
                         let import_name = format!("__NG_CLI_RESOURCE__{}", *resource_counter);
-                        let specifier = format!("angular:jit:style:file;{}", s.value.as_str());
+                        let specifier = format!("angular:jit:style:file;{}", url.as_str());
                         resource_imports.push((import_name.clone(), specifier));
 
                         let prop_start = prop.span.start as usize - expr_start;
@@ -1168,15 +1180,22 @@ fn build_jit_decorator_text(
                     }
                 }
                 Some("styleUrls") => {
-                    // Array of style URLs
+                    // Array of style URLs — fold each element through the same
+                    // resolver so `${DIR}/a.css`-style entries are accepted.
                     if let Expression::ArrayExpression(arr) = &prop.value {
                         let mut style_refs = std::vec::Vec::new();
                         for elem in &arr.elements {
-                            if let ArrayExpressionElement::StringLiteral(s) = elem {
+                            // ArrayExpressionElement variants that can hold a
+                            // value expression all carry one — funnel them
+                            // through `as_expression()` and let the resolver
+                            // decide which shapes fold.
+                            let Some(elem_expr) = elem.as_expression() else { continue };
+                            if let Some(url) =
+                                crate::directive::extract_string_value(allocator, elem_expr, consts)
+                            {
                                 let import_name =
                                     format!("__NG_CLI_RESOURCE__{}", *resource_counter);
-                                let specifier =
-                                    format!("angular:jit:style:file;{}", s.value.as_str());
+                                let specifier = format!("angular:jit:style:file;{}", url.as_str());
                                 resource_imports.push((import_name.clone(), specifier));
                                 style_refs.push(import_name);
                                 *resource_counter += 1;
@@ -1404,6 +1423,11 @@ fn transform_angular_file_jit(
     // are referenced at runtime in ctorParameters. Angular's TS JIT transform
     // patches TypeScript's import elision for the same reason.
 
+    // Collect file-scope string consts so the JIT decorator rewriter can fold
+    // identifier and template-literal references in `templateUrl` / `styleUrl`
+    // / `styleUrls`, matching the AOT metadata extraction path.
+    let string_consts = collect_string_consts(allocator, &parser_ret.program);
+
     // 3. Walk AST to find Angular-decorated classes
     let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
     let mut resource_counter: u32 = 0;
@@ -1448,11 +1472,13 @@ fn transform_angular_file_jit(
             // Check if this is the Angular decorator that needs special text transformation
             if dec.span == angular_decorator.span {
                 let text = build_jit_decorator_text(
+                    allocator,
                     source,
                     dec,
                     decorator_kind,
                     &mut resource_counter,
                     &mut resource_imports,
+                    &string_consts,
                 );
                 all_class_decorator_texts.push(text);
             } else {
@@ -1829,7 +1855,7 @@ pub fn transform_angular_file(
     // Collect file-scope string consts so decorator metadata can resolve identifier
     // references (e.g. `host: { [ATTR_NAME]: '' }`) the same way the official
     // Angular compiler does.
-    let string_consts = collect_string_consts(&parser_ret.program);
+    let string_consts = collect_string_consts(allocator, &parser_ret.program);
 
     #[cfg(feature = "cross_file_elision")]
     let mut import_map =

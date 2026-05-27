@@ -9940,3 +9940,347 @@ export class D {}
         result.code
     );
 }
+
+// ---------------------------------------------------------------------------
+// Issue #286: `${...}` template-literal interpolation in decorator metadata.
+//
+// Angular's partial evaluator constant-folds template literals whose `${...}`
+// expressions reference same-file `const`-bound string values. OXC must match
+// this behavior for `template:`, `selector:`, `styles:`, etc. — otherwise an
+// AOT component silently never matches its tag (or fails to compile at all).
+// ---------------------------------------------------------------------------
+
+/// `template:` may be a template literal interpolating a module-level `const`.
+/// The interpolation must be folded so the component emits a real `ɵcmp` with
+/// the resolved template.
+#[test]
+fn component_template_literal_const_interpolation_in_template() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const twBtn = `px-4 py-2 rounded`;
+
+@Component({
+    selector: 'app-btn',
+    template: `<button class="${twBtn}">x</button>`,
+    standalone: true,
+})
+export class BtnComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "btn.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The component MUST have a real definition emitted.
+    assert!(
+        result.code.contains("ɵɵdefineComponent("),
+        "Expected ɵɵdefineComponent in output (component must be compiled, not skipped).\nCode:\n{}",
+        result.code
+    );
+
+    // The resolved class attribute must reach the output. Angular's template
+    // compiler tokenizes the class string into a `consts: [[1, ...]]` array
+    // (AttributeMarker.Classes == 1), so we check for the tokenized form.
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"consts:[[1,"px-4","py-2","rounded"]]"#),
+        "Expected resolved class attribute tokens in compiled output.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `selector:` may be a template literal interpolating a module-level `const`.
+/// The interpolation must be folded so the selector matches its tag at runtime.
+#[test]
+fn component_template_literal_const_interpolation_in_selector() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const PREFIX = 'app';
+
+@Component({
+    selector: `${PREFIX}-btn`,
+    template: '<button>x</button>',
+    standalone: true,
+})
+export class BtnComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "btn.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"selectors:[["app-btn"]]"#),
+        "Expected selectors:[[\"app-btn\"]] from folded `${{PREFIX}}-btn`.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `@Directive` selector must also resolve template-literal interpolation.
+#[test]
+fn directive_template_literal_const_interpolation_in_selector() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+const NAME = 'highlight';
+
+@Directive({
+    selector: `[${NAME}]`,
+})
+export class HighlightDirective {}
+"#;
+    let result = transform_angular_file(&allocator, "highlight.directive.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"selectors:[[""#) && normalized.contains(r#""highlight""#),
+        "Expected resolved selector containing \"highlight\" attribute in directive definition.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Multiple `${...}` interpolations in a single template literal must all fold.
+#[test]
+fn component_template_literal_multiple_const_interpolations() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const A = 'hello';
+const B = 'world';
+
+@Component({
+    selector: 'app-multi',
+    template: `<span>${A} ${B}!</span>`,
+    standalone: true,
+})
+export class MultiComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "multi.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("ɵɵdefineComponent("),
+        "Expected ɵɵdefineComponent in output.\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("hello world!"),
+        "Expected folded text \"hello world!\" in compiled template.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Chained consts: a const whose initializer interpolates another const must
+/// still resolve when referenced from decorator metadata.
+#[test]
+fn component_chained_const_template_literal_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const PREFIX = 'app';
+const TAG = `${PREFIX}-chained`;
+
+@Component({
+    selector: TAG,
+    template: '<span>x</span>',
+    standalone: true,
+})
+export class ChainedComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "chained.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let normalized = result.code.replace([' ', '\n', '\t'], "");
+    assert!(
+        normalized.contains(r#"selectors:[["app-chained"]]"#),
+        "Expected selectors:[[\"app-chained\"]] from chained const resolution.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `styles:` array elements may contain `${...}` interpolations referencing
+/// same-file consts; they must fold like `template:` does.
+#[test]
+fn component_styles_template_literal_const_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const COLOR = 'red';
+
+@Component({
+    selector: 'app-s',
+    template: '<span>x</span>',
+    styles: [`:host { color: ${COLOR}; }`],
+    standalone: true,
+})
+export class StyledComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "styled.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("color: red"),
+        "Expected folded `color: red` in styles output.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// JIT mode: `templateUrl` may be a template literal interpolating a
+/// module-level `const`. The rewriter must fold and emit the
+/// `angular:jit:template:file;...` import with the resolved path.
+#[test]
+fn jit_template_url_template_literal_const_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const DIR = './cmp';
+
+@Component({
+    selector: 'app-root',
+    templateUrl: `${DIR}/x.html`,
+    standalone: true,
+})
+export class AppComponent {}
+"#;
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("angular:jit:template:file;./cmp/x.html"),
+        "JIT output should import folded template path via angular:jit:template:file.\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("templateUrl"),
+        "JIT output should replace templateUrl with template.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// JIT mode: `templateUrl` may be a bare identifier referencing a same-file
+/// string `const`. Must also fold.
+#[test]
+fn jit_template_url_const_identifier() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const TPL = './app.html';
+
+@Component({
+    selector: 'app-root',
+    templateUrl: TPL,
+    standalone: true,
+})
+export class AppComponent {}
+"#;
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("angular:jit:template:file;./app.html"),
+        "JIT output should import resolved template path via angular:jit:template:file.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// JIT mode: `styleUrl` may be a template literal interpolating a `const`.
+#[test]
+fn jit_style_url_template_literal_const_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const DIR = './cmp';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>x</h1>',
+    styleUrl: `${DIR}/x.css`,
+})
+export class AppComponent {}
+"#;
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("angular:jit:style:file;./cmp/x.css"),
+        "JIT output should import folded style path via angular:jit:style:file.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// JIT mode: `styleUrls:` array elements may be template literals
+/// interpolating a `const`. Each element must fold individually.
+#[test]
+fn jit_style_urls_template_literal_const_interpolation() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+const DIR = './cmp';
+
+@Component({
+    selector: 'app-root',
+    template: '<h1>x</h1>',
+    styleUrls: [`${DIR}/a.css`, './b.css'],
+})
+export class AppComponent {}
+"#;
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "app.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("angular:jit:style:file;./cmp/a.css"),
+        "JIT output should import folded first style path.\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("angular:jit:style:file;./b.css"),
+        "JIT output should also import the literal second style path.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// An interpolated `${...}` whose identifier is NOT a known const must NOT
+/// crash and must NOT produce a partial/garbage selector — the field is
+/// dropped (same fallback as today for any unresolvable identifier).
+#[test]
+fn component_template_literal_unresolved_identifier_drops_field() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: `${UNRESOLVED}-tag`,
+    template: '<span>x</span>',
+    standalone: true,
+})
+export class UnresolvedComponent {}
+"#;
+    let result = transform_angular_file(&allocator, "u.component.ts", source, None, None);
+    // Must not crash.
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // Must not emit a selector containing an unresolved literal.
+    assert!(
+        !result.code.contains("${UNRESOLVED}-tag"),
+        "Unresolved interpolation must not leak verbatim into selectors.\nCode:\n{}",
+        result.code
+    );
+}
