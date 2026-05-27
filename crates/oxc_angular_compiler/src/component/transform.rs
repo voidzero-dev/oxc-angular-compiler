@@ -40,7 +40,7 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     extract_content_queries, extract_directive_metadata, extract_view_queries,
-    find_directive_decorator_span, generate_directive_definitions,
+    find_directive_decorator, find_directive_decorator_span, generate_directive_definitions,
 };
 use crate::dts;
 use crate::injectable::{
@@ -2235,13 +2235,65 @@ pub fn transform_angular_file(
                         .dts_declarations
                         .push(dts::generate_directive_dts(&directive_metadata, has_injectable));
 
+                    // Emit setClassMetadata for TestBed support (overrideDirective + signal
+                    // members), mirroring the @Component path. Matches ngc, which emits
+                    // directive class metadata including synthesized signal-member prop
+                    // decorators.
+                    let mut decls_after_class = String::new();
+                    if options.emit_class_metadata
+                        && !options.advanced_optimizations
+                        && let Some(decorator) = find_directive_decorator(&class.decorators)
+                    {
+                        let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+                            ReadVarExpr {
+                                name: Ident::from(class_name.as_str()),
+                                source_span: None,
+                            },
+                            allocator,
+                        ));
+                        let class_metadata = R3ClassMetadata {
+                            r#type: type_expr,
+                            decorators: build_decorator_metadata_array(
+                                allocator,
+                                &[decorator],
+                                Some(source),
+                                None,
+                                None,
+                                Some(&string_consts),
+                            ),
+                            // Constructor deps are reflected from the class AST.
+                            // Directive metadata carries a different dependency
+                            // representation than `build_ctor_params_metadata` consumes,
+                            // so imported ctor-token types are not namespace-prefixed here
+                            // (matches the standalone-NAPI path; the common no-ctor case
+                            // emits `null`, exactly like ngc).
+                            ctor_parameters: build_ctor_params_metadata(
+                                allocator,
+                                class,
+                                None,
+                                &mut file_namespace_registry,
+                                &import_map,
+                                Some(source),
+                            ),
+                            prop_decorators: build_prop_decorators_metadata(
+                                allocator,
+                                class,
+                                Some(source),
+                                &mut file_namespace_registry,
+                            ),
+                        };
+                        let metadata_expr = compile_class_metadata(allocator, &class_metadata);
+                        decls_after_class.push_str(&emitter.emit_expression(&metadata_expr));
+                        decls_after_class.push(';');
+                    }
+
                     class_positions.push((
                         class_name.clone(),
                         compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
                         class.body.span.end,
                     ));
                     class_definitions
-                        .insert(class_name, (property_assignments, String::new(), String::new()));
+                        .insert(class_name, (property_assignments, String::new(), decls_after_class));
                 } else if let Some(mut pipe_metadata) =
                     extract_pipe_metadata(allocator, class, implicit_standalone, Some(source))
                 {

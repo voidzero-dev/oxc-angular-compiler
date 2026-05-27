@@ -200,6 +200,51 @@ fn namespaced_required_signal_input_detected() {
 }
 
 #[test]
+fn directive_emits_set_class_metadata_with_signal_input() {
+    // ngc emits setClassMetadata for @Directive too (incl. signal-member prop
+    // decorators), so signal inputs survive TestBed.overrideDirective.
+    let allocator = Allocator::default();
+    let source = "import { Directive, input, Input } from '@angular/core';\n\n\
+        @Directive({ selector: '[appFoo]', standalone: true })\n\
+        export class FooDirective {\n\
+          readonly value = input('x');\n\
+          @Input() classic = 0;\n\
+        }\n";
+    let options = TransformOptions { emit_class_metadata: true, ..TransformOptions::default() };
+    let result =
+        transform_angular_file(&allocator, "foo.directive.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "compile errored: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("\u{275}setClassMetadata"),
+        "directive should emit setClassMetadata:\n{}",
+        result.code
+    );
+    let md = metadata_region(&result.code);
+    assert!(md.contains("Directive"), "Directive decorator metadata missing:\n{md}");
+    assert!(
+        md.contains("Input") && md.contains("isSignal:true"),
+        "signal input prop decorator missing for directive:\n{md}"
+    );
+    assert!(md.contains("classic"), "classic @Input prop decorator missing:\n{md}");
+}
+
+#[test]
+fn directive_no_metadata_when_emit_disabled() {
+    let allocator = Allocator::default();
+    let source = "import { Directive, input } from '@angular/core';\n\n\
+        @Directive({ selector: '[appFoo]', standalone: true })\n\
+        export class FooDirective { readonly value = input('x'); }\n";
+    let options = TransformOptions { emit_class_metadata: false, ..TransformOptions::default() };
+    let result =
+        transform_angular_file(&allocator, "foo.directive.ts", source, Some(&options), None);
+    assert!(
+        !result.code.contains("\u{275}setClassMetadata"),
+        "no setClassMetadata when disabled:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn namespaced_required_signal_model_detected() {
     // ngc handles `core.model.required()` → Input(isSignal) + Output.
     let allocator = Allocator::default();

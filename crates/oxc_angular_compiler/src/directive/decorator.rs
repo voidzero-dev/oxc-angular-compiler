@@ -22,7 +22,9 @@ use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
 
 /// Find the @Directive decorator in a list of decorators.
-fn find_directive_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
+pub(crate) fn find_directive_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+) -> Option<&'a Decorator<'a>> {
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_directive_call(&call.callee),
         Expression::Identifier(id) => id.name == "Directive",

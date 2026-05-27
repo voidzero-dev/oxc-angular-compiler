@@ -28,6 +28,7 @@ pub(crate) use decorator::{extract_string_value, resolve_template_literal};
 pub use decorator::{
     StringConsts, collect_string_consts, extract_directive_metadata, find_directive_decorator_span,
 };
+pub(crate) use decorator::find_directive_decorator;
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
