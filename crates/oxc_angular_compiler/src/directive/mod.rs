@@ -24,6 +24,7 @@ pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
+pub(crate) use decorator::extract_string_value;
 pub use decorator::{
     StringConsts, collect_string_consts, extract_directive_metadata, find_directive_decorator_span,
 };
