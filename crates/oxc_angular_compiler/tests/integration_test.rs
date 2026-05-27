@@ -10705,3 +10705,116 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+/// When `providers: PROVIDERS` references a `const PROVIDERS = makeProviders()`
+/// whose initializer *calls* a later-declared `function makeProviders()`, and
+/// that function reads another later-declared `const TOKEN`, the hoister must
+/// also pull `TOKEN` above the class — otherwise the hoisted `PROVIDERS`
+/// initializer invokes `makeProviders()` before `TOKEN` is initialized and
+/// throws `ReferenceError: Cannot access 'TOKEN' before initialization`.
+///
+/// Regression test for Codex bot review on PR #302 (line 340 of hoist.rs).
+#[test]
+fn component_provider_const_via_function_call_pulls_in_transitive_tdz_dep() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: PROVIDERS })
+class TestComponent {}
+const TOKEN = 'tok';
+const PROVIDERS = makeProviders();
+function makeProviders() { return [{ provide: TOKEN }]; }
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let providers_pos = result.code.find("const PROVIDERS").unwrap_or_else(|| {
+        panic!("Expected `const PROVIDERS` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    // Both must be hoisted above the class.
+    assert!(
+        providers_pos < class_pos,
+        "`const PROVIDERS` must be hoisted above the class. \
+         providers@{providers_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (transitively read by makeProviders() at module init) \
+         must also be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+
+    // And `TOKEN` must come before `PROVIDERS` so `makeProviders()` can read it
+    // when the hoisted `PROVIDERS` initializer evaluates at module load.
+    assert!(
+        token_pos < providers_pos,
+        "`const TOKEN` must precede `const PROVIDERS` in the hoisted region. \
+         token@{token_pos} providers@{providers_pos}\nCode:\n{}",
+        result.code
+    );
+
+    // Neither should be duplicated.
+    assert_eq!(
+        result.code.matches("const PROVIDERS").count(),
+        1,
+        "`const PROVIDERS` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `class.body.span.end` is the exclusive byte offset one past the closing
+/// `}`. A `VariableDeclaration` whose statement starts at *exactly* that
+/// offset (no whitespace between `}` and `const`) is positioned immediately
+/// after the class body and is still in the TDZ when the class's static
+/// fields evaluate. The hoist must move it; using `<=` for the
+/// "before-class" check accidentally skips this boundary case.
+///
+/// Regression test for Cursor bot review on PR #302 (line 124 of hoist.rs).
+#[test]
+fn component_provider_const_immediately_after_class_brace_is_hoisted() {
+    let allocator = Allocator::default();
+    // No whitespace at all between `}` and `const` — `const` starts at
+    // exactly `class.body.span.end`.
+    let source = "import { Component } from '@angular/core';\n\
+@Component({ selector: 'x', template: '', providers: [{ provide: TOKEN, useValue: 1 }] })\n\
+export class TestComponent {}const TOKEN = 'tok';\n";
+
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    assert!(
+        token_pos < class_pos,
+        "Boundary-case `const TOKEN` (decl at exactly class.body.span.end) must \
+         still be hoisted above the class. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once (original deleted).\nCode:\n{}",
+        result.code
+    );
+}

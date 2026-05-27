@@ -31,8 +31,10 @@ use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Class, Declaration, Decorator,
-    ExportDefaultDeclarationKind, Expression, ObjectPropertyKind, Program, Statement,
+    ExportDefaultDeclarationKind, Expression, IdentifierReference, ObjectPropertyKind, Program,
+    Statement,
 };
+use oxc_ast_visit::Visit;
 use oxc_span::GetSpan;
 
 use crate::optimizer::Edit;
@@ -78,8 +80,15 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
     //   - `binding_to_stmt`: identifier name → containing statement's `start`.
     //   - `stmt_info`: statement start → end/delete bounds and the union of
     //     identifier references across the statement's initializers.
-    let (binding_to_stmt, stmt_info) = collect_top_level_bindings(program, source);
-    if binding_to_stmt.is_empty() {
+    //   - `fn_body_idents`: top-level function name → identifier references in
+    //     its body. Top-level function *declarations* are JS-hoisted so they
+    //     never need physical hoisting, but if a hoisted initializer *calls*
+    //     them (`const PROVIDERS = makeProviders()`), the function body runs
+    //     at module load and any later-declared binding it touches still
+    //     TDZ-throws. The BFS consults this map to chase identifiers through
+    //     function-call boundaries.
+    let (binding_to_stmt, stmt_info, fn_body_idents) = collect_top_level_bindings(program, source);
+    if binding_to_stmt.is_empty() && fn_body_idents.is_empty() {
         return Vec::new();
     }
 
@@ -117,37 +126,55 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
             if !visited.insert(name) {
                 continue;
             }
-            let Some(&stmt_start) = binding_to_stmt.get(name) else { continue };
-            let Some(info) = stmt_info.get(&stmt_start) else { continue };
-            // Skip bindings declared *before* this class — they're already
-            // initialized when the class evaluates.
-            if stmt_start <= class_body_end {
-                continue;
-            }
+            if let Some(&stmt_start) = binding_to_stmt.get(name) {
+                let Some(info) = stmt_info.get(&stmt_start) else { continue };
+                // Skip bindings declared *before* this class — they're
+                // already initialized when the class evaluates.
+                // `class_body_end` is the exclusive end of the class body
+                // (one byte past `}`), so a statement starting at exactly
+                // `class_body_end` is the very next byte after the class —
+                // declared *after* and still needs hoisting.
+                if stmt_start < class_body_end {
+                    continue;
+                }
 
-            plan.entry(stmt_start)
-                .and_modify(|p| {
-                    if effective_start < p.insert_at {
-                        p.insert_at = effective_start;
+                plan.entry(stmt_start)
+                    .and_modify(|p| {
+                        if effective_start < p.insert_at {
+                            p.insert_at = effective_start;
+                        }
+                    })
+                    .or_insert(PlanEntry {
+                        stmt_end: info.stmt_end,
+                        delete_end: info.delete_end,
+                        insert_at: effective_start,
+                    });
+
+                // Transitive hoist: if this binding's initializer references
+                // another later-declared binding, that one must move above
+                // the class too — otherwise the *hoisted* statement itself
+                // TDZ-throws when its initializer runs. Without this,
+                // `providers: PROVIDERS` followed by `const PROVIDERS = [{
+                // provide: TOKEN, ... }]; const TOKEN = ...;` moves
+                // `PROVIDERS` but leaves `TOKEN` below, so module evaluation
+                // now throws inside the hoisted `PROVIDERS` initializer.
+                // See PR #302 review.
+                for n in &info.init_idents {
+                    if !visited.contains(n) {
+                        worklist.push(n);
                     }
-                })
-                .or_insert(PlanEntry {
-                    stmt_end: info.stmt_end,
-                    delete_end: info.delete_end,
-                    insert_at: effective_start,
-                });
-
-            // Transitive hoist: if this binding's initializer references
-            // another later-declared binding, that one must move above the
-            // class too — otherwise the *hoisted* statement itself TDZ-throws
-            // when its initializer runs. Without this, `providers: PROVIDERS`
-            // followed by `const PROVIDERS = [{ provide: TOKEN, ... }]; const
-            // TOKEN = ...;` moves `PROVIDERS` but leaves `TOKEN` below, so
-            // module evaluation now throws inside the hoisted `PROVIDERS`
-            // initializer. See PR #302 review.
-            for n in &info.init_idents {
-                if !visited.contains(n) {
-                    worklist.push(n);
+                }
+            } else if let Some(body_refs) = fn_body_idents.get(name) {
+                // The name resolves to a top-level function declaration.
+                // Don't hoist the function itself (JS already hoists fn
+                // decls), but if its body references later bindings, those
+                // references fire whenever the function is called — and a
+                // hoisted initializer *will* call it at module load. Chase
+                // them through the worklist. See PR #302 review (Codex).
+                for n in body_refs {
+                    if !visited.contains(n) {
+                        worklist.push(n);
+                    }
                 }
             }
         }
@@ -161,14 +188,26 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
     // emitted *before* their dependents in the hoisted prelude. Within a
     // single bucket (same `insert_at`), this guarantees that e.g. `const
     // TOKEN` precedes `const PROVIDERS = [{ provide: TOKEN, ... }]`.
-    let order = topological_order(&plan, &binding_to_stmt, &stmt_info);
+    let order = topological_order(&plan, &binding_to_stmt, &stmt_info, &fn_body_idents);
 
     // Step 4: emit edits. Group by `insert_at` so multiple statements headed
     // to the same class become a single insert edit whose text is the
     // concatenation in topological order. Emitting them as separate edits at
     // the same offset would invert their order (each insert at the same
     // position prepends to the prior insert's text).
+    //
+    // `HOIST_INSERT_PRIORITY` (positive) keeps hoisted text *above* the
+    // `decls_before_class` insertion at the same offset (which uses default
+    // priority 0).
+    //
+    // `HOIST_DELETE_PRIORITY` (negative) lets a hoist delete that starts at
+    // exactly `class.body.span.end` — the byte right after `}`, where a
+    // const declared with no whitespace lives — apply *before* the
+    // `decls_after_class` insert at the same offset. Without the priority
+    // skew, the insert ran first and the delete would then chew into the
+    // newly inserted IIFE/metadata text instead of the original const.
     const HOIST_INSERT_PRIORITY: i32 = 5;
+    const HOIST_DELETE_PRIORITY: i32 = -1;
     let mut per_target: HashMap<u32, String> = HashMap::new();
     let mut edits: Vec<Edit> = Vec::new();
 
@@ -178,7 +217,7 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
         let bucket = per_target.entry(p.insert_at).or_default();
         bucket.push_str(text);
         bucket.push('\n');
-        edits.push(Edit::delete(*stmt_start, p.delete_end));
+        edits.push(Edit::delete(*stmt_start, p.delete_end).with_priority(HOIST_DELETE_PRIORITY));
     }
 
     for (insert_at, text) in per_target {
@@ -193,10 +232,11 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
 /// ascending `stmt_start` so the result is deterministic. Cycles (which would
 /// require ill-formed source where two consts reference each other) are
 /// broken silently — they can't produce a valid evaluation order anyway.
-fn topological_order(
+fn topological_order<'a>(
     plan: &HashMap<u32, PlanEntry>,
-    binding_to_stmt: &HashMap<&str, u32>,
-    stmt_info: &HashMap<u32, StmtInfo<'_>>,
+    binding_to_stmt: &HashMap<&'a str, u32>,
+    stmt_info: &HashMap<u32, StmtInfo<'a>>,
+    fn_body_idents: &HashMap<&'a str, HashSet<&'a str>>,
 ) -> Vec<u32> {
     let plan_starts: HashSet<u32> = plan.keys().copied().collect();
 
@@ -204,14 +244,22 @@ fn topological_order(
     // *before* it). Filter to only edges that land inside the plan; deps that
     // resolve outside (declared before the class, or not top-level) are
     // already TDZ-safe.
+    //
+    // The "effective init idents" of a planned statement are the transitive
+    // closure of its direct `init_idents` through `fn_body_idents`: if the
+    // initializer calls a function, the function body's identifier reads also
+    // count as references that fire when the hoisted statement evaluates. So
+    // `const PROVIDERS = makeProviders()` with `function makeProviders() {
+    // return [{ provide: TOKEN }]; }` must end up after `const TOKEN` in the
+    // hoisted prelude. See PR #302 review (Codex).
     let mut deps: HashMap<u32, Vec<u32>> = HashMap::with_capacity(plan_starts.len());
     for &start in &plan_starts {
         let Some(info) = stmt_info.get(&start) else {
             deps.insert(start, Vec::new());
             continue;
         };
-        let mut edges: Vec<u32> = info
-            .init_idents
+        let effective = expand_through_functions(&info.init_idents, fn_body_idents);
+        let mut edges: Vec<u32> = effective
             .iter()
             .filter_map(|n| binding_to_stmt.get(n))
             .copied()
@@ -261,6 +309,36 @@ fn topological_order(
     }
 
     order
+}
+
+/// Take a set of identifier references and expand it transitively through
+/// `fn_body_idents`: every time we encounter a name that resolves to a
+/// top-level function, we add the function body's own identifier references
+/// (and recurse). The result is the union of every identifier that the
+/// initial set "reaches" via function calls — what would actually fire if
+/// you ran the initializer at module load. A `seen` set guards against
+/// mutual recursion between top-level functions.
+fn expand_through_functions<'a>(
+    seed: &HashSet<&'a str>,
+    fn_body_idents: &HashMap<&'a str, HashSet<&'a str>>,
+) -> HashSet<&'a str> {
+    let mut out: HashSet<&'a str> = HashSet::new();
+    let mut worklist: Vec<&'a str> = seed.iter().copied().collect();
+    let mut seen: HashSet<&'a str> = HashSet::new();
+    while let Some(name) = worklist.pop() {
+        if !seen.insert(name) {
+            continue;
+        }
+        out.insert(name);
+        if let Some(body_refs) = fn_body_idents.get(name) {
+            for n in body_refs {
+                if !seen.contains(n) {
+                    worklist.push(n);
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Compute the effective start of a class statement, ignoring trailing
@@ -330,13 +408,14 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
 fn collect_top_level_bindings<'a>(
     program: &Program<'a>,
     source: &str,
-) -> (HashMap<&'a str, u32>, HashMap<u32, StmtInfo<'a>>) {
+) -> (HashMap<&'a str, u32>, HashMap<u32, StmtInfo<'a>>, HashMap<&'a str, HashSet<&'a str>>) {
     let bytes = source.as_bytes();
     let mut binding_to_stmt: HashMap<&'a str, u32> = HashMap::new();
     let mut stmt_info: HashMap<u32, StmtInfo<'a>> = HashMap::new();
+    let mut fn_body_idents: HashMap<&'a str, HashSet<&'a str>> = HashMap::new();
 
     for stmt in &program.body {
-        let decl = match stmt {
+        let var_decl = match stmt {
             Statement::VariableDeclaration(decl) => Some(decl.as_ref()),
             Statement::ExportNamedDeclaration(export) => match &export.declaration {
                 Some(Declaration::VariableDeclaration(decl)) => Some(decl.as_ref()),
@@ -344,30 +423,87 @@ fn collect_top_level_bindings<'a>(
             },
             _ => None,
         };
-        let Some(decl) = decl else { continue };
+        if let Some(decl) = var_decl {
+            let span = stmt.span();
+            let stmt_start = span.start;
+            let mut info = StmtInfo {
+                stmt_end: span.end,
+                delete_end: end_with_trailing_newline(span.end, bytes),
+                init_idents: HashSet::new(),
+            };
 
-        let span = stmt.span();
-        let stmt_start = span.start;
-        let mut info = StmtInfo {
-            stmt_end: span.end,
-            delete_end: end_with_trailing_newline(span.end, bytes),
-            init_idents: HashSet::new(),
-        };
-
-        for declarator in &decl.declarations {
-            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                binding_to_stmt.insert(id.name.as_str(), stmt_start);
+            for declarator in &decl.declarations {
+                if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                    binding_to_stmt.insert(id.name.as_str(), stmt_start);
+                }
+                // Destructuring patterns are deliberately ignored — see
+                // collect_top_level_bindings docstring above.
+                if let Some(init) = &declarator.init {
+                    collect_expr_idents(init, &mut info.init_idents);
+                }
             }
-            // Destructuring patterns are deliberately ignored — see
-            // collect_top_level_bindings docstring above.
-            if let Some(init) = &declarator.init {
-                collect_expr_idents(init, &mut info.init_idents);
+            stmt_info.insert(stmt_start, info);
+            continue;
+        }
+
+        // Top-level `function foo() { ... }` (also `export function` /
+        // `export default function foo`). Function declarations are
+        // JS-hoisted whole-body, so we never *move* them; we only index
+        // their body references so the BFS can chase TDZ-relevant
+        // identifiers across function-call boundaries.
+        let func = match stmt {
+            Statement::FunctionDeclaration(f) => Some(f.as_ref()),
+            Statement::ExportNamedDeclaration(export) => match &export.declaration {
+                Some(Declaration::FunctionDeclaration(f)) => Some(f.as_ref()),
+                _ => None,
+            },
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::FunctionDeclaration(f) => Some(f.as_ref()),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(func) = func {
+            if let (Some(id), Some(body)) = (&func.id, &func.body) {
+                let mut refs: HashSet<&'a str> = HashSet::new();
+                let mut visitor = FunctionBodyIdentVisitor { out: &mut refs };
+                visitor.visit_function_body(body);
+                fn_body_idents.insert(id.name.as_str(), refs);
             }
         }
-        stmt_info.insert(stmt_start, info);
     }
 
-    (binding_to_stmt, stmt_info)
+    (binding_to_stmt, stmt_info, fn_body_idents)
+}
+
+/// AST visitor that collects every `IdentifierReference` reachable from a
+/// function body, with the same "lazy bodies are opaque" rule the existing
+/// expression walker uses: nested function/arrow expressions inside the body
+/// don't run when the outer function is called, so their bodies are skipped.
+struct FunctionBodyIdentVisitor<'a, 'b> {
+    out: &'b mut HashSet<&'a str>,
+}
+
+impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
+    fn visit_identifier_reference(&mut self, it: &IdentifierReference<'a>) {
+        self.out.insert(it.name.as_str());
+    }
+
+    // Nested function/arrow expressions only execute when *they* are called,
+    // not when the enclosing function is. Don't descend.
+    fn visit_function(
+        &mut self,
+        _it: &oxc_ast::ast::Function<'a>,
+        _flags: oxc_syntax::scope::ScopeFlags,
+    ) {
+    }
+
+    fn visit_arrow_function_expression(&mut self, _it: &oxc_ast::ast::ArrowFunctionExpression<'a>) {
+    }
+
+    // Class expressions inside the body define methods that don't run at
+    // call time of the outer function. Skip.
+    fn visit_class(&mut self, _it: &Class<'a>) {}
 }
 
 /// Advance `end` past one trailing line terminator so that deleting the
