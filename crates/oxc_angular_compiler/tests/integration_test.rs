@@ -10556,3 +10556,152 @@ export class TestComponent {}
     let class_pos = result.code.find("class TestComponent").unwrap();
     assert!(token_pos < class_pos, "Order should be preserved.\nCode:\n{}", result.code);
 }
+
+/// Reproducer for PR #302 review feedback: when two bindings from the *same*
+/// multi-declarator statement (`const A = 1, B = 2;`) are referenced by
+/// different decorated classes, the hoist plan keys entries by binding name,
+/// producing two `HoistEntry` values that share the same `stmt_start` but
+/// carry different `insert_at` targets. The dedup loop in `collect_hoist_edits`
+/// keeps whichever entry HashMap iteration visits first and drops the other —
+/// so the chosen `insert_at` is nondeterministic, and can land *after* the
+/// earliest referencing class. That leaves the earlier class still inside the
+/// TDZ of the hoisted statement.
+///
+/// Scenario from the Codex review:
+///   * `class A` (decorated) references `B`.
+///   * `class C` (decorated) references `A`.
+///   * Both classes are declared *before* `const A = 1, B = 2;`.
+///
+/// The correct behavior is to hoist the shared statement to *above the
+/// earliest* referencing class (class A here), so both `A` and `B` are
+/// initialized before either decorator runs.
+#[test]
+fn component_shared_multideclarator_const_hoists_above_earliest_referencer() {
+    let allocator = Allocator::default();
+    // `Acomp` references `Bval` in its decorator metadata.
+    // `Ccomp` references `Aval` in its decorator metadata.
+    // The const declaring both `Aval` and `Bval` is declared *after* both
+    // classes, so both must be hoisted above the earliest class (`Acomp`).
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'a-comp',
+    template: '',
+    providers: [{ provide: 'k', useValue: Bval }],
+})
+export class Acomp {}
+@Component({
+    selector: 'c-comp',
+    template: '',
+    providers: [{ provide: 'k', useValue: Aval }],
+})
+export class Ccomp {}
+const Aval = 1, Bval = 2;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The shared declaration must appear exactly once (original deleted, single
+    // hoisted copy emitted).
+    let const_count = result.code.matches("const Aval").count();
+    assert_eq!(
+        const_count, 1,
+        "`const Aval = 1, Bval = 2;` should appear exactly once. Got {const_count}.\nCode:\n{}",
+        result.code
+    );
+
+    let const_pos = result.code.find("const Aval").expect("`const Aval` must appear in the output");
+    let acomp_pos =
+        result.code.find("class Acomp").expect("`class Acomp` must appear in the output");
+    let ccomp_pos =
+        result.code.find("class Ccomp").expect("`class Ccomp` must appear in the output");
+
+    // The hoisted shared statement must precede BOTH classes — not just the
+    // later one (`Ccomp`). If the dedup logic picks `Ccomp`'s `insert_at`,
+    // the const will land between the two classes, leaving `Acomp` in the
+    // TDZ of `Bval`.
+    assert!(
+        const_pos < acomp_pos,
+        "`const Aval, Bval` must be hoisted above the *earliest* referencer (Acomp). \
+         const@{const_pos} Acomp@{acomp_pos} Ccomp@{ccomp_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        const_pos < ccomp_pos,
+        "`const Aval, Bval` must also be hoisted above Ccomp. \
+         const@{const_pos} Acomp@{acomp_pos} Ccomp@{ccomp_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Regression for transitive TDZ deps: when decorator metadata references an
+/// aggregate binding (e.g. `providers: PROVIDERS`) and that aggregate's
+/// initializer transitively references *another* later-declared top-level
+/// binding (`TOKEN`), the hoister must pull both bindings above the class.
+///
+/// Without this, `PROVIDERS` gets moved above the class but `TOKEN` stays
+/// below, so `PROVIDERS`'s own initializer throws `ReferenceError: Cannot
+/// access 'TOKEN' before initialization` at module evaluation — strictly
+/// worse than before the hoist.
+#[test]
+fn component_provider_aggregate_const_pulls_in_transitive_tdz_dep() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: PROVIDERS })
+export class TestComponent {}
+const PROVIDERS = [{ provide: TOKEN, useValue: 1 }];
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let providers_pos = result.code.find("const PROVIDERS").unwrap_or_else(|| {
+        panic!("Expected `const PROVIDERS` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    // Both must be hoisted above the class.
+    assert!(
+        providers_pos < class_pos,
+        "`const PROVIDERS` must be hoisted above the class. \
+         providers@{providers_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (transitively referenced by PROVIDERS' initializer) \
+         must also be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+
+    // And `TOKEN` must come before `PROVIDERS` so PROVIDERS' initializer can
+    // actually read it at module load.
+    assert!(
+        token_pos < providers_pos,
+        "`const TOKEN` must precede `const PROVIDERS` in the hoisted region. \
+         token@{token_pos} providers@{providers_pos}\nCode:\n{}",
+        result.code
+    );
+
+    // Neither should be duplicated.
+    assert_eq!(
+        result.code.matches("const PROVIDERS").count(),
+        1,
+        "`const PROVIDERS` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}

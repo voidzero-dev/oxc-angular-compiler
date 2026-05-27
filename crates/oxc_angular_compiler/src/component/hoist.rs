@@ -21,6 +21,11 @@
 //!   function/arrow bodies and class expression bodies — references that
 //!   only fire when a factory or method runs (e.g. `useFactory: () => DEP`)
 //!   don't trigger a hoist.
+//! * Hoisting is *transitive*: if a hoisted binding's initializer references
+//!   another later-declared top-level binding, that one is hoisted too. The
+//!   final emission order is a topological sort of the dependency graph, so
+//!   `const PROVIDERS = [{ provide: TOKEN, ... }]` ends up *after*
+//!   `const TOKEN = ...` in the hoisted prelude.
 
 use std::collections::{HashMap, HashSet};
 
@@ -32,14 +37,26 @@ use oxc_span::GetSpan;
 
 use crate::optimizer::Edit;
 
-/// One referenced-by-decorator top-level binding scheduled for hoisting.
-#[derive(Clone, Copy)]
-struct HoistEntry {
-    /// Span of the statement to relocate.
-    stmt_start: u32,
+/// Per-statement record collected during the initial scan. Multi-declarator
+/// statements (`const A = 1, B = 2;`) get a single entry shared by every name
+/// they bind; `init_idents` is the union of identifier references across all
+/// declarator initializers.
+struct StmtInfo<'a> {
     stmt_end: u32,
-    /// End of the deletion (extends `stmt_end` past trailing newline so the
-    /// hoist doesn't leave a stray blank line behind).
+    /// End of the deletion (extends `stmt_end` past one trailing newline so
+    /// the hoist doesn't leave a stray blank line behind).
+    delete_end: u32,
+    /// Identifier references appearing in any declarator's initializer in
+    /// this statement. Used to drive transitive hoisting.
+    init_idents: HashSet<&'a str>,
+}
+
+/// One statement scheduled for hoisting, keyed by its `stmt_start`. Multiple
+/// classes that need the same statement collapse into a single entry whose
+/// `insert_at` is the MIN of all referencers' effective starts.
+#[derive(Clone, Copy)]
+struct PlanEntry {
+    stmt_end: u32,
     delete_end: u32,
     /// Insertion target — the earliest referencing class's effective start.
     insert_at: u32,
@@ -57,58 +74,82 @@ struct HoistEntry {
 /// hoisted statements end up immediately above the class, with any
 /// constant-pool declarations from the compiler in between.
 pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit> {
-    let bindings = collect_top_level_bindings(program, source);
-    if bindings.is_empty() {
+    // Step 1: index top-level bindings.
+    //   - `binding_to_stmt`: identifier name → containing statement's `start`.
+    //   - `stmt_info`: statement start → end/delete bounds and the union of
+    //     identifier references across the statement's initializers.
+    let (binding_to_stmt, stmt_info) = collect_top_level_bindings(program, source);
+    if binding_to_stmt.is_empty() {
         return Vec::new();
     }
 
-    // For each top-level decorated class, find the identifiers eagerly
-    // referenced in its decorator metadata. Record the earliest such class
-    // position per referenced binding so multiple references hoist exactly
-    // once, ahead of the first user.
-    let mut plan: HashMap<&'a str, HoistEntry> = HashMap::new();
+    // Step 2: for every Angular-decorated class, BFS through binding
+    // initializers starting from the identifiers directly referenced in the
+    // decorator metadata. The plan is keyed by `stmt_start` (not name) so
+    // multi-declarator statements collapse into a single entry, and the
+    // `insert_at` is updated to the MIN across all referencers — that guards
+    // against the nondeterministic dedup bug where, with `const A = 1, B = 2;`
+    // referenced by two different classes, the surviving entry's `insert_at`
+    // depended on HashMap iteration order and could land *after* the earlier
+    // class. See PR #302 review.
+    let mut plan: HashMap<u32, PlanEntry> = HashMap::new();
 
     for stmt in &program.body {
-        let Some((class, stmt_start)) = class_of(stmt) else { continue };
-
-        // Skip classes that don't carry any Angular decorator we care about.
-        // Walking every class would be safe but wastes work on unrelated code.
+        let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
         if !has_angular_decorator(class) {
             continue;
         }
 
-        let mut referenced: HashSet<&'a str> = HashSet::new();
+        let mut direct: HashSet<&'a str> = HashSet::new();
         for decorator in &class.decorators {
-            collect_decorator_idents(decorator, &mut referenced);
+            collect_decorator_idents(decorator, &mut direct);
         }
-
-        if referenced.is_empty() {
+        if direct.is_empty() {
             continue;
         }
 
         let class_body_end = class.body.span.end;
-        let effective_start = effective_class_start(class, stmt_start);
+        let effective_start = effective_class_start(class, stmt_start_pos);
 
-        for name in referenced {
-            let Some(info) = bindings.get(name) else { continue };
-            // Only hoist declarations that start AFTER the class body ends.
-            // Anything before is already TDZ-safe.
-            if info.stmt_start <= class_body_end {
+        let mut worklist: Vec<&'a str> = direct.into_iter().collect();
+        let mut visited: HashSet<&'a str> = HashSet::new();
+        while let Some(name) = worklist.pop() {
+            if !visited.insert(name) {
+                continue;
+            }
+            let Some(&stmt_start) = binding_to_stmt.get(name) else { continue };
+            let Some(info) = stmt_info.get(&stmt_start) else { continue };
+            // Skip bindings declared *before* this class — they're already
+            // initialized when the class evaluates.
+            if stmt_start <= class_body_end {
                 continue;
             }
 
-            plan.entry(name)
-                .and_modify(|existing| {
-                    if effective_start < existing.insert_at {
-                        existing.insert_at = effective_start;
+            plan.entry(stmt_start)
+                .and_modify(|p| {
+                    if effective_start < p.insert_at {
+                        p.insert_at = effective_start;
                     }
                 })
-                .or_insert(HoistEntry {
-                    stmt_start: info.stmt_start,
+                .or_insert(PlanEntry {
                     stmt_end: info.stmt_end,
                     delete_end: info.delete_end,
                     insert_at: effective_start,
                 });
+
+            // Transitive hoist: if this binding's initializer references
+            // another later-declared binding, that one must move above the
+            // class too — otherwise the *hoisted* statement itself TDZ-throws
+            // when its initializer runs. Without this, `providers: PROVIDERS`
+            // followed by `const PROVIDERS = [{ provide: TOKEN, ... }]; const
+            // TOKEN = ...;` moves `PROVIDERS` but leaves `TOKEN` below, so
+            // module evaluation now throws inside the hoisted `PROVIDERS`
+            // initializer. See PR #302 review.
+            for n in &info.init_idents {
+                if !visited.contains(n) {
+                    worklist.push(n);
+                }
+            }
         }
     }
 
@@ -116,39 +157,28 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
         return Vec::new();
     }
 
-    // Sort entries by source position so multiple hoists preserve their
-    // original relative order in the output.
-    let mut entries: Vec<HoistEntry> = plan.into_values().collect();
-    entries.sort_by_key(|e| e.stmt_start);
+    // Step 3: topologically sort the planned statements so dependencies are
+    // emitted *before* their dependents in the hoisted prelude. Within a
+    // single bucket (same `insert_at`), this guarantees that e.g. `const
+    // TOKEN` precedes `const PROVIDERS = [{ provide: TOKEN, ... }]`.
+    let order = topological_order(&plan, &binding_to_stmt, &stmt_info);
 
-    // We want hoisted text to appear *above* `decls_before_class` (which
-    // contains constant-pool decls that may reference the hoisted identifiers).
-    // Existing `decls_before_class` runs at priority 0. apply_edits applies
-    // lower priority *first* at the same offset, and each later application
-    // pushes earlier text further right in the output — so a *higher*
-    // priority lands the hoisted text earlier in the result. Pick 5.
+    // Step 4: emit edits. Group by `insert_at` so multiple statements headed
+    // to the same class become a single insert edit whose text is the
+    // concatenation in topological order. Emitting them as separate edits at
+    // the same offset would invert their order (each insert at the same
+    // position prepends to the prior insert's text).
     const HOIST_INSERT_PRIORITY: i32 = 5;
-
-    // Group hoisted statements by their target insertion point so that
-    // multiple consts headed to the same class are emitted as a single
-    // insert edit, with their text concatenated in source order. Emitting
-    // them as separate edits would reverse their order, since each insert
-    // at the same offset prepends to the prior insert's text.
-    let mut emitted_stmts: HashSet<u32> = HashSet::new();
     let mut per_target: HashMap<u32, String> = HashMap::new();
-    let mut edits = Vec::new();
+    let mut edits: Vec<Edit> = Vec::new();
 
-    for entry in &entries {
-        if !emitted_stmts.insert(entry.stmt_start) {
-            continue;
-        }
-
-        let text = &source[entry.stmt_start as usize..entry.stmt_end as usize];
-        let bucket = per_target.entry(entry.insert_at).or_default();
+    for stmt_start in &order {
+        let p = &plan[stmt_start];
+        let text = &source[*stmt_start as usize..p.stmt_end as usize];
+        let bucket = per_target.entry(p.insert_at).or_default();
         bucket.push_str(text);
         bucket.push('\n');
-
-        edits.push(Edit::delete(entry.stmt_start, entry.delete_end));
+        edits.push(Edit::delete(*stmt_start, p.delete_end));
     }
 
     for (insert_at, text) in per_target {
@@ -156,6 +186,81 @@ pub fn collect_hoist_edits<'a>(program: &Program<'a>, source: &str) -> Vec<Edit>
     }
 
     edits
+}
+
+/// Iterative post-order DFS yielding a topological ordering of planned
+/// statements: dependencies first, then dependents. The seed iteration is in
+/// ascending `stmt_start` so the result is deterministic. Cycles (which would
+/// require ill-formed source where two consts reference each other) are
+/// broken silently — they can't produce a valid evaluation order anyway.
+fn topological_order(
+    plan: &HashMap<u32, PlanEntry>,
+    binding_to_stmt: &HashMap<&str, u32>,
+    stmt_info: &HashMap<u32, StmtInfo<'_>>,
+) -> Vec<u32> {
+    let plan_starts: HashSet<u32> = plan.keys().copied().collect();
+
+    // Adjacency list: stmt_start -> stmt_starts it depends on (must come
+    // *before* it). Filter to only edges that land inside the plan; deps that
+    // resolve outside (declared before the class, or not top-level) are
+    // already TDZ-safe.
+    let mut deps: HashMap<u32, Vec<u32>> = HashMap::with_capacity(plan_starts.len());
+    for &start in &plan_starts {
+        let Some(info) = stmt_info.get(&start) else {
+            deps.insert(start, Vec::new());
+            continue;
+        };
+        let mut edges: Vec<u32> = info
+            .init_idents
+            .iter()
+            .filter_map(|n| binding_to_stmt.get(n))
+            .copied()
+            .filter(|s| *s != start && plan_starts.contains(s))
+            .collect();
+        edges.sort_unstable();
+        edges.dedup();
+        deps.insert(start, edges);
+    }
+
+    let mut all_starts: Vec<u32> = plan_starts.into_iter().collect();
+    all_starts.sort_unstable();
+
+    // States: 0 = unvisited, 1 = on stack (visiting), 2 = done.
+    let mut state: HashMap<u32, u8> = HashMap::new();
+    let mut order: Vec<u32> = Vec::new();
+
+    // Iterative DFS via an explicit stack of (node, child_index). When all of
+    // a node's children are processed we move it from "visiting" to "done"
+    // and push it onto `order`. Recursion would be simpler but risks stack
+    // overflow on pathological inputs.
+    for seed in all_starts {
+        if matches!(state.get(&seed).copied(), Some(2)) {
+            continue;
+        }
+        let mut stack: Vec<(u32, usize)> = vec![(seed, 0)];
+        state.insert(seed, 1);
+        while let Some(&(node, idx)) = stack.last() {
+            let children = deps.get(&node).map(Vec::as_slice).unwrap_or(&[]);
+            if idx < children.len() {
+                let child = children[idx];
+                stack.last_mut().unwrap().1 += 1;
+                match state.get(&child).copied() {
+                    Some(2) => {} // already emitted
+                    Some(1) => {} // cycle — skip back-edge
+                    _ => {
+                        state.insert(child, 1);
+                        stack.push((child, 0));
+                    }
+                }
+            } else {
+                state.insert(node, 2);
+                order.push(node);
+                stack.pop();
+            }
+        }
+    }
+
+    order
 }
 
 /// Compute the effective start of a class statement, ignoring trailing
@@ -205,47 +310,32 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
     })
 }
 
-/// Information about a top-level binding declaration's location.
-#[derive(Clone, Copy)]
-struct BindingInfo {
-    stmt_start: u32,
-    stmt_end: u32,
-    delete_end: u32,
-}
-
 /// Walk top-level statements and index every variable binding identifier
-/// they declare. Multiple identifiers from a combined declaration
-/// (`const A = 1, B = 2;`) share the same statement span — hoisting one
-/// hoists the whole statement, which is harmless because the other bindings
-/// come along for the ride.
+/// they declare, returning two complementary maps:
+/// * `binding_to_stmt`: identifier name → containing statement's `start`. Used
+///   to look up hoist info from an identifier reference.
+/// * `stmt_info`: statement `start` → end/delete bounds and the union of
+///   identifier references across every declarator's initializer. Used to
+///   drive transitive hoisting and the topological sort.
 ///
 /// Only `VariableDeclaration` (const/let/var) and the `export` form of it are
 /// considered:
-///
 /// * `function` declarations are fully hoisted by the JavaScript runtime
 ///   already (their bodies are available before their textual position), so
 ///   they never trigger TDZ.
-/// * Class declarations are intentionally skipped here because hoisting them
-///   would race the rest of the transform pipeline, which inserts static
-///   fields and surrounding declarations at the class's original position.
-///   Deleting the class's source range would clobber those inserts.
-///   Forward-referenced classes are rare in real Angular code and out of
-///   scope for this fix.
+/// * Class declarations are intentionally skipped because hoisting them would
+///   race the rest of the transform pipeline, which inserts static fields and
+///   surrounding declarations at the class's original position. Deleting the
+///   class's source range would clobber those inserts.
 fn collect_top_level_bindings<'a>(
     program: &Program<'a>,
     source: &str,
-) -> HashMap<&'a str, BindingInfo> {
+) -> (HashMap<&'a str, u32>, HashMap<u32, StmtInfo<'a>>) {
     let bytes = source.as_bytes();
-    let mut out: HashMap<&'a str, BindingInfo> = HashMap::new();
+    let mut binding_to_stmt: HashMap<&'a str, u32> = HashMap::new();
+    let mut stmt_info: HashMap<u32, StmtInfo<'a>> = HashMap::new();
 
     for stmt in &program.body {
-        let stmt_span = stmt.span();
-        let info = BindingInfo {
-            stmt_start: stmt_span.start,
-            stmt_end: stmt_span.end,
-            delete_end: end_with_trailing_newline(stmt_span.end, bytes),
-        };
-
         let decl = match stmt {
             Statement::VariableDeclaration(decl) => Some(decl.as_ref()),
             Statement::ExportNamedDeclaration(export) => match &export.declaration {
@@ -254,28 +344,30 @@ fn collect_top_level_bindings<'a>(
             },
             _ => None,
         };
-
         let Some(decl) = decl else { continue };
+
+        let span = stmt.span();
+        let stmt_start = span.start;
+        let mut info = StmtInfo {
+            stmt_end: span.end,
+            delete_end: end_with_trailing_newline(span.end, bytes),
+            init_idents: HashSet::new(),
+        };
+
         for declarator in &decl.declarations {
-            add_binding_names(&declarator.id, info, &mut out);
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id {
+                binding_to_stmt.insert(id.name.as_str(), stmt_start);
+            }
+            // Destructuring patterns are deliberately ignored — see
+            // collect_top_level_bindings docstring above.
+            if let Some(init) = &declarator.init {
+                collect_expr_idents(init, &mut info.init_idents);
+            }
         }
+        stmt_info.insert(stmt_start, info);
     }
 
-    out
-}
-
-/// Extract identifier names from a binding pattern. We only handle plain
-/// identifier patterns — anything destructured (`const { a } = x;`) is left
-/// alone because hoisting destructuring would change observable behavior if
-/// the right-hand side has side effects.
-fn add_binding_names<'a>(
-    pat: &BindingPattern<'a>,
-    info: BindingInfo,
-    out: &mut HashMap<&'a str, BindingInfo>,
-) {
-    if let BindingPattern::BindingIdentifier(id) = pat {
-        out.insert(id.name.as_str(), info);
-    }
+    (binding_to_stmt, stmt_info)
 }
 
 /// Advance `end` past one trailing line terminator so that deleting the
@@ -362,7 +454,7 @@ fn collect_expr_idents<'a>(expr: &Expression<'a>, out: &mut HashSet<&'a str>) {
             }
         }
         E::CallExpression(call) => {
-            collect_callee_idents(&call.callee, out);
+            collect_expr_idents(&call.callee, out);
             for arg in &call.arguments {
                 match arg {
                     Argument::SpreadElement(s) => collect_expr_idents(&s.argument, out),
@@ -454,10 +546,6 @@ fn collect_expr_idents<'a>(expr: &Expression<'a>, out: &mut HashSet<&'a str>) {
         // Literals and `this`/`super` carry no identifier references.
         _ => {}
     }
-}
-
-fn collect_callee_idents<'a>(callee: &Expression<'a>, out: &mut HashSet<&'a str>) {
-    collect_expr_idents(callee, out);
 }
 
 fn collect_array_element_idents<'a>(el: &ArrayExpressionElement<'a>, out: &mut HashSet<&'a str>) {
