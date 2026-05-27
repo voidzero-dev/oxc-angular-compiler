@@ -9,8 +9,8 @@ use std::path::Path;
 
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
-    Argument, Declaration, ExportDefaultDeclarationKind, Expression,
-    ImportDeclarationSpecifier, ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
+    Argument, Declaration, ExportDefaultDeclarationKind, Expression, ImportDeclarationSpecifier,
+    ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -1195,8 +1195,7 @@ fn build_jit_decorator_text<'a>(
                             {
                                 let import_name =
                                     format!("__NG_CLI_RESOURCE__{}", *resource_counter);
-                                let specifier =
-                                    format!("angular:jit:style:file;{}", url.as_str());
+                                let specifier = format!("angular:jit:style:file;{}", url.as_str());
                                 resource_imports.push((import_name.clone(), specifier));
                                 style_refs.push(import_name);
                                 *resource_counter += 1;
