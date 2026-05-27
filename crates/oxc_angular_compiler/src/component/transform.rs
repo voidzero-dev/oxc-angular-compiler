@@ -2052,6 +2052,7 @@ pub fn transform_angular_file(
                                             Some(source),
                                             Some(template),
                                             Some(metadata.styles.as_slice()),
+                                            Some(&string_consts),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,

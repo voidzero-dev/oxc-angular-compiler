@@ -533,7 +533,7 @@ fn literal_string_from_expression<'a>(expr: &Expression<'a>) -> Option<Ident<'a>
 /// string consts. Returns `None` if any interpolation can't be statically
 /// resolved to a string — matching Angular's all-or-nothing partial evaluator
 /// for static metadata fields.
-fn resolve_template_literal<'a>(
+pub(crate) fn resolve_template_literal<'a>(
     allocator: &'a Allocator,
     tpl: &TemplateLiteral<'a>,
     consts: &StringConsts<'a>,

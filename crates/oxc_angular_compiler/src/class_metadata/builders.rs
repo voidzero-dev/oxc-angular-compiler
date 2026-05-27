@@ -5,14 +5,15 @@
 
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
-    Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind, PropertyKey,
-    TSType, TSTypeName,
+    Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind,
+    ObjectPropertyKind, PropertyKey, TSType, TSTypeName,
 };
 use oxc_str::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::directive::{
-    R3InputMetadata, try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
+    R3InputMetadata, StringConsts, resolve_template_literal, try_parse_signal_input,
+    try_parse_signal_model, try_parse_signal_output,
 };
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
@@ -41,6 +42,7 @@ pub fn build_decorator_metadata_array<'a>(
     source_text: Option<&'a str>,
     inlined_template: Option<&'a str>,
     inlined_styles: Option<&[Ident<'a>]>,
+    consts: Option<&StringConsts<'a>>,
 ) -> OutputExpression<'a> {
     let mut decorator_entries = AllocVec::new_in(allocator);
 
@@ -110,6 +112,18 @@ pub fn build_decorator_metadata_array<'a>(
                             inlined_template,
                             inlined_styles,
                         );
+                        // Drop config fields whose value is a template literal with an
+                        // unresolvable `${…}` interpolation, matching the AOT `ɵcmp` path
+                        // (which drops e.g. an unresolved `selector`). Otherwise the raw
+                        // template literal would leak verbatim into `setClassMetadata`.
+                        if let Some(consts) = consts {
+                            drop_unresolvable_template_literal_fields(
+                                allocator,
+                                &mut converted,
+                                expr,
+                                consts,
+                            );
+                        }
                     }
                     args.push(converted);
                 }
@@ -241,6 +255,47 @@ fn inline_component_resources<'a>(
     }
 }
 
+/// Remove config fields from a converted `@Component` args map when the source
+/// value is a template literal whose `${…}` interpolation can't be statically
+/// resolved against `consts` (e.g. `selector: \`${UNRESOLVED}-tag\``).
+///
+/// Angular's partial evaluator (and OXC's AOT `ɵcmp` extraction) drops such
+/// fields rather than emitting a half-evaluated literal. Resolvable template
+/// literals are left untouched (converted as-is); only the unresolvable ones are
+/// dropped, so the raw `${…}` text never leaks into `setClassMetadata`.
+fn drop_unresolvable_template_literal_fields<'a>(
+    allocator: &'a Allocator,
+    converted: &mut OutputExpression<'a>,
+    source: &Expression<'a>,
+    consts: &StringConsts<'a>,
+) {
+    let Expression::ObjectExpression(obj) = source else {
+        return;
+    };
+    let OutputExpression::LiteralMap(map) = converted else {
+        return;
+    };
+
+    for property in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = property else {
+            continue;
+        };
+        let Expression::TemplateLiteral(tpl) = &prop.value else {
+            continue;
+        };
+        // An empty-interpolation template literal is a plain string — keep it.
+        if tpl.expressions.is_empty() {
+            continue;
+        }
+        if resolve_template_literal(allocator, tpl, consts).is_some() {
+            continue; // Resolvable — leave the converted value as-is.
+        }
+        if let Some(key) = get_property_key_name(&prop.key) {
+            map.entries.retain(|entry| entry.is_spread || entry.key != key);
+        }
+    }
+}
+
 /// Build a `template: "…"` map entry from the inlined content.
 fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> LiteralMapEntry<'a> {
     LiteralMapEntry::new(
@@ -310,6 +365,7 @@ pub fn build_ctor_params_metadata<'a>(
                 allocator,
                 &param_decorators,
                 source_text,
+                None,
                 None,
                 None,
             );
@@ -403,6 +459,7 @@ pub fn build_prop_decorators_metadata<'a>(
                 allocator,
                 &angular_decorators,
                 source_text,
+                None,
                 None,
                 None,
             );

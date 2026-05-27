@@ -1995,6 +1995,7 @@ pub fn compile_class_metadata_sync(
         Some(&source),
         None,
         None,
+        None,
     );
 
     // Build constructor parameters metadata
