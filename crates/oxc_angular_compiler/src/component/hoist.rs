@@ -1493,6 +1493,52 @@ impl<'a, 'b> FunctionBodyIdentVisitor<'a, 'b> {
             }
         }
     }
+
+    /// Index a nested named function (declaration or named expression)
+    /// keyed by its binding `SymbolId`: walk its body and parameter defaults
+    /// into a fresh `(refs, called)` pair and store it under
+    /// `local_fn_bodies`. The stored entry is folded into the surrounding
+    /// eager surface only when something invokes the function — see
+    /// `fold_local_fn_body_at_callee`.
+    ///
+    /// Idempotent: re-indexing a symbol overwrites the entry with the same
+    /// data, so the pre-pass + `visit_function` paths can both run without
+    /// duplicating work.
+    fn index_local_fn_body(
+        &mut self,
+        fn_symbol: SymbolId,
+        params: &FormalParameters<'a>,
+        body: Option<&oxc_ast::ast::FunctionBody<'a>>,
+    ) {
+        let mut refs: HashSet<SymbolId> = HashSet::new();
+        let mut called: HashSet<SymbolId> = HashSet::new();
+        if let Some(body) = body {
+            let mut scratch = FunctionBodyIdentVisitor::new(self.semantic, &mut refs, &mut called);
+            scratch.visit_function_body(body);
+        }
+        walk_param_defaults(params, self.semantic, &mut refs, &mut called);
+        self.local_fn_bodies.insert(fn_symbol, (refs, called));
+    }
+
+    /// Pre-pass: index every nested function declaration that appears in
+    /// the given statement list. Function declarations are hoisted within
+    /// the enclosing function/block scope, so a call may textually precede
+    /// the declaration. Indexing up front lets the source-order walk
+    /// resolve those calls at their fold-site.
+    fn index_hoisted_fn_declarations(
+        &mut self,
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) {
+        for stmt in statements {
+            if let Statement::FunctionDeclaration(func) = stmt {
+                if let Some(id) = &func.id {
+                    if let Some(fn_symbol) = id.symbol_id.get() {
+                        self.index_local_fn_body(fn_symbol, &func.params, func.body.as_deref());
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
@@ -1589,38 +1635,64 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         oxc_ast_visit::walk::walk_new_expression(self, it);
     }
 
-    // A *named* nested `Function` may be a local function declaration that
-    // gets called from the surrounding eagerly-evaluated body — e.g.
+    // A *named* nested `Function` (declaration or named function expression)
+    // may be a local function called from the surrounding eagerly-evaluated
+    // body — e.g.
     // `function outer() { function inner() { return TOKEN; } return inner(); }`.
-    // Its body therefore runs eagerly at outer's call time and must
-    // contribute identifier reads / callees to `self.out` / `self.called`.
-    // The local symbol won't be indexed in `fn_body_called_symbols`, so
-    // `close_eagerly_called` can't chase it; folding the body in here
-    // closes that gap.
+    // Its body runs eagerly only when something invokes it. Mirroring the
+    // local-arrow-binding pattern in `visit_variable_declarator`, index the
+    // body into `local_fn_bodies` keyed by the function's `SymbolId` and let
+    // the call-site fold (`fold_local_fn_body_at_callee`) bring the body
+    // refs into `self.out` / `self.called` only when the function is
+    // actually invoked. Walking the body unconditionally here would over-
+    // hoist bindings read by a declared-but-uncalled nested function.
     //
-    // Parameter defaults still need an explicit walk because the inner
-    // function's parameter defaults fire at *its* call sites — which, for
-    // local decls invoked inside the eager body, are themselves eager.
-    //
-    // Anonymous `Function` (`it.id == None`) — i.e. a function *expression*
-    // assigned to a value — remains lazy: it only runs when its value is
-    // invoked, which the outer body doesn't model. A `const x = function
-    // named() {...}` shape would be over-walked here, but over-counting only
-    // over-blocks hoisting (it never under-blocks) and disambiguating
-    // declaration vs. named expression requires extra scope-flag plumbing
-    // that isn't worth the cost.
+    // For nested function *declarations*, the JS hoisting rule means a call
+    // may textually precede the declaration. Source-order traversal can't
+    // resolve such a call by the time it visits it, so the pre-passes in
+    // `visit_function_body` / `visit_block_statement` index every nested
+    // function declaration in the current scope BEFORE walking statements.
+    // The duplicate indexing here is idempotent (HashMap insert overwrites
+    // with identical data) and also covers named function *expressions*
+    // (`x = function named() { ... }`), which the block pre-pass doesn't
+    // see.
     fn visit_function(
         &mut self,
         it: &oxc_ast::ast::Function<'a>,
-        flags: oxc_syntax::scope::ScopeFlags,
+        _flags: oxc_syntax::scope::ScopeFlags,
     ) {
-        if it.id.is_some() {
-            oxc_ast_visit::walk::walk_function(self, it, flags);
-            walk_param_defaults(&it.params, self.semantic, self.out, self.called);
+        if let Some(id) = &it.id {
+            if let Some(fn_symbol) = id.symbol_id.get() {
+                self.index_local_fn_body(fn_symbol, &it.params, it.body.as_deref());
+            }
         }
+        // Body intentionally not walked: the fold-at-call-site path replaces
+        // the unconditional walk that previously broke laziness for declared-
+        // but-uncalled nested functions.
     }
 
     fn visit_arrow_function_expression(&mut self, _it: &oxc_ast::ast::ArrowFunctionExpression<'a>) {
+    }
+
+    // Pre-pass: function declarations are hoisted within their enclosing
+    // function body, so a call to `inner()` may appear in source *before*
+    // `function inner() { ... }`. Scan the statement list first and index
+    // every nested function declaration; only then walk statements so the
+    // fold-at-call-site logic in `visit_call_expression` /
+    // `visit_new_expression` / `visit_tagged_template_expression` can
+    // resolve such calls.
+    fn visit_function_body(&mut self, it: &oxc_ast::ast::FunctionBody<'a>) {
+        self.index_hoisted_fn_declarations(&it.statements);
+        oxc_ast_visit::walk::walk_function_body(self, it);
+    }
+
+    // Block-scoped function declarations (`if (x) { function inner() { … } }`)
+    // are hoisted to the top of the block in modern JS. Apply the same
+    // pre-pass to nested block statements so a call earlier in the block
+    // can resolve the locally-hoisted function.
+    fn visit_block_statement(&mut self, it: &oxc_ast::ast::BlockStatement<'a>) {
+        self.index_hoisted_fn_declarations(&it.body);
+        oxc_ast_visit::walk::walk_block_statement(self, it);
     }
 
     // Class expressions inside an eagerly-called function body evaluate

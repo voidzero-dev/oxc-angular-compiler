@@ -11364,6 +11364,103 @@ const TOKEN = 'tok';
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 }
 
+/// Laziness sibling for *named* nested function declarations: inside an
+/// eagerly-called `make()`, a locally-declared `function unused()` reads
+/// `TOKEN`, but the function is never invoked. `make()` returns `[]`, so no
+/// eager read of `TOKEN` actually happens at decorator-eval time. The
+/// transform must NOT fold `unused`'s body into the eager surface — doing so
+/// would falsely hoist `TOKEN` above the class even though no value-passed
+/// reference fires.
+///
+/// The original source places `const TOKEN` after the class. With correct
+/// laziness, the transform leaves that ordering intact.
+#[test]
+fn component_eager_fn_body_uncalled_nested_fn_decl_does_not_force_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+function make() {
+  function unused() { return TOKEN; }
+  return [];
+}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+
+    assert!(
+        class_pos < token_pos,
+        "`const TOKEN` must NOT be hoisted: `unused` is declared but never \
+         called, so its body refs are lazy. class@{class_pos} \
+         token@{token_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// JS function declarations are hoisted inside their enclosing scope, so a
+/// call to `inner()` can appear in source *before* the `function inner()`
+/// declaration and still resolve at runtime. The visitor walks in source
+/// order, so it sees `return inner();` before it indexes `inner`. The
+/// fold-at-call-site path must therefore pre-index nested function
+/// declarations within each function body / block before walking the
+/// statements — otherwise the call site cannot resolve `inner` and `TOKEN`
+/// stays unhoisted.
+#[test]
+fn component_eager_fn_body_hoisted_fn_decl_call_still_chases() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+function make() {
+  return inner();
+  function inner() { return TOKEN; }
+}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read by a hoisted nested function declaration called \
+         from above its source position inside an eagerly-called function) \
+         must be hoisted above the class to avoid TDZ. token@{token_pos} \
+         class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
 /// The safe-skip guard must refuse to hoist a `var TOKEN = make()` initializer
 /// when the eagerly-called `make()`'s body reads a later-declared top-level
 /// class. Without the fix, hoisting `var TOKEN = make()` above
