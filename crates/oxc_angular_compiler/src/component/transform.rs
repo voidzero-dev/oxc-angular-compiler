@@ -464,17 +464,6 @@ pub type ImportMap<'a> = FxHashMap<Ident<'a>, ImportInfo<'a>>;
 ///   -> `is_named_import: true` (can use bare `DefaultService`)
 /// - Namespace imports: `import * as core from "@angular/core"`
 ///   -> `is_named_import: false` (need namespace prefix)
-/// Extract a `ModuleExportName` as a plain string slice when it's a textual
-/// name. Quoted-string export names (e.g., `import { "string-name" as foo }`)
-/// are not supported for deferrable resolution and return `None`.
-fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str> {
-    match name {
-        ModuleExportName::IdentifierName(id) => Some(id.name.as_str()),
-        ModuleExportName::IdentifierReference(id) => Some(id.name.as_str()),
-        ModuleExportName::StringLiteral(_) => None,
-    }
-}
-
 pub fn build_import_map<'a>(
     allocator: &'a Allocator,
     program_body: &[Statement<'a>],
@@ -587,6 +576,17 @@ pub fn build_import_map<'a>(
     }
 
     import_map
+}
+
+/// Extract a `ModuleExportName` as a plain string slice when it's a textual
+/// name. Quoted-string export names (e.g., `import { "string-name" as foo }`)
+/// are not supported for deferrable resolution and return `None`.
+fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str> {
+    match name {
+        ModuleExportName::IdentifierName(id) => Some(id.name.as_str()),
+        ModuleExportName::IdentifierReference(id) => Some(id.name.as_str()),
+        ModuleExportName::StringLiteral(_) => None,
+    }
 }
 
 /// Find the byte position (in the source) just after the last import statement.
