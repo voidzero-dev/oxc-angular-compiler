@@ -13083,6 +13083,118 @@ export class MyService {
     );
 }
 
+/// Regression for https://github.com/voidzero-dev/oxc-angular-compiler/issues/291.
+///
+/// `transformAngularFile` must surface external `templateUrl` / `styleUrls`
+/// paths in `result.dependencies` so build tools (the Vite plugin in
+/// particular) can register them as watch dependencies.
+#[test]
+fn test_resource_dependencies_reported_when_resolved() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-x',
+    templateUrl: './x.html',
+    styleUrls: ['./x.css', './shared.css'],
+    standalone: true,
+})
+export class XComponent {}
+"#;
+
+    let mut templates = std::collections::HashMap::new();
+    templates.insert("./x.html".to_string(), "<div>x</div>".to_string());
+    let mut styles = std::collections::HashMap::new();
+    styles.insert("./x.css".to_string(), vec![".x{color:red}".to_string()]);
+    styles.insert("./shared.css".to_string(), vec![".shared{}".to_string()]);
+    let resources = ResolvedResources { templates, styles };
+
+    let result =
+        transform_angular_file(&allocator, "x.component.ts", source, None, Some(&resources));
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.dependencies.contains(&"./x.html".to_string()),
+        "templateUrl should appear in dependencies, got: {:?}",
+        result.dependencies
+    );
+    assert!(
+        result.dependencies.contains(&"./x.css".to_string()),
+        "styleUrl ./x.css should appear in dependencies, got: {:?}",
+        result.dependencies
+    );
+    assert!(
+        result.dependencies.contains(&"./shared.css".to_string()),
+        "styleUrl ./shared.css should appear in dependencies, got: {:?}",
+        result.dependencies
+    );
+}
+
+/// Regression for https://github.com/voidzero-dev/oxc-angular-compiler/issues/291.
+///
+/// External resource paths must be reported in `result.dependencies` even when
+/// no `ResolvedResources` map is supplied. Build tools call the compiler from
+/// their loader, and they need to know which sibling files to watch *before*
+/// they can pre-load and supply the resource contents. Returning an empty
+/// `dependencies` list when `resolvedResources` is `None` silently breaks HMR.
+#[test]
+fn test_resource_dependencies_reported_without_resolved_resources() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-x',
+    templateUrl: './x.html',
+    styleUrls: ['./x.css', './shared.css'],
+    standalone: true,
+})
+export class XComponent {}
+"#;
+
+    // No ResolvedResources passed — mirrors the path build tools hit on the
+    // first transform pass before they've discovered the sibling files.
+    let result = transform_angular_file(&allocator, "x.component.ts", source, None, None);
+
+    assert!(
+        result.dependencies.contains(&"./x.html".to_string()),
+        "templateUrl must be reported in dependencies even when unresolved, got: {:?}",
+        result.dependencies
+    );
+    assert!(
+        result.dependencies.contains(&"./x.css".to_string())
+            && result.dependencies.contains(&"./shared.css".to_string()),
+        "styleUrls must be reported in dependencies even when unresolved, got: {:?}",
+        result.dependencies
+    );
+}
+
+/// styleUrls must be tracked even when the component uses an inline
+/// `template:` string. styles and templates are independent resource axes.
+#[test]
+fn test_inline_template_with_external_styles_reports_style_dependencies() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-x',
+    template: '<div>inline</div>',
+    styleUrl: './x.css',
+    standalone: true,
+})
+export class XComponent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "x.component.ts", source, None, None);
+    assert!(
+        result.dependencies.contains(&"./x.css".to_string()),
+        "styleUrl alongside an inline template must still appear in dependencies, got: {:?}",
+        result.dependencies
+    );
+}
+
 /// Regression for https://github.com/voidzero-dev/oxc-angular-compiler/issues/290.
 ///
 /// A `@Component` template like `<div><span></div>` used to compile silently —
