@@ -1285,7 +1285,9 @@ fn synthesize_signal_api_decorators(
                 return std::vec::Vec::new();
             }
             let decorator_name = match kind {
-                InitializerApiKind::ViewChild | InitializerApiKind::ViewChildRequired => "ViewChild",
+                InitializerApiKind::ViewChild | InitializerApiKind::ViewChildRequired => {
+                    "ViewChild"
+                }
                 InitializerApiKind::ViewChildren => "ViewChildren",
                 InitializerApiKind::ContentChild | InitializerApiKind::ContentChildRequired => {
                     "ContentChild"
@@ -1296,8 +1298,9 @@ fn synthesize_signal_api_decorators(
             // Mirror ngc query lowering: positional args carry over; isSignal is folded into
             // the options object (spreading the existing options if present).
             let Some(locator_arg) = call.arguments.first() else { return std::vec::Vec::new() };
-            let locator_text =
-                source[locator_arg.span().start as usize..locator_arg.span().end as usize].to_string();
+            let locator_text = source
+                [locator_arg.span().start as usize..locator_arg.span().end as usize]
+                .to_string();
             let options_text = if let Some(opts_arg) = call.arguments.get(1) {
                 let opts_src =
                     &source[opts_arg.span().start as usize..opts_arg.span().end as usize];

@@ -36,10 +36,7 @@ fn component(body: &str, imports: &str) -> String {
 #[test]
 fn input_initializer_emits_synthesized_input_prop_decorator() {
     let out = compile_jit(&component("  readonly value = input(0);", "input"));
-    assert!(
-        out.contains("propDecorators"),
-        "JIT output should emit propDecorators. Got:\n{out}"
-    );
+    assert!(out.contains("propDecorators"), "JIT output should emit propDecorators. Got:\n{out}");
     assert!(out.contains("value:"), "field name should be a propDecorators key. Got:\n{out}");
     assert!(out.contains("type: Input"), "synthesized @Input missing. Got:\n{out}");
     assert!(out.contains("isSignal: true"), "isSignal flag missing. Got:\n{out}");
@@ -51,15 +48,16 @@ fn input_initializer_emits_synthesized_input_prop_decorator() {
 fn input_required_marks_required_true() {
     let out = compile_jit(&component("  readonly value = input.required<string>();", "input"));
     assert!(out.contains("type: Input"), "Got:\n{out}");
-    assert!(out.contains("required: true"), "input.required() should set required: true. Got:\n{out}");
+    assert!(
+        out.contains("required: true"),
+        "input.required() should set required: true. Got:\n{out}"
+    );
 }
 
 #[test]
 fn input_with_alias_option_uses_provided_alias() {
-    let out = compile_jit(&component(
-        "  readonly value = input(0, { alias: 'publicName' });",
-        "input",
-    ));
+    let out =
+        compile_jit(&component("  readonly value = input(0, { alias: 'publicName' });", "input"));
     assert!(out.contains("alias: \"publicName\""), "alias from options not honored. Got:\n{out}");
 }
 
@@ -115,13 +113,19 @@ fn model_synthesizes_input_and_output_pair() {
     assert!(out.contains("type: Input"), "@Input half of model() missing. Got:\n{out}");
     assert!(out.contains("type: Output"), "@Output half of model() missing. Got:\n{out}");
     // Output alias is `<input>Change` (matches ngc behavior).
-    assert!(out.contains("\"valueChange\""), "model's output alias `<name>Change` missing. Got:\n{out}");
+    assert!(
+        out.contains("\"valueChange\""),
+        "model's output alias `<name>Change` missing. Got:\n{out}"
+    );
 }
 
 #[test]
 fn model_required_propagates_required_to_input() {
     let out = compile_jit(&component("  readonly value = model.required<string>();", "model"));
-    assert!(out.contains("required: true"), "model.required() should set Input.required. Got:\n{out}");
+    assert!(
+        out.contains("required: true"),
+        "model.required() should set Input.required. Got:\n{out}"
+    );
 }
 
 #[test]
