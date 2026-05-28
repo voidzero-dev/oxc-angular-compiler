@@ -1409,13 +1409,35 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         oxc_ast_visit::walk::walk_new_expression(self, it);
     }
 
-    // Nested function/arrow expressions only execute when *they* are called,
-    // not when the enclosing function is. Don't descend.
+    // A *named* nested `Function` may be a local function declaration that
+    // gets called from the surrounding eagerly-evaluated body — e.g.
+    // `function outer() { function inner() { return TOKEN; } return inner(); }`.
+    // Its body therefore runs eagerly at outer's call time and must
+    // contribute identifier reads / callees to `self.out` / `self.called`.
+    // The local symbol won't be indexed in `fn_body_called_symbols`, so
+    // `close_eagerly_called` can't chase it; folding the body in here
+    // closes that gap.
+    //
+    // Parameter defaults still need an explicit walk because the inner
+    // function's parameter defaults fire at *its* call sites — which, for
+    // local decls invoked inside the eager body, are themselves eager.
+    //
+    // Anonymous `Function` (`it.id == None`) — i.e. a function *expression*
+    // assigned to a value — remains lazy: it only runs when its value is
+    // invoked, which the outer body doesn't model. A `const x = function
+    // named() {...}` shape would be over-walked here, but over-counting only
+    // over-blocks hoisting (it never under-blocks) and disambiguating
+    // declaration vs. named expression requires extra scope-flag plumbing
+    // that isn't worth the cost.
     fn visit_function(
         &mut self,
-        _it: &oxc_ast::ast::Function<'a>,
-        _flags: oxc_syntax::scope::ScopeFlags,
+        it: &oxc_ast::ast::Function<'a>,
+        flags: oxc_syntax::scope::ScopeFlags,
     ) {
+        if it.id.is_some() {
+            oxc_ast_visit::walk::walk_function(self, it, flags);
+            walk_param_defaults(&it.params, self.semantic, self.out, self.called);
+        }
     }
 
     fn visit_arrow_function_expression(&mut self, _it: &oxc_ast::ast::ArrowFunctionExpression<'a>) {
