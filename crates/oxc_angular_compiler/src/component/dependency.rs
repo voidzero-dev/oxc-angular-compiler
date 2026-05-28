@@ -60,6 +60,15 @@ pub struct R3DependencyMetadata<'a> {
 
     /// Whether `@SkipSelf()` decorator is present.
     pub skip_self: bool,
+
+    /// Whether this dependency's token came from a type-only import
+    /// (`import type { X }` or `import { type X }`).
+    ///
+    /// Such imports are erased at runtime, so the token cannot be resolved to a
+    /// value. When this flag is set on any constructor dependency, the factory
+    /// as a whole becomes `ɵɵinvalidFactory()` — matching Angular's
+    /// `ValueUnavailableKind.TYPE_ONLY_IMPORT` behaviour. See issue #288.
+    pub type_only_invalid: bool,
 }
 
 impl<'a> R3DependencyMetadata<'a> {
@@ -74,6 +83,7 @@ impl<'a> R3DependencyMetadata<'a> {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         }
     }
 
@@ -88,6 +98,25 @@ impl<'a> R3DependencyMetadata<'a> {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
+        }
+    }
+
+    /// Create an invalid dependency caused by a type-only import.
+    ///
+    /// Used when a constructor parameter's type annotation resolves to a
+    /// type-only import. The whole factory must become `ɵɵinvalidFactory()`.
+    pub fn type_only_invalid() -> Self {
+        Self {
+            token: None,
+            token_source_module: None,
+            has_named_import: false,
+            attribute_name: None,
+            host: false,
+            optional: false,
+            self_: false,
+            skip_self: false,
+            type_only_invalid: true,
         }
     }
 
@@ -126,6 +155,7 @@ impl<'a> R3DependencyMetadata<'a> {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         }
     }
 

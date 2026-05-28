@@ -964,16 +964,26 @@ fn extract_param_dependency<'a>(
     // Build the dependency metadata
     let mut dep = match &token {
         Some(token_name) => {
-            let mut d = R3DependencyMetadata::new(token_name.clone());
             // Look up the token in the import map to find its source module and import type
             if let Some(import_info) = import_map.get(token_name) {
-                d.token_source_module = Some(import_info.source_module.clone());
-                // Always use namespace imports for DI tokens (has_named_import = false).
-                // Import elision removes @Inject(TOKEN) argument imports since they're
-                // only used in decorator positions that get compiled away.
-                // Using bare TOKEN would fail at runtime because the import is gone.
+                if import_info.is_type_only {
+                    // Type-only imports (`import type { X }` / `import { type X }`)
+                    // are erased at runtime and cannot be used as DI tokens. The whole
+                    // factory must collapse to `ɵɵinvalidFactory()` — matching Angular's
+                    // `ValueUnavailableKind.TYPE_ONLY_IMPORT`. See issue #288.
+                    R3DependencyMetadata::type_only_invalid()
+                } else {
+                    let mut d = R3DependencyMetadata::new(token_name.clone());
+                    d.token_source_module = Some(import_info.source_module.clone());
+                    // Always use namespace imports for DI tokens (has_named_import = false).
+                    // Import elision removes @Inject(TOKEN) argument imports since they're
+                    // only used in decorator positions that get compiled away.
+                    // Using bare TOKEN would fail at runtime because the import is gone.
+                    d
+                }
+            } else {
+                R3DependencyMetadata::new(token_name.clone())
             }
-            d
         }
         None => R3DependencyMetadata::invalid(),
     };

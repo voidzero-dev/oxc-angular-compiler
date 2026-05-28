@@ -573,6 +573,16 @@ fn resolve_factory_dep_namespaces<'a>(
         let name = &var.name;
         // Look up this identifier in the import map
         let Some(import_info) = import_map.get(name) else { continue };
+        if import_info.is_type_only {
+            // Type-only imports (`import type { X }` / `import { type X }`) are erased
+            // at runtime, so they cannot be used as DI tokens. Flag the dep so the
+            // factory collapses to `ɵɵinvalidFactory()` and avoid registering a
+            // namespace that would otherwise add a runtime import for the module.
+            // See issue #288.
+            dep.token = None;
+            dep.type_only_invalid = true;
+            continue;
+        }
         // Replace with namespace-prefixed reference: i1.Store instead of Store
         let namespace = namespace_registry.get_or_assign(&import_info.source_module);
         dep.token = Some(OutputExpression::ReadProp(oxc_allocator::Box::new_in(

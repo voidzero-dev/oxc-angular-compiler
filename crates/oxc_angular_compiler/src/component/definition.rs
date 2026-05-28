@@ -36,6 +36,39 @@ use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
 use crate::pipeline::emit::HostBindingCompilationResult;
 use crate::pipeline::selector::{parse_selector_to_r3_selector, r3_selector_to_output_expr};
 
+/// Create an `i0.ɵɵinvalidFactory()` call expression.
+///
+/// Used when constructor dependencies cannot be resolved at runtime (e.g.,
+/// a type-only import was used as a DI token).
+fn create_invalid_factory_call(allocator: &Allocator) -> OutputExpression<'_> {
+    let fn_expr = OutputExpression::ReadProp(Box::new_in(
+        ReadPropExpr {
+            receiver: Box::new_in(
+                OutputExpression::ReadVar(Box::new_in(
+                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    allocator,
+                )),
+                allocator,
+            ),
+            name: Ident::from(Identifiers::INVALID_FACTORY),
+            optional: false,
+            source_span: None,
+        },
+        allocator,
+    ));
+
+    OutputExpression::InvokeFunction(Box::new_in(
+        InvokeFunctionExpr {
+            fn_expr: Box::new_in(fn_expr, allocator),
+            args: OxcVec::new_in(allocator),
+            pure: false,
+            optional: false,
+            source_span: None,
+        },
+        allocator,
+    ))
+}
+
 /// Result of generating component definitions.
 pub struct ComponentDefinitions<'a> {
     /// The ɵcmp definition (component metadata for Angular runtime).
@@ -627,6 +660,25 @@ fn generate_constructor_factory<'a>(
         },
         allocator,
     ));
+
+    // If any constructor parameter resolved to a type-only import, the whole
+    // factory cannot be formed at runtime. Emit `i0.ɵɵinvalidFactory()` instead
+    // of a `new ClassCtor(...)` expression — matching Angular's
+    // `ValueUnavailableKind.TYPE_ONLY_IMPORT` behaviour. See issue #288.
+    if deps.iter().any(|d| d.type_only_invalid) {
+        statements.push(OutputStatement::Expression(Box::new_in(
+            crate::output::ast::ExpressionStatement {
+                expr: create_invalid_factory_call(allocator),
+                source_span: None,
+            },
+            allocator,
+        )));
+
+        return OutputExpression::Function(Box::new_in(
+            FunctionExpr { name: Some(fn_name), params, statements, source_span: None },
+            allocator,
+        ));
+    }
 
     // Compile constructor dependencies if any
     // Uses FactoryTarget::Component for components
