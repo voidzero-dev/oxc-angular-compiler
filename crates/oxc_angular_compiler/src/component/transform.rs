@@ -1013,14 +1013,14 @@ fn extract_all_jit_member_decorators(
     let mut non_angular_members: std::vec::Vec<JitNonAngularMemberDecorator> = std::vec::Vec::new();
 
     for element in &class.body.body {
-        let (member_name, is_static, is_property, decorators) = match element {
+        let (member_name, is_static, is_property, decorators, initializer) = match element {
             ClassElement::PropertyDefinition(prop) => {
                 let name = match &prop.key {
                     PropertyKey::StaticIdentifier(id) => id.name.to_string(),
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, prop.r#static, true, &prop.decorators)
+                (name, prop.r#static, true, &prop.decorators, prop.value.as_ref())
             }
             ClassElement::MethodDefinition(method) => {
                 if method.kind == MethodDefinitionKind::Constructor {
@@ -1031,7 +1031,7 @@ fn extract_all_jit_member_decorators(
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, method.r#static, false, &method.decorators)
+                (name, method.r#static, false, &method.decorators, None)
             }
             ClassElement::AccessorProperty(accessor) => {
                 let name = match &accessor.key {
@@ -1039,13 +1039,15 @@ fn extract_all_jit_member_decorators(
                     PropertyKey::StringLiteral(s) => s.value.to_string(),
                     _ => continue,
                 };
-                (name, accessor.r#static, false, &accessor.decorators)
+                (name, accessor.r#static, false, &accessor.decorators, None)
             }
             _ => continue,
         };
 
         let mut angular_decs: std::vec::Vec<JitParamDecorator> = std::vec::Vec::new();
         let mut non_angular_texts: std::vec::Vec<String> = std::vec::Vec::new();
+        let mut explicit_field_decorators: rustc_hash::FxHashSet<String> =
+            rustc_hash::FxHashSet::default();
 
         for decorator in decorators {
             let (dec_name, call_args) = match &decorator.expression {
@@ -1070,6 +1072,7 @@ fn extract_all_jit_member_decorators(
 
             if ANGULAR_FIELD_DECORATORS.contains(&dec_name.as_str()) {
                 // Angular field decorator → goes into propDecorators
+                explicit_field_decorators.insert(dec_name.clone());
                 angular_decs.push(JitParamDecorator { name: dec_name, args: call_args });
             } else if !ANGULAR_DECORATOR_NAMES.contains(&dec_name.as_str()) {
                 // Non-Angular decorator → goes into __decorate() call
@@ -1079,6 +1082,21 @@ fn extract_all_jit_member_decorators(
             }
             // Angular non-field decorators (e.g. @Inject on a member) are silently dropped
             // since they have no meaningful effect on members.
+        }
+
+        // Signal initializer-API lowering: synthesize @Input / @Output / @ViewChild / etc.
+        // decorators from `input()`, `output()`, `model()`, `viewChild*()`, `contentChild*()`
+        // initializers so the runtime JIT facade can discover them via `propDecorators`.
+        // Mirrors `packages/compiler-cli/src/ngtsc/transform/jit/src/initializer_api_transforms/`.
+        // When an explicit matching decorator already exists, the explicit one wins.
+        if let Some(init) = initializer {
+            let synthesized = synthesize_signal_api_decorators(
+                source,
+                init,
+                &member_name,
+                &explicit_field_decorators,
+            );
+            angular_decs.extend(synthesized);
         }
 
         if !angular_decs.is_empty() {
@@ -1099,6 +1117,233 @@ fn extract_all_jit_member_decorators(
     }
 
     (angular_members, non_angular_members)
+}
+
+/// Strip `as`/`satisfies`/parenthesized wrappers around an initializer expression,
+/// mirroring ngc's `tryParseInitializerApi` (e.g. `x = input(0) as any`, `x = (input(0))`).
+fn unwrap_jit_initializer<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::TSAsExpression(e) => unwrap_jit_initializer(&e.expression),
+        Expression::TSSatisfiesExpression(e) => unwrap_jit_initializer(&e.expression),
+        Expression::ParenthesizedExpression(e) => unwrap_jit_initializer(&e.expression),
+        _ => expr,
+    }
+}
+
+/// Recognized initializer API kinds. Used to dispatch synthesis.
+#[derive(Debug, Clone, Copy)]
+enum InitializerApiKind {
+    Input,
+    InputRequired,
+    Output,
+    OutputFromObservable,
+    Model,
+    ModelRequired,
+    ViewChild,
+    ViewChildRequired,
+    ViewChildren,
+    ContentChild,
+    ContentChildRequired,
+    ContentChildren,
+}
+
+/// Identify which initializer API a call expression represents.
+///
+/// Handles three call shapes:
+/// - bare identifier: `input(...)`, `output(...)`
+/// - `.required` member: `input.required(...)`, `model.required(...)`
+/// - namespaced: `core.input(...)`, `core.viewChild.required(...)`
+fn classify_initializer_api(callee: &Expression<'_>) -> Option<InitializerApiKind> {
+    fn match_name(name: &str) -> Option<InitializerApiKind> {
+        match name {
+            "input" => Some(InitializerApiKind::Input),
+            "output" => Some(InitializerApiKind::Output),
+            "outputFromObservable" => Some(InitializerApiKind::OutputFromObservable),
+            "model" => Some(InitializerApiKind::Model),
+            "viewChild" => Some(InitializerApiKind::ViewChild),
+            "viewChildren" => Some(InitializerApiKind::ViewChildren),
+            "contentChild" => Some(InitializerApiKind::ContentChild),
+            "contentChildren" => Some(InitializerApiKind::ContentChildren),
+            _ => None,
+        }
+    }
+    fn required_variant(base: InitializerApiKind) -> Option<InitializerApiKind> {
+        match base {
+            InitializerApiKind::Input => Some(InitializerApiKind::InputRequired),
+            InitializerApiKind::Model => Some(InitializerApiKind::ModelRequired),
+            InitializerApiKind::ViewChild => Some(InitializerApiKind::ViewChildRequired),
+            InitializerApiKind::ContentChild => Some(InitializerApiKind::ContentChildRequired),
+            _ => None,
+        }
+    }
+
+    match callee {
+        Expression::Identifier(id) => match_name(id.name.as_str()),
+        Expression::StaticMemberExpression(member) => {
+            // `<base>.required` — find the underlying base API and promote it.
+            if member.property.name == "required" {
+                let base = match &member.object {
+                    Expression::Identifier(id) => match_name(id.name.as_str())?,
+                    Expression::StaticMemberExpression(inner) => {
+                        // Namespaced: `core.input.required`
+                        match_name(inner.property.name.as_str())?
+                    }
+                    _ => return None,
+                };
+                required_variant(base)
+            } else {
+                // Namespaced: `core.input(...)`. The outer property *is* the function name.
+                match &member.object {
+                    Expression::Identifier(_) => match_name(member.property.name.as_str()),
+                    _ => None,
+                }
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Inspect a property initializer; if it matches a recognized signal initializer API,
+/// return the synthesized `propDecorators` entries that JIT runtime needs.
+///
+/// `existing` contains the names of explicit field decorators already present on the
+/// property (e.g. `Input`, `Output`); we skip synthesis when the user-authored decorator
+/// already covers the binding (matches upstream behavior — explicit decorator wins).
+fn synthesize_signal_api_decorators(
+    source: &str,
+    initializer: &Expression<'_>,
+    field_name: &str,
+    existing: &rustc_hash::FxHashSet<String>,
+) -> std::vec::Vec<JitParamDecorator> {
+    let unwrapped = unwrap_jit_initializer(initializer);
+    let Expression::CallExpression(call) = unwrapped else { return std::vec::Vec::new() };
+    let Some(kind) = classify_initializer_api(&call.callee) else { return std::vec::Vec::new() };
+
+    match kind {
+        InitializerApiKind::Input | InitializerApiKind::InputRequired => {
+            if existing.contains("Input") {
+                return std::vec::Vec::new();
+            }
+            let required = matches!(kind, InitializerApiKind::InputRequired);
+            // input(initial, options?) → options is args[1]; input.required(options?) → args[0].
+            let options_index = if required { 0 } else { 1 };
+            let alias = extract_string_option(call, options_index, "alias")
+                .unwrap_or_else(|| field_name.to_string());
+            let args = format!(
+                "{{ isSignal: true, alias: \"{alias}\", required: {required}, transform: undefined }}",
+                alias = escape_js_string(&alias),
+                required = required,
+            );
+            std::vec::Vec::from([JitParamDecorator { name: "Input".to_string(), args: Some(args) }])
+        }
+        InitializerApiKind::Output | InitializerApiKind::OutputFromObservable => {
+            if existing.contains("Output") {
+                return std::vec::Vec::new();
+            }
+            // output(options?) → args[0]; outputFromObservable(source, options?) → args[1].
+            let options_index =
+                if matches!(kind, InitializerApiKind::OutputFromObservable) { 1 } else { 0 };
+            let alias = extract_string_option(call, options_index, "alias")
+                .unwrap_or_else(|| field_name.to_string());
+            let args = format!("\"{}\"", escape_js_string(&alias));
+            std::vec::Vec::from([JitParamDecorator {
+                name: "Output".to_string(),
+                args: Some(args),
+            }])
+        }
+        InitializerApiKind::Model | InitializerApiKind::ModelRequired => {
+            // model() is two bindings — block if either @Input or @Output is already present.
+            if existing.contains("Input") || existing.contains("Output") {
+                return std::vec::Vec::new();
+            }
+            let required = matches!(kind, InitializerApiKind::ModelRequired);
+            // Same arg layout as input.
+            let options_index = if required { 0 } else { 1 };
+            let alias = extract_string_option(call, options_index, "alias")
+                .unwrap_or_else(|| field_name.to_string());
+            let input_args = format!(
+                "{{ isSignal: true, alias: \"{alias}\", required: {required}, transform: undefined }}",
+                alias = escape_js_string(&alias),
+                required = required,
+            );
+            let output_args = format!("\"{}Change\"", escape_js_string(&alias));
+            std::vec::Vec::from([
+                JitParamDecorator { name: "Input".to_string(), args: Some(input_args) },
+                JitParamDecorator { name: "Output".to_string(), args: Some(output_args) },
+            ])
+        }
+        InitializerApiKind::ViewChild
+        | InitializerApiKind::ViewChildRequired
+        | InitializerApiKind::ViewChildren
+        | InitializerApiKind::ContentChild
+        | InitializerApiKind::ContentChildRequired
+        | InitializerApiKind::ContentChildren => {
+            // Any existing query decorator blocks all query synthesis on this field.
+            const QUERY_DECS: &[&str] =
+                &["ViewChild", "ViewChildren", "ContentChild", "ContentChildren"];
+            if QUERY_DECS.iter().any(|d| existing.contains(*d)) {
+                return std::vec::Vec::new();
+            }
+            let decorator_name = match kind {
+                InitializerApiKind::ViewChild | InitializerApiKind::ViewChildRequired => "ViewChild",
+                InitializerApiKind::ViewChildren => "ViewChildren",
+                InitializerApiKind::ContentChild | InitializerApiKind::ContentChildRequired => {
+                    "ContentChild"
+                }
+                InitializerApiKind::ContentChildren => "ContentChildren",
+                _ => unreachable!(),
+            };
+            // Mirror ngc query lowering: positional args carry over; isSignal is folded into
+            // the options object (spreading the existing options if present).
+            let Some(locator_arg) = call.arguments.first() else { return std::vec::Vec::new() };
+            let locator_text =
+                source[locator_arg.span().start as usize..locator_arg.span().end as usize].to_string();
+            let options_text = if let Some(opts_arg) = call.arguments.get(1) {
+                let opts_src =
+                    &source[opts_arg.span().start as usize..opts_arg.span().end as usize];
+                format!("{{ ...{}, isSignal: true }}", opts_src)
+            } else {
+                "{ isSignal: true }".to_string()
+            };
+            let args = format!("{locator_text}, {options_text}");
+            std::vec::Vec::from([JitParamDecorator {
+                name: decorator_name.to_string(),
+                args: Some(args),
+            }])
+        }
+    }
+}
+
+/// Pull a string option (e.g. `alias`) from the object literal at `args[options_index]`.
+/// Returns `None` if the argument isn't an object literal or the option is missing/non-string.
+fn extract_string_option(
+    call: &oxc_ast::ast::CallExpression<'_>,
+    options_index: usize,
+    option_name: &str,
+) -> Option<String> {
+    let arg = call.arguments.get(options_index)?;
+    let Argument::ObjectExpression(obj) = arg else { return None };
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
+        let key_matches = match &prop.key {
+            PropertyKey::StaticIdentifier(id) => id.name.as_str() == option_name,
+            PropertyKey::StringLiteral(s) => s.value.as_str() == option_name,
+            _ => false,
+        };
+        if !key_matches {
+            continue;
+        }
+        if let Expression::StringLiteral(s) = &prop.value {
+            return Some(s.value.to_string());
+        }
+    }
+    None
+}
+
+/// Minimal JS-string escape for values embedded in synthesized propDecorator text.
+/// Property names are TS identifiers or string literals, so only `\` and `"` matter.
+fn escape_js_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// Build the propDecorators static property text for JIT member decorator metadata.
