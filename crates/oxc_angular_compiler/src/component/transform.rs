@@ -596,30 +596,26 @@ pub fn build_import_map<'a>(
 /// Build the list of `R3DeferPerComponentDependency` describing the
 /// `@Component.deferredImports` entries, used to emit `setClassMetadataAsync`.
 ///
-/// Each entry carries a `symbol_name` that is used twice in the emitted
+/// Each entry carries two names that serve distinct roles in the emitted
 /// output:
 ///
-/// 1. as the parameter name on the `setClassMetadataAsync` callback — so the
-///    decorator object literal's identifier references resolve to the
-///    callback parameter rather than the static import, and
-/// 2. for non-default named imports, as the property read in the resolver
-///    (`m.HeavyWidget` rather than `m.Heavy`). Default imports use `m.default`
-///    via the `is_default_import` flag regardless of `symbol_name`.
+/// - `param_name` — the local binding from the source file (e.g. `Heavy` for
+///   `import { HeavyWidget as Heavy }`, `LazyCmp` for
+///   `import LazyCmp from './lazy'`). Used as the parameter name on the
+///   `setClassMetadataAsync` callback so the wrapped decorator metadata
+///   literal's identifier references shadow the outer static import,
+///   allowing bundlers to drop the eager declaration.
+/// - `export_name` — the name under which the symbol is exported from its
+///   source module (e.g. `HeavyWidget` or `default`). Used as the property
+///   read in the dynamic-import resolver chain (`m.<export_name>`). For
+///   default imports the resolver substitutes `m.default` based on
+///   `is_default_import`, so the value here is informational in that case.
 ///
-/// This mirrors Angular's `getExportedName`
-/// (`packages/compiler-cli/src/ngtsc/reflection/src/typescript.ts:849`):
-///
-/// - For an `ImportSpecifier` (`import { Foo as Bar }`), it returns the
-///   `propertyName` (`Foo`) — the original exported name.
-/// - For any other declaration kind (default imports, namespace imports), it
-///   returns the local binding (`originalId.text`).
-///
-/// Default imports therefore *must* use the local binding as `symbol_name`:
-/// the literal string `"default"` is a JavaScript reserved word and would
-/// produce `(default) => { … }` — a `SyntaxError` — in the
-/// `setClassMetadataAsync` wrapper. The `m.default` property access is
-/// handled by the `is_default_import` branch in
-/// `compile_component_metadata_async_resolver`.
+/// Angular collapses both into a single `symbolName` field set to the
+/// exported name; that leaves the static `import { Foo as Bar }` pinned for
+/// aliased deferrable imports because the callback parameter (`Foo`) doesn't
+/// match the metadata body's reference (`Bar`). Splitting the fields here is
+/// a deliberate improvement on Angular's emission.
 ///
 /// Entries for unresolved symbols, namespace imports, and type-only imports
 /// are skipped — they have no concrete runtime value to lazy-load and the
@@ -636,20 +632,13 @@ fn build_defer_per_component_deps<'a>(
             continue;
         }
         let is_default_import = info.imported_name.as_deref() == Some("default");
-        let symbol_name = if is_default_import {
-            // Default imports: the callback parameter must be a legal JS
-            // identifier, so fall back to the local binding (e.g. `LazyCmp`).
-            // The `m.default` property access is emitted separately via the
-            // `is_default_import` flag.
-            local_name.clone()
-        } else {
-            // Aliased named imports (`import { Foo as Bar }`) → original
-            // `Foo`. Plain named imports → local name (which equals the
-            // exported name).
-            info.imported_name.clone().unwrap_or_else(|| local_name.clone())
-        };
+        // `export_name` is `info.imported_name` when present (aliased named
+        // imports or default imports), otherwise the local name (which
+        // equals the exported name for plain `import { Foo }`).
+        let export_name = info.imported_name.clone().unwrap_or_else(|| local_name.clone());
         deps.push(R3DeferPerComponentDependency {
-            symbol_name,
+            param_name: local_name.clone(),
+            export_name,
             import_path: info.source_module.clone(),
             is_default_import,
         });

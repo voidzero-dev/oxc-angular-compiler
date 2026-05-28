@@ -703,6 +703,20 @@ export class Parent {}
         !collapsed.contains("m.Heavy)") && !collapsed.contains("m.Heavy,"),
         "Aliased import must not resolve to the local alias `Heavy`. Output:\n{code}"
     );
+
+    // The `setClassMetadataAsync` callback parameter must use the *local*
+    // binding so the decorator metadata body's `Heavy` reference shadows the
+    // outer static import — letting bundlers drop the eager declaration.
+    // Angular emits `(HeavyWidget) =>` here and leaves the static import
+    // pinned; we diverge to enable tree-shaking.
+    assert!(
+        collapsed.contains("(Heavy)=>"),
+        "Expected `(Heavy) =>` callback parameter (local binding shadows static import). Output:\n{code}"
+    );
+    assert!(
+        !collapsed.contains("(HeavyWidget)=>"),
+        "Callback parameter must NOT be the original export name `HeavyWidget` (would leave the static import pinned). Output:\n{code}"
+    );
 }
 
 /// Default imports must use `m.default` in the resolver chain.
