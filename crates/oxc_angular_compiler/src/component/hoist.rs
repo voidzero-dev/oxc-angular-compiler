@@ -1662,7 +1662,16 @@ fn collect_expr_symbols<'a>(
             }
         }
         E::TaggedTemplateExpression(tagged) => {
+            // Mirror the call/new arms: a tagged template invokes the tag
+            // function eagerly, so direct, member-call (`fn.call`, `fn.apply`),
+            // and `fn.bind(...)` shapes must all enter `called`. Without the
+            // indirect/bind helpers here, `make.bind(null)\`...\`` in decorator
+            // metadata would record `make` as a value reference but never chase
+            // its body. Covers PR #302 Cursor Low #3314809112 / Codex P2
+            // #3314810080.
             record_direct_callee(&tagged.tag, semantic, called);
+            record_indirect_callee(&tagged.tag, semantic, called);
+            record_bind_callee(&tagged.tag, semantic, called);
             collect_expr_symbols(&tagged.tag, semantic, out, called);
             for e in &tagged.quasi.expressions {
                 collect_expr_symbols(e, semantic, out, called);

@@ -12206,3 +12206,45 @@ const TOKEN = 1;
         result.code
     );
 }
+
+/// Decorator metadata uses a tagged template whose tag is produced by
+/// `.bind` / `.call` / `.apply`. The tag function fires at class-definition
+/// time, so its body refs must enter the eagerly-called closure — same
+/// treatment `E::CallExpression` / `E::NewExpression` already get. Covers
+/// both Cursor Low #3314809112 (consistency with call/new arms) and Codex
+/// P2 #3314810080 (bound tagged-template callees) on PR #302.
+#[test]
+fn component_tagged_template_bind_tag_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make.bind(null)`hello` })
+class TestComponent {}
+function make() { return [{ provide: TOKEN, useValue: 0 }]; }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside `make`'s body, called via a `.bind`-tagged \
+         template in decorator metadata) must be hoisted above the class to avoid \
+         TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
