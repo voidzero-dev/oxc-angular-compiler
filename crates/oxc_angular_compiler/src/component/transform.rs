@@ -41,15 +41,16 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     extract_content_queries, extract_directive_metadata, extract_view_queries,
-    find_directive_decorator_span, generate_directive_definitions,
+    find_directive_decorator, find_directive_decorator_span, generate_directive_definitions,
 };
 use crate::dts;
 use crate::injectable::{
-    extract_injectable_metadata, find_injectable_decorator_span,
+    extract_injectable_metadata, find_injectable_decorator, find_injectable_decorator_span,
     generate_injectable_definition_from_decorator,
 };
 use crate::ng_module::{
-    extract_ng_module_metadata, find_ng_module_decorator_span, generate_full_ng_module_definition,
+    extract_ng_module_metadata, find_ng_module_decorator, find_ng_module_decorator_span,
+    generate_full_ng_module_definition,
 };
 use crate::output::ast::{
     DeclareFunctionStmt, FunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,
@@ -60,7 +61,8 @@ use crate::parser::ParseTemplateOptions;
 use crate::parser::expression::BindingParser;
 use crate::parser::html::{HtmlParser, remove_whitespaces};
 use crate::pipe::{
-    extract_pipe_metadata, find_pipe_decorator_span, generate_full_pipe_definition_from_decorator,
+    extract_pipe_metadata, find_pipe_decorator, find_pipe_decorator_span,
+    generate_full_pipe_definition_from_decorator,
 };
 use crate::pipeline::compilation::{DeferBlockDepsEmitMode, TemplateCompilationMode};
 use crate::pipeline::emit::{
@@ -671,6 +673,65 @@ fn find_last_import_end(program_body: &[Statement<'_>]) -> Option<usize> {
     }
 
     last_import_end.map(|pos| pos as usize)
+}
+
+/// Build the `ɵsetClassMetadata(...)` declaration string for a non-`@Component`
+/// decorated class (`@Directive`/`@Pipe`/`@Injectable`/`@NgModule`).
+///
+/// Mirrors the `@Component` metadata block (without template/style inlining):
+/// emits the decorator metadata, `ctorParameters` (reflected from the class, with
+/// imported token types namespace-prefixed via the import map), and prop decorators
+/// (real `@Input`/`@Output`/query plus synthesized initializer-API). Returns an
+/// empty string when metadata emission is disabled. Matches ngc, which emits
+/// `setClassMetadata` for all decorated classes (needed for TestBed overrides).
+#[allow(clippy::too_many_arguments)]
+fn build_set_class_metadata_decls<'a>(
+    allocator: &'a Allocator,
+    class: &oxc_ast::ast::Class<'a>,
+    class_name: &str,
+    decorator: &oxc_ast::ast::Decorator<'a>,
+    options: &TransformOptions,
+    source: &'a str,
+    string_consts: &crate::directive::StringConsts<'a>,
+    import_map: &ImportMap<'a>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+) -> String {
+    if !options.emit_class_metadata || options.advanced_optimizations {
+        return String::new();
+    }
+
+    let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
+        ReadVarExpr { name: Ident::from(class_name), source_span: None },
+        allocator,
+    ));
+    let class_metadata = R3ClassMetadata {
+        r#type: type_expr,
+        decorators: build_decorator_metadata_array(
+            allocator,
+            &[decorator],
+            Some(source),
+            None,
+            None,
+            Some(string_consts),
+        ),
+        ctor_parameters: build_ctor_params_metadata(
+            allocator,
+            class,
+            None,
+            namespace_registry,
+            import_map,
+            Some(source),
+        ),
+        prop_decorators: build_prop_decorators_metadata(
+            allocator,
+            class,
+            Some(source),
+            namespace_registry,
+        ),
+    };
+    let metadata_expr = compile_class_metadata(allocator, &class_metadata);
+    let emitter = JsEmitter::new();
+    format!("{};", emitter.emit_expression(&metadata_expr))
 }
 
 // ============================================================================
@@ -2053,6 +2114,7 @@ pub fn transform_angular_file(
                                             Some(source),
                                             Some(template),
                                             Some(metadata.styles.as_slice()),
+                                            Some(&string_consts),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
                                             allocator,
@@ -2066,6 +2128,7 @@ pub fn transform_angular_file(
                                             allocator,
                                             class,
                                             Some(source),
+                                            &mut file_namespace_registry,
                                         ),
                                     };
 
@@ -2234,13 +2297,33 @@ pub fn transform_angular_file(
                         .dts_declarations
                         .push(dts::generate_directive_dts(&directive_metadata, has_injectable));
 
+                    // Emit setClassMetadata for TestBed support (overrideDirective +
+                    // signal members), mirroring the @Component path.
+                    let decls_after_class = find_directive_decorator(&class.decorators)
+                        .map(|decorator| {
+                            build_set_class_metadata_decls(
+                                allocator,
+                                class,
+                                &class_name,
+                                decorator,
+                                options,
+                                source,
+                                &string_consts,
+                                &import_map,
+                                &mut file_namespace_registry,
+                            )
+                        })
+                        .unwrap_or_default();
+
                     class_positions.push((
                         class_name.clone(),
                         compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
                         class.body.span.end,
                     ));
-                    class_definitions
-                        .insert(class_name, (property_assignments, String::new(), String::new()));
+                    class_definitions.insert(
+                        class_name,
+                        (property_assignments, String::new(), decls_after_class),
+                    );
                 } else if let Some(mut pipe_metadata) =
                     extract_pipe_metadata(allocator, class, implicit_standalone, Some(source))
                 {
@@ -2310,6 +2393,23 @@ pub fn transform_angular_file(
                             has_injectable,
                         ));
 
+                        // Emit setClassMetadata for TestBed support (overridePipe).
+                        let decls_after_class = find_pipe_decorator(&class.decorators)
+                            .map(|decorator| {
+                                build_set_class_metadata_decls(
+                                    allocator,
+                                    class,
+                                    &class_name,
+                                    decorator,
+                                    options,
+                                    source,
+                                    &string_consts,
+                                    &import_map,
+                                    &mut file_namespace_registry,
+                                )
+                            })
+                            .unwrap_or_default();
+
                         class_positions.push((
                             class_name.clone(),
                             compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
@@ -2317,7 +2417,7 @@ pub fn transform_angular_file(
                         ));
                         class_definitions.insert(
                             class_name,
-                            (property_assignments, String::new(), String::new()),
+                            (property_assignments, String::new(), decls_after_class),
                         );
                     }
                 } else if let Some(mut ng_module_metadata) =
@@ -2401,6 +2501,28 @@ pub fn transform_angular_file(
                             has_injectable,
                         ));
 
+                        // Emit setClassMetadata for TestBed support (overrideModule),
+                        // appended after the NgModule's external declarations.
+                        if let Some(decorator) = find_ng_module_decorator(&class.decorators) {
+                            let metadata = build_set_class_metadata_decls(
+                                allocator,
+                                class,
+                                &class_name,
+                                decorator,
+                                options,
+                                source,
+                                &string_consts,
+                                &import_map,
+                                &mut file_namespace_registry,
+                            );
+                            if !metadata.is_empty() {
+                                if !external_decls.is_empty() {
+                                    external_decls.push('\n');
+                                }
+                                external_decls.push_str(&metadata);
+                            }
+                        }
+
                         // NgModule: external_decls go AFTER the class (they reference the class name)
                         class_positions.push((
                             class_name.clone(),
@@ -2460,6 +2582,23 @@ pub fn transform_angular_file(
                             type_argument_count,
                         ));
 
+                        // Emit setClassMetadata for TestBed support.
+                        let decls_after_class = find_injectable_decorator(&class.decorators)
+                            .map(|decorator| {
+                                build_set_class_metadata_decls(
+                                    allocator,
+                                    class,
+                                    &class_name,
+                                    decorator,
+                                    options,
+                                    source,
+                                    &string_consts,
+                                    &import_map,
+                                    &mut file_namespace_registry,
+                                )
+                            })
+                            .unwrap_or_default();
+
                         class_positions.push((
                             class_name.clone(),
                             compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
@@ -2467,7 +2606,7 @@ pub fn transform_angular_file(
                         ));
                         class_definitions.insert(
                             class_name,
-                            (property_assignments, String::new(), String::new()),
+                            (property_assignments, String::new(), decls_after_class),
                         );
                     }
                 }

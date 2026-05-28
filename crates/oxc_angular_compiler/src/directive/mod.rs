@@ -24,10 +24,11 @@ pub use compiler::{
     DirectiveCompileResult, compile_directive, compile_directive_from_metadata,
     create_inputs_literal, create_outputs_literal,
 };
-pub(crate) use decorator::extract_string_value;
+pub(crate) use decorator::find_directive_decorator;
 pub use decorator::{
     StringConsts, collect_string_consts, extract_directive_metadata, find_directive_decorator_span,
 };
+pub(crate) use decorator::{extract_string_value, resolve_template_literal};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
@@ -36,5 +37,9 @@ pub use metadata::{
 pub use property_decorators::{
     extract_content_queries, extract_host_bindings, extract_host_listeners, extract_input_metadata,
     extract_output_metadata, extract_view_queries,
+};
+pub(crate) use property_decorators::{
+    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
+    unwrap_initializer_api_expr,
 };
 pub use query::{create_content_queries_function, create_view_queries_function};

@@ -174,7 +174,9 @@ pub fn extract_pipe_metadata<'a>(
 }
 
 /// Find the @Pipe decorator in a list of decorators.
-fn find_pipe_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
+pub(crate) fn find_pipe_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+) -> Option<&'a Decorator<'a>> {
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_pipe_call(&call.callee),
         Expression::Identifier(id) => id.name == "Pipe",

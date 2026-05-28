@@ -22,7 +22,9 @@ use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
 
 /// Find the @Directive decorator in a list of decorators.
-fn find_directive_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
+pub(crate) fn find_directive_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+) -> Option<&'a Decorator<'a>> {
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_directive_call(&call.callee),
         Expression::Identifier(id) => id.name == "Directive",
@@ -533,7 +535,7 @@ fn literal_string_from_expression<'a>(expr: &Expression<'a>) -> Option<Ident<'a>
 /// string consts. Returns `None` if any interpolation can't be statically
 /// resolved to a string — matching Angular's all-or-nothing partial evaluator
 /// for static metadata fields.
-fn resolve_template_literal<'a>(
+pub(crate) fn resolve_template_literal<'a>(
     allocator: &'a Allocator,
     tpl: &TemplateLiteral<'a>,
     consts: &StringConsts<'a>,

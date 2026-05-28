@@ -17,6 +17,7 @@ mod definition;
 mod metadata;
 
 pub use compiler::{NgModuleCompileResult, compile_ng_module, compile_ng_module_from_metadata};
+pub(crate) use decorator::find_ng_module_decorator;
 pub use decorator::{NgModuleMetadata, extract_ng_module_metadata, find_ng_module_decorator_span};
 pub use definition::{
     FullNgModuleDefinition, NgModuleDefinition, emit_full_ng_module_definition,

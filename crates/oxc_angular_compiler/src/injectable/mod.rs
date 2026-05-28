@@ -17,6 +17,7 @@ mod definition;
 mod metadata;
 
 pub use compiler::{InjectableCompileResult, compile_injectable, compile_injectable_from_metadata};
+pub(crate) use decorator::find_injectable_decorator;
 pub use decorator::{
     DependencyMetadata, InjectableMetadata, ProvidedInValue, UseClassMetadata, UseExistingMetadata,
     UseFactoryMetadata, extract_injectable_metadata, find_injectable_decorator_span,

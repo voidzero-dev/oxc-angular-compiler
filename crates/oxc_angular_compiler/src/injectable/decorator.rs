@@ -204,6 +204,13 @@ fn convert_deps_to_r3<'a>(
     result
 }
 
+/// Find the `@Injectable` decorator node on a class.
+pub(crate) fn find_injectable_decorator<'a>(
+    decorators: &'a [oxc_ast::ast::Decorator<'a>],
+) -> Option<&'a oxc_ast::ast::Decorator<'a>> {
+    decorators.iter().find(|d| is_injectable_decorator(d))
+}
+
 /// Find the span of the `@Injectable` decorator on a class.
 pub fn find_injectable_decorator_span(class: &Class<'_>) -> Option<Span> {
     for decorator in &class.decorators {
