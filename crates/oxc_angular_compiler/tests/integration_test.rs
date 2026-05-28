@@ -13082,3 +13082,42 @@ export class MyService {
         "Injectable type-only DI param must produce `ɵɵinvalidFactory()`. Factory:\n{factory_section}"
     );
 }
+
+/// Regression for https://github.com/voidzero-dev/oxc-angular-compiler/issues/290.
+///
+/// A `@Component` template like `<div><span></div>` used to compile silently —
+/// `result.diagnostics` was empty even though `</div>` jumps past an unclosed
+/// `<span>`. The HTML parser now flags this exactly like Angular's reference
+/// parser, and the diagnostic must propagate all the way out to the file-level
+/// transform result so consumers (vite plugin, NAPI bindings) can surface it.
+#[test]
+fn test_malformed_template_surfaces_parse_diagnostic() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-bad',
+    template: '<div><span></div>',
+    standalone: true,
+})
+export class BadComponent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "bad.component.ts", source, None, None);
+
+    assert!(
+        result.has_errors(),
+        "Malformed template must produce diagnostics, but `result.diagnostics` was empty. Output:\n{}",
+        result.code
+    );
+    let mentions_unclosed = result.diagnostics.iter().any(|d| {
+        let s = format!("{d}");
+        s.contains("Unexpected closing tag \"div\"")
+    });
+    assert!(
+        mentions_unclosed,
+        "Diagnostic should call out the unexpected closing tag, got: {:?}",
+        result.diagnostics
+    );
+}

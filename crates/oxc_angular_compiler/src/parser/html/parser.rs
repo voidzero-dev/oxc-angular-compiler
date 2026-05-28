@@ -321,11 +321,17 @@ impl<'a> HtmlParser<'a> {
 
     /// Pops an element from the container stack matching the given tag name.
     /// If there are unclosed elements above the matching one, they are implicitly closed first.
+    ///
+    /// Returns the closed element node along with a boolean flag indicating whether any
+    /// implicitly-closed container above the matching one required an explicit end tag
+    /// (i.e. its tag definition does not have `closed_by_parent`, or it was a block).
+    /// Mirrors Angular's `_popContainer`, which surfaces this as an "Unexpected closing
+    /// tag" diagnostic on the closing tag itself.
     fn pop_element_container(
         &mut self,
         tag_name: &str,
         end_span: Option<Span>,
-    ) -> Option<HtmlNode<'a>> {
+    ) -> (Option<HtmlNode<'a>>, bool) {
         // Find the matching element in the stack and its element index
         let mut match_stack_idx = None;
         let mut match_elem_idx = None;
@@ -339,8 +345,14 @@ impl<'a> HtmlParser<'a> {
             }
         }
 
-        let match_stack_idx = match_stack_idx?;
-        let match_elem_idx = match_elem_idx?;
+        let Some(match_stack_idx) = match_stack_idx else {
+            return (None, false);
+        };
+        let Some(match_elem_idx) = match_elem_idx else {
+            return (None, false);
+        };
+
+        let mut unexpected_close_detected = false;
 
         // Implicitly close all containers above the matching one (in reverse order)
         while self.container_stack.len() > match_stack_idx + 1 {
@@ -349,6 +361,14 @@ impl<'a> HtmlParser<'a> {
             };
             match container {
                 ContainerIndex::Element(idx) => {
+                    // Only elements whose end tag is truly optional (closed_by_parent) may
+                    // be implicitly closed silently. Anything else means this end tag is
+                    // jumping past a still-open element, which is what Angular's reference
+                    // parser flags via `unexpectedCloseTagDetected`.
+                    let elem_name = self.elements[idx].name.as_str().to_lowercase();
+                    if !get_html_tag_definition(&elem_name).closed_by_parent {
+                        unexpected_close_detected = true;
+                    }
                     // Get the element without end_span (implicitly closed)
                     let element = std::mem::replace(
                         &mut self.elements[idx],
@@ -370,6 +390,8 @@ impl<'a> HtmlParser<'a> {
                     self.add_to_parent(HtmlNode::Element(Box::new_in(element, self.allocator)));
                 }
                 ContainerIndex::Block(idx) => {
+                    // Blocks are never implicitly closed by a parent end tag.
+                    unexpected_close_detected = true;
                     // Close blocks too (implicitly)
                     let block = std::mem::replace(
                         &mut self.blocks[idx],
@@ -413,7 +435,7 @@ impl<'a> HtmlParser<'a> {
             element.end_span = Some(es);
             element.span = Span::new(element.span.start, es.end);
         }
-        Some(HtmlNode::Element(Box::new_in(element, self.allocator)))
+        (Some(HtmlNode::Element(Box::new_in(element, self.allocator))), unexpected_close_detected)
     }
 
     /// Auto-closes elements that have optional end tags based on HTML5 rules.
@@ -432,8 +454,12 @@ impl<'a> HtmlParser<'a> {
             };
 
             if should_auto_close(&current_tag, new_tag) {
-                // Pop the current element and add it to its parent
-                if let Some(node) = self.pop_element_container(&current_tag, None) {
+                // Pop the current element and add it to its parent. Implicit auto-close
+                // from a new opening tag never produces an "unexpected close" diagnostic
+                // because the loop pops the top element on each iteration — there are no
+                // skipped containers above the match.
+                let (node, _) = self.pop_element_container(&current_tag, None);
+                if let Some(node) = node {
                     self.add_to_parent(node);
                 }
             } else {
@@ -684,7 +710,18 @@ impl<'a> HtmlParser<'a> {
         }
 
         // Pop the matching element from the stack
-        if let Some(node) = self.pop_element_container(&tag_name, Some(end_span)) {
+        let (node, unexpected_close) = self.pop_element_container(&tag_name, Some(end_span));
+        if let Some(node) = node {
+            if unexpected_close {
+                // Matching open tag exists, but at least one still-open container above it
+                // had to be implicitly closed. Mirrors Angular's reference parser, which
+                // attaches the diagnostic to the closing tag itself.
+                let err = self.make_error(
+                    start,
+                    format!("Unexpected closing tag \"{}\". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags", tag_name),
+                );
+                self.errors.push(err);
+            }
             self.add_to_parent(node);
         } else {
             // No matching element - report error for stray closing tag
@@ -1910,5 +1947,52 @@ mod tests {
         } else {
             panic!("Expected Block node");
         }
+    }
+
+    // Regression: https://github.com/voidzero-dev/oxc-angular-compiler/issues/290
+    // Closing a parent while a non-optional-end-tag child is still open used to be
+    // silently accepted, leaving `result.errors` empty.
+    #[test]
+    fn test_parse_unclosed_inner_tag_reports_error() {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::new(&allocator, "<div><span></div>", "test.html");
+        let result = parser.parse();
+        assert!(
+            !result.errors.is_empty(),
+            "Expected a diagnostic when </div> closes an unclosed <span>"
+        );
+        assert!(
+            result.errors.iter().any(|e| e.msg.contains("Unexpected closing tag \"div\"")),
+            "Diagnostic should mention the closing tag that triggered the implicit close, got: {:?}",
+            result.errors
+        );
+        // Recovery must still produce an AST for the outer <div>.
+        assert_eq!(result.nodes.len(), 1, "Recovery should still yield the outer element");
+    }
+
+    #[test]
+    fn test_parse_mismatched_close_does_not_error_for_optional_end_tag() {
+        // `<li>` has closed_by_parent = true, so closing the surrounding <ul> after an
+        // unclosed <li> should remain silent (mirrors Angular's reference parser).
+        let allocator = Allocator::default();
+        let parser = HtmlParser::new(&allocator, "<ul><li>item</ul>", "test.html");
+        let result = parser.parse();
+        assert!(
+            result.errors.is_empty(),
+            "Implicitly closing optional-end-tag elements should not emit errors, got: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_parse_multiple_unclosed_inner_tags_reports_error() {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::new(&allocator, "<section><div><span></section>", "test.html");
+        let result = parser.parse();
+        assert!(
+            result.errors.iter().any(|e| e.msg.contains("Unexpected closing tag \"section\"")),
+            "Should report unexpected closing tag when </section> skips past open <div>/<span>, got: {:?}",
+            result.errors
+        );
     }
 }
