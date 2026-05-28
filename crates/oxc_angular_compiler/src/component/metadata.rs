@@ -63,6 +63,15 @@ impl AngularVersion {
         self.major >= 20
     }
 
+    /// Check if this version supports the `@Service` decorator (v22.0.0+).
+    ///
+    /// Angular v22 introduced the `@Service` decorator as a lighter alternative to
+    /// `@Injectable`. The runtime gains `compileService`/`ɵɵdefineService` in the same
+    /// release, so earlier versions cannot consume downleveled `@Service` metadata.
+    pub fn supports_service_decorator(&self) -> bool {
+        self.major >= 22
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// Returns `None` if the version string is invalid.

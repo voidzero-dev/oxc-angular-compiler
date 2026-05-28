@@ -6865,6 +6865,102 @@ export class HighlightDirective {
 }
 
 #[test]
+fn test_jit_service_decorator() {
+    // @Service (Angular v22+) should be JIT-downleveled exactly like @Injectable:
+    // decorator removed, static decorators/ctorParameters emitted, and __decorate applied.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service()
+export class CounterService {
+    constructor(private http: HttpClient) {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The @Service decorator should be removed and lowered through __decorate.
+    assert!(
+        !result.code.contains("@Service"),
+        "JIT output should NOT contain the @Service decorator. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT service output should use __decorate. Got:\n{}",
+        result.code
+    );
+
+    // ctorParameters reflecting the constructor dependency should be emitted.
+    assert!(
+        result.code.contains("ctorParameters") && result.code.contains("HttpClient"),
+        "JIT service output should emit ctorParameters with HttpClient. Got:\n{}",
+        result.code
+    );
+
+    // JIT must NOT emit AOT definitions; the runtime's compileService handles that.
+    assert!(
+        !result.code.contains("ɵsvc") && !result.code.contains("ɵfac"),
+        "JIT service output should NOT contain AOT definitions. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_service_decorator", result.code);
+}
+
+#[test]
+fn test_jit_service_decorator_version_gated() {
+    // Targeting Angular < 22 must not downlevel @Service (the runtime lacks
+    // compileService). The decorator is left in source and a diagnostic is surfaced.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service()
+export class CounterService {}
+";
+
+    let options = ComponentTransformOptions {
+        jit: true,
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
+
+    // A diagnostic should be surfaced for the unsupported decorator.
+    assert!(
+        result.has_errors(),
+        "Targeting v21 with @Service should produce a diagnostic. Got none.\n{}",
+        result.code
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Diagnostic should mention @Service and v22. Got: {:?}",
+        result.diagnostics
+    );
+
+    // The decorator should remain in the source (pass-through, not downleveled).
+    assert!(
+        result.code.contains("@Service"),
+        "JIT output for v21 should leave the @Service decorator unchanged. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("__decorate("),
+        "JIT output for v21 should NOT downlevel @Service via __decorate. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn test_jit_full_component_example() {
     // Full example matching the issue #97 scenario
     let allocator = Allocator::default();

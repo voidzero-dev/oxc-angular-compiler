@@ -795,6 +795,7 @@ enum AngularDecoratorKind {
     Directive,
     Pipe,
     Injectable,
+    Service,
     NgModule,
 }
 
@@ -879,6 +880,7 @@ fn find_angular_decorator<'a>(
                 Some("Directive") => return Some((AngularDecoratorKind::Directive, decorator)),
                 Some("Pipe") => return Some((AngularDecoratorKind::Pipe, decorator)),
                 Some("Injectable") => return Some((AngularDecoratorKind::Injectable, decorator)),
+                Some("Service") => return Some((AngularDecoratorKind::Service, decorator)),
                 Some("NgModule") => return Some((AngularDecoratorKind::NgModule, decorator)),
                 _ => {}
             }
@@ -995,6 +997,7 @@ const ANGULAR_DECORATOR_NAMES: &[&str] = &[
     "Directive",
     "Pipe",
     "Injectable",
+    "Service",
     "NgModule",
 ];
 
@@ -1576,6 +1579,21 @@ fn transform_angular_file_jit(
         let Some((decorator_kind, angular_decorator)) = find_angular_decorator(class) else {
             continue;
         };
+
+        // Version gating: the `@Service` decorator requires Angular v22+, where the
+        // runtime JIT facade gained `compileService`/`ɵɵdefineService`. When targeting an
+        // older version, surface the gap and leave the decorator unchanged (pass-through)
+        // so the JIT downlevel pipeline doesn't emit metadata the runtime can't consume.
+        // When the version is unknown, assume support (matches the `map_or(true, …)` pattern).
+        if matches!(decorator_kind, AngularDecoratorKind::Service)
+            && !options.angular_version.map_or(true, |v| v.supports_service_decorator())
+        {
+            result.diagnostics.push(OxcDiagnostic::error(format!(
+                "The @Service decorator on '{}' requires Angular v22 or later.",
+                class_name
+            )));
+            continue;
+        }
 
         // Collect ALL class-level decorator spans and texts (in source order)
         let mut all_class_decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
