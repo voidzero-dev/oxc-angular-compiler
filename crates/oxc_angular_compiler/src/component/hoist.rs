@@ -590,18 +590,16 @@ pub fn collect_hoist_edits<'a>(
             stmt_eager_sets.insert(start, HashSet::new());
             continue;
         };
+        // Mirror the cascade un-planning pass exactly: seed with
+        // `init_called_symbols`, fold in fn-valued binding symbols (when
+        // eagerly called) BEFORE the closure, then close under
+        // `fn_body_called_symbols`. The closure must include the
+        // transitive callees reachable through the fn-valued binding's
+        // body — folding after the close would leave those callees out
+        // of `stmt_called` for the topo edge-expansion, so dependency
+        // edges through the binding's chain would be missed and a
+        // dependent could be emitted before its dependee.
         let mut stmt_called: HashSet<SymbolId> = info.init_called_symbols.iter().copied().collect();
-        let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
-        close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
-        // Function-valued bindings declared by this statement are part
-        // of THIS statement's eager-call surface when their initializer
-        // is invoked at module load (i.e. the binding's symbol is in
-        // some class's `eagerly_called`). Including them here lets
-        // `expand_through_functions` chase through the arrow/function
-        // body's refs to find dependency edges to other planned
-        // statements — without this the binding's body refs are invisible
-        // to the topo sort, mirroring the same issue Bug 1 fixed in the
-        // BFS pop branch.
         if let Some(fn_syms) = stmt_fn_valued_bindings.get(&start) {
             for &fn_sym in fn_syms {
                 if combined_eagerly_called.contains(&fn_sym) {
@@ -609,6 +607,8 @@ pub fn collect_hoist_edits<'a>(
                 }
             }
         }
+        let mut stmt_call_wl: Vec<SymbolId> = stmt_called.iter().copied().collect();
+        close_eagerly_called(&mut stmt_called, &mut stmt_call_wl, &fn_body_called_symbols);
         stmt_eager_sets.insert(start, stmt_called);
     }
 
@@ -1969,8 +1969,10 @@ fn record_direct_callee<'a>(
 /// * `fn.call(...)` — `Function.prototype.call`
 /// * `fn.apply(...)` — `Function.prototype.apply`
 ///
-/// In both cases the static member's `object` must be a *direct identifier*
-/// (`fn`) — we resolve through the semantic model and record the symbol
+/// The static member's `object` may also be a `ConditionalExpression`,
+/// `LogicalExpression`, or `SequenceExpression`; each candidate identifier
+/// reachable through the receiver (after peeling parens / TS wrappers and
+/// descending into branches / last seq element) is resolved and recorded
 /// in `called`. Anything more nested (`obj.fn.call(...)`,
 /// `getFn().call(...)`) is out of scope and falls through.
 ///
@@ -2004,17 +2006,19 @@ fn record_indirect_callee<'a>(
     if prop != "call" && prop != "apply" {
         return;
     }
-    let E::Identifier(id) = &member.object else { return };
-    if let Some(symbol) = resolve_symbol(id, semantic) {
-        called.insert(symbol);
-    }
+    // Receiver may be a bare identifier OR a conditional / logical / sequence
+    // expression whose branches each resolve to an identifier (e.g.
+    // `(cond ? makeA : makeB).call(null)`). Reuse the same descent logic
+    // `record_direct_callee` uses for the outer callee.
+    record_direct_callee(&member.object, semantic, called);
 }
 
 /// Handle the `fn.bind(...)()` shape. Called from the call site of the
 /// *outer* `CallExpression` — its `callee` is the inner `fn.bind(...)`
-/// `CallExpression`. If the inner call's callee is `Identifier.bind`
-/// (a `StaticMemberExpression` whose `object` is a direct identifier and
-/// `property` is `"bind"`), record the identifier's symbol in `called`.
+/// `CallExpression`. If the inner call's callee is `<receiver>.bind` where
+/// `<receiver>` is a direct identifier (after peeling parens / TS wrappers)
+/// or a conditional / logical / sequence expression whose branches each
+/// resolve to an identifier, record every reachable symbol in `called`.
 /// Only one level of bind is covered; nested `fn.bind(a).bind(b)()` falls
 /// through.
 fn record_bind_callee<'a>(
@@ -2052,10 +2056,11 @@ fn record_bind_callee<'a>(
     if member.property.name.as_str() != "bind" {
         return;
     }
-    let E::Identifier(id) = &member.object else { return };
-    if let Some(symbol) = resolve_symbol(id, semantic) {
-        called.insert(symbol);
-    }
+    // Receiver may be a bare identifier OR a conditional / logical / sequence
+    // expression whose branches each resolve to an identifier (e.g.
+    // `(cond ? makeA : makeB).bind(null)()`). Reuse `record_direct_callee`
+    // for symmetric descent.
+    record_direct_callee(&member.object, semantic, called);
 }
 
 /// If `init` is *directly* an `ArrowFunctionExpression` or

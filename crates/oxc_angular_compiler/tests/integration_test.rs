@@ -12247,3 +12247,157 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+/// Decorator metadata invokes a `.call`-style indirect callee whose
+/// receiver is a conditional expression: `(cond ? makeA : makeB).call(null)`.
+/// `record_indirect_callee` must descend through the conditional/logical/
+/// sequence wrapper to reach the underlying identifiers — otherwise neither
+/// `makeA` nor `makeB` enters the eagerly-called closure and `TOKEN` (read
+/// from their bodies) is left unhoisted.
+#[test]
+fn component_eager_indirect_callee_descends_through_conditional() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const cond = true;
+@Component({ selector: 'x', template: '', providers: (cond ? makeA : makeB).call(null) })
+class TestComponent {}
+function makeA() { return [{ provide: TOKEN, useValue: 0 }]; }
+function makeB() { return [{ provide: TOKEN, useValue: 1 }]; }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside both branches of a conditional indirect callee \
+         `(cond ? makeA : makeB).call(null)`) must be hoisted above the class to \
+         avoid TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Decorator metadata invokes a `.bind`-style callee whose receiver is a
+/// conditional expression: `(cond ? makeA : makeB).bind(null)()`.
+/// `record_bind_callee` must descend through the conditional/logical/
+/// sequence wrapper on the bind receiver to reach the underlying
+/// identifiers — otherwise neither `makeA` nor `makeB` enters the
+/// eagerly-called closure and `TOKEN` (read from their bodies) is left
+/// unhoisted.
+#[test]
+fn component_eager_bind_callee_descends_through_conditional() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const cond = true;
+@Component({ selector: 'x', template: '', providers: (cond ? makeA : makeB).bind(null)() })
+class TestComponent {}
+function makeA() { return [{ provide: TOKEN, useValue: 0 }]; }
+function makeB() { return [{ provide: TOKEN, useValue: 1 }]; }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside both branches of a conditional bind callee \
+         `(cond ? makeA : makeB).bind(null)()`) must be hoisted above the class to \
+         avoid TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Both the cascade un-planning pass and the topological-precompute pass
+/// derive a per-statement `stmt_called` set. They must compute it with the
+/// SAME shape — seed with `init_called_symbols`, fold in fn-valued binding
+/// symbols (when eagerly called), then close under `fn_body_called_symbols`.
+/// If the two passes disagree, the topo edge expansion may miss a dependency
+/// edge through a fn-valued binding's body chain, leaving a hoisted
+/// dependent emitted before its dependee.
+///
+/// Engineered shape: `make = () => inner()` calls `inner()`, whose body
+/// reads `TOKEN`. The final emission order must place `const TOKEN` BEFORE
+/// the hoisted `const make = () => inner();` so that when `make()` runs at
+/// module load the eventual `TOKEN` read is initialized.
+#[test]
+fn component_topo_symmetric_eager_set_with_fn_valued_binding_chain() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+const make = () => inner();
+function inner() { return TOKEN; }
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let make_pos = result
+        .code
+        .find("const make")
+        .unwrap_or_else(|| panic!("Expected `const make` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` must be hoisted above the class. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        make_pos < class_pos,
+        "`const make` must be hoisted above the class. \
+         make@{make_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        token_pos < make_pos,
+        "`const TOKEN` must precede `const make` so that `make()` (called at \
+         module load via the decorator) reads an initialized `TOKEN` through \
+         `inner()`. token@{token_pos} make@{make_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
