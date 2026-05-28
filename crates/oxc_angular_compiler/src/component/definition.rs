@@ -27,6 +27,7 @@ use super::transform::TransformOptions;
 use crate::directive::{
     create_host_directive_mappings_array, create_inputs_literal, create_outputs_literal,
 };
+use crate::factory::create_invalid_factory_call;
 use crate::output::ast::{
     FnParam, FunctionExpr, InstantiateExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
     LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
@@ -627,6 +628,25 @@ fn generate_constructor_factory<'a>(
         },
         allocator,
     ));
+
+    // If any constructor parameter resolved to a type-only import, the whole
+    // factory cannot be formed at runtime. Emit `i0.ɵɵinvalidFactory()` instead
+    // of a `new ClassCtor(...)` expression — matching Angular's
+    // `ValueUnavailableKind.TYPE_ONLY_IMPORT` behaviour. See issue #288.
+    if deps.iter().any(|d| d.type_only_invalid) {
+        statements.push(OutputStatement::Expression(Box::new_in(
+            crate::output::ast::ExpressionStatement {
+                expr: create_invalid_factory_call(allocator),
+                source_span: None,
+            },
+            allocator,
+        )));
+
+        return OutputExpression::Function(Box::new_in(
+            FunctionExpr { name: Some(fn_name), params, statements, source_span: None },
+            allocator,
+        ));
+    }
 
     // Compile constructor dependencies if any
     // Uses FactoryTarget::Component for components

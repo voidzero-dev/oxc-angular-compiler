@@ -762,6 +762,13 @@ fn build_param_type_expression<'a>(
     // Use namespace prefix when the type annotation matches the dep token name
     // and the dep has a source module (imported type).
     if let Some(dep) = dep {
+        // Type-only imports cannot be referenced at runtime — emit `undefined`
+        // in the metadata, matching the behaviour Angular's `typeToValue()`
+        // uses for `ValueUnavailableKind.TYPE_ONLY_IMPORT`. See issue #288.
+        if dep.type_only_invalid {
+            return None;
+        }
+
         if let Some(ref source_module) = dep.token_source_module {
             if let Some(ref token) = dep.token {
                 let type_matches_token =

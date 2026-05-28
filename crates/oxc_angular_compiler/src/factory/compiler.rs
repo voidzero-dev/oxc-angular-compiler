@@ -140,6 +140,11 @@ pub fn compile_factory_function<'a>(
     // Build the constructor expression based on deps
     // See: r3_factory.ts:119-129
     let ctor_expr: Option<OutputExpression<'a>> = match &base.deps {
+        R3FactoryDeps::Valid(deps) if deps.iter().any(|d| d.type_only_invalid) => {
+            // A constructor parameter resolves to a type-only import; the factory
+            // as a whole cannot be formed. Force `ɵɵinvalidFactory()`. See #288.
+            None
+        }
         R3FactoryDeps::Valid(deps) => {
             // new (type)(ɵɵinject(Dep1), ɵɵinject(Dep2), ...)
             let inject_args = inject_dependencies(allocator, deps.as_slice(), base.target);
@@ -694,8 +699,8 @@ fn create_import_call<'a>(
     ))
 }
 
-/// Creates i0.ɵɵinvalidFactory() call.
-fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
+/// Creates `i0.ɵɵinvalidFactory()` call.
+pub fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
     create_import_call(allocator, Identifiers::INVALID_FACTORY, Vec::new_in(allocator))
 }
 

@@ -12623,3 +12623,188 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+// =============================================================================
+// Regression tests for issue #288 — type-only constructor parameters
+// =============================================================================
+//
+// When a constructor parameter's type annotation comes from a type-only import
+// (`import type { X }` or `import { type X }`), TypeScript erases the import at
+// runtime. The Angular reference compiler responds with `ɵɵinvalidFactory()`
+// (`ValueUnavailableKind.TYPE_ONLY_IMPORT`) instead of an `ɵɵdirectiveInject(X)`
+// call that would crash with `token must be defined`.
+
+/// Issue #288: `import type { MyService }` constructor params must not emit a
+/// runtime DI token.
+///
+/// A type-only import is erased at runtime, so neither a namespace import for
+/// the module nor a `directiveInject(i1.MyService)` call may be generated. The
+/// factory body must instead be `ɵɵinvalidFactory()`.
+#[test]
+fn test_component_type_only_import_emits_invalid_factory() {
+    let allocator = Allocator::default();
+
+    let source = r"
+import { Component } from '@angular/core';
+import type { MyService } from './my-service';
+
+@Component({
+    selector: 'x',
+    template: '',
+    standalone: true,
+})
+export class X {
+    constructor(private svc: MyService) {}
+}
+";
+
+    let result = transform_angular_file(&allocator, "x.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        !code.lines().any(|l| l.trim_start().starts_with("import * as ")
+            && (l.contains("'./my-service'") || l.contains("\"./my-service\""))),
+        "type-only import './my-service' must not be promoted to a runtime namespace import.\nOutput:\n{code}"
+    );
+
+    assert!(
+        !code.contains("i1.MyService"),
+        "Must not emit namespace-prefixed `i1.MyService` for a type-only import.\nOutput:\n{code}"
+    );
+    assert!(
+        !code.contains("directiveInject(MyService)"),
+        "Must not emit a bare `directiveInject(MyService)` for a type-only import.\nOutput:\n{code}"
+    );
+
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+    assert!(
+        factory_section.contains("ɵɵinvalidFactory()"),
+        "Type-only DI param must produce `ɵɵinvalidFactory()`. Factory:\n{factory_section}"
+    );
+}
+
+/// Issue #288: `import { type MyService }` (inline type specifier) must behave
+/// the same as a declaration-level `import type`.
+#[test]
+fn test_component_inline_type_specifier_emits_invalid_factory() {
+    let allocator = Allocator::default();
+
+    let source = r"
+import { Component } from '@angular/core';
+import { type MyService } from './my-service';
+
+@Component({
+    selector: 'x',
+    template: '',
+    standalone: true,
+})
+export class X {
+    constructor(private svc: MyService) {}
+}
+";
+
+    let result = transform_angular_file(&allocator, "x.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        !code.contains("from './my-service'") && !code.contains("from \"./my-service\""),
+        "inline `type` specifier must not promote './my-service' to a runtime import.\nOutput:\n{code}"
+    );
+    assert!(
+        !code.contains("i1.MyService"),
+        "Must not emit namespace-prefixed `i1.MyService` for a type-only specifier.\nOutput:\n{code}"
+    );
+
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+    assert!(
+        factory_section.contains("ɵɵinvalidFactory()"),
+        "Inline `type` specifier DI param must produce `ɵɵinvalidFactory()`. Factory:\n{factory_section}"
+    );
+}
+
+/// Issue #288: directives with type-only DI tokens must also emit
+/// `ɵɵinvalidFactory()` instead of a runtime namespace reference.
+#[test]
+fn test_directive_type_only_import_emits_invalid_factory() {
+    let allocator = Allocator::default();
+
+    let source = r"
+import { Directive } from '@angular/core';
+import type { MyService } from './my-service';
+
+@Directive({
+    selector: '[appX]',
+    standalone: true,
+})
+export class XDirective {
+    constructor(private svc: MyService) {}
+}
+";
+
+    let result = transform_angular_file(&allocator, "x.directive.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        !code.lines().any(|l| l.trim_start().starts_with("import * as ")
+            && (l.contains("'./my-service'") || l.contains("\"./my-service\""))),
+        "type-only import './my-service' must not be promoted to a runtime namespace import.\nOutput:\n{code}"
+    );
+    assert!(
+        !code.contains("i1.MyService"),
+        "Must not emit namespace-prefixed `i1.MyService` for a type-only directive param.\nOutput:\n{code}"
+    );
+
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+    assert!(
+        factory_section.contains("ɵɵinvalidFactory()"),
+        "Directive type-only DI param must produce `ɵɵinvalidFactory()`. Factory:\n{factory_section}"
+    );
+}
+
+/// Issue #288: injectables (`@Injectable`) with type-only DI tokens must also
+/// emit `ɵɵinvalidFactory()`.
+#[test]
+fn test_injectable_type_only_import_emits_invalid_factory() {
+    let allocator = Allocator::default();
+
+    let source = r"
+import { Injectable } from '@angular/core';
+import type { MyDep } from './my-dep';
+
+@Injectable({ providedIn: 'root' })
+export class MyService {
+    constructor(private dep: MyDep) {}
+}
+";
+
+    let result = transform_angular_file(&allocator, "my-service.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        !code.lines().any(|l| l.trim_start().starts_with("import * as ")
+            && (l.contains("'./my-dep'") || l.contains("\"./my-dep\""))),
+        "type-only import './my-dep' must not be promoted to a runtime namespace import.\nOutput:\n{code}"
+    );
+
+    let factory_section =
+        code.split("ɵfac").nth(1).expect("Should have a factory definition (ɵfac)");
+    assert!(
+        factory_section.contains("ɵɵinvalidFactory()"),
+        "Injectable type-only DI param must produce `ɵɵinvalidFactory()`. Factory:\n{factory_section}"
+    );
+}

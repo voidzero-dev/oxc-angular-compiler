@@ -181,6 +181,7 @@ fn clone_r3_deps<'a>(
             optional: dep.optional,
             self_: dep.self_,
             skip_self: dep.skip_self,
+            type_only_invalid: dep.type_only_invalid,
         });
     }
     result
@@ -199,6 +200,7 @@ fn convert_deps_to_r3<'a>(
             optional: dep.optional,
             self_: dep.self_,
             skip_self: dep.skip_self,
+            type_only_invalid: false,
         });
     }
     result
@@ -617,10 +619,19 @@ fn extract_param_dependency<'a>(
             optional,
             self_,
             skip_self,
+            type_only_invalid: false,
         };
     }
 
-    R3DependencyMetadata { token, attribute_name_type: None, host, optional, self_, skip_self }
+    R3DependencyMetadata {
+        token,
+        attribute_name_type: None,
+        host,
+        optional,
+        self_,
+        skip_self,
+        type_only_invalid: false,
+    }
 }
 
 /// Get the name of a decorator from its expression.

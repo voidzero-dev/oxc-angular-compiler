@@ -155,6 +155,7 @@ fn generate_fac_definition<'a>(
                     optional: dep.optional,
                     self_: dep.self_,
                     skip_self: dep.skip_self,
+                    type_only_invalid: dep.type_only_invalid,
                 });
             }
             R3FactoryDeps::Valid(factory_deps)

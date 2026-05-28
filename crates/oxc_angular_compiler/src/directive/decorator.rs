@@ -364,10 +364,19 @@ fn extract_param_dependency<'a>(
             optional,
             self_,
             skip_self,
+            type_only_invalid: false,
         };
     }
 
-    R3DependencyMetadata { token, attribute_name_type: None, host, optional, self_, skip_self }
+    R3DependencyMetadata {
+        token,
+        attribute_name_type: None,
+        host,
+        optional,
+        self_,
+        skip_self,
+        type_only_invalid: false,
+    }
 }
 
 /// Get the name of a decorator from its expression.

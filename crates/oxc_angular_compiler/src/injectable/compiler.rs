@@ -188,6 +188,7 @@ fn clone_deps_vec<'a>(
             optional: dep.optional,
             self_: dep.self_,
             skip_self: dep.skip_self,
+            type_only_invalid: dep.type_only_invalid,
         });
     }
     result
@@ -664,6 +665,7 @@ mod tests {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         });
 
         let metadata = R3InjectableMetadataBuilder::new()
@@ -721,6 +723,7 @@ mod tests {
             optional: false,
             self_: false,
             skip_self: false,
+            type_only_invalid: false,
         });
 
         let metadata = R3InjectableMetadataBuilder::new()
