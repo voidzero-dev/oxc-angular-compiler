@@ -2021,6 +2021,16 @@ pub fn transform_angular_file(
                 Some(source),
                 &string_consts,
             ) {
+                // Track external resource dependencies before resolution so build tools
+                // still learn which sibling files to watch when the resource isn't in
+                // `resolved_resources` or compilation fails downstream.
+                if let Some(template_url) = &metadata.template_url {
+                    result.dependencies.push(template_url.to_string());
+                }
+                for style_url in &metadata.style_urls {
+                    result.dependencies.push(style_url.to_string());
+                }
+
                 // 3. Resolve external styles and merge into metadata
                 resolve_styles(allocator, &mut metadata, resolved_resources);
 
@@ -2255,14 +2265,6 @@ pub fn transform_angular_file(
                                 ),
                                 class.body.span.end,
                             ));
-
-                            // Track external dependencies
-                            if let Some(template_url) = &metadata.template_url {
-                                result.dependencies.push(template_url.to_string());
-                            }
-                            for style_url in &metadata.style_urls {
-                                result.dependencies.push(style_url.to_string());
-                            }
 
                             // Generate .d.ts type declaration for this component
                             let type_argument_count = class
