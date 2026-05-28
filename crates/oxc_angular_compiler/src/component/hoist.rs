@@ -229,6 +229,36 @@ pub fn collect_hoist_edits<'a>(
             }
             if let Some(&stmt_start) = symbol_to_stmt.get(&symbol) {
                 let Some(info) = stmt_info.get(&stmt_start) else { continue };
+
+                // Body chase for eagerly-called fn-valued bindings runs
+                // BEFORE the pre-class early-continue. Even when the binding
+                // itself is declared *before* the class (so its binding is
+                // initialized when the class evaluates), the function body
+                // it stores still fires when the decorator calls it, and
+                // that body's later-declared reads are TDZ-relevant. Without
+                // this, `const make = () => [{ provide: TOKEN }]` followed
+                // by `@Component({providers: make()}) class C {}` and a
+                // later `const TOKEN` would skip the chase entirely because
+                // `make`'s stmt_start < class_body_end. Mirrors the post-
+                // plan body-chase below; deferred otherwise so a later eager-
+                // set promotion belatedly chases via the `now_eager` sweep.
+                // Regression for Codex P2 review #3314836115 on PR #302.
+                if fn_body_symbol_refs.contains_key(&symbol) {
+                    if eagerly_called.contains(&symbol) {
+                        if chased_fn_bodies.insert(symbol)
+                            && let Some(body_refs) = fn_body_symbol_refs.get(&symbol)
+                        {
+                            for &s in body_refs {
+                                if !visited.contains(&s) {
+                                    worklist.push(s);
+                                }
+                            }
+                        }
+                    } else {
+                        deferred_fns.insert(symbol);
+                    }
+                }
+
                 // Skip bindings declared *before* this class — they're
                 // already initialized when the class evaluates.
                 // `class_body_end` is the exclusive end of the class body
@@ -373,37 +403,11 @@ pub fn collect_hoist_edits<'a>(
                     }
                 }
 
-                // Function-valued bindings act as BOTH a binding (planned
-                // above) AND a function (their body refs fire when called).
-                // `index_fn_valued_binding` populates `fn_body_symbol_refs`
-                // for `const make = () => …` / `const make = function … {}`
-                // shapes. If the decorator metadata called `make()` (or a
-                // hoisted initializer's `init_called_symbols` closure
-                // promoted `make` into `eagerly_called`), the body refs
-                // ALSO need chasing — otherwise the arrow body's reads
-                // (e.g. `TOKEN` inside `() => [{ provide: TOKEN, … }]`)
-                // never enter the worklist and stay declared below the
-                // class, throwing TDZ when the hoisted `make()` runs at
-                // module load. Mirror the `else if eagerly_called` branch
-                // below; defer otherwise so a later eager-set promotion
-                // belatedly chases the body via the existing now_eager
-                // sweep at the top of this match arm. See PR #302 Codex P2
-                // review #3311913006.
-                if fn_body_symbol_refs.contains_key(&symbol) {
-                    if eagerly_called.contains(&symbol) {
-                        if chased_fn_bodies.insert(symbol) {
-                            if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
-                                for &s in body_refs {
-                                    if !visited.contains(&s) {
-                                        worklist.push(s);
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        deferred_fns.insert(symbol);
-                    }
-                }
+                // The fn-valued-binding body chase used to live here, after
+                // the plan/transitive logic, but it must run for pre-class
+                // bindings too — moved to the top of this branch above the
+                // `stmt_start < class_body_end` early-continue. Covers PR
+                // #302 Codex P2 reviews #3311913006 and #3314836115.
             } else if eagerly_called.contains(&symbol) {
                 // The symbol resolves to a top-level function declaration
                 // that is *actually called* (transitively) at module load

@@ -12248,3 +12248,48 @@ const TOKEN = 'tok';
         result.code
     );
 }
+
+/// An eagerly-called function-valued binding declared *before* the
+/// decorated class is itself already initialized — but the function body
+/// it stores still fires when the decorator calls it, and that body's
+/// later-declared reads (`TOKEN` below) are TDZ-relevant. The BFS used
+/// to skip the body chase entirely when the binding's stmt_start was
+/// before the class's body end, leaving `TOKEN` unhoisted and the
+/// emitted Ivy definition throwing at module load.
+///
+/// Regression test for Codex P2 review #3314836115 on PR #302.
+#[test]
+fn component_pre_class_fn_valued_binding_chases_body_refs() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const make = () => [{ provide: TOKEN, useValue: 0 }];
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside the body of a pre-class fn-valued binding \
+         called by the decorator) must be hoisted above the class to avoid TDZ. \
+         token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
