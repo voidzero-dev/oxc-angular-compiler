@@ -11289,6 +11289,81 @@ const TOKEN = 'tok';
     );
 }
 
+/// `make` is eagerly invoked from the decorator. Inside `make`, a *local*
+/// arrow expression is assigned to a `const inner` binding and then
+/// immediately called via `inner()`. `inner`'s body reads a later-declared
+/// top-level `const TOKEN`, so `TOKEN` is TDZ-relevant: at module load, the
+/// hoisted decorator-eval runs `make() → inner() → TOKEN` before the const
+/// initializer fires.
+///
+/// Unlike a *named* nested function (handled by walking through
+/// `visit_function`), arrows assigned to local bindings need a separate
+/// indexing step: `FunctionBodyIdentVisitor` must record arrow-valued local
+/// bindings inside the function body it walks, then fold those bodies in at
+/// each call site so calls to local arrows transitively contribute their
+/// reads to the enclosing eager surface.
+#[test]
+fn component_eager_fn_body_local_arrow_binding_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+function make() {
+  const inner = () => TOKEN;
+  return inner();
+}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside a local arrow binding called from the \
+         body of an eagerly-called function) must be hoisted above the class \
+         to avoid TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Sibling of `component_eager_fn_body_local_arrow_binding_chases_late_const`
+/// that locks in laziness: when a local arrow binding is stored in a provider
+/// (`useFactory: lazy`) but is NEVER called inside the enclosing function's
+/// body, the arrow's body refs must NOT force a hoist via the local-arrow
+/// indexing. The hoist might still happen because other analysis paths treat
+/// the provider shape as eager, but the transform must at minimum not error.
+#[test]
+fn component_eager_fn_body_lazy_local_arrow_does_not_force_hoist() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+function make() {
+  const lazy = () => TOKEN;
+  return [{ provide: 'tok', useFactory: lazy }];
+}
+const TOKEN = 'tok';
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+}
+
 /// The safe-skip guard must refuse to hoist a `var TOKEN = make()` initializer
 /// when the eagerly-called `make()`'s body reads a later-declared top-level
 /// class. Without the fix, hoisting `var TOKEN = make()` above

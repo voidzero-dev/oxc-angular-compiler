@@ -1075,8 +1075,7 @@ fn collect_top_level_bindings<'a>(
                 let Some(fn_symbol) = id.symbol_id.get() else { continue };
                 let mut refs: HashSet<SymbolId> = HashSet::new();
                 let mut called: HashSet<SymbolId> = HashSet::new();
-                let mut visitor =
-                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, &mut refs, &mut called);
                 visitor.visit_function_body(body);
                 // Parameter defaults (`function f(x = TOKEN)`) evaluate at
                 // call time, before the body runs. If this function is
@@ -1266,7 +1265,7 @@ fn walk_class_eager_parts<'a>(
                 // Constructor body + parameter defaults fire at `new`-time.
                 if include_constructor && method.kind == MethodDefinitionKind::Constructor {
                     if let Some(body) = &method.value.body {
-                        let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                        let mut visitor = FunctionBodyIdentVisitor::new(semantic, out, called);
                         visitor.visit_function_body(body);
                     }
                     walk_param_defaults(&method.value.params, semantic, out, called);
@@ -1309,7 +1308,7 @@ fn walk_class_eager_parts<'a>(
             ClassElement::StaticBlock(block) => {
                 // `static { … }` body runs once at class-definition time.
                 // Walk it like an eagerly-evaluated function body.
-                let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, out, called);
                 for stmt in &block.body {
                     visitor.visit_statement(stmt);
                 }
@@ -1363,6 +1362,137 @@ struct FunctionBodyIdentVisitor<'a, 'b> {
     semantic: &'b Semantic<'a>,
     out: &'b mut HashSet<SymbolId>,
     called: &'b mut HashSet<SymbolId>,
+    /// Map from local `const`/`let`/`var` binding `SymbolId` (declared inside
+    /// the function body being walked) to the (refs, callees) collected from
+    /// the body of an arrow/function expression assigned to that binding.
+    ///
+    /// Populated by [`visit_variable_declarator`] when it sees
+    /// `const inner = () => …` / `const inner = function () { … }` inside
+    /// the body. The arrow body is NOT folded into `out`/`called` at the
+    /// declarator site — the arrow only fires if something calls `inner`,
+    /// which would still be lazy if `inner` is merely passed as a value.
+    /// Instead, every `CallExpression` / `NewExpression` /
+    /// `TaggedTemplateExpression` site that resolves a callee to one of
+    /// these local symbols folds the stored body refs into the surrounding
+    /// eager surface. That precision preserves laziness for value-passed
+    /// arrows (e.g. `useFactory: inner`) while still chasing identifier
+    /// reads when the local arrow is invoked inside the eager body
+    /// (e.g. `return inner();`).
+    local_fn_bodies: HashMap<SymbolId, (HashSet<SymbolId>, HashSet<SymbolId>)>,
+}
+
+impl<'a, 'b> FunctionBodyIdentVisitor<'a, 'b> {
+    fn new(
+        semantic: &'b Semantic<'a>,
+        out: &'b mut HashSet<SymbolId>,
+        called: &'b mut HashSet<SymbolId>,
+    ) -> Self {
+        Self { semantic, out, called, local_fn_bodies: HashMap::new() }
+    }
+
+    /// Fold every `local_fn_bodies` entry reachable through a call/new/tag
+    /// callee shape into `self.out` / `self.called`. Walks the same callee
+    /// descent shape `record_direct_callee` uses (peels parens / TS wrappers,
+    /// descends into conditional / logical / sequence branches), resolving
+    /// each bare identifier to a `SymbolId`. When that symbol matches a
+    /// `local_fn_bodies` entry, the stored body refs flow into the eager
+    /// surface AND any local-arrow callees stored under that entry are
+    /// folded transitively (`f` calls `g` calls `h`, all local arrows).
+    fn fold_local_fn_body_at_callee(&mut self, callee: &Expression<'a>) {
+        use Expression as E;
+        let mut worklist: Vec<&Expression<'a>> = vec![callee];
+        let mut seen: HashSet<*const Expression<'a>> = HashSet::new();
+        let mut callee_symbols: Vec<SymbolId> = Vec::new();
+        while let Some(mut cur) = worklist.pop() {
+            loop {
+                let key = cur as *const Expression<'a>;
+                if !seen.insert(key) {
+                    break;
+                }
+                match cur {
+                    E::Identifier(id) => {
+                        if let Some(symbol) = resolve_symbol(id, self.semantic) {
+                            callee_symbols.push(symbol);
+                        }
+                        break;
+                    }
+                    E::ParenthesizedExpression(p) => cur = &p.expression,
+                    E::TSAsExpression(ts) => cur = &ts.expression,
+                    E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+                    E::TSNonNullExpression(ts) => cur = &ts.expression,
+                    E::TSTypeAssertion(ts) => cur = &ts.expression,
+                    E::TSInstantiationExpression(ts) => cur = &ts.expression,
+                    // `obj.fn(...)` — receiver may itself be a local arrow
+                    // binding (`obj.foo` where `obj` is local). We only chase
+                    // through the static-member chain to handle `fn.call` /
+                    // `fn.apply` / `fn.bind` — the receiver of those is the
+                    // callable. Other static members (`obj.method`) imply a
+                    // member call on the receiver, not a call on a local
+                    // arrow binding, so they fall through.
+                    E::StaticMemberExpression(member) => {
+                        let prop = member.property.name.as_str();
+                        if prop == "call" || prop == "apply" || prop == "bind" {
+                            cur = &member.object;
+                        } else {
+                            break;
+                        }
+                    }
+                    // `fn.bind(...)()` — the outer callee is a `CallExpression`
+                    // whose own callee is `<receiver>.bind`. Descend through
+                    // the inner call so the receiver `<receiver>` (which may
+                    // be a local arrow binding) gets resolved.
+                    E::CallExpression(inner_call) => cur = &inner_call.callee,
+                    E::ConditionalExpression(cond) => {
+                        worklist.push(&cond.consequent);
+                        worklist.push(&cond.alternate);
+                        break;
+                    }
+                    E::LogicalExpression(log) => {
+                        worklist.push(&log.left);
+                        worklist.push(&log.right);
+                        break;
+                    }
+                    E::SequenceExpression(seq) => {
+                        if let Some(last) = seq.expressions.last() {
+                            worklist.push(last);
+                        }
+                        break;
+                    }
+                    _ => break,
+                }
+            }
+        }
+
+        // Fold each resolved symbol's stored body, transitively through any
+        // local-arrow callees stored under that body. A small visited set
+        // guards against cycles (`const a = () => b(); const b = () => a();`
+        // — both would self-reference once cross-folded).
+        let mut fold_worklist: Vec<SymbolId> = callee_symbols;
+        let mut folded: HashSet<SymbolId> = HashSet::new();
+        while let Some(symbol) = fold_worklist.pop() {
+            if !folded.insert(symbol) {
+                continue;
+            }
+            if let Some((refs, called)) = self.local_fn_bodies.get(&symbol) {
+                // Clone the small symbol sets so the borrow on
+                // `self.local_fn_bodies` releases before we mutate
+                // `self.out` / `self.called`.
+                let refs = refs.clone();
+                let called = called.clone();
+                for sym in &refs {
+                    self.out.insert(*sym);
+                }
+                for sym in &called {
+                    self.called.insert(*sym);
+                    // If a callee inside this local arrow is itself another
+                    // local arrow binding, transitively fold its body too.
+                    if self.local_fn_bodies.contains_key(sym) {
+                        fold_worklist.push(*sym);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
@@ -1372,10 +1502,59 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         }
     }
 
+    // Index arrow / function expressions assigned to a plain
+    // `const`/`let`/`var` binding inside the body being walked. The arrow
+    // body is collected into a scratch `(refs, called)` pair and stored in
+    // `local_fn_bodies` keyed by the binding's `SymbolId`. Subsequent
+    // call sites in this body fold the stored body refs in only when the
+    // local arrow is actually invoked, preserving laziness for
+    // value-passed arrows.
+    //
+    // The scratch walk uses a *fresh* `FunctionBodyIdentVisitor`, so a local
+    // arrow whose body contains another local arrow won't transitively
+    // index that inner arrow under the outer's body. The fold step at call
+    // sites handles cross-arrow chains through `called` instead.
+    fn visit_variable_declarator(&mut self, it: &oxc_ast::ast::VariableDeclarator<'a>) {
+        if let BindingPattern::BindingIdentifier(id) = &it.id
+            && let Some(fn_symbol) = id.symbol_id.get()
+            && let Some(init) = &it.init
+        {
+            let mut scratch_refs: HashSet<SymbolId> = HashSet::new();
+            let mut scratch_called: HashSet<SymbolId> = HashSet::new();
+            if index_local_fn_valued_binding(
+                init,
+                self.semantic,
+                &mut scratch_refs,
+                &mut scratch_called,
+            ) {
+                self.local_fn_bodies.insert(fn_symbol, (scratch_refs, scratch_called));
+                // Visit only the type annotation (which may carry runtime-
+                // irrelevant identifier refs in TS — they're erased). Skip
+                // the init: the arrow/function body must NOT contribute to
+                // `self.out` here, because the arrow might never be called.
+                // Pattern visit covers any defaults inside the binding (none
+                // for the `BindingIdentifier` branch, but kept symmetric).
+                self.visit_binding_pattern(&it.id);
+                if let Some(type_annotation) = &it.type_annotation {
+                    self.visit_ts_type_annotation(type_annotation);
+                }
+                return;
+            }
+        }
+        // Init is not a direct arrow/function — fall through to the default
+        // walk so identifier refs in the init feed `self.out` normally.
+        oxc_ast_visit::walk::walk_variable_declarator(self, it);
+    }
+
     fn visit_call_expression(&mut self, it: &oxc_ast::ast::CallExpression<'a>) {
         record_direct_callee(&it.callee, self.semantic, self.called);
         record_indirect_callee(&it.callee, self.semantic, self.called);
         record_bind_callee(&it.callee, self.semantic, self.called);
+        // Local arrow bindings (`const inner = () => TOKEN; inner();`) aren't
+        // in `fn_body_called_symbols`, so `close_eagerly_called` can't chase
+        // them. Fold any indexed body refs in directly at the call site,
+        // exactly when the arrow is invoked.
+        self.fold_local_fn_body_at_callee(&it.callee);
         // IIFE detection mirrors the `collect_expr_symbols` arm: when the
         // callee is `(() => ...)` / `(function() { ... })`, the body runs
         // eagerly at this call site, so its identifier reads contribute to
@@ -1399,6 +1578,7 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         record_direct_callee(&it.callee, self.semantic, self.called);
         record_indirect_callee(&it.callee, self.semantic, self.called);
         record_bind_callee(&it.callee, self.semantic, self.called);
+        self.fold_local_fn_body_at_callee(&it.callee);
         // Symmetric IIFE handling for `new (function() { ... })()`.
         if walk_iife_callee_body(&it.callee, self.semantic, self.out, self.called) {
             for arg in &it.arguments {
@@ -1474,6 +1654,7 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         record_direct_callee(&it.tag, self.semantic, self.called);
         record_indirect_callee(&it.tag, self.semantic, self.called);
         record_bind_callee(&it.tag, self.semantic, self.called);
+        self.fold_local_fn_body_at_callee(&it.tag);
         oxc_ast_visit::walk::walk_tagged_template_expression(self, it);
     }
 }
@@ -2108,8 +2289,7 @@ fn index_fn_valued_binding<'a>(
             E::ArrowFunctionExpression(arrow) => {
                 let mut refs: HashSet<SymbolId> = HashSet::new();
                 let mut called: HashSet<SymbolId> = HashSet::new();
-                let mut visitor =
-                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, &mut refs, &mut called);
                 visitor.visit_function_body(&arrow.body);
                 walk_param_defaults(&arrow.params, semantic, &mut refs, &mut called);
                 fn_body_symbol_refs.insert(fn_symbol, refs);
@@ -2120,12 +2300,59 @@ fn index_fn_valued_binding<'a>(
                 let Some(body) = &func.body else { return false };
                 let mut refs: HashSet<SymbolId> = HashSet::new();
                 let mut called: HashSet<SymbolId> = HashSet::new();
-                let mut visitor =
-                    FunctionBodyIdentVisitor { semantic, out: &mut refs, called: &mut called };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, &mut refs, &mut called);
                 visitor.visit_function_body(body);
                 walk_param_defaults(&func.params, semantic, &mut refs, &mut called);
                 fn_body_symbol_refs.insert(fn_symbol, refs);
                 fn_body_called_symbols.insert(fn_symbol, called);
+                return true;
+            }
+            E::ParenthesizedExpression(p) => cur = &p.expression,
+            E::TSAsExpression(ts) => cur = &ts.expression,
+            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+            E::TSNonNullExpression(ts) => cur = &ts.expression,
+            E::TSTypeAssertion(ts) => cur = &ts.expression,
+            E::TSInstantiationExpression(ts) => cur = &ts.expression,
+            _ => return false,
+        }
+    }
+}
+
+/// Sibling of [`index_fn_valued_binding`] that writes the indexed body refs /
+/// direct callees into caller-owned scratch sets instead of the cross-statement
+/// maps. Used by [`FunctionBodyIdentVisitor::visit_variable_declarator`] to
+/// build a `(refs, called)` pair for a local arrow/function binding declared
+/// inside a function body — those bindings are NOT top-level and don't belong
+/// in `fn_body_symbol_refs`, but their bodies still need to be foldable into
+/// the surrounding eager surface when they're invoked.
+///
+/// Returns `true` when `init` is (after peeling parens / TS wrappers) directly
+/// an `ArrowFunctionExpression` or `FunctionExpression` and indexing happened.
+/// The scratch visitor used here is *fresh*, so a local arrow whose body
+/// contains another local arrow won't transitively pick up the inner arrow's
+/// body refs through this single index step — the outer caller's fold-at-call
+/// step handles that chain via the `called` set on subsequent invocations.
+fn index_local_fn_valued_binding<'a>(
+    init: &Expression<'a>,
+    semantic: &Semantic<'a>,
+    refs: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) -> bool {
+    use Expression as E;
+    let mut cur = init;
+    loop {
+        match cur {
+            E::ArrowFunctionExpression(arrow) => {
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, refs, called);
+                visitor.visit_function_body(&arrow.body);
+                walk_param_defaults(&arrow.params, semantic, refs, called);
+                return true;
+            }
+            E::FunctionExpression(func) => {
+                let Some(body) = &func.body else { return false };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, refs, called);
+                visitor.visit_function_body(body);
+                walk_param_defaults(&func.params, semantic, refs, called);
                 return true;
             }
             E::ParenthesizedExpression(p) => cur = &p.expression,
@@ -2161,7 +2388,7 @@ fn walk_iife_callee_body<'a>(
     loop {
         match cur {
             E::ArrowFunctionExpression(arrow) => {
-                let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                let mut visitor = FunctionBodyIdentVisitor::new(semantic, out, called);
                 visitor.visit_function_body(&arrow.body);
                 // Parameter defaults evaluate at IIFE invocation time, before
                 // the body runs — symmetric with top-level function decls
@@ -2171,7 +2398,7 @@ fn walk_iife_callee_body<'a>(
             }
             E::FunctionExpression(func) => {
                 if let Some(body) = &func.body {
-                    let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                    let mut visitor = FunctionBodyIdentVisitor::new(semantic, out, called);
                     visitor.visit_function_body(body);
                 }
                 walk_param_defaults(&func.params, semantic, out, called);
