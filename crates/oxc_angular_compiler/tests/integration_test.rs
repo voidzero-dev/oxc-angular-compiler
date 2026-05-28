@@ -738,6 +738,17 @@ export class Parent {}
         collapsed.contains(".then((m)=>m.default)") || collapsed.contains(".then(m=>m.default)"),
         "Default import must resolve to `m.default`. Output:\n{code}"
     );
+
+    // The `setClassMetadataAsync` callback parameter name must be a legal JS
+    // identifier — not the reserved word `default`. Use the local binding.
+    assert!(
+        !collapsed.contains("(default)=>") && !collapsed.contains("(default)=>"),
+        "Default-import callback parameter must not be the reserved word `default`. Output:\n{code}"
+    );
+    assert!(
+        collapsed.contains("(LazyCmp)=>"),
+        "Default-import callback parameter must use the local binding name `LazyCmp`. Output:\n{code}"
+    );
 }
 
 /// Components without `@defer` blocks must not generate a resolver function
