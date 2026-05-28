@@ -402,12 +402,6 @@ pub fn collect_hoist_edits<'a>(
                         worklist.push(s);
                     }
                 }
-
-                // The fn-valued-binding body chase used to live here, after
-                // the plan/transitive logic, but it must run for pre-class
-                // bindings too — moved to the top of this branch above the
-                // `stmt_start < class_body_end` early-continue. Covers PR
-                // #302 Codex P2 reviews #3311913006 and #3314836115.
             } else if eagerly_called.contains(&symbol) {
                 // The symbol resolves to a top-level function declaration
                 // that is *actually called* (transitively) at module load
