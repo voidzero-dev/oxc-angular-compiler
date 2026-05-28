@@ -2240,6 +2240,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
                         optional: dep.optional.unwrap_or(false),
                         self_: dep.self_.unwrap_or(false),
                         skip_self: dep.skip_self.unwrap_or(false),
+                        type_only_invalid: false,
                     });
                 }
             }

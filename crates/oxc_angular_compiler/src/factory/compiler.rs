@@ -699,8 +699,8 @@ fn create_import_call<'a>(
     ))
 }
 
-/// Creates i0.ɵɵinvalidFactory() call.
-fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
+/// Creates `i0.ɵɵinvalidFactory()` call.
+pub fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
     create_import_call(allocator, Identifiers::INVALID_FACTORY, Vec::new_in(allocator))
 }
 

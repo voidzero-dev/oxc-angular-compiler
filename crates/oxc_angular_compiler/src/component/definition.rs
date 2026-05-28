@@ -27,6 +27,7 @@ use super::transform::TransformOptions;
 use crate::directive::{
     create_host_directive_mappings_array, create_inputs_literal, create_outputs_literal,
 };
+use crate::factory::create_invalid_factory_call;
 use crate::output::ast::{
     FnParam, FunctionExpr, InstantiateExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr,
     LiteralMapEntry, LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr,
@@ -35,39 +36,6 @@ use crate::output::ast::{
 use crate::pipeline::compilation::{ComponentCompilationJob, ConstValue};
 use crate::pipeline::emit::HostBindingCompilationResult;
 use crate::pipeline::selector::{parse_selector_to_r3_selector, r3_selector_to_output_expr};
-
-/// Create an `i0.ɵɵinvalidFactory()` call expression.
-///
-/// Used when constructor dependencies cannot be resolved at runtime (e.g.,
-/// a type-only import was used as a DI token).
-fn create_invalid_factory_call(allocator: &Allocator) -> OutputExpression<'_> {
-    let fn_expr = OutputExpression::ReadProp(Box::new_in(
-        ReadPropExpr {
-            receiver: Box::new_in(
-                OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
-                )),
-                allocator,
-            ),
-            name: Ident::from(Identifiers::INVALID_FACTORY),
-            optional: false,
-            source_span: None,
-        },
-        allocator,
-    ));
-
-    OutputExpression::InvokeFunction(Box::new_in(
-        InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
-            args: OxcVec::new_in(allocator),
-            pure: false,
-            optional: false,
-            source_span: None,
-        },
-        allocator,
-    ))
-}
 
 /// Result of generating component definitions.
 pub struct ComponentDefinitions<'a> {
