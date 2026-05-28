@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@napi-rs/cli':
-      specifier: 3.6.2
-      version: 3.6.2
+      specifier: 3.7.0
+      version: 3.7.0
     '@oxc-node/cli':
       specifier: 0.1.0
       version: 0.1.0
@@ -49,7 +49,7 @@ importers:
     devDependencies:
       '@napi-rs/cli':
         specifier: 'catalog:'
-        version: 3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)
+        version: 3.7.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)
       oxfmt:
         specifier: 'catalog:'
         version: 0.52.0
@@ -74,7 +74,7 @@ importers:
         version: 21.2.14(@angular/compiler@21.2.14)(typescript@6.0.3)
       '@napi-rs/cli':
         specifier: 'catalog:'
-        version: 3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)
+        version: 3.7.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)
       '@oxc-node/cli':
         specifier: 'catalog:'
         version: 0.1.0
@@ -1287,8 +1287,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@napi-rs/cli@3.6.2':
-    resolution: {integrity: sha512-jy5rABUh9tbE/vPRzw9kGzGuqZiVslyDQUV8LkvjzqVX/oJMN7g0U1uhtr9L3W1H+iRM/urXHXUf+CE4n8FvLA==}
+  '@napi-rs/cli@3.7.0':
+    resolution: {integrity: sha512-3d3+rmxlOIV/G1zPWeX4PCxuYnhcCQM2BvY9rtimC8RO0dFR9gtYP+Grov+WoduZtfWRj5N1XvytWeRxxCk5zw==}
     engines: {node: '>= 16'}
     hasBin: true
     peerDependencies:
@@ -3790,8 +3790,8 @@ packages:
   electron-to-chromium@1.5.340:
     resolution: {integrity: sha512-908qahOGocRMinT2nM3ajCEM99H4iPdv84eagPP3FfZy/1ZGeOy2CZYzjhms81ckOPCXPlW7LkY4XpxD8r1DrA==}
 
-  emnapi@1.9.1:
-    resolution: {integrity: sha512-s4RbfzgbYg9cWBZXJT6LazImJQ5p+F+LyTsCWQJXbGVdPmtCtdlwqd0Oiv3O51KyYV/Hq58xszaQ/l153tK6Uw==}
+  emnapi@1.10.0:
+    resolution: {integrity: sha512-swoyZjupDvLoe/KC3HZ4SY1JUN+tviT6eOZ3Px28TZAYdBHtRIiMWWrIUUH+2/9CYY4fNTID1YhYZ+kdFHszHg==}
     peerDependencies:
       node-addon-api: '>= 6.1.0'
     peerDependenciesMeta:
@@ -5551,7 +5551,7 @@ snapshots:
   '@msgpackr-extract/msgpackr-extract-win32-x64@3.0.3':
     optional: true
 
-  '@napi-rs/cli@3.6.2(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)':
+  '@napi-rs/cli@3.7.0(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)(@types/node@24.1.0)(node-addon-api@7.1.1)':
     dependencies:
       '@inquirer/prompts': 8.3.0(@types/node@24.1.0)
       '@napi-rs/cross-toolchain': 1.0.3(@emnapi/core@1.10.0)(@emnapi/runtime@1.10.0)
@@ -5559,7 +5559,7 @@ snapshots:
       '@octokit/rest': 22.0.1
       clipanion: 4.0.0-rc.4(typanion@3.14.0)
       colorette: 2.0.20
-      emnapi: 1.9.1(node-addon-api@7.1.1)
+      emnapi: 1.10.0(node-addon-api@7.1.1)
       es-toolkit: 1.45.1
       js-yaml: 4.1.1
       obug: 2.1.1
@@ -7397,7 +7397,7 @@ snapshots:
 
   electron-to-chromium@1.5.340: {}
 
-  emnapi@1.9.1(node-addon-api@7.1.1):
+  emnapi@1.10.0(node-addon-api@7.1.1):
     optionalDependencies:
       node-addon-api: 7.1.1
 
