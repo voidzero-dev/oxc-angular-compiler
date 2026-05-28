@@ -5769,7 +5769,7 @@ fn transform_to_r3_nodes(template: &str) -> (std::vec::Vec<String>, std::vec::Ve
 
 #[test]
 fn test_for_block_no_expression_returns_none() {
-    // Finding 2: @for with no expression should return None (no ForLoopBlock node),
+    // @for with no expression should return None (no ForLoopBlock node),
     // matching Angular's behavior where parseForLoopParameters returns null.
     let (errors, has_for_block) = transform_to_r3("@for { <div></div> }");
     assert!(
@@ -5781,7 +5781,7 @@ fn test_for_block_no_expression_returns_none() {
 
 #[test]
 fn test_for_block_missing_track_returns_none() {
-    // Finding 2: @for with valid expression but missing track should return None,
+    // @for with valid expression but missing track should return None,
     // matching Angular's behavior (params.trackBy === null → node stays null).
     let (errors, has_for_block) = transform_to_r3("@for (item of items) { <div></div> }");
     assert!(
@@ -5796,7 +5796,7 @@ fn test_for_block_missing_track_returns_none() {
 
 #[test]
 fn test_if_block_no_expression_skips_main_branch() {
-    // Finding 3: @if with no parameters should not push a main branch,
+    // @if with no parameters should not push a main branch,
     // matching Angular where parseConditionalBlockParameters returns null.
     let (errors, node_types) = transform_to_r3_nodes("@if { <div></div> }");
     // The IfBlock should have 0 branches (main branch skipped)
@@ -6190,7 +6190,7 @@ export class TestComponent {
 /// a dynamic value, the compiler extracts a pure function constant (e.g., `_c0`).
 /// This constant must be emitted in the output — not silently dropped.
 ///
-/// Regression test for: host binding pool constants not being emitted in
+/// Guards against host binding pool constants not being emitted in
 /// compile_template_to_js_with_options path.
 #[test]
 fn test_host_binding_pure_function_declarations_emitted() {
@@ -10557,7 +10557,7 @@ export class TestComponent {}
     assert!(token_pos < class_pos, "Order should be preserved.\nCode:\n{}", result.code);
 }
 
-/// Reproducer for PR #302 review feedback: when two bindings from the *same*
+/// When two bindings from the *same*
 /// multi-declarator statement (`const A = 1, B = 2;`) are referenced by
 /// different decorated classes, the hoist plan keys entries by binding name,
 /// producing two `HoistEntry` values that share the same `stmt_start` but
@@ -10567,7 +10567,7 @@ export class TestComponent {}
 /// earliest referencing class. That leaves the earlier class still inside the
 /// TDZ of the hoisted statement.
 ///
-/// Scenario from the Codex review:
+/// Scenario:
 ///   * `class A` (decorated) references `B`.
 ///   * `class C` (decorated) references `A`.
 ///   * Both classes are declared *before* `const A = 1, B = 2;`.
@@ -10634,7 +10634,7 @@ const Aval = 1, Bval = 2;
     );
 }
 
-/// Regression for transitive TDZ deps: when decorator metadata references an
+/// Guards transitive TDZ deps: when decorator metadata references an
 /// aggregate binding (e.g. `providers: PROVIDERS`) and that aggregate's
 /// initializer transitively references *another* later-declared top-level
 /// binding (`TOKEN`), the hoister must pull both bindings above the class.
@@ -10712,8 +10712,6 @@ const TOKEN = 'tok';
 /// also pull `TOKEN` above the class — otherwise the hoisted `PROVIDERS`
 /// initializer invokes `makeProviders()` before `TOKEN` is initialized and
 /// throws `ReferenceError: Cannot access 'TOKEN' before initialization`.
-///
-/// Regression test for Codex bot review on PR #302 (line 340 of hoist.rs).
 #[test]
 fn component_provider_const_via_function_call_pulls_in_transitive_tdz_dep() {
     let allocator = Allocator::default();
@@ -10784,8 +10782,6 @@ function makeProviders() { return [{ provide: TOKEN }]; }
 /// after the class body and is still in the TDZ when the class's static
 /// fields evaluate. The hoist must move it; using `<=` for the
 /// "before-class" check accidentally skips this boundary case.
-///
-/// Regression test for Cursor bot review on PR #302 (line 124 of hoist.rs).
 #[test]
 fn component_provider_const_immediately_after_class_brace_is_hoisted() {
     let allocator = Allocator::default();
@@ -10825,9 +10821,6 @@ export class TestComponent {}const TOKEN = 'tok';\n";
 /// So later-declared bindings reachable only through that function's body
 /// must NOT be hoisted. Hoisting them would create a NEW TDZ that didn't
 /// exist in the original source.
-///
-/// Regression test for PR #302 Codex review: BFS function-body chasing
-/// branch must only fire when the function is eagerly called.
 #[test]
 fn component_provider_useFactory_function_value_does_not_hoist_body_deps() {
     let allocator = Allocator::default();
@@ -10867,9 +10860,6 @@ const TOKEN = TestComponent;
 /// `Expression::ChainExpression` (optional chaining, `TOKEN?.id` or `f?.()`)
 /// must contribute identifier references to the decorator-metadata symbol
 /// scan, so that the referenced top-level binding gets hoisted.
-///
-/// Regression test for PR #302 Codex review: the catch-all `_ => {}` arm
-/// in `collect_expr_symbols` was silently dropping `ChainExpression`.
 #[test]
 fn component_provider_optional_chain_token_is_hoisted() {
     let allocator = Allocator::default();
@@ -10906,10 +10896,6 @@ const TOKEN = { id: 'tok' };
 /// Top-level destructuring patterns must be indexed: `const { TOKEN } = X;`
 /// binds `TOKEN`, and decorator metadata referencing `TOKEN` must hoist that
 /// declaration above the class.
-///
-/// Regression test for PR #302 Codex review: `collect_top_level_bindings`
-/// only handled `BindingPattern::BindingIdentifier`, ignoring object/array
-/// destructuring patterns entirely.
 #[test]
 fn component_provider_destructured_top_level_token_is_hoisted() {
     let allocator = Allocator::default();
@@ -10953,8 +10939,6 @@ const { TOKEN } = TOKENS;
 /// The safe-skip guard refuses to hoist a statement when any of its
 /// initializer symbols resolves to a top-level class declared at position
 /// `>= effective_start` of the class being protected.
-///
-/// Regression test for Codex review #3310709319 on PR #302.
 #[test]
 fn component_provider_multi_declarator_with_class_self_ref_skips_hoist() {
     let allocator = Allocator::default();
@@ -10997,8 +10981,6 @@ const TOKEN = 'tok', BACKREF = TestComponent;
 /// the arrow body must be treated as eager. The general lazy-bodies rule
 /// (skip arrow/function bodies) doesn't apply when the function is its own
 /// callee.
-///
-/// Regression test for Codex review #3310709326 on PR #302.
 #[test]
 fn component_provider_iife_metadata_hoists_inner_token() {
     let allocator = Allocator::default();
@@ -11043,8 +11025,6 @@ const TOKEN = 'tok';
 ///
 /// Per-class eagerly_called scoping (seeded only from THIS class's
 /// `decorator_called`) prevents this leak.
-///
-/// Regression test for Cursor review #3310734461 on PR #302.
 #[test]
 fn component_provider_useFactory_value_does_not_chase_global_eager_caller() {
     let allocator = Allocator::default();
@@ -11094,8 +11074,6 @@ const TOKEN = TestComponent;
 /// is left below the class and the hoisted `const PROVIDERS = makeProviders()`
 /// throws `ReferenceError: Cannot access 'TOKEN' before initialization` when
 /// the parameter default fires.
-///
-/// Regression test for Codex P2 review on PR #302.
 #[test]
 fn component_provider_eager_call_chases_param_default_refs() {
     let allocator = Allocator::default();
@@ -11163,8 +11141,6 @@ const TOKEN = 'tok';
 /// `FALLBACK` stays below the class and the hoisted destructuring throws
 /// `ReferenceError: Cannot access 'FALLBACK' before initialization` at
 /// runtime.
-///
-/// Regression test for Codex P2 review #3311274924 on PR #302.
 #[test]
 fn component_destructured_default_chases_late_const() {
     let allocator = Allocator::default();
@@ -11227,8 +11203,6 @@ const FALLBACK = 'tok';
 /// IIFE callee bodies the same way `collect_expr_symbols` does, or `TOKEN`
 /// is left below the class and the eagerly-called function throws at module
 /// init.
-///
-/// Regression test for Cursor review #3311313158 on PR #302.
 #[test]
 fn component_eager_fn_body_iife_chases_late_const() {
     let allocator = Allocator::default();
@@ -11275,8 +11249,6 @@ const TOKEN = 'tok';
 /// The user's existing TDZ on `TOKEN` is NOT our problem to fix — we must
 /// just not introduce a NEW class TDZ. So we only assert that `class
 /// TestComponent` still precedes `var TOKEN`.
-///
-/// Regression test for Codex P2 review #3311493528 on PR #302.
 #[test]
 fn component_eager_fn_body_class_ref_blocks_hoist() {
     let allocator = Allocator::default();
@@ -11318,8 +11290,6 @@ function make() { return TestComponent; }
 /// `collect_expr_symbols` walker must not silently drop these — otherwise
 /// `TOKEN` never enters the BFS and stays declared below the class, while
 /// the class's emitted Ivy definition reads `TOKEN` eagerly.
-///
-/// Regression test for Cursor Low review #3311551145 on PR #302.
 #[test]
 fn component_assignment_expression_chases_late_const() {
     let allocator = Allocator::default();
@@ -11356,7 +11326,7 @@ const TOKEN = 'tok';
     );
 }
 
-/// Finding 1: transitive dependency cascade. The BFS pops `TOKEN` whose
+/// Transitive dependency cascade. The BFS pops `TOKEN` whose
 /// only directly-called function is `make()`; the closure of
 /// `init_called_symbols` brings in nothing class-relevant from `make`'s
 /// body (it just calls `BACKREF` whose binding is a non-function const).
@@ -11371,8 +11341,6 @@ const TOKEN = 'tok';
 /// Required: when a dependency is guard-skipped, every transitively
 /// dependent already-planned statement must be un-planned too. Without
 /// the fix, `var TOKEN` lands above `class TestComponent` in the output.
-///
-/// Regression test for Codex P2 review (Finding 1) on PR #302.
 #[test]
 fn component_eager_fn_body_transitive_class_ref_unplans_chain() {
     let allocator = Allocator::default();
@@ -11413,7 +11381,7 @@ const BACKREF = TestComponent;
     );
 }
 
-/// Finding 2: function-valued `const`/`let` bindings hide eager class
+/// Function-valued `const`/`let` bindings hide eager class
 /// reads. The BFS pops `TOKEN` whose `init_called_symbols = {make}`.
 /// `make` is a `const` arrow, not a function decl — so it's missing from
 /// `fn_body_*` maps. The closure expansion finds nothing; the guard
@@ -11425,8 +11393,6 @@ const BACKREF = TestComponent;
 /// peeling parens / TS wrappers) must be indexed into `fn_body_*` maps
 /// keyed by the binding symbol, so the existing safe-skip guard catches
 /// the transitive class read.
-///
-/// Regression test for Codex P2 review (Finding 2) on PR #302.
 #[test]
 fn component_eager_fn_value_const_arrow_class_ref_blocks_hoist() {
     let allocator = Allocator::default();
@@ -11457,7 +11423,7 @@ const make = () => TestComponent;
     );
 }
 
-/// Finding 3: member-call shapes `fn.call(...)` / `fn.apply(...)` aren't
+/// Member-call shapes `fn.call(...)` / `fn.apply(...)` aren't
 /// recognized as eager calls. `record_direct_callee` peels parens / TS
 /// wrappers but stops at `StaticMemberExpression`, so `make.call(null)`
 /// records nothing in `called`. The guard's `stmt_called` is empty, the
@@ -11468,8 +11434,6 @@ const make = () => TestComponent;
 /// Required: extend `record_direct_callee` (or a wrapper) to recognize
 /// the static call shapes `fn.call(...)`, `fn.apply(...)`, and
 /// `fn.bind(...)()` on top-level function symbols.
-///
-/// Regression test for Codex P2 review (Finding 3) on PR #302.
 #[test]
 fn component_eager_member_call_class_ref_blocks_hoist() {
     let allocator = Allocator::default();
@@ -11500,7 +11464,7 @@ function make() { return TestComponent; }
     );
 }
 
-/// Codex P3 review Finding 1: cross-class `insert_at` ordering. Two
+/// Cross-class `insert_at` ordering. Two
 /// `@Component`-decorated classes (C1 first, C2 second) with an
 /// undecorated `class Mid` between them. C1 plans `var TOKEN = make()` at
 /// `insert_at = pos_C1`; its BFS chases `make`'s body to `X` but the
@@ -11558,7 +11522,7 @@ const X = Mid;
     );
 }
 
-/// Codex P3 review Finding 2: per-S eager-call set. Class A uses
+/// Per-S eager-call set. Class A uses
 /// `makeRef` as a value (`useFactory: makeRef`); class B *calls* `make()`
 /// (`providers: [make()]`). The cascade pass currently uses
 /// `combined_eagerly_called` (the union across all classes) so `make` —
@@ -11607,7 +11571,7 @@ const BACKREF = 'tok';
     );
 }
 
-/// Codex P3 review Finding 3: multi-declarator function-valued bindings.
+/// Multi-declarator function-valued bindings.
 /// `index_fn_valued_binding` currently only runs when
 /// `decl.declarations.len() == 1`. The shape
 /// `const make = () => TestComponent, other = 0;` skips indexing, so
@@ -11650,7 +11614,7 @@ const make = () => TestComponent, other = 0;
     );
 }
 
-/// Codex P2 review #3311913006: a top-level `const make = () => DEP`
+/// A top-level `const make = () => DEP`
 /// populates BOTH `symbol_to_stmt[make]` (binding) AND
 /// `fn_body_symbol_refs[make]` (because `index_fn_valued_binding` indexes
 /// arrow/function-valued bindings as if they were function declarations).
@@ -11715,7 +11679,7 @@ const TOKEN = 'tok';
     );
 }
 
-/// Cursor Low review #3311962888: lock in symmetric per-stmt eager-call
+/// Locks in symmetric per-stmt eager-call
 /// reasoning between the cascade un-planning pass and `topological_order`.
 /// The cascade was changed to compute a per-S `stmt_called` (closure of
 /// `init_called_symbols` under `fn_body_called_symbols`); the topo sort
@@ -11729,7 +11693,7 @@ const TOKEN = 'tok';
 /// reorder or drop it).
 ///
 /// Locks in symmetric per-stmt eager-call reasoning between cascade and
-/// topological_order — see PR #302 Cursor review #3311962888.
+/// topological_order.
 #[test]
 fn component_topo_uses_per_stmt_eager_set() {
     let allocator = Allocator::default();
@@ -11775,7 +11739,7 @@ const BACKREF = 'tok';
     );
 }
 
-/// Follow-on adversarial finding (Round 6): a function-valued `const`
+/// A function-valued `const`
 /// binding whose ARROW BODY reads a top-level class can escape BOTH the
 /// safe-skip guard AND the cascade un-planning when the binding ITSELF
 /// is eagerly called from a decorator.
@@ -11919,7 +11883,7 @@ const BACKREF = TestComponent;
     );
 }
 
-/// Codex P2 review #3312108552: top-level class declarations' constructor
+/// Top-level class declarations' constructor
 /// bodies are NOT indexed into `fn_body_symbol_refs` /
 /// `fn_body_called_symbols`. When a hoisted initializer eagerly invokes
 /// `new ClassName()`, the constructor body runs at module load — and any
@@ -12001,7 +11965,7 @@ const TOKEN = 1;
     );
 }
 
-/// Codex P2 review #3312108558: `E::ClassExpression(_) => {}` in
+/// `E::ClassExpression(_) => {}` in
 /// `collect_expr_symbols` drops the eager parts of a class expression —
 /// the `super_class` expression, computed keys, static field initializers,
 /// and static blocks. Those fire when the class expression is *defined*,
@@ -12079,8 +12043,6 @@ const BASE = class {};
 /// set. `FunctionBodyIdentVisitor::visit_class` is a no-op which silently
 /// drops these refs unless it walks the class's eager parts via
 /// `walk_class_eager_parts`.
-///
-/// Regression test for Codex P2 review #3314767088 on PR #302.
 #[test]
 fn component_eager_fn_body_inline_class_extends_chases_late_const() {
     let allocator = Allocator::default();
@@ -12122,8 +12084,6 @@ const TOKEN = class {};
 /// alternate of a `ConditionalExpression` callee and add both identifiers to
 /// `called`. Without this, neither callee body is chased and `TOKEN` stays
 /// declared below the class.
-///
-/// Regression test for Codex P2 review #3314767091 on PR #302.
 #[test]
 fn component_eager_conditional_callee_chases_both_branches() {
     let allocator = Allocator::default();
@@ -12168,8 +12128,6 @@ const TOKEN = 1;
 /// (direct/indirect/bind) — otherwise the default walk adds `tag` to `out`
 /// only, `tag` never enters `eagerly_called`, and the late `TOKEN` reference
 /// inside `tag`'s body is never chased.
-///
-/// Regression test for Cursor Low review #3314770575 on PR #302.
 #[test]
 fn component_eager_fn_body_tagged_template_chases_late_const() {
     let allocator = Allocator::default();
@@ -12210,9 +12168,7 @@ const TOKEN = 1;
 /// Decorator metadata uses a tagged template whose tag is produced by
 /// `.bind` / `.call` / `.apply`. The tag function fires at class-definition
 /// time, so its body refs must enter the eagerly-called closure — same
-/// treatment `E::CallExpression` / `E::NewExpression` already get. Covers
-/// both Cursor Low #3314809112 (consistency with call/new arms) and Codex
-/// P2 #3314810080 (bound tagged-template callees) on PR #302.
+/// treatment `E::CallExpression` / `E::NewExpression` already get.
 #[test]
 fn component_tagged_template_bind_tag_chases_late_const() {
     let allocator = Allocator::default();
@@ -12256,8 +12212,6 @@ const TOKEN = 'tok';
 /// to skip the body chase entirely when the binding's stmt_start was
 /// before the class's body end, leaving `TOKEN` unhoisted and the
 /// emitted Ivy definition throwing at module load.
-///
-/// Regression test for Codex P2 review #3314836115 on PR #302.
 #[test]
 fn component_pre_class_fn_valued_binding_chases_body_refs() {
     let allocator = Allocator::default();

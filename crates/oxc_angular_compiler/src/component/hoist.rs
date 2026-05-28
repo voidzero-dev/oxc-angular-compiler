@@ -128,8 +128,7 @@ pub fn collect_hoist_edits<'a>(
     // its reads become TDZ-relevant to that statement.
     //
     // Computed once here so the BFS safe-skip guard, the cascade un-planning
-    // pass, and the topological sort can all consult the same map. See
-    // PR #302 Round 6 follow-on review.
+    // pass, and the topological sort can all consult the same map.
     let mut stmt_fn_valued_bindings: HashMap<u32, Vec<SymbolId>> = HashMap::new();
     for (&sym, &stmt_start) in &symbol_to_stmt {
         if fn_body_symbol_refs.contains_key(&sym) {
@@ -141,7 +140,6 @@ pub fn collect_hoist_edits<'a>(
     // the class's `span.start`. Used by the BFS to refuse hoisting any
     // statement whose initializer references a class that lives at-or-after
     // the protect site — see the safe-skip guard near `plan.entry(...)`.
-    // Regression for Codex review #3310709319 on PR #302.
     let top_level_class_positions = collect_top_level_class_positionss(program);
 
     // Step 2a: gather per-class decorator-metadata symbols (both the full
@@ -157,8 +155,7 @@ pub fn collect_hoist_edits<'a>(
     // (`useFactory: foo`), foo's body does NOT fire when this class
     // evaluates — and chasing TOKEN would invent a new TDZ on the class
     // (when `TOKEN = TestComponent`). A global `eagerly_called` (seeded
-    // from every module-init call site) over-reaches across classes. See
-    // PR #302 review (Cursor #3310734461).
+    // from every module-init call site) over-reaches across classes.
     let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>, HashSet<SymbolId>)> = Vec::new();
     for stmt in &program.body {
         let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
@@ -184,7 +181,7 @@ pub fn collect_hoist_edits<'a>(
     // against the nondeterministic dedup bug where, with `const A = 1, B = 2;`
     // referenced by two different classes, the surviving entry's `insert_at`
     // depended on HashMap iteration order and could land *after* the earlier
-    // class. See PR #302 review.
+    // class.
     let mut plan: HashMap<u32, PlanEntry> = HashMap::new();
     // Union of per-class `eagerly_called` sets for all classes that
     // contributed to the plan. The topological sort's edge expansion
@@ -242,7 +239,6 @@ pub fn collect_hoist_edits<'a>(
                 // `make`'s stmt_start < class_body_end. Mirrors the post-
                 // plan body-chase below; deferred otherwise so a later eager-
                 // set promotion belatedly chases via the `now_eager` sweep.
-                // Regression for Codex P2 review #3314836115 on PR #302.
                 if fn_body_symbol_refs.contains_key(&symbol) {
                     if eagerly_called.contains(&symbol) {
                         if chased_fn_bodies.insert(symbol)
@@ -300,8 +296,7 @@ pub fn collect_hoist_edits<'a>(
                 //
                 // The check uses `>=`: a class declared at exactly
                 // `effective_start` is itself the class we're protecting
-                // — definitely blocking. Regression for Codex review
-                // #3310709319 and Codex P2 review #3311493528 on PR #302.
+                // — definitely blocking.
                 let mut stmt_called: HashSet<SymbolId> =
                     info.init_called_symbols.iter().copied().collect();
                 // Fold in any fn-valued binding declared by this statement
@@ -315,7 +310,6 @@ pub fn collect_hoist_edits<'a>(
                 // by `providers: make()` would slip past the guard because
                 // the initializer's plain `init_symbols` / `init_called_symbols`
                 // are empty (arrow bodies are lazy in `collect_expr_symbols`).
-                // See PR #302 Round 6 follow-on review.
                 if let Some(fn_syms) = stmt_fn_valued_bindings.get(&stmt_start) {
                     for &fn_sym in fn_syms {
                         if eagerly_called.contains(&fn_sym) {
@@ -396,7 +390,6 @@ pub fn collect_hoist_edits<'a>(
                 // provide: TOKEN, ... }]; const TOKEN = ...;` moves
                 // `PROVIDERS` but leaves `TOKEN` below, so module evaluation
                 // now throws inside the hoisted `PROVIDERS` initializer.
-                // See PR #302 review.
                 for &s in &info.init_symbols {
                     if !visited.contains(&s) {
                         worklist.push(s);
@@ -408,7 +401,6 @@ pub fn collect_hoist_edits<'a>(
                 // *for this class*. Don't hoist the function itself (JS
                 // already hoists fn decls), but its body's identifier
                 // reads fire whenever it runs. Chase those references.
-                // See PR #302 review (Codex).
                 if chased_fn_bodies.insert(symbol) {
                     if let Some(body_refs) = fn_body_symbol_refs.get(&symbol) {
                         for &s in body_refs {
@@ -422,7 +414,7 @@ pub fn collect_hoist_edits<'a>(
                 // Top-level function not (yet) in eagerly_called for this
                 // class. Defer — if a later visit promotes it (because some
                 // planned binding's initializer calls it), we'll belatedly
-                // chase its body. See PR #302 review (Cursor).
+                // chase its body.
                 deferred_fns.insert(symbol);
             }
         }
@@ -443,7 +435,7 @@ pub fn collect_hoist_edits<'a>(
     // by chasing through `fn_body_symbol_refs` may itself get guard-skipped
     // when the BFS later pops it — leaving S planned with a missing dep.
     //
-    // Example (Finding 1 of Codex P2 review on PR #302):
+    // Example:
     //
     //   class TestComponent { ... }              // ← class C
     //   var TOKEN = make();                       // ← S: passes guard
@@ -478,7 +470,7 @@ pub fn collect_hoist_edits<'a>(
         let mut to_remove: Vec<u32> = Vec::new();
         for (&start, entry) in &plan {
             let Some(info) = stmt_info.get(&start) else { continue };
-            // Finding 2 (Codex P3 review): use a *per-S* eager-call set —
+            // Use a *per-S* eager-call set —
             // the closure of THIS statement's `init_called_symbols` under
             // `fn_body_called_symbols` — instead of the global
             // `combined_eagerly_called`. The global union over-expands: if
@@ -501,8 +493,7 @@ pub fn collect_hoist_edits<'a>(
             // for a class that calls `make()` would not see its body's
             // dependency on `BACKREF` (whose own statement was guard-
             // skipped), so the cascade would fail to drop `make` and the
-            // hoisted `make()` would TDZ on `BACKREF`. See PR #302 Round 6
-            // follow-on review.
+            // hoisted `make()` would TDZ on `BACKREF`.
             let mut seed: HashSet<SymbolId> = info.init_symbols.clone();
             if let Some(fn_syms) = stmt_fn_valued_bindings.get(&start) {
                 for &fn_sym in fn_syms {
@@ -526,7 +517,7 @@ pub fn collect_hoist_edits<'a>(
                     continue;
                 }
                 // Dep is in the plan — only safe if its `insert_at` is at
-                // or before S's `insert_at`. Finding 1 (Codex P3 review):
+                // or before S's `insert_at`:
                 // two planned statements can target *different* `insert_at`
                 // positions (one per decorated class). If S targets
                 // `insert_at = pos_C1` and its dep `D` is planned only for
@@ -587,8 +578,7 @@ pub fn collect_hoist_edits<'a>(
     // union can over-expand: a function `make` eagerly called only by
     // class B leaks into class A's `makeRef = make` closure when
     // computing topo edges, forming a spurious edge that may invert
-    // ordering or trigger the cycle-break. See PR #302 Cursor Low review
-    // #3311962888.
+    // ordering or trigger the cycle-break.
     //
     // `stmt_fn_valued_bindings` (computed once near the top of this
     // function) is consulted here too — see the doc comment on
@@ -678,15 +668,13 @@ pub fn collect_hoist_edits<'a>(
 /// `init_called_symbols` under `fn_body_called_symbols`, matching the
 /// shape the cascade un-planning loop uses. Passing per-S sets instead of
 /// the global `combined_eagerly_called` keeps the cascade and topo
-/// passes reasoning against the same eager-evaluation surface — see PR
-/// #302 Cursor Low review #3311962888.
+/// passes reasoning against the same eager-evaluation surface.
 ///
 /// `stmt_fn_valued_bindings` maps each planned `stmt_start` to the
 /// function-valued binding symbols it declares (e.g. `make` for
 /// `const make = () => TOKEN;`). Their `fn_body_symbol_refs` entries are
 /// chased to surface body-ref dependencies that are invisible to the
-/// statement's plain `init_symbols` — see PR #302 Codex P2 review
-/// #3311913006.
+/// statement's plain `init_symbols`.
 fn topological_order(
     plan: &HashMap<u32, PlanEntry>,
     symbol_to_stmt: &HashMap<SymbolId, u32>,
@@ -709,8 +697,7 @@ fn topological_order(
     // If the initializer calls a function (directly or transitively), the
     // function body's identifier reads count as references that fire when
     // the hoisted statement evaluates. Functions only stored as values are
-    // NOT expanded — their bodies don't run at module load. See PR #302
-    // review (Codex).
+    // NOT expanded — their bodies don't run at module load.
     //
     // Function-valued binding symbols this statement declares (e.g. `make`
     // in `const make = () => TOKEN;`) are added to the seed so the
@@ -831,8 +818,7 @@ fn expand_through_functions(
 ///
 /// Per-class scoping: the seed is THIS class's call graph only. A function
 /// invoked elsewhere in the module but only referenced as a value in this
-/// class's metadata does not enter this class's set. See PR #302 review
-/// (Cursor #3310734461).
+/// class's metadata does not enter this class's set.
 fn close_eagerly_called(
     eagerly_called: &mut HashSet<SymbolId>,
     worklist: &mut Vec<SymbolId>,
@@ -1013,8 +999,7 @@ fn collect_top_level_bindings<'a>(
                 // patterned bindings are skipped — the function-value shape
                 // only appears with a plain identifier binding in practice.
                 // Run this BEFORE collecting `init_symbols` so the indexing
-                // happens before the normal binding/init flow. See PR #302
-                // Codex P2 Finding 3.
+                // happens before the normal binding/init flow.
                 if let (BindingPattern::BindingIdentifier(id), Some(init)) =
                     (&declarator.id, &declarator.init)
                     && let Some(fn_symbol) = id.symbol_id.get()
@@ -1033,8 +1018,7 @@ fn collect_top_level_bindings<'a>(
                 // = arr;`, `const { a: { b } } = obj;`, …) also index every
                 // binding identifier they introduce. Without this, decorator
                 // metadata referencing such a binding never resolves to its
-                // declaring statement and the hoist is skipped. See PR #302
-                // Codex review.
+                // declaring statement and the hoist is skipped.
                 for_each_binding_identifier(&declarator.id, &mut |id| {
                     if let Some(symbol_id) = id.symbol_id.get() {
                         symbol_to_stmt.insert(symbol_id, stmt_start);
@@ -1055,8 +1039,7 @@ fn collect_top_level_bindings<'a>(
                 // declared top-level binding referenced by a default is
                 // TDZ-relevant exactly like the `init` itself. Walk every
                 // nested `AssignmentPattern::right` in the binding pattern
-                // and feed its refs into the statement's eager sets. See
-                // PR #302 Codex review #3311274924.
+                // and feed its refs into the statement's eager sets.
                 for_each_pattern_default(&declarator.id, &mut |expr| {
                     collect_expr_symbols(
                         expr,
@@ -1124,8 +1107,7 @@ fn collect_top_level_bindings<'a>(
         // eager) is intentional. The BFS only ever uses these maps to
         // *block* hoisting that would introduce a fresh TDZ — never to
         // greenlight one — so extending the body-ref set can only
-        // over-block, never under-block. See PR #302 Codex P2 review
-        // #3312108552.
+        // over-block, never under-block.
         if let Some((class, _)) = class_of(stmt) {
             if let Some(id) = &class.id
                 && let Some(class_symbol) = id.symbol_id.get()
@@ -1251,7 +1233,7 @@ fn for_each_pattern_default<'a, 'src>(
 /// only over-blocks hoisting, never under-blocks.
 ///
 /// For a *class expression* embedded inside an eagerly-evaluated decorator
-/// argument (Bug 2 of Codex P2 review #3312108558), the class expression
+/// argument, the class expression
 /// itself is being defined inline — so only the class-definition-time
 /// eager parts fire here. Instance methods/fields/constructor bodies are
 /// lazy until someone calls `new` on the class, which the metadata can't
@@ -1350,8 +1332,6 @@ fn walk_class_eager_parts<'a>(
 /// * `AssignmentPattern.right` nested anywhere inside the parameter's
 ///   `BindingPattern` (e.g. the inner `= X` in
 ///   `function f({ a = X } = {})`).
-///
-/// See PR #302 Codex review (#3311099883).
 fn walk_param_defaults<'a>(
     params: &FormalParameters<'a>,
     semantic: &Semantic<'a>,
@@ -1402,7 +1382,6 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         // the eager-evaluation set. Without this, `visit_arrow_function`
         // / `visit_function` (intentional no-ops below) would silently drop
         // the IIFE body inside an eagerly-called function — TDZ regression.
-        // See PR #302 Cursor review #3311313158.
         if walk_iife_callee_body(&it.callee, self.semantic, self.out, self.called) {
             // Body handled; only the arguments still need to flow into
             // `self.out` / `self.called`.
@@ -1450,8 +1429,6 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
     // surrounding code does call `new` here, the constructor body and
     // parameter defaults fire too. Over-counting only over-blocks (it never
     // under-blocks), so include the constructor to stay conservative.
-    //
-    // Regression for Codex P2 review #3314767088 on PR #302.
     fn visit_class(&mut self, it: &Class<'a>) {
         walk_class_eager_parts(
             it,
@@ -1471,8 +1448,7 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
         // `called` just like a `CallExpression`. Without this override, the
         // default walk reaches `tag` via `visit_identifier_reference` (which
         // only feeds `out`), so the tag's body never gets chased through
-        // `eagerly_called`. Regression for Cursor Low review #3314770575
-        // on PR #302.
+        // `eagerly_called`.
         record_direct_callee(&it.tag, self.semantic, self.called);
         record_indirect_callee(&it.tag, self.semantic, self.called);
         record_bind_callee(&it.tag, self.semantic, self.called);
@@ -1588,8 +1564,6 @@ fn collect_expr_symbols<'a>(
             // default `ArrowFunctionExpression` / `FunctionExpression`
             // arms below treat bodies as lazy; for IIFEs we walk the body
             // explicitly via `FunctionBodyIdentVisitor` instead.
-            //
-            // Regression for Codex review #3310709326 on PR #302.
             if !walk_iife_callee_body(&call.callee, semantic, out, called) {
                 collect_expr_symbols(&call.callee, semantic, out, called);
             }
@@ -1665,8 +1639,7 @@ fn collect_expr_symbols<'a>(
             // and `fn.bind(...)` shapes must all enter `called`. Without the
             // indirect/bind helpers here, `make.bind(null)\`...\`` in decorator
             // metadata would record `make` as a value reference but never chase
-            // its body. Covers PR #302 Cursor Low #3314809112 / Codex P2
-            // #3314810080.
+            // its body.
             record_direct_callee(&tagged.tag, semantic, called);
             record_indirect_callee(&tagged.tag, semantic, called);
             record_bind_callee(&tagged.tag, semantic, called);
@@ -1709,8 +1682,7 @@ fn collect_expr_symbols<'a>(
         // time. The `right` is a regular expression; the `left` is an
         // `AssignmentTarget` (bare identifier, member, or pattern-shaped)
         // walked via the dedicated helper. Without this, decorator metadata
-        // shaped `providers: [(cached = TOKEN)]` silently dropped `TOKEN`
-        // — Cursor Low review #3311551145 on PR #302.
+        // shaped `providers: [(cached = TOKEN)]` silently dropped `TOKEN`.
         E::AssignmentExpression(assign) => {
             collect_expr_symbols(&assign.right, semantic, out, called);
             collect_assignment_target_symbols(&assign.left, semantic, out, called);
@@ -1729,7 +1701,7 @@ fn collect_expr_symbols<'a>(
         // metadata can't see that call, so they stay opaque.
         //
         // Member decorators and the class expression's own decorators are
-        // skipped here. See PR #302 Codex P2 review #3312108558.
+        // skipped here.
         E::ClassExpression(class_expr) => {
             walk_class_eager_parts(
                 class_expr.as_ref(),
@@ -1941,8 +1913,6 @@ fn collect_assignment_target_property_symbols<'a>(
 /// don't loop forever (in practice each `Expression` node is unique, but
 /// guarding by raw pointer is cheap insurance against quadratic blow-up on
 /// pathological inputs).
-///
-/// Regression for Codex P2 review #3314767091 on PR #302.
 fn record_direct_callee<'a>(
     callee: &Expression<'a>,
     semantic: &Semantic<'a>,
@@ -2011,7 +1981,6 @@ fn record_direct_callee<'a>(
 ///
 /// Used alongside [`record_direct_callee`] at every call/new site so the
 /// guard's `init_called_symbols` reflects the actual eager-invocation set.
-/// Regression for Codex P2 review (Finding 3) on PR #302.
 fn record_indirect_callee<'a>(
     callee: &Expression<'a>,
     semantic: &Semantic<'a>,
@@ -2097,8 +2066,7 @@ fn record_bind_callee<'a>(
 /// into both. Returns `true` when indexing happened.
 ///
 /// This makes `const make = () => DEP` visible to the BFS safe-skip guard
-/// the same way `function make() { return DEP; }` is. See PR #302 Codex
-/// P2 (Finding 2).
+/// the same way `function make() { return DEP; }` is.
 fn index_fn_valued_binding<'a>(
     init: &Expression<'a>,
     fn_symbol: SymbolId,
@@ -2155,8 +2123,6 @@ fn index_fn_valued_binding<'a>(
 /// Returns `false` when the callee is not a function/arrow expression; the
 /// caller then falls through to the normal `collect_expr_symbols` descent
 /// (which is a no-op for these node kinds anyway, but still correct).
-///
-/// Regression for Codex review #3310709326 on PR #302.
 fn walk_iife_callee_body<'a>(
     callee: &Expression<'a>,
     semantic: &Semantic<'a>,
@@ -2172,7 +2138,7 @@ fn walk_iife_callee_body<'a>(
                 visitor.visit_function_body(&arrow.body);
                 // Parameter defaults evaluate at IIFE invocation time, before
                 // the body runs — symmetric with top-level function decls
-                // in `collect_top_level_bindings`. See PR #302 Codex P2.
+                // in `collect_top_level_bindings`.
                 walk_param_defaults(&arrow.params, semantic, out, called);
                 return true;
             }
