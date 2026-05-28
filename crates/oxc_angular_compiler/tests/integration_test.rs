@@ -12072,3 +12072,137 @@ const BASE = class {};
         result.code
     );
 }
+
+/// `make()` is eagerly invoked by the decorator. Inside `make`'s body an
+/// inline class expression `class extends TOKEN {}` evaluates eagerly, so the
+/// `super_class` reference to `TOKEN` should flow into the eager-evaluation
+/// set. `FunctionBodyIdentVisitor::visit_class` is a no-op which silently
+/// drops these refs unless it walks the class's eager parts via
+/// `walk_class_eager_parts`.
+///
+/// Regression test for Codex P2 review #3314767088 on PR #302.
+#[test]
+fn component_eager_fn_body_inline_class_extends_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: make() })
+class TestComponent {}
+function make() { return class extends TOKEN {}; }
+const TOKEN = class {};
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read by `class extends TOKEN {{}}` inside the body of \
+         an eagerly-called function) must be hoisted above the class to avoid \
+         TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// `(cond ? makeA : makeB)()` invokes one of `makeA`/`makeB`. Both branches
+/// can run, so `record_direct_callee` must descend into the consequent and
+/// alternate of a `ConditionalExpression` callee and add both identifiers to
+/// `called`. Without this, neither callee body is chased and `TOKEN` stays
+/// declared below the class.
+///
+/// Regression test for Codex P2 review #3314767091 on PR #302.
+#[test]
+fn component_eager_conditional_callee_chases_both_branches() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+const cond = true;
+@Component({ selector: 'x', template: '', providers: (cond ? makeA : makeB)() })
+class TestComponent {}
+function makeA() { return TOKEN; }
+function makeB() { return TOKEN; }
+const TOKEN = 1;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside both branches of a conditional callee \
+         `(cond ? makeA : makeB)()`) must be hoisted above the class to avoid \
+         TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Inside an eagerly-called function `outer()`, a tagged template
+/// `` tag`hello` `` invokes `tag`. `FunctionBodyIdentVisitor` must override
+/// `visit_tagged_template_expression` and record the tag as a callee
+/// (direct/indirect/bind) — otherwise the default walk adds `tag` to `out`
+/// only, `tag` never enters `eagerly_called`, and the late `TOKEN` reference
+/// inside `tag`'s body is never chased.
+///
+/// Regression test for Cursor Low review #3314770575 on PR #302.
+#[test]
+fn component_eager_fn_body_tagged_template_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: outer() })
+class TestComponent {}
+function outer() { return tag`hello`; }
+function tag(_strings: TemplateStringsArray) { return TOKEN; }
+const TOKEN = 1;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < class_pos,
+        "`const TOKEN` (read inside the body of a tagged-template tag invoked \
+         from an eagerly-called function) must be hoisted above the class to \
+         avoid TDZ. token@{token_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}

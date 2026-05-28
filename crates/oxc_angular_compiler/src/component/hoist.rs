@@ -1444,9 +1444,42 @@ impl<'a, 'b> Visit<'a> for FunctionBodyIdentVisitor<'a, 'b> {
     fn visit_arrow_function_expression(&mut self, _it: &oxc_ast::ast::ArrowFunctionExpression<'a>) {
     }
 
-    // Class expressions inside the body define methods that don't run at
-    // call time of the outer function. Skip.
-    fn visit_class(&mut self, _it: &Class<'a>) {}
+    // Class expressions inside an eagerly-called function body evaluate
+    // their eager parts (`super_class`, computed keys, static field /
+    // accessor initializers, static blocks) at call time of the outer
+    // function. The instance / static method bodies and instance field
+    // initializers are lazy until something `new`s the class — but if the
+    // surrounding code does call `new` here, the constructor body and
+    // parameter defaults fire too. Over-counting only over-blocks (it never
+    // under-blocks), so include the constructor to stay conservative.
+    //
+    // Regression for Codex P2 review #3314767088 on PR #302.
+    fn visit_class(&mut self, it: &Class<'a>) {
+        walk_class_eager_parts(
+            it,
+            /* include_constructor */ true,
+            self.semantic,
+            self.out,
+            self.called,
+        );
+    }
+
+    fn visit_tagged_template_expression(
+        &mut self,
+        it: &oxc_ast::ast::TaggedTemplateExpression<'a>,
+    ) {
+        // Mirror `visit_call_expression`: a tagged template `tag`...`` invokes
+        // `tag`, so its direct/indirect/bind callee shapes contribute to
+        // `called` just like a `CallExpression`. Without this override, the
+        // default walk reaches `tag` via `visit_identifier_reference` (which
+        // only feeds `out`), so the tag's body never gets chased through
+        // `eagerly_called`. Regression for Cursor Low review #3314770575
+        // on PR #302.
+        record_direct_callee(&it.tag, self.semantic, self.called);
+        record_indirect_callee(&it.tag, self.semantic, self.called);
+        record_bind_callee(&it.tag, self.semantic, self.called);
+        oxc_ast_visit::walk::walk_tagged_template_expression(self, it);
+    }
 }
 
 /// Advance `end` past one trailing line terminator so that deleting the
@@ -1884,33 +1917,71 @@ fn collect_assignment_target_property_symbols<'a>(
     }
 }
 
-/// If `callee` is a *direct* identifier reference (peeling through
-/// parentheses and TS type-only wrappers), record its symbol in `called`.
-/// Member callees (`foo.bar()`) and other complex expressions are skipped
-/// — only direct callees of `CallExpression`/`NewExpression` count as
-/// eager invocations of a top-level function.
+/// If `callee` resolves to one or more *direct* identifier references
+/// (peeling through parentheses and TS type-only wrappers, and descending
+/// into the branches of conditional / logical / sequence callees), record
+/// each symbol in `called`. Member callees (`foo.bar()`) and other complex
+/// expressions are skipped — only direct callees of
+/// `CallExpression`/`NewExpression` count as eager invocations of a
+/// top-level function.
+///
+/// Conditional (`(cond ? a : b)()`), logical (`(a || b)()`), and sequence
+/// (`(x, y, z)()`) callees are first-class shapes: either branch of the
+/// conditional/logical may end up invoked, and the last expression in a
+/// sequence is the result whose callee is invoked. The worklist below
+/// pushes both branches of `?:` / `||`/`&&`/`??` and the LAST expression of
+/// a sequence, with a `seen` guard so cycles or shared subtrees in the AST
+/// don't loop forever (in practice each `Expression` node is unique, but
+/// guarding by raw pointer is cheap insurance against quadratic blow-up on
+/// pathological inputs).
+///
+/// Regression for Codex P2 review #3314767091 on PR #302.
 fn record_direct_callee<'a>(
     callee: &Expression<'a>,
     semantic: &Semantic<'a>,
     called: &mut HashSet<SymbolId>,
 ) {
     use Expression as E;
-    let mut cur = callee;
-    loop {
-        match cur {
-            E::Identifier(id) => {
-                if let Some(symbol) = resolve_symbol(id, semantic) {
-                    called.insert(symbol);
-                }
-                return;
+    let mut worklist: Vec<&Expression<'a>> = vec![callee];
+    let mut seen: HashSet<*const Expression<'a>> = HashSet::new();
+    while let Some(mut cur) = worklist.pop() {
+        loop {
+            let key = cur as *const Expression<'a>;
+            if !seen.insert(key) {
+                break;
             }
-            E::ParenthesizedExpression(p) => cur = &p.expression,
-            E::TSAsExpression(ts) => cur = &ts.expression,
-            E::TSSatisfiesExpression(ts) => cur = &ts.expression,
-            E::TSNonNullExpression(ts) => cur = &ts.expression,
-            E::TSTypeAssertion(ts) => cur = &ts.expression,
-            E::TSInstantiationExpression(ts) => cur = &ts.expression,
-            _ => return,
+            match cur {
+                E::Identifier(id) => {
+                    if let Some(symbol) = resolve_symbol(id, semantic) {
+                        called.insert(symbol);
+                    }
+                    break;
+                }
+                E::ParenthesizedExpression(p) => cur = &p.expression,
+                E::TSAsExpression(ts) => cur = &ts.expression,
+                E::TSSatisfiesExpression(ts) => cur = &ts.expression,
+                E::TSNonNullExpression(ts) => cur = &ts.expression,
+                E::TSTypeAssertion(ts) => cur = &ts.expression,
+                E::TSInstantiationExpression(ts) => cur = &ts.expression,
+                E::ConditionalExpression(cond) => {
+                    worklist.push(&cond.consequent);
+                    worklist.push(&cond.alternate);
+                    break;
+                }
+                E::LogicalExpression(log) => {
+                    worklist.push(&log.left);
+                    worklist.push(&log.right);
+                    break;
+                }
+                E::SequenceExpression(seq) => {
+                    // Only the last expression's value becomes the callee.
+                    if let Some(last) = seq.expressions.last() {
+                        worklist.push(last);
+                    }
+                    break;
+                }
+                _ => break,
+            }
         }
     }
 }
