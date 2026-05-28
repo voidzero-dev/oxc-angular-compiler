@@ -27,6 +27,7 @@ use super::decorator::{
     extract_component_metadata, find_component_decorator, find_component_decorator_span,
 };
 use super::definition::{const_value_to_expression, generate_component_definitions};
+use super::hoist::{collect_hoist_edits, program_has_angular_decorated_class};
 use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
@@ -2565,6 +2566,33 @@ pub fn transform_angular_file(
                 edits.push(Edit::insert(*class_body_end, format!("\n{}", decls_after_class)));
             }
         }
+    }
+
+    // 5e. TDZ-safe hoisting of top-level bindings referenced by decorator
+    // metadata but declared after the decorated class. Without this, the
+    // emitted `ɵcmp` static field's `ɵɵProvidersFeature` would evaluate the
+    // reference at class-definition time and throw `ReferenceError`. See
+    // issue #287.
+    //
+    // The hoister resolves identifier references through `oxc_semantic` so
+    // a nested-scope shadow of a top-level name can't be mistaken for the
+    // top-level binding itself.
+    //
+    // Gate the Semantic build behind a cheap top-level scan: a real Angular
+    // codebase contains plenty of plain `.ts` helpers, type-only modules, and
+    // services without `@Injectable` that we route through this function. For
+    // those, building a full symbol table just to discover there's nothing to
+    // hoist is pure overhead.
+    if program_has_angular_decorated_class(&parser_ret.program) {
+        // Semantic builder errors (redeclarations, etc.) are intentionally
+        // dropped: the parser already captured syntax errors into
+        // `result.diagnostics` upstream, and Semantic-level diagnostics here
+        // aren't actionable for the hoist pass — we treat the input as
+        // best-effort and rely on the host build to surface genuine errors.
+        // The JIT path (see ~line 1380) follows the same convention.
+        let hoist_semantic =
+            oxc_semantic::SemanticBuilder::new().build(&parser_ret.program).semantic;
+        edits.extend(collect_hoist_edits(&parser_ret.program, source, &hoist_semantic));
     }
 
     // Apply all edits in one pass
