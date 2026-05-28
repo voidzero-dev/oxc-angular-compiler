@@ -10,7 +10,7 @@ use std::path::Path;
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, Declaration, ExportDefaultDeclarationKind, Expression, ImportDeclarationSpecifier,
-    ImportOrExportKind, ObjectPropertyKind, PropertyKey, Statement,
+    ImportOrExportKind, ModuleExportName, ObjectPropertyKind, PropertyKey, Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -34,8 +34,9 @@ use super::namespace_registry::NamespaceRegistry;
 use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
-    R3ClassMetadata, build_ctor_params_metadata, build_decorator_metadata_array,
-    build_prop_decorators_metadata, compile_class_metadata,
+    R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
+    build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
+    compile_component_class_metadata,
 };
 use crate::directive::collect_string_consts;
 use crate::directive::{
@@ -421,6 +422,15 @@ pub struct ImportInfo<'a> {
     /// Type-only imports are erased at runtime and should not generate namespace
     /// imports for `setClassMetadata()` type references.
     pub is_type_only: bool,
+    /// Original exported name on the source module, when it differs from the
+    /// local binding name. Used to build correct `import('./mod').then(m => m.X)`
+    /// chains for `@defer` dependency resolvers.
+    ///
+    /// - `import { Foo }` → `None` (export name equals local name)
+    /// - `import { Foo as Bar }` → `Some("Foo")` (use original exported name)
+    /// - `import Foo from "./mod"` → `Some("default")` (default export)
+    /// - `import * as ns from "./mod"` → `None` (namespace, not deferrable)
+    pub imported_name: Option<Ident<'a>>,
 }
 
 /// Map from local identifier name to its import information.
@@ -454,6 +464,17 @@ pub type ImportMap<'a> = FxHashMap<Ident<'a>, ImportInfo<'a>>;
 ///   -> `is_named_import: true` (can use bare `DefaultService`)
 /// - Namespace imports: `import * as core from "@angular/core"`
 ///   -> `is_named_import: false` (need namespace prefix)
+/// Extract a `ModuleExportName` as a plain string slice when it's a textual
+/// name. Quoted-string export names (e.g., `import { "string-name" as foo }`)
+/// are not supported for deferrable resolution and return `None`.
+fn module_export_name_to_str<'a>(name: &ModuleExportName<'a>) -> Option<&'a str> {
+    match name {
+        ModuleExportName::IdentifierName(id) => Some(id.name.as_str()),
+        ModuleExportName::IdentifierReference(id) => Some(id.name.as_str()),
+        ModuleExportName::StringLiteral(_) => None,
+    }
+}
+
 pub fn build_import_map<'a>(
     allocator: &'a Allocator,
     program_body: &[Statement<'a>],
@@ -497,9 +518,23 @@ pub fn build_import_map<'a>(
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone().into());
 
+                    // Capture the original exported name when it differs from the
+                    // local binding (i.e., `import { Foo as Bar }`). This is used
+                    // when building `@defer` dependency resolvers so the dynamic
+                    // import chain references the original export, not the alias.
+                    let imported_export_name = module_export_name_to_str(&spec.imported);
+                    let imported_name = imported_export_name
+                        .filter(|exported| *exported != local_name.as_str())
+                        .map(|exported| Ident::from(allocator.alloc_str(exported)));
+
                     import_map.insert(
                         local_name,
-                        ImportInfo { source_module, is_named_import: true, is_type_only },
+                        ImportInfo {
+                            source_module,
+                            is_named_import: true,
+                            is_type_only,
+                            imported_name,
+                        },
                     );
                 }
                 ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) => {
@@ -519,6 +554,10 @@ pub fn build_import_map<'a>(
                             source_module,
                             is_named_import: true,
                             is_type_only: decl_is_type_only,
+                            // Default imports always resolve to `m.default` in
+                            // dynamic-import chains, regardless of the local
+                            // binding name.
+                            imported_name: Some(Ident::from("default")),
                         },
                     );
                 }
@@ -539,6 +578,7 @@ pub fn build_import_map<'a>(
                             source_module,
                             is_named_import: false,
                             is_type_only: decl_is_type_only,
+                            imported_name: None,
                         },
                     );
                 }
@@ -553,6 +593,49 @@ pub fn build_import_map<'a>(
 ///
 /// Resolve namespace imports for factory dependency tokens.
 ///
+/// Build the list of `R3DeferPerComponentDependency` describing the
+/// `@Component.deferredImports` entries, used to emit `setClassMetadataAsync`.
+///
+/// Each entry carries the symbol's *original exported name* — the one the
+/// source module actually exports — plus the import path and a default-export
+/// flag. That name is used twice in the emitted output:
+///
+/// 1. as the property read in the resolver (`m.HeavyWidget` rather than
+///    `m.Heavy`), and
+/// 2. as the parameter name on the `setClassMetadataAsync` callback.
+///
+/// This mirrors Angular's `getExportedName`
+/// (`packages/compiler-cli/src/ngtsc/reflection/src/typescript.ts:849`),
+/// which returns `decl.propertyName` for aliased imports and falls back to
+/// the local name otherwise.
+///
+/// Entries for unresolved symbols, namespace imports, and type-only imports
+/// are skipped — they have no concrete runtime value to lazy-load and the
+/// resolver would silently misfire.
+fn build_defer_per_component_deps<'a>(
+    allocator: &'a Allocator,
+    deferred_imports: &[Ident<'a>],
+    import_map: &ImportMap<'a>,
+) -> oxc_allocator::Vec<'a, R3DeferPerComponentDependency<'a>> {
+    let mut deps = oxc_allocator::Vec::new_in(allocator);
+    for local_name in deferred_imports {
+        let Some(info) = import_map.get(local_name) else { continue };
+        if !info.is_named_import || info.is_type_only {
+            continue;
+        }
+        let is_default_import = info.imported_name.as_deref() == Some("default");
+        // The original export name when it differs from the local binding
+        // (aliased or default import); otherwise the local name itself.
+        let symbol_name = info.imported_name.clone().unwrap_or_else(|| local_name.clone());
+        deps.push(R3DeferPerComponentDependency {
+            symbol_name,
+            import_path: info.source_module.clone(),
+            is_default_import,
+        });
+    }
+    deps
+}
+
 /// The import elision phase removes type-only imports (e.g., `import { Store } from '@ngrx/store'`)
 /// because constructor parameter types are considered type-only. However, the factory function
 /// needs to reference these types at runtime (e.g., `i0.ɵɵinject(Store)`).
@@ -2019,6 +2102,7 @@ pub fn transform_angular_file(
                         content_queries,
                         shared_pool_index,
                         &mut file_namespace_registry,
+                        &import_map,
                     ) {
                         Ok(compilation_result) => {
                             // Update the shared pool index for the next component
@@ -2142,9 +2226,46 @@ pub fn transform_angular_file(
                                         ),
                                     };
 
-                                    // Compile to the wrapped IIFE expression
-                                    let metadata_expr =
-                                        compile_class_metadata(allocator, &class_metadata);
+                                    // If the component opted into lazy loading via
+                                    // `@Component.deferredImports` AND actually uses
+                                    // `@defer` in its template, emit
+                                    // `ɵsetClassMetadataAsync` so the TestBed-facing
+                                    // metadata is built lazily inside a callback that
+                                    // receives the dynamically-imported classes as
+                                    // parameters. The decorator object literal still
+                                    // references symbols like `LazyCmp` by name, but
+                                    // those names resolve to the callback's parameters
+                                    // — there's no static reference to the import in
+                                    // the emitted code, so bundlers can tree-shake the
+                                    // `import { LazyCmp } from './lazy'` declaration in
+                                    // production builds (the sync `setClassMetadata`
+                                    // call is itself dev-only and gets dropped too).
+                                    //
+                                    // When the template has no `@defer` block we fall
+                                    // back to plain `setClassMetadata`: the resolver
+                                    // and async wrapper would never run, and emitting
+                                    // them would leave a stray `import(...)` in the
+                                    // output that defeats tree-shaking.
+                                    let deferred_deps: oxc_allocator::Vec<
+                                        R3DeferPerComponentDependency<'_>,
+                                    > = if compilation_result.has_defer_block {
+                                        build_defer_per_component_deps(
+                                            allocator,
+                                            &metadata.deferred_imports,
+                                            &import_map,
+                                        )
+                                    } else {
+                                        oxc_allocator::Vec::new_in(allocator)
+                                    };
+                                    let metadata_expr = if deferred_deps.is_empty() {
+                                        compile_class_metadata(allocator, &class_metadata)
+                                    } else {
+                                        compile_component_class_metadata(
+                                            allocator,
+                                            &class_metadata,
+                                            Some(deferred_deps.as_slice()),
+                                        )
+                                    };
                                     let metadata_js = emitter.emit_expression(&metadata_expr);
 
                                     if !decls_after_class.is_empty() {
@@ -2783,6 +2904,16 @@ struct FullCompilationResult {
 
     /// The ng-content selectors found in the template (e.g., `["*", ".header"]`).
     ng_content_selectors: Vec<String>,
+
+    /// `true` when the parsed template contains at least one `@defer` block.
+    ///
+    /// Used by the caller to gate `setClassMetadataAsync` emission: a component
+    /// can declare `deferredImports: [...]` without actually using `@defer` in
+    /// its template (e.g., during development before the block is wired up).
+    /// In that case Angular's runtime needs neither the lazy resolver nor the
+    /// async metadata callback, and emitting them would leave dead
+    /// `import(...)` calls in the output.
+    has_defer_block: bool,
 }
 
 /// Compile a component template and generate ɵcmp/ɵfac definitions.
@@ -2805,6 +2936,7 @@ fn compile_component_full<'a>(
     content_queries: OxcVec<'a, R3QueryMetadata<'a>>,
     pool_starting_index: u32,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    import_map: &ImportMap<'a>,
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
 
@@ -2880,9 +3012,67 @@ fn compile_component_full<'a>(
     // Note: DomOnly mode is still used for host bindings (separate code path).
     let mode = TemplateCompilationMode::Full;
 
-    // Determine defer block emit mode based on JIT setting
-    // In JIT mode, use PerComponent mode since the compiler doesn't have full dependency info
-    let defer_block_deps_emit_mode = if options.jit {
+    // Reject overlap between `imports: [X]` and `deferredImports: [X]` —
+    // a symbol must be either eager OR deferrable, never both. Mirrors
+    // Angular's `validateNoImportOverlap` (handler.ts:2558+).
+    if !metadata.deferred_imports.is_empty() && !metadata.imports.is_empty() {
+        let eager: rustc_hash::FxHashSet<&str> =
+            metadata.imports.iter().map(|i| i.as_str()).collect();
+        for deferred in &metadata.deferred_imports {
+            if eager.contains(deferred.as_str()) {
+                diagnostics.push(OxcDiagnostic::error(format!(
+                    "`{}` is imported via both `@Component.imports` and `@Component.deferredImports`. \
+                     To fix this, make sure that dependencies are imported only once.",
+                    deferred.as_str()
+                )));
+            }
+        }
+        if !diagnostics.is_empty() {
+            return Err(diagnostics);
+        }
+    }
+
+    // Build the deferrable-dependencies resolver from
+    // `@Component.deferredImports`.
+    //
+    // OXC is a single-file (local) compiler, so we use Angular's PerComponent
+    // emit mode for defer dependencies: a single shared resolver function is
+    // generated from the component's `deferredImports: [...]` array and
+    // wired into every `ɵɵdefer(...)` call. The runtime invokes it lazily,
+    // the first time any defer block triggers.
+    //
+    // Issue: voidzero-dev/oxc-angular-compiler#289 — previously the resolver
+    // was omitted entirely, leaving `ɵɵdefer(...)` with no dependency
+    // argument and no `import(...)` calls in the output, so `@defer` did no
+    // code-splitting.
+    //
+    // Note: Angular's full compilation mode also derives deferrable symbols
+    // from `imports: [...]` by matching template selectors against imported
+    // directive classes (`resolveAllDeferredDependencies`). That needs
+    // cross-file metadata OXC doesn't have, so we follow Angular's local
+    // path and require explicit `deferredImports`.
+    // Computed once and reused below: the resolver decision and the eventual
+    // `setClassMetadataAsync` gate both depend on whether the template uses
+    // `@defer`.
+    let has_defer_block = super::defer_resolver::template_has_defer_block(&r3_result.nodes);
+
+    let defer_resolver_fn = if metadata.deferred_imports.is_empty() {
+        None
+    } else if has_defer_block {
+        super::defer_resolver::build_defer_resolver_expression(allocator, metadata, import_map)
+    } else {
+        // `deferredImports` declared but no `@defer` block — the resolver
+        // would be unused dead code. Leave it off.
+        None
+    };
+
+    // When we have a resolver, switch to PerComponent emit mode so the
+    // ingest stage threads `all_deferrable_deps_fn` into each `DeferOp`.
+    // Without a resolver, the existing PerBlock-vs-JIT behavior stays in
+    // place (and `all_deferrable_deps_fn = None`).
+    let defer_block_deps_emit_mode = if defer_resolver_fn.is_some() {
+        DeferBlockDepsEmitMode::PerComponent
+    } else if options.jit {
         DeferBlockDepsEmitMode::PerComponent
     } else {
         DeferBlockDepsEmitMode::PerBlock
@@ -2906,9 +3096,9 @@ fn compile_component_full<'a>(
         relative_template_path,
         enable_debug_locations,
         template_source: if enable_debug_locations { Some(template) } else { None },
-        // In PerComponent mode, this would be provided by the build tool
-        // For now, we don't have a way to pass it from NAPI, so it's None
-        all_deferrable_deps_fn: None,
+        // PerComponent mode: pass the shared resolver expression so the
+        // ingest stage attaches it to every defer block's create op.
+        all_deferrable_deps_fn: defer_resolver_fn,
         // Use the shared pool starting index to avoid duplicate constant names
         // when compiling multiple components in the same file
         pool_starting_index,
@@ -3119,6 +3309,7 @@ fn compile_component_full<'a>(
         class_debug_info_js,
         next_pool_index,
         ng_content_selectors,
+        has_defer_block,
     })
 }
 

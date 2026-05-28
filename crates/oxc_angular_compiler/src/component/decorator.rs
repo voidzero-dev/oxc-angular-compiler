@@ -144,6 +144,15 @@ pub fn extract_component_metadata<'a>(
                     metadata.raw_imports =
                         convert_oxc_expression(allocator, &prop.value, source_text);
                 }
+                "deferredImports" => {
+                    // Symbols explicitly opted into lazy loading via `@defer`.
+                    // Mirrors Angular's `@Component.deferredImports` field; in
+                    // local compilation this is the only source of deferrable
+                    // dependencies (full compilation additionally derives them
+                    // from template usage of `imports: [...]`, which requires
+                    // cross-file selector info OXC doesn't have).
+                    metadata.deferred_imports = extract_identifier_array(allocator, &prop.value);
+                }
                 "exportAs" => {
                     // exportAs can be comma-separated: "foo, bar"
                     if let Some(export_as) =

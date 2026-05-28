@@ -591,6 +591,255 @@ fn test_defer_on_viewport() {
     insta::assert_snapshot!("defer_on_viewport", js);
 }
 
+/// Reproduces voidzero-dev/oxc-angular-compiler#289 (aligned with Angular's
+/// local-compilation behavior): a `@defer` block on a component whose lazy
+/// dependency is declared in the `@Component.deferredImports` array must emit
+/// a deferrable-dependencies resolver — a no-arg arrow returning an array of
+/// dynamic `import()` calls — wired in as the third argument of
+/// `ɵɵdefer(...)`. Previously the resolver argument was omitted entirely and
+/// no `import('./lazy')` appeared anywhere in the output.
+#[test]
+fn test_defer_emits_dependency_resolver_from_deferred_imports() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-parent',
+    deferredImports: [LazyCmp],
+    template: '@defer { <app-lazy/> }',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    // The output must contain a dynamic import of the lazy module.
+    assert!(
+        code.contains("import(\"./lazy\")") || code.contains("import('./lazy')"),
+        "Expected a dynamic `import('./lazy')` for the deferred dependency. Output:\n{code}"
+    );
+
+    // The dynamic import should be followed by `.then(...)` with a callback
+    // that reads `m.LazyCmp` (the original / local export name). Exact
+    // whitespace and parenthesization of the arrow params is up to the
+    // emitter.
+    let collapsed: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        collapsed.contains(".then((m)=>m.LazyCmp)") || collapsed.contains(".then(m=>m.LazyCmp)"),
+        "Expected `.then(m => m.LazyCmp)` chain after dynamic import. Output:\n{code}"
+    );
+
+    // The resolver expression must be wired into `ɵɵdefer(...)` as a non-null
+    // third argument.
+    assert!(
+        code.contains("ɵɵdefer(1,0,() =>[import(\"./lazy\")")
+            || code.contains("ɵɵdefer(1,0,()=>[import(\"./lazy\")"),
+        "ɵɵdefer's 3rd argument (resolverFn) must be the deferrable-deps arrow function. Output:\n{code}"
+    );
+
+    // The deferred symbol must NOT appear in the eager dependencies factory.
+    // (When the component has only `deferredImports` and no `imports`, the
+    // `dependencies` field is omitted entirely.)
+    assert!(
+        !code.contains("ɵɵgetComponentDepsFactory(Parent,[LazyCmp]"),
+        "Deferred symbol must not appear in the eager `ɵɵgetComponentDepsFactory` array. Output:\n{code}"
+    );
+
+    // `setClassMetadataAsync` (not the sync `setClassMetadata`) should be
+    // emitted so the TestBed-facing metadata is built lazily — the deferred
+    // symbol is reached through the async callback's parameter, not a
+    // static import reference.
+    assert!(
+        code.contains("setClassMetadataAsync"),
+        "Components with `deferredImports` should emit `setClassMetadataAsync`. Output:\n{code}"
+    );
+}
+
+/// Aliased imports must use the original exported name in `m.X`, not the
+/// local alias.
+#[test]
+fn test_defer_dependency_resolver_uses_original_export_name_for_aliases() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { HeavyWidget as Heavy } from './widget';
+
+@Component({
+    selector: 'app-parent',
+    deferredImports: [Heavy],
+    template: '@defer { <app-heavy/> }',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        code.contains("import(\"./widget\")") || code.contains("import('./widget')"),
+        "Expected dynamic `import('./widget')`. Output:\n{code}"
+    );
+
+    // The chain must resolve `m.HeavyWidget` (the original export name), not
+    // `m.Heavy` (the local alias).
+    let collapsed: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        collapsed.contains(".then((m)=>m.HeavyWidget)")
+            || collapsed.contains(".then(m=>m.HeavyWidget)"),
+        "Expected `.then(m => m.HeavyWidget)` using the original export name. Output:\n{code}"
+    );
+    assert!(
+        !collapsed.contains("m.Heavy)") && !collapsed.contains("m.Heavy,"),
+        "Aliased import must not resolve to the local alias `Heavy`. Output:\n{code}"
+    );
+}
+
+/// Default imports must use `m.default` in the resolver chain.
+#[test]
+fn test_defer_dependency_resolver_uses_default_for_default_imports() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import LazyCmp from './lazy-default';
+
+@Component({
+    selector: 'app-parent',
+    deferredImports: [LazyCmp],
+    template: '@defer { <app-lazy/> }',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+
+    assert!(
+        code.contains("import(\"./lazy-default\")") || code.contains("import('./lazy-default')"),
+        "Expected dynamic `import('./lazy-default')`. Output:\n{code}"
+    );
+
+    let collapsed: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        collapsed.contains(".then((m)=>m.default)") || collapsed.contains(".then(m=>m.default)"),
+        "Default import must resolve to `m.default`. Output:\n{code}"
+    );
+}
+
+/// Components without `@defer` blocks must not generate a resolver function
+/// (regression guard so we don't accidentally produce dead lazy-loading code).
+#[test]
+fn test_no_defer_block_skips_dependency_resolver() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { ChildCmp } from './child';
+
+@Component({
+    selector: 'app-parent',
+    deferredImports: [ChildCmp],
+    template: '<app-child/>',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    assert!(
+        !code.contains("import(\"./child\")") && !code.contains("import('./child')"),
+        "Components without @defer must not emit dynamic imports. Output:\n{code}"
+    );
+}
+
+/// When the user lists a symbol only in `@Component.imports`, OXC must NOT
+/// auto-detect it as deferrable (that's the full-compilation behavior, which
+/// needs cross-file selector info OXC doesn't have). Issue #289's original
+/// repro form (`imports: [LazyCmp]` with `@defer`) therefore emits no
+/// resolver — the user must move the symbol to `deferredImports`.
+#[test]
+fn test_defer_with_only_imports_does_not_auto_detect() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+    selector: 'app-parent',
+    imports: [LazyCmp],
+    template: '@defer { <app-lazy/> }',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let code = &result.code;
+    // `imports: [LazyCmp]` alone must remain eager — no dynamic import emitted.
+    assert!(
+        !code.contains("import(\"./lazy\")") && !code.contains("import('./lazy')"),
+        "Symbols declared only in `imports` (not `deferredImports`) must not be lazy-loaded in local compilation. Output:\n{code}"
+    );
+}
+
+/// Matches Angular's `validateNoImportOverlap` (handler.ts:2558+): a symbol
+/// listed in both `imports` and `deferredImports` is an error — each
+/// dependency must have a single, unambiguous role.
+#[test]
+fn test_defer_overlap_between_imports_and_deferred_imports_is_diagnostic() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+import { Mixed } from './mixed';
+
+@Component({
+    selector: 'app-parent',
+    imports: [Mixed],
+    deferredImports: [Mixed],
+    template: '@defer { <app-mixed/> }',
+    standalone: true,
+})
+export class Parent {}
+"#;
+
+    let result = transform_angular_file(&allocator, "parent.component.ts", source, None, None);
+
+    assert!(
+        result.has_errors(),
+        "Symbol used in both `imports` and `deferredImports` must yield a diagnostic. Output:\n{}",
+        result.code
+    );
+    let any_overlap_msg = result.diagnostics.iter().any(|d| {
+        let s = format!("{d}");
+        s.contains("`@Component.imports`") && s.contains("`@Component.deferredImports`")
+    });
+    assert!(
+        any_overlap_msg,
+        "Diagnostic should mention both `@Component.imports` and `@Component.deferredImports`. Got: {:?}",
+        result.diagnostics
+    );
+}
+
 #[test]
 #[should_panic(
     expected = "Cannot specify additional `hydrate` triggers if `hydrate never` is present"

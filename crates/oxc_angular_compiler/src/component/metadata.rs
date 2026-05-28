@@ -256,6 +256,22 @@ pub struct ComponentMetadata<'a> {
     /// - A spread expression: `[...SHARED_IMPORTS, MyPipe]`
     pub raw_imports: Option<OutputExpression<'a>>,
 
+    /// Local identifiers from the `@Component.deferredImports` array.
+    ///
+    /// Each entry is a class binding the user explicitly opted into
+    /// lazy-loading via `@defer` blocks. The compiler wires them into the
+    /// per-component deferrable-dependencies resolver function emitted as
+    /// the third argument of `ɵɵdefer(...)`, and never includes them in the
+    /// eager dependency surface.
+    ///
+    /// Mirrors Angular's `analysis.explicitlyDeferredTypes` populated by
+    /// `collectExplicitlyDeferredSymbols` in
+    /// `packages/compiler-cli/src/ngtsc/annotations/component/src/handler.ts`.
+    /// Local compilation reads this field; full compilation additionally
+    /// derives candidates from template usage of `imports: [...]`, which
+    /// requires cross-file selector info OXC doesn't have.
+    pub deferred_imports: Vec<'a, Ident<'a>>,
+
     /// Animation triggers for the component.
     ///
     /// Corresponds to the `animations` property in `@Component`.
@@ -558,6 +574,7 @@ impl<'a> ComponentMetadata<'a> {
             declarations: Vec::new_in(allocator),
             declaration_list_emit_mode: DeclarationListEmitMode::default(),
             raw_imports: None,
+            deferred_imports: Vec::new_in(allocator),
             animations: None,
             schemas: Vec::new_in(allocator),
             is_signal: false,

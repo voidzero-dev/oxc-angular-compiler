@@ -9,6 +9,7 @@
 #[cfg(feature = "cross_file_elision")]
 mod cross_file_elision;
 mod decorator;
+mod defer_resolver;
 mod definition;
 mod dependency;
 mod hoist;
