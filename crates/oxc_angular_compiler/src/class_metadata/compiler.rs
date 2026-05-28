@@ -60,7 +60,7 @@ pub fn compile_component_class_metadata<'a>(
             // Has deferred dependencies - use setClassMetadataAsync
             let mut params = Vec::new_in(allocator);
             for dep in deps {
-                params.push(FnParam { name: dep.symbol_name.clone() });
+                params.push(FnParam { name: dep.param_name.clone() });
             }
             let resolver = compile_component_metadata_async_resolver(allocator, deps);
             internal_compile_set_class_metadata_async(allocator, metadata, params, resolver)
@@ -109,7 +109,7 @@ pub fn compile_component_metadata_async_resolver<'a>(
         inner_params.push(FnParam { name: Ident::from("m") });
 
         let prop_name =
-            if dep.is_default_import { Ident::from("default") } else { dep.symbol_name.clone() };
+            if dep.is_default_import { Ident::from("default") } else { dep.export_name.clone() };
 
         let inner_body = OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
