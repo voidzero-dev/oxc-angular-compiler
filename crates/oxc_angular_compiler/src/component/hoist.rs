@@ -35,9 +35,9 @@
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BindingPattern, ChainElement, Class, Declaration, Decorator,
-    ExportDefaultDeclarationKind, Expression, FormalParameters, IdentifierReference,
-    ObjectPropertyKind, Program, Statement,
+    Argument, ArrayExpressionElement, BindingPattern, ChainElement, Class, ClassElement,
+    Declaration, Decorator, ExportDefaultDeclarationKind, Expression, FormalParameters,
+    IdentifierReference, MethodDefinitionKind, ObjectPropertyKind, Program, Statement,
 };
 use oxc_ast_visit::Visit;
 use oxc_semantic::Semantic;
@@ -1108,6 +1108,42 @@ fn collect_top_level_bindings<'a>(
                 fn_body_symbol_refs.insert(fn_symbol, refs);
                 fn_body_called_symbols.insert(fn_symbol, called);
             }
+            continue;
+        }
+
+        // Top-level class declarations. We don't *move* classes (they're
+        // gated separately and never added to `symbol_to_stmt`), but we
+        // index the eager parts of each class so the BFS can chase
+        // TDZ-relevant identifiers through `new ClassName()` callers in
+        // hoisted initializers. Mirrors the function-declaration arm above:
+        // `fn_body_symbol_refs[class_symbol]` receives every identifier read
+        // at class-definition time (super_class, computed keys, static
+        // initializers, static blocks) AND `new`-time (constructor body +
+        // params + instance field initializers); `fn_body_called_symbols`
+        // receives direct callees seen in those parts.
+        //
+        // The over-counting (definition-time eager merged with new-time
+        // eager) is intentional. The BFS only ever uses these maps to
+        // *block* hoisting that would introduce a fresh TDZ — never to
+        // greenlight one — so extending the body-ref set can only
+        // over-block, never under-block. See PR #302 Codex P2 review
+        // #3312108552.
+        if let Some((class, _)) = class_of(stmt) {
+            if let Some(id) = &class.id
+                && let Some(class_symbol) = id.symbol_id.get()
+            {
+                let mut refs: HashSet<SymbolId> = HashSet::new();
+                let mut called: HashSet<SymbolId> = HashSet::new();
+                walk_class_eager_parts(
+                    class,
+                    /* include_constructor */ true,
+                    semantic,
+                    &mut refs,
+                    &mut called,
+                );
+                fn_body_symbol_refs.insert(class_symbol, refs);
+                fn_body_called_symbols.insert(class_symbol, called);
+            }
         }
     }
 
@@ -1196,6 +1232,110 @@ fn for_each_pattern_default<'a, 'src>(
         BindingPattern::AssignmentPattern(assign) => {
             f(&assign.right);
             for_each_pattern_default(&assign.left, f);
+        }
+    }
+}
+
+/// Walk a class's eager parts and feed identifier refs / direct callees
+/// into `out` / `called`. "Eager parts" depend on `include_constructor`:
+///
+/// * Class-definition-time eager (always walked): `super_class` expression,
+///   computed keys on any member, static field/accessor initializers,
+///   static blocks.
+/// * `new`-time eager (walked when `include_constructor` is true):
+///   constructor body + constructor parameter defaults, instance field /
+///   accessor initializers (these run inside the synthesized constructor).
+///
+/// For a top-level *class declaration* indexed as if it were a "function"
+/// in `fn_body_symbol_refs`, we want `include_constructor = true` —
+/// `new ClassName()` triggers both definition-time AND constructor-time
+/// eager evaluations. Over-counting the definition-time parts is fine; it
+/// only over-blocks hoisting, never under-blocks.
+///
+/// For a *class expression* embedded inside an eagerly-evaluated decorator
+/// argument (Bug 2 of Codex P2 review #3312108558), the class expression
+/// itself is being defined inline — so only the class-definition-time
+/// eager parts fire here. Instance methods/fields/constructor bodies are
+/// lazy until someone calls `new` on the class, which the metadata can't
+/// see. Use `include_constructor = false`.
+///
+/// Member decorators and the class's own decorators are skipped — decorator
+/// factory invocation is special and out of scope.
+fn walk_class_eager_parts<'a>(
+    class: &Class<'a>,
+    include_constructor: bool,
+    semantic: &Semantic<'a>,
+    out: &mut HashSet<SymbolId>,
+    called: &mut HashSet<SymbolId>,
+) {
+    // `super_class` evaluates at class-definition time, before the body
+    // executes. Always walk it.
+    if let Some(super_expr) = &class.super_class {
+        collect_expr_symbols(super_expr, semantic, out, called);
+    }
+    for element in &class.body.body {
+        match element {
+            ClassElement::MethodDefinition(method) => {
+                // Computed keys fire at class-definition time regardless of
+                // method kind.
+                if method.computed
+                    && let Some(key_expr) = method.key.as_expression()
+                {
+                    collect_expr_symbols(key_expr, semantic, out, called);
+                }
+                // Constructor body + parameter defaults fire at `new`-time.
+                if include_constructor && method.kind == MethodDefinitionKind::Constructor {
+                    if let Some(body) = &method.value.body {
+                        let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                        visitor.visit_function_body(body);
+                    }
+                    walk_param_defaults(&method.value.params, semantic, out, called);
+                }
+                // Non-constructor instance method bodies are lazy; static
+                // method bodies are also lazy (they're properties on the
+                // class object, executed when called). Skip both.
+            }
+            ClassElement::PropertyDefinition(prop) => {
+                if prop.computed
+                    && let Some(key_expr) = prop.key.as_expression()
+                {
+                    collect_expr_symbols(key_expr, semantic, out, called);
+                }
+                // Static field initializers fire at class-definition time.
+                // Instance field initializers fire at `new`-time inside the
+                // synthesized constructor.
+                if let Some(value) = &prop.value {
+                    if prop.r#static {
+                        collect_expr_symbols(value, semantic, out, called);
+                    } else if include_constructor {
+                        collect_expr_symbols(value, semantic, out, called);
+                    }
+                }
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                if accessor.computed
+                    && let Some(key_expr) = accessor.key.as_expression()
+                {
+                    collect_expr_symbols(key_expr, semantic, out, called);
+                }
+                if let Some(value) = &accessor.value {
+                    if accessor.r#static {
+                        collect_expr_symbols(value, semantic, out, called);
+                    } else if include_constructor {
+                        collect_expr_symbols(value, semantic, out, called);
+                    }
+                }
+            }
+            ClassElement::StaticBlock(block) => {
+                // `static { … }` body runs once at class-definition time.
+                // Walk it like an eagerly-evaluated function body.
+                let mut visitor = FunctionBodyIdentVisitor { semantic, out, called };
+                for stmt in &block.body {
+                    visitor.visit_statement(stmt);
+                }
+            }
+            // `TSIndexSignature` is type-only, erased at runtime.
+            ClassElement::TSIndexSignature(_) => {}
         }
     }
 }
@@ -1540,9 +1680,25 @@ fn collect_expr_symbols<'a>(
         E::UpdateExpression(update) => {
             collect_simple_assignment_target_symbols(&update.argument, semantic, out, called);
         }
-        // Class expressions inside metadata are exceedingly rare and their
-        // bodies aren't eagerly evaluated; treat them as opaque.
-        E::ClassExpression(_) => {}
+        // Class expressions inside an eagerly-evaluated context. Several
+        // parts of a class expression fire at class-definition time and
+        // are TDZ-relevant: the `super_class` expression, computed keys
+        // on any member, static field / accessor initializers, and static
+        // blocks. Instance methods, instance fields, and the constructor
+        // body are lazy until someone calls `new` on the class — and the
+        // metadata can't see that call, so they stay opaque.
+        //
+        // Member decorators and the class expression's own decorators are
+        // skipped here. See PR #302 Codex P2 review #3312108558.
+        E::ClassExpression(class_expr) => {
+            walk_class_eager_parts(
+                class_expr.as_ref(),
+                /* include_constructor */ false,
+                semantic,
+                out,
+                called,
+            );
+        }
         // Function and arrow bodies run lazily — references inside don't
         // affect class-init evaluation.
         E::ArrowFunctionExpression(_) | E::FunctionExpression(_) => {}

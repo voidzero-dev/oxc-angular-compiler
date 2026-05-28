@@ -11918,3 +11918,157 @@ const BACKREF = TestComponent;
         result.code
     );
 }
+
+/// Codex P2 review #3312108552: top-level class declarations' constructor
+/// bodies are NOT indexed into `fn_body_symbol_refs` /
+/// `fn_body_called_symbols`. When a hoisted initializer eagerly invokes
+/// `new ClassName()`, the constructor body runs at module load — and any
+/// later-declared top-level binding it reads will TDZ-throw.
+///
+/// Trace:
+/// - `@Component({ providers: PROVIDERS }) class TestComponent {}`
+/// - `class S { constructor() { TOKEN; } }` declared above.
+/// - `const PROVIDERS = [new S()];` below the decorated class.
+/// - `const TOKEN = 1;` below `PROVIDERS`.
+///
+/// BFS pops `PROVIDERS`: `init_symbols = {S}`, `init_called_symbols = {S}`
+/// (recorded by `record_direct_callee` on `new S()`). Without class
+/// indexing, the closure of `init_called_symbols` under
+/// `fn_body_called_symbols` stays `{S}` and `fn_body_symbol_refs.get(&S)`
+/// is empty. Safe-skip guard passes. `PROVIDERS` is planned. BFS chases
+/// `S` (transitive): not in `symbol_to_stmt`, not in `eagerly_called`
+/// (since `S` is a class, not a function decl) → nothing happens. `TOKEN`
+/// never enters the worklist; it stays below the class. At runtime,
+/// hoisted `new S()` reads `TOKEN` in TDZ.
+///
+/// Fix: index every top-level class declaration's constructor body (and
+/// eager class parts) into `fn_body_symbol_refs` / `fn_body_called_symbols`.
+/// Then `S` becomes `eagerly_called` once `PROVIDERS`'s
+/// `init_called_symbols` is folded in, and the BFS chases the class
+/// "body" refs (which include `TOKEN`).
+///
+/// Assert: `const TOKEN` precedes `const PROVIDERS` AND `const PROVIDERS`
+/// precedes `class TestComponent` — both transitively hoisted.
+#[test]
+fn component_eager_new_class_constructor_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+class S { constructor() { TOKEN; } }
+@Component({ selector: 'x', template: '', providers: PROVIDERS })
+class TestComponent {}
+const PROVIDERS = [new S()];
+const TOKEN = 1;
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let token_pos = result
+        .code
+        .find("const TOKEN")
+        .unwrap_or_else(|| panic!("Expected `const TOKEN` to be present.\nCode:\n{}", result.code));
+    let providers_pos = result.code.find("const PROVIDERS").unwrap_or_else(|| {
+        panic!("Expected `const PROVIDERS` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        token_pos < providers_pos,
+        "`const TOKEN` (read inside `class S`'s constructor body which is \
+         eagerly invoked by `new S()` in `PROVIDERS`) must be hoisted above \
+         `const PROVIDERS`. token@{token_pos} providers@{providers_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        providers_pos < class_pos,
+        "`const PROVIDERS` must be hoisted above `class TestComponent`. \
+         providers@{providers_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const TOKEN").count(),
+        1,
+        "`const TOKEN` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const PROVIDERS").count(),
+        1,
+        "`const PROVIDERS` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
+
+/// Codex P2 review #3312108558: `E::ClassExpression(_) => {}` in
+/// `collect_expr_symbols` drops the eager parts of a class expression —
+/// the `super_class` expression, computed keys, static field initializers,
+/// and static blocks. Those fire when the class expression is *defined*,
+/// not lazily when its methods run.
+///
+/// Trace:
+/// - `@Component({ providers: PROVIDERS }) class TestComponent {}`
+/// - `const PROVIDERS = [class extends BASE {}];`
+/// - `const BASE = class {};`
+///
+/// Without the fix, `PROVIDERS`'s `init_symbols` is empty (class expr is
+/// opaque), so `BASE` never enters the worklist. `PROVIDERS` is hoisted
+/// above `TestComponent` but `BASE` stays below — at runtime, hoisted
+/// `[class extends BASE {}]` evaluates and reads `BASE` in TDZ.
+///
+/// Fix: walk `super_class`, computed keys on all members, static field
+/// initializers, static accessor initializers, and static blocks.
+///
+/// Assert: `const BASE` precedes `const PROVIDERS` AND `const PROVIDERS`
+/// precedes `class TestComponent`.
+#[test]
+fn component_class_expr_super_class_chases_late_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+@Component({ selector: 'x', template: '', providers: PROVIDERS })
+class TestComponent {}
+const PROVIDERS = [class extends BASE {}];
+const BASE = class {};
+"#;
+    let result = transform_angular_file(&allocator, "test.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let base_pos = result
+        .code
+        .find("const BASE")
+        .unwrap_or_else(|| panic!("Expected `const BASE` to be present.\nCode:\n{}", result.code));
+    let providers_pos = result.code.find("const PROVIDERS").unwrap_or_else(|| {
+        panic!("Expected `const PROVIDERS` to be present.\nCode:\n{}", result.code)
+    });
+    let class_pos = result.code.find("class TestComponent").unwrap_or_else(|| {
+        panic!("Expected `class TestComponent` to be present.\nCode:\n{}", result.code)
+    });
+
+    assert!(
+        base_pos < providers_pos,
+        "`const BASE` (read by `class extends BASE {{}}` inside `PROVIDERS`) \
+         must be hoisted above `const PROVIDERS`. base@{base_pos} \
+         providers@{providers_pos}\nCode:\n{}",
+        result.code
+    );
+    assert!(
+        providers_pos < class_pos,
+        "`const PROVIDERS` must be hoisted above `class TestComponent`. \
+         providers@{providers_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const BASE").count(),
+        1,
+        "`const BASE` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+    assert_eq!(
+        result.code.matches("const PROVIDERS").count(),
+        1,
+        "`const PROVIDERS` should appear exactly once.\nCode:\n{}",
+        result.code
+    );
+}
