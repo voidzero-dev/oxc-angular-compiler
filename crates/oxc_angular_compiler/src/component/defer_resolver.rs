@@ -34,14 +34,14 @@
 //! the `deferredImports` field as the only safe source of deferrable
 //! symbols, and OXC does the same.
 
-use oxc_allocator::{Allocator, Box, Vec as OxcVec};
-use oxc_str::Ident;
+use oxc_allocator::Allocator;
 
 use crate::ast::r3::{R3DeferredBlock, R3Node, R3Visitor, visit_all};
-use crate::output::ast::{
-    ArrowFunctionBody, ArrowFunctionExpr, DynamicImportExpr, DynamicImportUrl, FnParam,
-    InvokeFunctionExpr, LiteralArrayExpr, OutputExpression, ReadPropExpr, ReadVarExpr,
+use crate::class_metadata::{
+    R3DeferPerComponentDependency, compile_component_metadata_async_resolver,
 };
+use crate::output::ast::OutputExpression;
+use oxc_str::Ident;
 
 use super::metadata::ComponentMetadata;
 use super::transform::ImportMap;
@@ -68,6 +68,60 @@ pub fn template_has_defer_block<'a>(nodes: &[R3Node<'a>]) -> bool {
     visitor.found
 }
 
+/// Build the list of `R3DeferPerComponentDependency` describing the
+/// `@Component.deferredImports` entries, used to emit `setClassMetadataAsync`
+/// and the per-component `ɵɵdefer` resolver.
+///
+/// Each entry carries two names that serve distinct roles in the emitted
+/// output:
+///
+/// - `param_name` — the local binding from the source file (e.g. `Heavy` for
+///   `import { HeavyWidget as Heavy }`, `LazyCmp` for
+///   `import LazyCmp from './lazy'`). Used as the parameter name on the
+///   `setClassMetadataAsync` callback so the wrapped decorator metadata
+///   literal's identifier references shadow the outer static import,
+///   allowing bundlers to drop the eager declaration.
+/// - `export_name` — the name under which the symbol is exported from its
+///   source module (e.g. `HeavyWidget` or `default`). Used as the property
+///   read in the dynamic-import resolver chain (`m.<export_name>`). For
+///   default imports the resolver substitutes `m.default` based on
+///   `is_default_import`, so the value here is informational in that case.
+///
+/// Angular collapses both into a single `symbolName` field set to the
+/// exported name; that leaves the static `import { Foo as Bar }` pinned for
+/// aliased deferrable imports because the callback parameter (`Foo`) doesn't
+/// match the metadata body's reference (`Bar`). Splitting the fields here is
+/// a deliberate improvement on Angular's emission.
+///
+/// Entries for unresolved symbols, namespace imports, and type-only imports
+/// are skipped — they have no concrete runtime value to lazy-load and the
+/// resolver would silently misfire.
+pub(super) fn build_defer_per_component_deps<'a>(
+    allocator: &'a Allocator,
+    deferred_imports: &[Ident<'a>],
+    import_map: &ImportMap<'a>,
+) -> oxc_allocator::Vec<'a, R3DeferPerComponentDependency<'a>> {
+    let mut deps = oxc_allocator::Vec::new_in(allocator);
+    for local_name in deferred_imports {
+        let Some(info) = import_map.get(local_name) else { continue };
+        if !info.is_named_import || info.is_type_only {
+            continue;
+        }
+        let is_default_import = info.imported_name.as_deref() == Some("default");
+        // `export_name` is `info.imported_name` when present (aliased named
+        // imports or default imports), otherwise the local name (which
+        // equals the exported name for plain `import { Foo }`).
+        let export_name = info.imported_name.clone().unwrap_or_else(|| local_name.clone());
+        deps.push(R3DeferPerComponentDependency {
+            param_name: local_name.clone(),
+            export_name,
+            import_path: info.source_module.clone(),
+            is_default_import,
+        });
+    }
+    deps
+}
+
 /// Build the deferrable-dependencies resolver expression from the component's
 /// `@Component.deferredImports` array.
 ///
@@ -90,6 +144,11 @@ pub fn template_has_defer_block<'a>(nodes: &[R3Node<'a>]) -> bool {
 /// `compileDeferResolverFunction` emits a dynamic `import(<path>)` for every
 /// entry the user lists, including bare specifiers like `@angular/material`.
 /// Filtering would silently drop intentional opt-ins.
+///
+/// Shares the emission code path with `setClassMetadataAsync` via
+/// [`compile_component_metadata_async_resolver`] so both call sites stay in
+/// lockstep — the resolver wired into `ɵɵdefer(...)` is byte-equivalent to
+/// the one wired into `ɵsetClassMetadataAsync(...)`.
 pub fn build_defer_resolver_expression<'a>(
     allocator: &'a Allocator,
     metadata: &ComponentMetadata<'a>,
@@ -99,120 +158,10 @@ pub fn build_defer_resolver_expression<'a>(
         return None;
     }
 
-    let mut entries = OxcVec::new_in(allocator);
-
-    for local_name in &metadata.deferred_imports {
-        let Some(info) = import_map.get(local_name) else { continue };
-
-        // Namespace imports (`import * as ns from 'x'`) cannot be turned into
-        // a single `m.X` reference, so skip them.
-        if !info.is_named_import {
-            continue;
-        }
-
-        // Type-only imports are erased at runtime — they have no concrete
-        // value to lazy-load.
-        if info.is_type_only {
-            continue;
-        }
-
-        // Choose the property to read off the loaded module:
-        // - Aliased named import (`import { Foo as Bar }`) → original `Foo`
-        // - Default import (`import D from 'x'`) → `default`
-        // - Plain named import (`import { Foo }`) → local name `Foo`
-        let export_name: Ident<'a> =
-            info.imported_name.clone().unwrap_or_else(|| local_name.clone());
-
-        entries.push(build_import_then_expression(
-            allocator,
-            info.source_module.clone(),
-            export_name,
-        ));
-    }
-
-    if entries.is_empty() {
+    let deps = build_defer_per_component_deps(allocator, &metadata.deferred_imports, import_map);
+    if deps.is_empty() {
         return None;
     }
 
-    // Wrap the array in a no-arg arrow function so the resolver is lazy.
-    let array_expr = OutputExpression::LiteralArray(Box::new_in(
-        LiteralArrayExpr { entries, source_span: None },
-        allocator,
-    ));
-    let arrow = OutputExpression::ArrowFunction(Box::new_in(
-        ArrowFunctionExpr {
-            params: OxcVec::new_in(allocator),
-            body: ArrowFunctionBody::Expression(Box::new_in(array_expr, allocator)),
-            source_span: None,
-        },
-        allocator,
-    ));
-    Some(arrow)
-}
-
-/// Build `import(<source>).then(m => m.<export_name>)`.
-fn build_import_then_expression<'a>(
-    allocator: &'a Allocator,
-    source: Ident<'a>,
-    export_name: Ident<'a>,
-) -> OutputExpression<'a> {
-    let dynamic_import = OutputExpression::DynamicImport(Box::new_in(
-        DynamicImportExpr {
-            url: DynamicImportUrl::String(source),
-            url_comment: None,
-            source_span: None,
-        },
-        allocator,
-    ));
-
-    // `m => m.<export_name>`
-    let m_ident = Ident::from("m");
-    let callback_body = OutputExpression::ReadProp(Box::new_in(
-        ReadPropExpr {
-            receiver: Box::new_in(
-                OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: m_ident.clone(), source_span: None },
-                    allocator,
-                )),
-                allocator,
-            ),
-            name: export_name,
-            optional: false,
-            source_span: None,
-        },
-        allocator,
-    ));
-    let mut params = OxcVec::with_capacity_in(1, allocator);
-    params.push(FnParam { name: m_ident });
-    let callback = OutputExpression::ArrowFunction(Box::new_in(
-        ArrowFunctionExpr {
-            params,
-            body: ArrowFunctionBody::Expression(Box::new_in(callback_body, allocator)),
-            source_span: None,
-        },
-        allocator,
-    ));
-
-    // `import(<source>).then(<callback>)`
-    let then_callee = OutputExpression::ReadProp(Box::new_in(
-        ReadPropExpr {
-            receiver: Box::new_in(dynamic_import, allocator),
-            name: Ident::from("then"),
-            optional: false,
-            source_span: None,
-        },
-        allocator,
-    ));
-    let mut args = OxcVec::with_capacity_in(1, allocator);
-    args.push(callback);
-    OutputExpression::InvokeFunction(Box::new_in(
-        InvokeFunctionExpr {
-            fn_expr: Box::new_in(then_callee, allocator),
-            args,
-            pure: false,
-            optional: false,
-            source_span: None,
-        },
-        allocator,
-    ))
+    Some(compile_component_metadata_async_resolver(allocator, &deps))
 }

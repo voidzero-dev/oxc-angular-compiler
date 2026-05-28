@@ -593,59 +593,6 @@ pub fn build_import_map<'a>(
 ///
 /// Resolve namespace imports for factory dependency tokens.
 ///
-/// Build the list of `R3DeferPerComponentDependency` describing the
-/// `@Component.deferredImports` entries, used to emit `setClassMetadataAsync`.
-///
-/// Each entry carries two names that serve distinct roles in the emitted
-/// output:
-///
-/// - `param_name` — the local binding from the source file (e.g. `Heavy` for
-///   `import { HeavyWidget as Heavy }`, `LazyCmp` for
-///   `import LazyCmp from './lazy'`). Used as the parameter name on the
-///   `setClassMetadataAsync` callback so the wrapped decorator metadata
-///   literal's identifier references shadow the outer static import,
-///   allowing bundlers to drop the eager declaration.
-/// - `export_name` — the name under which the symbol is exported from its
-///   source module (e.g. `HeavyWidget` or `default`). Used as the property
-///   read in the dynamic-import resolver chain (`m.<export_name>`). For
-///   default imports the resolver substitutes `m.default` based on
-///   `is_default_import`, so the value here is informational in that case.
-///
-/// Angular collapses both into a single `symbolName` field set to the
-/// exported name; that leaves the static `import { Foo as Bar }` pinned for
-/// aliased deferrable imports because the callback parameter (`Foo`) doesn't
-/// match the metadata body's reference (`Bar`). Splitting the fields here is
-/// a deliberate improvement on Angular's emission.
-///
-/// Entries for unresolved symbols, namespace imports, and type-only imports
-/// are skipped — they have no concrete runtime value to lazy-load and the
-/// resolver would silently misfire.
-fn build_defer_per_component_deps<'a>(
-    allocator: &'a Allocator,
-    deferred_imports: &[Ident<'a>],
-    import_map: &ImportMap<'a>,
-) -> oxc_allocator::Vec<'a, R3DeferPerComponentDependency<'a>> {
-    let mut deps = oxc_allocator::Vec::new_in(allocator);
-    for local_name in deferred_imports {
-        let Some(info) = import_map.get(local_name) else { continue };
-        if !info.is_named_import || info.is_type_only {
-            continue;
-        }
-        let is_default_import = info.imported_name.as_deref() == Some("default");
-        // `export_name` is `info.imported_name` when present (aliased named
-        // imports or default imports), otherwise the local name (which
-        // equals the exported name for plain `import { Foo }`).
-        let export_name = info.imported_name.clone().unwrap_or_else(|| local_name.clone());
-        deps.push(R3DeferPerComponentDependency {
-            param_name: local_name.clone(),
-            export_name,
-            import_path: info.source_module.clone(),
-            is_default_import,
-        });
-    }
-    deps
-}
-
 /// The import elision phase removes type-only imports (e.g., `import { Store } from '@ngrx/store'`)
 /// because constructor parameter types are considered type-only. However, the factory function
 /// needs to reference these types at runtime (e.g., `i0.ɵɵinject(Store)`).
@@ -2259,7 +2206,7 @@ pub fn transform_angular_file(
                                     let deferred_deps: oxc_allocator::Vec<
                                         R3DeferPerComponentDependency<'_>,
                                     > = if compilation_result.has_defer_block {
-                                        build_defer_per_component_deps(
+                                        super::defer_resolver::build_defer_per_component_deps(
                                             allocator,
                                             &metadata.deferred_imports,
                                             &import_map,
