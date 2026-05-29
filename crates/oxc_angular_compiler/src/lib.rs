@@ -98,6 +98,7 @@ pub use factory::{
 // Re-export partial-declaration emitters (library AOT)
 pub use partial::{
     compile_declare_factory_function, compile_declare_injectable_from_metadata,
+    compile_declare_injector_from_metadata, compile_declare_ng_module_from_metadata,
     compile_declare_pipe_from_metadata,
 };
 

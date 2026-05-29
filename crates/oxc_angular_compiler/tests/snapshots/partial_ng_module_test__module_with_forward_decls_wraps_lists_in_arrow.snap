@@ -1,0 +1,6 @@
+---
+source: crates/oxc_angular_compiler/tests/partial_ng_module_test.rs
+expression: js
+---
+i0.ɵɵngDeclareNgModule({minVersion:"14.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,
+    type:ForwardModule,declarations:() =>[LaterComp],exports:() =>[LaterComp]})

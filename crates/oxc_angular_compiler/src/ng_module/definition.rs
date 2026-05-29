@@ -36,6 +36,7 @@ use oxc_allocator::{Allocator, Vec as OxcVec};
 use super::compiler::compile_ng_module;
 use super::decorator::NgModuleMetadata;
 use super::metadata::R3NgModuleMetadata;
+use crate::CompilationMode;
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata, compile_factory_function,
@@ -43,6 +44,10 @@ use crate::factory::{
 use crate::injector::{R3InjectorMetadataBuilder, compile_injector};
 use crate::output::ast::{OutputExpression, OutputStatement, ReadVarExpr};
 use crate::output::emitter::JsEmitter;
+use crate::partial::injector::compile_declare_injector_from_metadata;
+use crate::partial::ng_module::{
+    compile_declare_factory_for_ng_module, compile_declare_ng_module_from_metadata,
+};
 
 /// Result of generating NgModule definition.
 ///
@@ -183,6 +188,7 @@ pub fn emit_ng_module_definition(class_name: &str, definition: &NgModuleDefiniti
 pub fn generate_full_ng_module_definition<'a>(
     allocator: &'a Allocator,
     metadata: &NgModuleMetadata<'a>,
+    compilation_mode: CompilationMode,
 ) -> Option<FullNgModuleDefinition<'a>> {
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
 
@@ -192,21 +198,38 @@ pub fn generate_full_ng_module_definition<'a>(
     // so factory dependencies get registered first, followed by module and injector dependencies.
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
 
-    // Generate ɵfac first
-    let fac_definition = generate_ng_module_fac(allocator, metadata);
-
-    // Generate ɵmod second
-    let mod_result = compile_ng_module(allocator, &r3_metadata);
-
-    // Generate ɵinj third
-    let inj_definition = generate_ng_module_inj(allocator, metadata);
-
-    Some(FullNgModuleDefinition {
-        mod_definition: mod_result.expression,
-        fac_definition,
-        inj_definition,
-        statements: mod_result.statements,
-    })
+    match compilation_mode {
+        CompilationMode::Full => {
+            let fac_definition = generate_ng_module_fac(allocator, metadata);
+            let mod_result = compile_ng_module(allocator, &r3_metadata);
+            let inj_definition = generate_ng_module_inj(allocator, metadata);
+            Some(FullNgModuleDefinition {
+                mod_definition: mod_result.expression,
+                fac_definition,
+                inj_definition,
+                statements: mod_result.statements,
+            })
+        }
+        CompilationMode::Partial => {
+            // Partial mode banishes the `ɵɵsetNgModuleScope` side-effect
+            // statement upstream-mandated; the linker re-creates remote
+            // scoping at link time if needed. See
+            // `compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts:971`.
+            let fac_definition = compile_declare_factory_for_ng_module(allocator, &r3_metadata);
+            let mod_definition = compile_declare_ng_module_from_metadata(allocator, &r3_metadata);
+            // Build the injector metadata using the same conversion the
+            // full path uses (`generate_ng_module_inj`'s builder), then
+            // hand it to the partial injector emitter.
+            let inj_metadata = build_injector_metadata(allocator, metadata);
+            let inj_definition = compile_declare_injector_from_metadata(allocator, &inj_metadata);
+            Some(FullNgModuleDefinition {
+                mod_definition,
+                fac_definition,
+                inj_definition,
+                statements: OxcVec::new_in(allocator),
+            })
+        }
+    }
 }
 
 /// Generate ɵfac factory function for an NgModule.
@@ -258,11 +281,22 @@ fn generate_ng_module_fac<'a>(
     result.expression
 }
 
-/// Generate ɵinj injector definition for an NgModule.
+/// Generate ɵinj injector definition for an NgModule (full mode).
 fn generate_ng_module_inj<'a>(
     allocator: &'a Allocator,
     metadata: &NgModuleMetadata<'a>,
 ) -> OutputExpression<'a> {
+    let inj_metadata = build_injector_metadata(allocator, metadata);
+    let result = compile_injector(allocator, &inj_metadata);
+    result.expression
+}
+
+/// Builds the `R3InjectorMetadata` from an NgModule's decorator metadata —
+/// shared by the full-mode and partial-mode emit paths.
+fn build_injector_metadata<'a>(
+    allocator: &'a Allocator,
+    metadata: &NgModuleMetadata<'a>,
+) -> crate::injector::R3InjectorMetadata<'a> {
     let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
         ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
         allocator,
@@ -272,14 +306,12 @@ fn generate_ng_module_inj<'a>(
         .name(metadata.class_name.clone())
         .r#type(type_expr);
 
-    // Add providers if present
     if let Some(providers) = &metadata.providers {
         builder = builder.providers(providers.clone_in(allocator));
     }
 
-    // Add imports for the injector.
-    // Prefer raw_imports_expr which preserves call expressions like StoreModule.forRoot(...)
-    // and spread elements, needed for ModuleWithProviders provider resolution.
+    // Prefer raw_imports_expr (preserves StoreModule.forRoot(...) and
+    // spread elements needed for ModuleWithProviders resolution).
     if let Some(raw_imports) = &metadata.raw_imports_expr {
         builder = builder.raw_imports(raw_imports.clone_in(allocator));
     } else {
@@ -292,9 +324,7 @@ fn generate_ng_module_inj<'a>(
         }
     }
 
-    let inj_metadata = builder.build().expect("Failed to build injector metadata");
-    let result = compile_injector(allocator, &inj_metadata);
-    result.expression
+    builder.build().expect("Failed to build injector metadata")
 }
 
 /// Emit the full NgModule definition as JavaScript code.
@@ -591,7 +621,8 @@ mod tests {
         assert!(deps[0].skip_self, "Should have skip_self");
 
         // Generate the full definition and check the output
-        let definition = generate_full_ng_module_definition(&allocator, &metadata);
+        let definition =
+            generate_full_ng_module_definition(&allocator, &metadata, CompilationMode::Full);
         let definition = definition.expect("Should generate definition");
 
         let js = emit_full_ng_module_definition("CoreModule", &definition);

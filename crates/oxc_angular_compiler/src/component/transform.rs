@@ -2892,9 +2892,11 @@ pub fn transform_angular_file(
                     }
 
                     // Compile NgModule and generate all definitions as external property assignments
-                    if let Some(definition) =
-                        generate_full_ng_module_definition(allocator, &ng_module_metadata)
-                    {
+                    if let Some(definition) = generate_full_ng_module_definition(
+                        allocator,
+                        &ng_module_metadata,
+                        options.compilation_mode,
+                    ) {
                         let emitter = JsEmitter::new();
                         let class_name = ng_module_metadata.class_name.to_string();
 

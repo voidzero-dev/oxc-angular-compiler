@@ -11,20 +11,27 @@
 //! - `injectable` — `ɵɵngDeclareInjectable`. Wired into the Injectable
 //!   emit path.
 //! - `pipe` — `ɵɵngDeclarePipe`. Wired into the Pipe emit path.
+//! - `ng_module` + `injector` — `ɵɵngDeclareNgModule` and
+//!   `ɵɵngDeclareInjector`. Both emit per `@NgModule`; wired into the
+//!   NgModule emit path. Partial mode banishes `setNgModuleScope`
+//!   (matches upstream `ng_module/handler.ts:971`).
 //!
 //! Setting `TransformOptions.compilation_mode = Partial` on a source
 //! containing the above decorators produces fully partial-form output.
 //!
 //! Not yet implemented (and the dispatch from the per-decorator emit paths
-//! falls back to full mode): component, directive, injector, ngmodule,
-//! classMetadata.
+//! falls back to full mode): component, directive, classMetadata.
 
 pub mod factory;
 pub mod injectable;
+pub mod injector;
+pub mod ng_module;
 pub mod pipe;
 
 pub use factory::compile_declare_factory_function;
 pub use injectable::compile_declare_injectable_from_metadata;
+pub use injector::compile_declare_injector_from_metadata;
+pub use ng_module::compile_declare_ng_module_from_metadata;
 pub use pipe::compile_declare_pipe_from_metadata;
 
 use oxc_allocator::{Allocator, Box, Vec};
