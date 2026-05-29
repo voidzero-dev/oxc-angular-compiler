@@ -9,18 +9,23 @@
 //! Currently implemented:
 //! - `factory` — `ɵɵngDeclareFactory`
 //! - `injectable` — `ɵɵngDeclareInjectable`. Wired into the Injectable
-//!   emit path: set `TransformOptions.compilation_mode = Partial` and an
-//!   `@Injectable` source compiles to a fully partial-form output.
+//!   emit path.
+//! - `pipe` — `ɵɵngDeclarePipe`. Wired into the Pipe emit path.
+//!
+//! Setting `TransformOptions.compilation_mode = Partial` on a source
+//! containing the above decorators produces fully partial-form output.
 //!
 //! Not yet implemented (and the dispatch from the per-decorator emit paths
-//! falls back to full mode): component, directive, pipe, injector,
-//! ngmodule, classMetadata.
+//! falls back to full mode): component, directive, injector, ngmodule,
+//! classMetadata.
 
 pub mod factory;
 pub mod injectable;
+pub mod pipe;
 
 pub use factory::compile_declare_factory_function;
 pub use injectable::compile_declare_injectable_from_metadata;
+pub use pipe::compile_declare_pipe_from_metadata;
 
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_str::Ident;

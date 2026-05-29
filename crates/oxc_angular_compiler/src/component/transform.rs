@@ -2792,9 +2792,11 @@ pub fn transform_angular_file(
                     }
 
                     // Compile pipe and generate both ɵfac and ɵpipe definitions as external property assignments
-                    if let Some(definition) =
-                        generate_full_pipe_definition_from_decorator(allocator, &pipe_metadata)
-                    {
+                    if let Some(definition) = generate_full_pipe_definition_from_decorator(
+                        allocator,
+                        &pipe_metadata,
+                        options.compilation_mode,
+                    ) {
                         // Use JsEmitter to emit both expressions
                         let emitter = JsEmitter::new();
                         let class_name = pipe_metadata.class_name.to_string();
