@@ -16,11 +16,9 @@ mod metadata;
 
 pub use compiler::{ServiceCompileResult, compile_service};
 pub use decorator::{
-    ServiceMetadata, extract_service_metadata, find_service_decorator,
-    find_service_decorator_span,
+    ServiceMetadata, extract_service_metadata, find_service_decorator, find_service_decorator_span,
 };
 pub use definition::{
-    ServiceDefinition, generate_service_definition,
-    generate_service_definition_from_decorator,
+    ServiceDefinition, generate_service_definition, generate_service_definition_from_decorator,
 };
 pub use metadata::R3ServiceMetadata;

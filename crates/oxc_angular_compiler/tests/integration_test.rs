@@ -13399,24 +13399,15 @@ import { Service } from '@angular/core';
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert!(
         result.code.contains("ɵɵdefineService"),
         "Should emit ɵɵdefineService. Got:\n{}",
         result.code
     );
-    assert!(
-        result.code.contains("static ɵfac"),
-        "Should emit static ɵfac. Got:\n{}",
-        result.code
-    );
+    assert!(result.code.contains("static ɵfac"), "Should emit static ɵfac. Got:\n{}", result.code);
     assert!(
         result.code.contains("static ɵprov"),
         "Should emit static ɵprov. Got:\n{}",
@@ -13446,17 +13437,11 @@ import { Service } from '@angular/core';
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert!(
-        result.code.contains("autoProvided:false")
-            || result.code.contains("autoProvided: false"),
+        result.code.contains("autoProvided:false") || result.code.contains("autoProvided: false"),
         "Should emit autoProvided: false. Got:\n{}",
         result.code
     );
@@ -13477,13 +13462,8 @@ function makeCounter() { return { count: 0 }; }
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // The factory entry should be an arrow wrapper, not a ɵfac delegation.
     assert!(
@@ -13516,13 +13496,8 @@ class Alternate {}
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // The user's arrow expression must appear inside the wrapper, called.
     assert!(
@@ -13550,13 +13525,8 @@ export class CounterService {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(
-        &allocator,
-        "counter.service.ts",
-        source,
-        Some(&options),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
 
     assert!(
         result.has_errors(),
@@ -13591,8 +13561,7 @@ import { Service, Injectable } from '@angular/core';
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
 
     assert!(
         result.has_errors(),
@@ -13630,13 +13599,8 @@ export class CounterService {}
         angular_version: Some(AngularVersion::new(21, 0, 0)),
         ..Default::default()
     };
-    let result = transform_angular_file(
-        &allocator,
-        "counter.service.ts",
-        source,
-        Some(&options),
-        None,
-    );
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
 
     assert!(
         !result
@@ -13673,8 +13637,7 @@ export class CounterService {
 }
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
 
     assert!(
         result.has_errors(),
@@ -13710,19 +13673,11 @@ import { Service } from '@angular/core';
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     // ɵprov must omit autoProvided when true (matches runtime default).
-    let prov_start = result
-        .code
-        .find("ɵɵdefineService")
-        .expect("should emit ɵɵdefineService");
+    let prov_start = result.code.find("ɵɵdefineService").expect("should emit ɵɵdefineService");
     let prov_end = result.code[prov_start..]
         .find("})")
         .map(|p| prov_start + p)
@@ -13735,8 +13690,7 @@ export class CounterService {}
 
     // setClassMetadata must preserve the user's decorator args.
     assert!(
-        result.code.contains("autoProvided:true")
-            || result.code.contains("autoProvided: true"),
+        result.code.contains("autoProvided:true") || result.code.contains("autoProvided: true"),
         "setClassMetadata args should preserve user's autoProvided: true. Got:\n{}",
         result.code
     );
@@ -13752,13 +13706,8 @@ import { Service } from '@angular/core';
 export class CounterService {}
 ";
 
-    let result =
-        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
-    assert!(
-        !result.has_errors(),
-        "Should compile without errors: {:?}",
-        result.diagnostics
-    );
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should compile without errors: {:?}", result.diagnostics);
 
     assert_eq!(result.dts_declarations.len(), 1);
     let decl = &result.dts_declarations[0];

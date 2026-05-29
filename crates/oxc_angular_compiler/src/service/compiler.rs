@@ -266,10 +266,7 @@ mod tests {
         let result = compile_service(&allocator, &metadata);
         let js = JsEmitter::new().emit_expression(&result.expression);
 
-        assert!(
-            js.contains("makeService()"),
-            "should call user factory inside arrow. Got: {js}"
-        );
+        assert!(js.contains("makeService()"), "should call user factory inside arrow. Got: {js}");
         assert!(
             !js.contains("MyService.ɵfac"),
             "should not delegate to ɵfac when custom factory supplied. Got: {js}"

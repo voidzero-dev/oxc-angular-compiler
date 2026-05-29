@@ -12,9 +12,7 @@
 //! upstream import-map gate that the AOT caller mirrors.
 
 use oxc_allocator::{Allocator, Box};
-use oxc_ast::ast::{
-    Argument, Class, Decorator, Expression, ObjectPropertyKind, PropertyKey,
-};
+use oxc_ast::ast::{Argument, Class, Decorator, Expression, ObjectPropertyKind, PropertyKey};
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
@@ -35,9 +33,7 @@ pub struct ServiceMetadata<'a> {
 }
 
 /// Find the `@Service` decorator node on a class (by identifier name only).
-pub fn find_service_decorator<'a>(
-    decorators: &'a [Decorator<'a>],
-) -> Option<&'a Decorator<'a>> {
+pub fn find_service_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
     decorators.iter().find(|d| is_service_decorator(d))
 }
 

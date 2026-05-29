@@ -75,7 +75,7 @@ fn generate_fac_definition<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::output::ast::{ReadVarExpr};
+    use crate::output::ast::ReadVarExpr;
     use crate::output::emitter::JsEmitter;
     use oxc_allocator::Box;
     use oxc_str::Ident;
@@ -104,7 +104,13 @@ mod tests {
             !fac_js.contains("ɵɵinject") && !fac_js.contains("inject("),
             "ɵfac should not call inject — services resolve deps in the ctor body. Got: {fac_js}"
         );
-        assert!(prov_js.contains("ɵɵdefineService"), "ɵprov should use defineService. Got: {prov_js}");
-        assert!(prov_js.contains("MyService.ɵfac"), "ɵprov should delegate to ɵfac. Got: {prov_js}");
+        assert!(
+            prov_js.contains("ɵɵdefineService"),
+            "ɵprov should use defineService. Got: {prov_js}"
+        );
+        assert!(
+            prov_js.contains("MyService.ɵfac"),
+            "ɵprov should delegate to ɵfac. Got: {prov_js}"
+        );
     }
 }

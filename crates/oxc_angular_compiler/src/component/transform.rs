@@ -49,10 +49,6 @@ use crate::injectable::{
     extract_injectable_metadata, find_injectable_decorator, find_injectable_decorator_span,
     generate_injectable_definition_from_decorator,
 };
-use crate::service::{
-    extract_service_metadata, find_service_decorator_span,
-    generate_service_definition_from_decorator,
-};
 use crate::ng_module::{
     extract_ng_module_metadata, find_ng_module_decorator, find_ng_module_decorator_span,
     generate_full_ng_module_definition,
@@ -76,6 +72,10 @@ use crate::pipeline::emit::{
 use crate::pipeline::ingest::{
     HostBindingInput, IngestOptions, ingest_component, ingest_component_with_options,
     ingest_host_binding_with_version,
+};
+use crate::service::{
+    extract_service_metadata, find_service_decorator_span,
+    generate_service_definition_from_decorator,
 };
 use crate::transform::HtmlToR3Transform;
 use crate::transform::html_to_r3::TransformOptions as R3TransformOptions;
@@ -3076,10 +3076,7 @@ pub fn transform_angular_file(
 
                     // Version gate: v22+ runtime introduced ɵɵdefineService. Unknown
                     // version defaults to "supports" (matches the JIT-side gate).
-                    if !options
-                        .angular_version
-                        .map_or(true, |v| v.supports_service_decorator())
-                    {
+                    if !options.angular_version.map_or(true, |v| v.supports_service_decorator()) {
                         result.diagnostics.push(OxcDiagnostic::error(format!(
                             "The @Service decorator on '{}' requires Angular v22 or later.",
                             class_name_for_diag
@@ -3143,9 +3140,10 @@ pub fn transform_angular_file(
                             emitter.emit_expression(&definition.prov_definition)
                         );
 
-                        result
-                            .dts_declarations
-                            .push(dts::generate_service_dts(&service_metadata, type_argument_count));
+                        result.dts_declarations.push(dts::generate_service_dts(
+                            &service_metadata,
+                            type_argument_count,
+                        ));
 
                         let decls_after_class = build_set_class_metadata_decls(
                             allocator,
