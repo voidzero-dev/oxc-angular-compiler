@@ -836,6 +836,17 @@ export interface TransformOptions {
    */
   minifyComponentStyles?: boolean
   /**
+   * Compilation mode: `"full"` (default) or `"partial"`.
+   *
+   * - `"full"` emits fully-resolved Ivy definitions (`ɵɵdefineComponent`,
+   *   `ɵɵdefineDirective`, …) — application builds.
+   * - `"partial"` emits partial declarations (`ɵɵngDeclareComponent`,
+   *   `ɵɵngDeclareDirective`, …) — library builds. Consumers run the
+   *   linker (also exposed by this package) to expand the declarations
+   *   into full Ivy form at their build time.
+   */
+  compilationMode?: string
+  /**
    * Resolved import paths for host directives and other imports.
    *
    * Maps local identifier name (e.g., "AriaDisableDirective") to the resolved

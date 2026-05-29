@@ -198,6 +198,16 @@ pub struct TransformOptions {
     /// final CSS strings that are embedded in generated component definitions.
     pub minify_component_styles: Option<bool>,
 
+    /// Compilation mode: `"full"` (default) or `"partial"`.
+    ///
+    /// - `"full"` emits fully-resolved Ivy definitions (`ɵɵdefineComponent`,
+    ///   `ɵɵdefineDirective`, …) — application builds.
+    /// - `"partial"` emits partial declarations (`ɵɵngDeclareComponent`,
+    ///   `ɵɵngDeclareDirective`, …) — library builds. Consumers run the
+    ///   linker (also exposed by this package) to expand the declarations
+    ///   into full Ivy form at their build time.
+    pub compilation_mode: Option<String>,
+
     /// Resolved import paths for host directives and other imports.
     ///
     /// Maps local identifier name (e.g., "AriaDisableDirective") to the resolved
@@ -240,7 +250,23 @@ impl From<TransformOptions> for RustTransformOptions {
             // Class metadata for TestBed support
             emit_class_metadata: options.emit_class_metadata.unwrap_or(true),
             minify_component_styles: options.minify_component_styles.unwrap_or(false),
+            compilation_mode: options
+                .compilation_mode
+                .as_deref()
+                .and_then(parse_compilation_mode)
+                .unwrap_or_default(),
         }
+    }
+}
+
+/// Parse a CompilationMode string. Recognized values: `"full"`, `"partial"`
+/// (case-insensitive). Returns `None` on unrecognized input — callers fall
+/// back to the `Default` (Full).
+fn parse_compilation_mode(s: &str) -> Option<oxc_angular_compiler::CompilationMode> {
+    match s.to_ascii_lowercase().as_str() {
+        "full" => Some(oxc_angular_compiler::CompilationMode::Full),
+        "partial" => Some(oxc_angular_compiler::CompilationMode::Partial),
+        _ => None,
     }
 }
 
