@@ -868,6 +868,29 @@ struct JitNonAngularMemberDecorator {
     decorator_texts: std::vec::Vec<String>,
 }
 
+/// Whether the class declares its own constructor with at least one parameter.
+///
+/// Used by the `@Service` handler to catch the common-but-broken pattern of
+/// declaring constructor-based DI on a service: upstream service.ts:278-309
+/// surfaces a diagnostic because `@Service` ɵfac is generated with empty
+/// deps, so those parameters would silently become `undefined` at runtime.
+///
+/// Unlike upstream, we don't walk to base classes — that requires cross-file
+/// resolution that oxc doesn't perform. Upstream's LOCAL compilation mode
+/// also skips that walk, and our single-file transform is closer to LOCAL
+/// mode than to a full reflector.
+fn class_has_own_constructor_params(class: &oxc_ast::ast::Class<'_>) -> bool {
+    use oxc_ast::ast::{ClassElement, MethodDefinitionKind};
+    class.body.body.iter().any(|element| {
+        if let ClassElement::MethodDefinition(method) = element {
+            method.kind == MethodDefinitionKind::Constructor
+                && !method.value.params.items.is_empty()
+        } else {
+            false
+        }
+    })
+}
+
 /// Return the `@Service` decorator on a class iff the `Service` identifier
 /// resolves to `@angular/core` via the import map. Returns `None` for a bare
 /// `@Service()` from a third-party library.
@@ -3074,6 +3097,19 @@ pub fn transform_angular_file(
                              '{}' is also decorated with @{}.",
                             class_name_for_diag, conflict_name
                         )));
+                        continue;
+                    }
+
+                    // Constructor DI diagnostic: @Service ɵfac is generated with
+                    // empty deps, so any constructor parameter would silently
+                    // become `undefined` at runtime. Surface upstream's error
+                    // (service.ts:312-318) instead of emitting broken code.
+                    if class_has_own_constructor_params(class) {
+                        result.diagnostics.push(OxcDiagnostic::error(
+                            "@Service class cannot use constructor dependency injection. \
+                             Use the `inject` function instead."
+                                .to_string(),
+                        ));
                         continue;
                     }
 

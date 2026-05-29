@@ -13502,6 +13502,39 @@ export class CounterService {}
 }
 
 #[test]
+fn test_aot_service_decorator_inline_arrow_factory() {
+    // Upstream's service_with_factory compliance golden: an inline arrow
+    // factory becomes `factory: () => (() => new Alternate())()` — the user's
+    // arrow is preserved and called inside an outer wrapper.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+class Alternate {}
+
+@Service({ factory: () => new Alternate() })
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    // The user's arrow expression must appear inside the wrapper, called.
+    assert!(
+        result.code.contains("new Alternate()"),
+        "User's arrow body should appear in the emitted factory wrapper. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("aot_service_decorator_inline_arrow_factory", result.code);
+}
+
+#[test]
 fn test_aot_service_decorator_version_gated() {
     // Targeting Angular < 22 should surface a diagnostic and leave the
     // decorator unchanged (no ɵfac/ɵprov emitted).
@@ -13621,6 +13654,90 @@ export class CounterService {}
     assert!(
         result.code.contains("@Service"),
         "Source @Service decorator should be left intact when not from @angular/core. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_service_decorator_constructor_di_diagnostic() {
+    // Upstream service.ts:278-309 rejects @Service classes that declare
+    // constructor params, because the v22 @Service ɵfac is generated with
+    // empty deps — the params would silently be `undefined` at runtime.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service, ApplicationRef } from '@angular/core';
+
+@Service()
+export class CounterService {
+    constructor(appRef: ApplicationRef) {}
+}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+
+    assert!(
+        result.has_errors(),
+        "@Service with ctor params should surface a diagnostic. Got none.\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            let s = d.to_string();
+            s.contains("@Service") && s.contains("constructor") && s.contains("inject")
+        }),
+        "Diagnostic should match upstream's wording (mentions @Service, constructor, inject). Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Should NOT emit ɵɵdefineService when the ctor-DI rule fires. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_service_decorator_explicit_auto_provided_true() {
+    // Upstream's explicitly_provided_service compliance golden: when the user
+    // writes @Service({autoProvided: true}), the ɵprov initializer must NOT
+    // contain `autoProvided` (it matches the runtime default), but the
+    // setClassMetadata `args` array must preserve the user's source value.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service({ autoProvided: true })
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    // ɵprov must omit autoProvided when true (matches runtime default).
+    let prov_start = result
+        .code
+        .find("ɵɵdefineService")
+        .expect("should emit ɵɵdefineService");
+    let prov_end = result.code[prov_start..]
+        .find("})")
+        .map(|p| prov_start + p)
+        .expect("should close the defineService call");
+    let prov_chunk = &result.code[prov_start..=prov_end];
+    assert!(
+        !prov_chunk.contains("autoProvided"),
+        "ɵprov should omit autoProvided when user passed true. Got: {prov_chunk}"
+    );
+
+    // setClassMetadata must preserve the user's decorator args.
+    assert!(
+        result.code.contains("autoProvided:true")
+            || result.code.contains("autoProvided: true"),
+        "setClassMetadata args should preserve user's autoProvided: true. Got:\n{}",
         result.code
     );
 }
