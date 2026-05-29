@@ -34,11 +34,46 @@ fn component(body: &str, imports: &str) -> String {
 }
 
 #[test]
+fn synthesized_decorators_resolve_against_angular_core_namespace_import() {
+    // Regression for the Codex P1 review on PR #319: a typical signal component
+    // imports only the lowercase functions (`input`, `output`, …) from
+    // `@angular/core`, not the capital-letter decorators. The synthesized
+    // `propDecorators` therefore must reference an Angular namespace alias and
+    // the JIT path must emit the matching `import * as i0 from "@angular/core"`,
+    // otherwise the module throws `ReferenceError: Input is not defined` while
+    // evaluating the class — before Angular's JIT facade ever runs.
+    let out = compile_jit(&component("  readonly value = input(0);", "input"));
+    assert!(
+        out.contains("import * as i0 from \"@angular/core\""),
+        "JIT path must inject the namespace import when synthesis occurred. Got:\n{out}"
+    );
+    assert!(
+        out.contains("type: i0.Input"),
+        "synthesized decorator must use the namespace alias. Got:\n{out}"
+    );
+}
+
+#[test]
+fn namespace_import_skipped_when_no_synthesis_needed() {
+    // No initializer-API usage at all → no synthesis → no namespace import.
+    // Adding it unconditionally would pollute every JIT-compiled file.
+    let out = compile_jit(
+        "import { Component } from '@angular/core';\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C { plain = 1; }\n",
+    );
+    assert!(
+        !out.contains("import * as i0 from \"@angular/core\""),
+        "namespace import should be skipped when no decorators were synthesized. Got:\n{out}"
+    );
+}
+
+#[test]
 fn input_initializer_emits_synthesized_input_prop_decorator() {
     let out = compile_jit(&component("  readonly value = input(0);", "input"));
     assert!(out.contains("propDecorators"), "JIT output should emit propDecorators. Got:\n{out}");
     assert!(out.contains("value:"), "field name should be a propDecorators key. Got:\n{out}");
-    assert!(out.contains("type: Input"), "synthesized @Input missing. Got:\n{out}");
+    assert!(out.contains("type: i0.Input"), "synthesized @Input missing. Got:\n{out}");
     assert!(out.contains("isSignal: true"), "isSignal flag missing. Got:\n{out}");
     assert!(out.contains("required: false"), "required: false missing. Got:\n{out}");
     assert!(out.contains("alias: \"value\""), "default alias = field name missing. Got:\n{out}");
@@ -47,7 +82,7 @@ fn input_initializer_emits_synthesized_input_prop_decorator() {
 #[test]
 fn input_required_marks_required_true() {
     let out = compile_jit(&component("  readonly value = input.required<string>();", "input"));
-    assert!(out.contains("type: Input"), "Got:\n{out}");
+    assert!(out.contains("type: i0.Input"), "Got:\n{out}");
     assert!(
         out.contains("required: true"),
         "input.required() should set required: true. Got:\n{out}"
@@ -66,7 +101,9 @@ fn explicit_input_decorator_blocks_input_synthesis() {
     // The user explicitly chose @Input — the decorator wins, no synthesized version
     // should appear (mirrors upstream signalInputsTransform's early return).
     let out = compile_jit(&component("  @Input() value = input(0);", "input, Input"));
-    // The explicit @Input decorator survives via the existing propDecorators path…
+    // The explicit @Input decorator survives via the existing propDecorators path.
+    // Explicit decorators reference the user's bare `Input` import (no namespace
+    // prefix); only synthesized decorators are namespace-prefixed.
     assert!(out.contains("type: Input"), "explicit @Input lost. Got:\n{out}");
     // …but the synthesized entry must NOT add isSignal. If both ran, isSignal would
     // appear in the args. Its absence proves the synthesis was skipped.
@@ -79,7 +116,7 @@ fn explicit_input_decorator_blocks_input_synthesis() {
 #[test]
 fn output_initializer_emits_synthesized_output_prop_decorator() {
     let out = compile_jit(&component("  readonly clicked = output<void>();", "output"));
-    assert!(out.contains("type: Output"), "synthesized @Output missing. Got:\n{out}");
+    assert!(out.contains("type: i0.Output"), "synthesized @Output missing. Got:\n{out}");
     // Default alias is the field name.
     assert!(out.contains("\"clicked\""), "default alias missing. Got:\n{out}");
 }
@@ -110,8 +147,8 @@ fn output_from_observable_options_live_in_args_1() {
 fn model_synthesizes_input_and_output_pair() {
     let out = compile_jit(&component("  readonly value = model(0);", "model"));
     // Both decorators on the same field.
-    assert!(out.contains("type: Input"), "@Input half of model() missing. Got:\n{out}");
-    assert!(out.contains("type: Output"), "@Output half of model() missing. Got:\n{out}");
+    assert!(out.contains("type: i0.Input"), "@Input half of model() missing. Got:\n{out}");
+    assert!(out.contains("type: i0.Output"), "@Output half of model() missing. Got:\n{out}");
     // Output alias is `<input>Change` (matches ngc behavior).
     assert!(
         out.contains("\"valueChange\""),
@@ -134,7 +171,7 @@ fn view_child_emits_synthesized_view_child_with_is_signal() {
         "  readonly el = viewChild<ElementRef>('ref');",
         "viewChild, ElementRef",
     ));
-    assert!(out.contains("type: ViewChild"), "synthesized @ViewChild missing. Got:\n{out}");
+    assert!(out.contains("type: i0.ViewChild"), "synthesized @ViewChild missing. Got:\n{out}");
     assert!(out.contains("isSignal: true"), "isSignal flag missing on query. Got:\n{out}");
     // OXC's TS stripper normalizes single-quoted string literals to double-quoted, so
     // assert against the post-strip form. The locator text just needs to survive.
@@ -157,7 +194,7 @@ fn view_children_emits_view_children_decorator() {
         "  readonly els = viewChildren<ElementRef>('ref');",
         "viewChildren, ElementRef",
     ));
-    assert!(out.contains("type: ViewChildren"), "Got:\n{out}");
+    assert!(out.contains("type: i0.ViewChildren"), "Got:\n{out}");
 }
 
 #[test]
@@ -167,7 +204,7 @@ fn content_child_required_emits_content_child() {
         "contentChild, ElementRef",
     ));
     // .required() variant maps to the same decorator name (ContentChild), with isSignal.
-    assert!(out.contains("type: ContentChild"), "Got:\n{out}");
+    assert!(out.contains("type: i0.ContentChild"), "Got:\n{out}");
     assert!(out.contains("isSignal: true"), "Got:\n{out}");
 }
 
@@ -179,6 +216,8 @@ fn explicit_view_child_decorator_blocks_query_synthesis() {
         "  @ViewChild('r') r = viewChild<ElementRef>('r');",
         "viewChild, ViewChild, ElementRef",
     ));
+    // Explicit @ViewChild references the user's bare `ViewChild` import (no namespace
+    // prefix); only synthesized decorators are namespace-prefixed.
     assert!(out.contains("type: ViewChild"), "explicit @ViewChild lost. Got:\n{out}");
     assert!(
         !out.contains("isSignal"),

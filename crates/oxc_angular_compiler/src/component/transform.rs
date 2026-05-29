@@ -1203,12 +1203,26 @@ fn classify_initializer_api(callee: &Expression<'_>) -> Option<InitializerApiKin
     }
 }
 
+/// Namespace alias under which `@angular/core` is imported when JIT synthesis needs
+/// to reference decorator names that the user didn't import (e.g. `Input` for a
+/// `@Component` that uses `input()` but didn't import the capital-letter decorator).
+///
+/// Matches ngc's `createSyntheticAngularCoreDecoratorAccess`, which emits
+/// `i0.Input` / `i0.Output` / etc. backed by `import * as i0 from "@angular/core"`.
+/// Without this prefixing, the synthesized `static propDecorators` would reference
+/// an undefined identifier and throw `ReferenceError` at module-evaluation time.
+pub(crate) const JIT_ANGULAR_CORE_NS: &str = "i0";
+
 /// Inspect a property initializer; if it matches a recognized signal initializer API,
 /// return the synthesized `propDecorators` entries that JIT runtime needs.
 ///
 /// `existing` contains the names of explicit field decorators already present on the
 /// property (e.g. `Input`, `Output`); we skip synthesis when the user-authored decorator
 /// already covers the binding (matches upstream behavior — explicit decorator wins).
+///
+/// Synthesized decorator names are namespace-prefixed (e.g. `i0.Input`) — see
+/// [`JIT_ANGULAR_CORE_NS`]. The caller is responsible for emitting the matching
+/// `import * as i0 from "@angular/core"` when any synthesis occurred.
 fn synthesize_signal_api_decorators(
     source: &str,
     initializer: &Expression<'_>,
@@ -1234,7 +1248,10 @@ fn synthesize_signal_api_decorators(
                 alias = escape_js_string(&alias),
                 required = required,
             );
-            std::vec::Vec::from([JitParamDecorator { name: "Input".to_string(), args: Some(args) }])
+            std::vec::Vec::from([JitParamDecorator {
+                name: format!("{JIT_ANGULAR_CORE_NS}.Input"),
+                args: Some(args),
+            }])
         }
         InitializerApiKind::Output | InitializerApiKind::OutputFromObservable => {
             if existing.contains("Output") {
@@ -1247,7 +1264,7 @@ fn synthesize_signal_api_decorators(
                 .unwrap_or_else(|| field_name.to_string());
             let args = format!("\"{}\"", escape_js_string(&alias));
             std::vec::Vec::from([JitParamDecorator {
-                name: "Output".to_string(),
+                name: format!("{JIT_ANGULAR_CORE_NS}.Output"),
                 args: Some(args),
             }])
         }
@@ -1268,8 +1285,14 @@ fn synthesize_signal_api_decorators(
             );
             let output_args = format!("\"{}Change\"", escape_js_string(&alias));
             std::vec::Vec::from([
-                JitParamDecorator { name: "Input".to_string(), args: Some(input_args) },
-                JitParamDecorator { name: "Output".to_string(), args: Some(output_args) },
+                JitParamDecorator {
+                    name: format!("{JIT_ANGULAR_CORE_NS}.Input"),
+                    args: Some(input_args),
+                },
+                JitParamDecorator {
+                    name: format!("{JIT_ANGULAR_CORE_NS}.Output"),
+                    args: Some(output_args),
+                },
             ])
         }
         InitializerApiKind::ViewChild
@@ -1310,11 +1333,23 @@ fn synthesize_signal_api_decorators(
             };
             let args = format!("{locator_text}, {options_text}");
             std::vec::Vec::from([JitParamDecorator {
-                name: decorator_name.to_string(),
+                name: format!("{JIT_ANGULAR_CORE_NS}.{decorator_name}"),
                 args: Some(args),
             }])
         }
     }
+}
+
+/// Returns `true` when any field of any JIT class has a synthesized decorator
+/// (signal API lowering) that references the `@angular/core` namespace. Used to
+/// gate the emission of `import * as i0 from "@angular/core"`.
+fn jit_classes_need_angular_core_namespace(jit_classes: &[JitClassInfo]) -> bool {
+    let prefix = format!("{JIT_ANGULAR_CORE_NS}.");
+    jit_classes.iter().any(|info| {
+        info.member_decorators
+            .iter()
+            .any(|m| m.decorators.iter().any(|d| d.name.starts_with(&prefix)))
+    })
 }
 
 /// Pull a string option (e.g. `alias`) from the object literal at `args[options_index]`.
@@ -1894,9 +1929,15 @@ fn transform_angular_file_jit(
     // 4. Build edits
     let mut edits: std::vec::Vec<Edit> = std::vec::Vec::new();
 
-    // Build the additional imports text (tslib + resource imports)
+    // Build the additional imports text (tslib + resource imports + Angular namespace
+    // when signal-API lowering synthesized decorators that need to resolve to
+    // `i0.Input`/`i0.Output`/etc. at runtime).
     let mut additional_imports = String::new();
     additional_imports.push_str("import { __decorate } from \"tslib\";\n");
+    if jit_classes_need_angular_core_namespace(&jit_classes) {
+        additional_imports
+            .push_str(&format!("import * as {JIT_ANGULAR_CORE_NS} from \"@angular/core\";\n"));
+    }
     for (import_name, specifier) in &resource_imports {
         additional_imports.push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
     }
