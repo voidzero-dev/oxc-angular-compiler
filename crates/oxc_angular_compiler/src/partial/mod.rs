@@ -8,14 +8,82 @@
 //!
 //! Currently implemented:
 //! - `factory` — `ɵɵngDeclareFactory`
+//! - `injectable` — `ɵɵngDeclareInjectable`. Wired into the Injectable
+//!   emit path: set `TransformOptions.compilation_mode = Partial` and an
+//!   `@Injectable` source compiles to a fully partial-form output.
 //!
 //! Not yet implemented (and the dispatch from the per-decorator emit paths
-//! falls back to full mode): component, directive, pipe, injectable,
-//! injector, ngmodule, classMetadata.
+//! falls back to full mode): component, directive, pipe, injector,
+//! ngmodule, classMetadata.
 
 pub mod factory;
+pub mod injectable;
 
 pub use factory::compile_declare_factory_function;
+pub use injectable::compile_declare_injectable_from_metadata;
+
+use oxc_allocator::{Allocator, Box, Vec};
+use oxc_str::Ident;
+
+use crate::output::ast::{
+    FunctionExpr, InvokeFunctionExpr, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
+    ReturnStatement,
+};
+use crate::r3::Identifiers;
+
+/// Wraps a forward-referenced expression as `i0.forwardRef(function() { return X; })`.
+///
+/// Mirrors upstream `generateForwardRef` at
+/// `packages/compiler/src/render3/util.ts:174`. The linker recognizes this
+/// exact shape and unwraps it before forwarding to the full-mode emitter.
+pub(crate) fn wrap_forward_ref<'a>(
+    allocator: &'a Allocator,
+    expr: OutputExpression<'a>,
+) -> OutputExpression<'a> {
+    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    body.push(OutputStatement::Return(Box::new_in(
+        ReturnStatement { value: expr, source_span: None },
+        allocator,
+    )));
+
+    let inner_fn = OutputExpression::Function(Box::new_in(
+        FunctionExpr {
+            name: None,
+            params: Vec::new_in(allocator),
+            statements: body,
+            source_span: None,
+        },
+        allocator,
+    ));
+
+    let i0 = OutputExpression::ReadVar(Box::new_in(
+        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+        allocator,
+    ));
+    let forward_ref_fn = OutputExpression::ReadProp(Box::new_in(
+        ReadPropExpr {
+            receiver: Box::new_in(i0, allocator),
+            name: Ident::from(Identifiers::FORWARD_REF),
+            optional: false,
+            source_span: None,
+        },
+        allocator,
+    ));
+
+    let mut args = Vec::new_in(allocator);
+    args.push(inner_fn);
+
+    OutputExpression::InvokeFunction(Box::new_in(
+        InvokeFunctionExpr {
+            fn_expr: Box::new_in(forward_ref_fn, allocator),
+            args,
+            pure: false,
+            optional: false,
+            source_span: None,
+        },
+        allocator,
+    ))
+}
 
 /// The literal text used for the `version` field of every partial
 /// declaration. Upstream substitutes this at npm publish; we keep the same

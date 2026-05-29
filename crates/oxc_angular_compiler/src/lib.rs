@@ -96,7 +96,7 @@ pub use factory::{
 };
 
 // Re-export partial-declaration emitters (library AOT)
-pub use partial::compile_declare_factory_function;
+pub use partial::{compile_declare_factory_function, compile_declare_injectable_from_metadata};
 
 // Re-export directive types
 pub use directive::{

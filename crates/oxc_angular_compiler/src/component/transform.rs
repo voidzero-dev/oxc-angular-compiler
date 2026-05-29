@@ -2468,6 +2468,7 @@ pub fn transform_angular_file(
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                     allocator,
                                     injectable_metadata,
+                                    options.compilation_mode,
                                 ) {
                                     let emitter = JsEmitter::new();
                                     property_assignments.push_str(&format!(
@@ -2720,6 +2721,7 @@ pub fn transform_angular_file(
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
                             allocator,
                             injectable_metadata,
+                            options.compilation_mode,
                         ) {
                             property_assignments.push_str(&format!(
                                 "\nstatic ɵprov = {};",
@@ -2815,6 +2817,7 @@ pub fn transform_angular_file(
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
                                 injectable_metadata,
+                                options.compilation_mode,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -2914,6 +2917,7 @@ pub fn transform_angular_file(
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
                                 injectable_metadata,
+                                options.compilation_mode,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -3003,6 +3007,7 @@ pub fn transform_angular_file(
                     if let Some(definition) = generate_injectable_definition_from_decorator(
                         allocator,
                         &injectable_metadata,
+                        options.compilation_mode,
                     ) {
                         let emitter = JsEmitter::new();
                         let class_name = injectable_metadata.class_name.to_string();
