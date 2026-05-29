@@ -23,18 +23,19 @@
 //!   pipeline. Templates are emitted as verbatim string literals;
 //!   control-flow block syntax in the template bumps minVersion to
 //!   17.0.0.
-//! - `class_metadata` (sync) — `ɵɵngDeclareClassMetadata`. Replaces the
+//! - `class_metadata` — sync `ɵɵngDeclareClassMetadata` (replaces the
 //!   full-mode `(() => { (typeof ngDevMode === "undefined" || ngDevMode)
-//!   && i0.ɵsetClassMetadata(...); })();` IIFE.
+//!   && i0.ɵsetClassMetadata(...); })();` IIFE) AND async
+//!   `ɵɵngDeclareClassMetadataAsync` for components with `@defer`
+//!   deferrable imports. The dispatch helper
+//!   `compile_component_declare_class_metadata` picks between them
+//!   based on whether `R3DeferPerComponentDependency` entries are
+//!   present.
 //!
 //! Setting `TransformOptions.compilation_mode = Partial` on a source
 //! containing any of these decorators produces fully partial-form
 //! output that the existing linker (`crate::linker`) expands back into
 //! valid full Ivy form.
-//!
-//! Not implemented:
-//! - `ɵɵngDeclareClassMetadataAsync` (async variant; needed only for
-//!   components with `@defer` deferrable imports).
 
 pub mod class_metadata;
 pub mod component;
@@ -45,7 +46,10 @@ pub mod injector;
 pub mod ng_module;
 pub mod pipe;
 
-pub use class_metadata::compile_declare_class_metadata;
+pub use class_metadata::{
+    compile_component_declare_class_metadata, compile_declare_class_metadata,
+    compile_declare_class_metadata_async,
+};
 pub use component::{PartialComponentInputs, compile_declare_component_from_metadata};
 pub use directive::compile_declare_directive_from_metadata;
 pub use factory::compile_declare_factory_function;

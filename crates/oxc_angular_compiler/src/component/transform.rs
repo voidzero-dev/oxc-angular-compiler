@@ -2582,14 +2582,15 @@ pub fn transform_angular_file(
                                     };
                                     let metadata_expr = match options.compilation_mode {
                                         crate::CompilationMode::Partial => {
-                                            // Partial mode: emit a bare
-                                            // ɵɵngDeclareClassMetadata call. Deferred-deps
-                                            // (async variant) not yet supported; falls back
-                                            // to the sync form, which is correct unless the
-                                            // template uses @defer with deferrable imports.
-                                            crate::partial::compile_declare_class_metadata(
+                                            // Partial mode mirrors upstream's
+                                            // compileComponentDeclareClassMetadata
+                                            // (class_metadata.ts:50): empty deferred
+                                            // deps → sync ɵɵngDeclareClassMetadata; one
+                                            // or more → async ɵɵngDeclareClassMetadataAsync.
+                                            crate::partial::compile_component_declare_class_metadata(
                                                 allocator,
                                                 &class_metadata,
+                                                deferred_deps.as_slice(),
                                             )
                                         }
                                         crate::CompilationMode::Full => {

@@ -97,7 +97,8 @@ pub use factory::{
 
 // Re-export partial-declaration emitters (library AOT)
 pub use partial::{
-    PartialComponentInputs, compile_declare_class_metadata,
+    PartialComponentInputs, compile_component_declare_class_metadata,
+    compile_declare_class_metadata, compile_declare_class_metadata_async,
     compile_declare_component_from_metadata, compile_declare_directive_from_metadata,
     compile_declare_factory_function, compile_declare_injectable_from_metadata,
     compile_declare_injector_from_metadata, compile_declare_ng_module_from_metadata,
