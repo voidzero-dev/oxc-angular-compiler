@@ -2694,6 +2694,7 @@ pub fn transform_angular_file(
                         allocator,
                         &directive_metadata,
                         shared_pool_index,
+                        options.compilation_mode,
                     );
 
                     // Update shared_pool_index for the next compilation
