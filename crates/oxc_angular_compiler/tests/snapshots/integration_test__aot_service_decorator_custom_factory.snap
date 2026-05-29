@@ -1,0 +1,23 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+assertion_line: 13501
+expression: result.code
+---
+
+import { Service } from '@angular/core';
+import * as i0 from '@angular/core';
+
+function makeCounter() { return { count: 0 }; }
+
+export class CounterService {
+static ɵfac = function CounterService_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || CounterService)();
+};
+static ɵprov = /*@__PURE__*/ i0.ɵɵdefineService({token:CounterService,factory:function() {
+  return makeCounter();
+}});
+}
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(CounterService,
+      [{type:Service,args:[{factory:makeCounter}]}],null,null));
+})();

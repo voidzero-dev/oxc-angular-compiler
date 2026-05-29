@@ -13380,3 +13380,283 @@ export class BadComponent {}
         result.diagnostics
     );
 }
+
+// =============================================================================
+// AOT @Service decorator (Angular v22+)
+// =============================================================================
+
+#[test]
+fn test_aot_service_decorator_basic() {
+    // A bare @Service() class should emit static ɵfac and static ɵprov.
+    // ɵprov uses ɵɵdefineService (not ɵɵdefineInjectable), and ɵfac is the
+    // deps-less constructor factory — @Service classes resolve DI via
+    // inject() calls inside the constructor body.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service()
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    assert!(
+        result.code.contains("ɵɵdefineService"),
+        "Should emit ɵɵdefineService. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("static ɵfac"),
+        "Should emit static ɵfac. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("static ɵprov"),
+        "Should emit static ɵprov. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("@Service"),
+        "Should remove the @Service decorator from source. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("autoProvided"),
+        "autoProvided is default-true, should not appear when not explicitly disabled. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("aot_service_decorator_basic", result.code);
+}
+
+#[test]
+fn test_aot_service_decorator_auto_provided_false() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service({ autoProvided: false })
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    assert!(
+        result.code.contains("autoProvided:false")
+            || result.code.contains("autoProvided: false"),
+        "Should emit autoProvided: false. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("aot_service_decorator_auto_provided_false", result.code);
+}
+
+#[test]
+fn test_aot_service_decorator_custom_factory() {
+    // A user-supplied factory: should be wrapped in an arrow `() => factory()`.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+function makeCounter() { return { count: 0 }; }
+
+@Service({ factory: makeCounter })
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    // The factory entry should be an arrow wrapper, not a ɵfac delegation.
+    assert!(
+        result.code.contains("makeCounter()"),
+        "Should call user-supplied factory inside arrow wrapper. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("factory:CounterService.ɵfac")
+            && !result.code.contains("factory: CounterService.ɵfac"),
+        "ɵprov factory should not delegate to ɵfac when user supplied a custom factory. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("aot_service_decorator_custom_factory", result.code);
+}
+
+#[test]
+fn test_aot_service_decorator_version_gated() {
+    // Targeting Angular < 22 should surface a diagnostic and leave the
+    // decorator unchanged (no ɵfac/ɵprov emitted).
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service()
+export class CounterService {}
+";
+
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result = transform_angular_file(
+        &allocator,
+        "counter.service.ts",
+        source,
+        Some(&options),
+        None,
+    );
+
+    assert!(
+        result.has_errors(),
+        "Targeting v21 with @Service should produce a diagnostic. Got none.\n{}",
+        result.code
+    );
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Diagnostic should mention @Service and v22. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Should NOT emit ɵɵdefineService when version-gated out. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_service_decorator_collision_with_injectable() {
+    // Upstream service.ts:101-116 rejects @Service co-located with any other
+    // @angular/core decorator. We surface a diagnostic and skip emission.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service, Injectable } from '@angular/core';
+
+@Service()
+@Injectable()
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+
+    assert!(
+        result.has_errors(),
+        "Combining @Service with another Angular decorator should produce a diagnostic. Got none.\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            let s = d.to_string();
+            s.contains("@Service") && s.contains("Injectable")
+        }),
+        "Diagnostic should call out both @Service and the conflicting Injectable. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Should NOT emit ɵɵdefineService when the collision rule fires. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_non_angular_service_decorator_is_ignored() {
+    // A `@Service()` from a non-Angular library must not be transformed —
+    // no ɵfac/ɵprov emission, no version-gate diagnostic.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from 'some-other-lib';
+
+@Service()
+export class CounterService {}
+";
+
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result = transform_angular_file(
+        &allocator,
+        "counter.service.ts",
+        source,
+        Some(&options),
+        None,
+    );
+
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Non-Angular @Service should not trigger the v22 diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Should NOT emit ɵɵdefineService for non-Angular @Service. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("@Service"),
+        "Source @Service decorator should be left intact when not from @angular/core. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_dts_service() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+
+@Service()
+export class CounterService {}
+";
+
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Should compile without errors: {:?}",
+        result.diagnostics
+    );
+
+    assert_eq!(result.dts_declarations.len(), 1);
+    let decl = &result.dts_declarations[0];
+    assert_eq!(decl.class_name, "CounterService");
+
+    assert!(
+        decl.members.contains("static ɵfac: i0.ɵɵFactoryDeclaration<CounterService, never>;"),
+        "Should contain ɵfac. Got:\n{}",
+        decl.members
+    );
+    // .d.ts reuses the InjectableDeclaration type per upstream
+    // service_compiler.ts:55 (createInjectableType).
+    assert!(
+        decl.members.contains("static ɵprov: i0.ɵɵInjectableDeclaration<CounterService>;"),
+        "Should contain ɵprov. Got:\n{}",
+        decl.members
+    );
+}
