@@ -6961,6 +6961,57 @@ export class CounterService {}
 }
 
 #[test]
+fn test_jit_non_angular_service_decorator_does_not_shadow_injectable() {
+    // A `@Service()` decorator from a non-Angular library must not cause the JIT
+    // pipeline to misclassify the class as v22 `@Service`, nor (on pre-v22
+    // targets) swallow a sibling `@Injectable` via the version-gate's early
+    // `continue`. Name matching alone is insufficient — `Service` is a common
+    // export name in DI containers and web frameworks.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable } from '@angular/core';
+import { Service } from 'some-other-lib';
+
+@Service()
+@Injectable()
+export class CounterService {
+    constructor(private http: HttpClient) {}
+}
+";
+
+    let options = ComponentTransformOptions {
+        jit: true,
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
+
+    // No "@Service requires v22" diagnostic should fire — this isn't Angular's
+    // Service.
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Non-Angular @Service should not trigger the v22 diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+
+    // The real @Injectable must still be lowered.
+    assert!(
+        result.code.contains("__decorate("),
+        "JIT output should still lower @Injectable via __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("ctorParameters") && result.code.contains("HttpClient"),
+        "JIT output should emit ctorParameters for the lowered @Injectable. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn test_jit_full_component_example() {
     // Full example matching the issue #97 scenario
     let allocator = Allocator::default();

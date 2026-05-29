@@ -865,8 +865,20 @@ struct JitNonAngularMemberDecorator {
 }
 
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
+///
+/// For the `Service` identifier specifically, the import map is consulted so a
+/// bare `@Service()` from a non-Angular library doesn't shadow a real Angular
+/// decorator that follows it on the same class. `Service` is common enough as a
+/// library export name (DI containers, web frameworks) that name-only matching
+/// would cause the JIT pipeline to either misclassify the class or, on
+/// pre-v22 targets, emit a misleading diagnostic and skip the sibling
+/// `@Component`/`@Injectable`/etc. Other Angular decorator names are unique
+/// enough in practice that the same check isn't applied to them — and doing so
+/// would regress namespace-style usage like `@core.Component()` where the
+/// identifier isn't directly in the import map.
 fn find_angular_decorator<'a>(
     class: &'a oxc_ast::ast::Class<'a>,
+    import_map: &ImportMap<'a>,
 ) -> Option<(AngularDecoratorKind, &'a oxc_ast::ast::Decorator<'a>)> {
     for decorator in &class.decorators {
         if let Expression::CallExpression(call) = &decorator.expression {
@@ -875,14 +887,30 @@ fn find_angular_decorator<'a>(
                 Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
                 _ => None,
             };
-            match name {
-                Some("Component") => return Some((AngularDecoratorKind::Component, decorator)),
-                Some("Directive") => return Some((AngularDecoratorKind::Directive, decorator)),
-                Some("Pipe") => return Some((AngularDecoratorKind::Pipe, decorator)),
-                Some("Injectable") => return Some((AngularDecoratorKind::Injectable, decorator)),
-                Some("Service") => return Some((AngularDecoratorKind::Service, decorator)),
-                Some("NgModule") => return Some((AngularDecoratorKind::NgModule, decorator)),
-                _ => {}
+            let kind = match name {
+                Some("Component") => Some(AngularDecoratorKind::Component),
+                Some("Directive") => Some(AngularDecoratorKind::Directive),
+                Some("Pipe") => Some(AngularDecoratorKind::Pipe),
+                Some("Injectable") => Some(AngularDecoratorKind::Injectable),
+                Some("Service") => Some(AngularDecoratorKind::Service),
+                Some("NgModule") => Some(AngularDecoratorKind::NgModule),
+                _ => None,
+            };
+
+            if matches!(kind, Some(AngularDecoratorKind::Service)) {
+                if let Expression::Identifier(id) = &call.callee {
+                    let info = import_map.get(&Ident::from(id.name.as_str()));
+                    let from_angular_core = info
+                        .map(|info| info.source_module.as_str() == "@angular/core")
+                        .unwrap_or(false);
+                    if !from_angular_core {
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(k) = kind {
+                return Some((k, decorator));
             }
         }
     }
@@ -1546,6 +1574,12 @@ fn transform_angular_file_jit(
     // / `styleUrls`, matching the AOT metadata extraction path.
     let string_consts = collect_string_consts(allocator, &parser_ret.program);
 
+    // Build an import map so `find_angular_decorator` can verify that a bare
+    // `@Service()` is actually Angular's, not a same-named decorator from
+    // another library.
+    let import_map =
+        build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
+
     // 3. Walk AST to find Angular-decorated classes
     let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
     let mut resource_counter: u32 = 0;
@@ -1576,7 +1610,8 @@ fn transform_angular_file_jit(
             continue;
         };
 
-        let Some((decorator_kind, angular_decorator)) = find_angular_decorator(class) else {
+        let Some((decorator_kind, angular_decorator)) = find_angular_decorator(class, &import_map)
+        else {
             continue;
         };
 
