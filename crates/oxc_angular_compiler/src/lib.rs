@@ -29,6 +29,7 @@ mod util;
 pub mod ast;
 pub mod class_debug_info;
 pub mod class_metadata;
+pub mod compilation_mode;
 pub mod component;
 pub mod directive;
 pub mod dts;
@@ -43,6 +44,7 @@ pub mod ng_module;
 pub mod optimizer;
 pub mod output;
 pub mod parser;
+pub mod partial;
 pub mod pipe;
 pub mod pipeline;
 pub mod r3;
@@ -53,6 +55,7 @@ pub mod transform;
 // Re-export key types
 pub use ast::expression::AngularExpression;
 pub use ast::r3::R3Node;
+pub use compilation_mode::CompilationMode;
 pub use transform::{HtmlToR3Transform, html_to_r3::html_ast_to_r3_ast};
 
 // Re-export component module types for convenience
@@ -91,6 +94,9 @@ pub use factory::{
     FactoryCompileResult, FactoryTarget, InjectFlags, R3ConstructorFactoryMetadata, R3FactoryDeps,
     R3FactoryMetadata, compile_factory_function,
 };
+
+// Re-export partial-declaration emitters (library AOT)
+pub use partial::compile_declare_factory_function;
 
 // Re-export directive types
 pub use directive::{

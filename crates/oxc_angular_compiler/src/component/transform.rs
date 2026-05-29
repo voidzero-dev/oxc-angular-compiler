@@ -190,6 +190,13 @@ pub struct TransformOptions {
     /// This runs after Angular style encapsulation, so it applies to the same
     /// final CSS strings that are embedded in component definitions.
     pub minify_component_styles: bool,
+
+    /// Selects between full Ivy emit (`ɵɵdefine*`) and partial-declaration
+    /// emit (`ɵɵngDeclare*`).
+    ///
+    /// `Full` (default) targets applications; `Partial` targets library
+    /// builds, where consumers run the linker to expand declarations.
+    pub compilation_mode: crate::CompilationMode,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -241,6 +248,7 @@ impl Default for TransformOptions {
             // it; production bundles strip the guarded call via tree-shaking.
             emit_class_metadata: true,
             minify_component_styles: false,
+            compilation_mode: crate::CompilationMode::Full,
         }
     }
 }

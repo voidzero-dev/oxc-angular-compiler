@@ -1,0 +1,6 @@
+---
+source: crates/oxc_angular_compiler/tests/partial_factory_test.rs
+expression: js
+---
+i0.ɵɵngDeclareFactory({minVersion:"12.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,
+    type:ChildService,deps:[{token:ParentService,optional:true,skipSelf:true}],target:i0.ɵɵFactoryTarget.Injectable})
