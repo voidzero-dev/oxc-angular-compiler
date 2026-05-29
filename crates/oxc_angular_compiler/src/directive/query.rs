@@ -446,6 +446,7 @@ pub fn create_view_queries_function<'a>(
     view_queries: &[R3QueryMetadata<'a>],
     name: Option<&str>,
     pool: Option<&mut ConstantPool<'a>>,
+    angular_version: Option<crate::AngularVersion>,
 ) -> OutputExpression<'a> {
     // Pre-pool all string selector predicates BEFORE building the function.
     // This ensures query predicates are pooled to top-level constants in the correct order
@@ -460,6 +461,28 @@ pub fn create_view_queries_function<'a>(
     let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
     let mut temp_allocator = TempAllocator::new();
 
+    // Chained emit (`ɵɵviewQuery(p1)(p2)`) requires Angular 21.0.4+ /
+    // 21.1.0+ — before that the runtime functions returned `void` and a
+    // chained call would throw `TypeError: not a function`. Consumers
+    // targeting v19/v20/v21.0.0–3 must opt out by passing an explicit
+    // `angular_version`; an unset version falls in line with the rest
+    // of this crate's "assume latest" convention (see e.g.
+    // `supports_implicit_standalone`'s `map_or(true, …)` and the
+    // `angular_version: None // assume latest` comment in `transform.rs`).
+    let chain_emit = angular_version.map_or(true, |v| v.supports_chained_queries());
+    let mut current_chain: Option<OutputExpression<'a>> = None;
+    let mut current_chain_is_signal: bool = false;
+
+    fn flush_chain<'a>(
+        allocator: &'a Allocator,
+        chain: &mut Option<OutputExpression<'a>>,
+        create_statements: &mut Vec<'a, OutputStatement<'a>>,
+    ) {
+        if let Some(expr) = chain.take() {
+            create_statements.push(expr_stmt(allocator, expr));
+        }
+    }
+
     for (idx, query) in view_queries.iter().enumerate() {
         // Creation: ɵɵviewQuery(predicate, flags, read) or ɵɵviewQuerySignal(ctx.prop, predicate, flags, read)
         // Use pre-pooled predicate instead of calling get_query_create_parameters
@@ -469,15 +492,28 @@ pub fn create_view_queries_function<'a>(
             pooled_predicates[idx].clone_in(allocator),
         );
 
-        // Emit each query as a separate statement.
-        // Angular 20's ɵɵviewQuery returns void, so chaining is not supported.
-        if query.is_signal {
-            let call =
-                call_fn(allocator, import_expr(allocator, Identifiers::VIEW_QUERY_SIGNAL), params);
+        let identifier =
+            if query.is_signal { Identifiers::VIEW_QUERY_SIGNAL } else { Identifiers::VIEW_QUERY };
+
+        if !chain_emit {
+            // Pre-v21.0.4: one statement per query, no chaining.
+            let call = call_fn(allocator, import_expr(allocator, identifier), params);
             create_statements.push(expr_stmt(allocator, call));
         } else {
-            let call = call_fn(allocator, import_expr(allocator, Identifiers::VIEW_QUERY), params);
-            create_statements.push(expr_stmt(allocator, call));
+            // Flush the pending chain if this query's signal-ness differs
+            // (different runtime symbol — can't be chained off the previous call).
+            if current_chain.is_some() && current_chain_is_signal != query.is_signal {
+                flush_chain(allocator, &mut current_chain, &mut create_statements);
+            }
+
+            let callee = match current_chain.take() {
+                Some(prev) => prev,
+                None => {
+                    current_chain_is_signal = query.is_signal;
+                    import_expr(allocator, identifier)
+                }
+            };
+            current_chain = Some(call_fn(allocator, callee, params));
         }
 
         // Update phase
@@ -555,6 +591,9 @@ pub fn create_view_queries_function<'a>(
         }
     }
 
+    // Flush the trailing chain (if any) as the final create statement.
+    flush_chain(allocator, &mut current_chain, &mut create_statements);
+
     // Build update statements with temp variable declarations
     let mut final_update_statements = Vec::new_in(allocator);
 
@@ -630,6 +669,7 @@ pub fn create_content_queries_function<'a>(
     queries: &[R3QueryMetadata<'a>],
     name: Option<&str>,
     pool: Option<&mut ConstantPool<'a>>,
+    angular_version: Option<crate::AngularVersion>,
 ) -> OutputExpression<'a> {
     // Pre-pool all string selector predicates BEFORE building the function.
     // This ensures query predicates are pooled to top-level constants in the correct order
@@ -644,6 +684,23 @@ pub fn create_content_queries_function<'a>(
     let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
     let mut temp_allocator = TempAllocator::new();
 
+    // See note in `create_view_queries_function` — chained content-query
+    // emit also requires v21.0.4+ runtime support, with `None` meaning
+    // "assume latest" per the rest of this crate's convention.
+    let chain_emit = angular_version.map_or(true, |v| v.supports_chained_queries());
+    let mut current_chain: Option<OutputExpression<'a>> = None;
+    let mut current_chain_is_signal: bool = false;
+
+    fn flush_chain<'a>(
+        allocator: &'a Allocator,
+        chain: &mut Option<OutputExpression<'a>>,
+        create_statements: &mut Vec<'a, OutputStatement<'a>>,
+    ) {
+        if let Some(expr) = chain.take() {
+            create_statements.push(expr_stmt(allocator, expr));
+        }
+    }
+
     for (idx, query) in queries.iter().enumerate() {
         // Prepend dirIndex parameter for content queries
         let mut prepend = Vec::new_in(allocator);
@@ -656,19 +713,27 @@ pub fn create_content_queries_function<'a>(
             prepend,
         );
 
-        // Emit each query as a separate statement.
-        // Angular 20's ɵɵcontentQuery returns void, so chaining is not supported.
-        if query.is_signal {
-            let call = call_fn(
-                allocator,
-                import_expr(allocator, Identifiers::CONTENT_QUERY_SIGNAL),
-                params,
-            );
+        let identifier = if query.is_signal {
+            Identifiers::CONTENT_QUERY_SIGNAL
+        } else {
+            Identifiers::CONTENT_QUERY
+        };
+
+        if !chain_emit {
+            let call = call_fn(allocator, import_expr(allocator, identifier), params);
             create_statements.push(expr_stmt(allocator, call));
         } else {
-            let call =
-                call_fn(allocator, import_expr(allocator, Identifiers::CONTENT_QUERY), params);
-            create_statements.push(expr_stmt(allocator, call));
+            if current_chain.is_some() && current_chain_is_signal != query.is_signal {
+                flush_chain(allocator, &mut current_chain, &mut create_statements);
+            }
+            let callee = match current_chain.take() {
+                Some(prev) => prev,
+                None => {
+                    current_chain_is_signal = query.is_signal;
+                    import_expr(allocator, identifier)
+                }
+            };
+            current_chain = Some(call_fn(allocator, callee, params));
         }
 
         // Update phase (same as view queries)
@@ -738,6 +803,9 @@ pub fn create_content_queries_function<'a>(
                 .push(MaybeAdvanceStatement::Statement(expr_stmt(allocator, and_expr)));
         }
     }
+
+    // Flush the trailing chain (if any) as the final create statement.
+    flush_chain(allocator, &mut current_chain, &mut create_statements);
 
     // Build update statements with temp variable declarations
     let mut final_update_statements = Vec::new_in(allocator);
@@ -812,7 +880,8 @@ mod tests {
         let allocator = Allocator::default();
         let queries: &[R3QueryMetadata<'_>] = &[];
 
-        let result = create_view_queries_function(&allocator, queries, Some("TestComponent"), None);
+        let result =
+            create_view_queries_function(&allocator, queries, Some("TestComponent"), None, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -828,7 +897,7 @@ mod tests {
         let queries: &[R3QueryMetadata<'_>] = &[];
 
         let result =
-            create_content_queries_function(&allocator, queries, Some("TestDirective"), None);
+            create_content_queries_function(&allocator, queries, Some("TestDirective"), None, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -861,7 +930,7 @@ mod tests {
 
         let queries = [query];
         let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None);
+            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -902,8 +971,13 @@ mod tests {
         };
 
         let queries = [query];
-        let result =
-            create_content_queries_function(&allocator, &queries, Some("TestDirective"), None);
+        let result = create_content_queries_function(
+            &allocator,
+            &queries,
+            Some("TestDirective"),
+            None,
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -922,7 +996,11 @@ mod tests {
         );
     }
 
-    /// Test two chained signal view queries
+    /// Two consecutive signal view queries should be emitted as a single
+    /// chained call — matches upstream ngtsc emit (compiler-cli compliance
+    /// `signal_queries/query_in_component.js`). `ɵɵviewQuerySignal` returns
+    /// `typeof ɵɵviewQuerySignal` (core/src/render3/instructions/
+    /// queries_signals.ts:53), so chaining is safe.
     #[test]
     fn test_chained_signal_view_queries() {
         let allocator = Allocator::default();
@@ -957,34 +1035,46 @@ mod tests {
         };
 
         let queries = [query1, query2];
-        let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None);
+        // Force the v22 path so the chained emit is exercised. On older
+        // runtimes (`None` or anything before v21.0.4) the builder emits
+        // separate statements instead — see `supports_chained_queries`.
+        let result = create_view_queries_function(
+            &allocator,
+            &queries,
+            Some("TestComponent"),
+            None,
+            Some(crate::AngularVersion::new(22, 0, 0)),
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
 
-        println!("Chained signal queries output:\n{}", output);
-
-        // Each signal query should be emitted as a separate statement.
-        // Angular 20's ɵɵviewQuerySignal returns void, so chaining is not supported.
         let normalized = output.replace(['\n', ' '], "");
         assert!(
-            normalized.contains("viewQuerySignal(ctx.query1,Component1,1);")
-                && normalized.contains("viewQuerySignal(ctx.query2,Component2,1);"),
-            "Each signal query should be a separate statement.\nGot:\n{}",
+            normalized
+                .contains("viewQuerySignal(ctx.query1,Component1,1)(ctx.query2,Component2,1);"),
+            "Consecutive signal view queries should chain.\nGot:\n{}",
+            output
+        );
+        // And there must NOT be two separate statements.
+        assert!(
+            !normalized.contains("viewQuerySignal(ctx.query1,Component1,1);"),
+            "First signal query must not be a standalone statement.\nGot:\n{}",
             output
         );
     }
 
-    /// Regression test: Multiple non-signal view queries must be separate statements.
+    /// Multiple non-signal view queries should chain — `ɵɵviewQuery`
+    /// returns `typeof ɵɵviewQuery` (core/src/render3/instructions/
+    /// queries.ts:58) and upstream emit chains them (see
+    /// compiler-cli/test/compliance/test_cases/r3_compiler_compliance/
+    /// components_and_directives/queries/*.js).
     ///
-    /// Previously, multiple view queries were chained as ɵɵviewQuery(p1)(p2), calling
-    /// the result of the first query as a function. Angular 20's ɵɵviewQuery returns void,
-    /// so chaining breaks with: TypeError: ɵɵviewQuery(...) is not a function.
-    ///
-    /// The fix: Emit each query as a separate statement.
+    /// Earlier versions of this compiler emitted separate statements based
+    /// on an incorrect "returns void" assumption — this regression test
+    /// guards the corrected behavior.
     #[test]
-    fn test_multiple_non_signal_view_queries_are_separate_statements() {
+    fn test_multiple_non_signal_view_queries_are_chained() {
         let allocator = Allocator::default();
 
         let query1 = R3QueryMetadata {
@@ -1016,41 +1106,38 @@ mod tests {
         };
 
         let queries = [query1, query2];
-        let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None);
+        let result = create_view_queries_function(
+            &allocator,
+            &queries,
+            Some("TestComponent"),
+            None,
+            Some(crate::AngularVersion::new(22, 0, 0)),
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
 
         let normalized = output.replace(['\n', ' '], "");
 
-        // Each non-signal view query should be a separate statement (ending with ;),
-        // NOT chained as ɵɵviewQuery(ChildComponent,5)(OtherComponent,5).
+        // Should produce a single chained call statement.
         assert!(
-            normalized.contains("i0.ɵɵviewQuery(ChildComponent,5);"),
-            "First view query should be a separate statement.\nGot:\n{}",
+            normalized.contains("i0.ɵɵviewQuery(ChildComponent,5)(OtherComponent,5);"),
+            "Consecutive non-signal view queries should chain.\nGot:\n{}",
             output
         );
+        // And NOT be two separate statements.
         assert!(
-            normalized.contains("i0.ɵɵviewQuery(OtherComponent,5);"),
-            "Second view query should be a separate statement.\nGot:\n{}",
-            output
-        );
-
-        // Make sure they're NOT chained (the old buggy pattern)
-        assert!(
-            !normalized.contains("viewQuery(ChildComponent,5)(OtherComponent"),
-            "View queries must NOT be chained (Angular 20 returns void).\nGot:\n{}",
+            !normalized.contains("i0.ɵɵviewQuery(ChildComponent,5);"),
+            "First view query must not be a standalone statement.\nGot:\n{}",
             output
         );
     }
 
-    /// Regression test: Multiple content queries must be separate statements.
-    ///
-    /// Same as the view query chaining bug, but for content queries.
-    /// Angular 20's ɵɵcontentQuery also returns void, so chaining breaks.
+    /// Multiple consecutive content queries should chain — same contract
+    /// as view queries (`ɵɵcontentQuery` returns `typeof ɵɵcontentQuery`,
+    /// core/src/render3/instructions/queries.ts:40).
     #[test]
-    fn test_multiple_content_queries_are_separate_statements() {
+    fn test_multiple_content_queries_are_chained() {
         let allocator = Allocator::default();
 
         let query1 = R3QueryMetadata {
@@ -1082,31 +1169,31 @@ mod tests {
         };
 
         let queries = [query1, query2];
-        let result =
-            create_content_queries_function(&allocator, &queries, Some("TestDirective"), None);
+        let result = create_content_queries_function(
+            &allocator,
+            &queries,
+            Some("TestDirective"),
+            None,
+            Some(crate::AngularVersion::new(22, 0, 0)),
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
 
         let normalized = output.replace(['\n', ' '], "");
 
-        // Each content query should be a separate statement (ending with ;),
-        // NOT chained as ɵɵcontentQuery(dirIndex,ItemComponent,5)(dirIndex,HeaderComponent,4).
+        // Should produce a single chained call statement.
         assert!(
-            normalized.contains("i0.ɵɵcontentQuery(dirIndex,ItemComponent,5);"),
-            "First content query should be a separate statement.\nGot:\n{}",
+            normalized.contains(
+                "i0.ɵɵcontentQuery(dirIndex,ItemComponent,5)(dirIndex,HeaderComponent,4);"
+            ),
+            "Consecutive content queries should chain.\nGot:\n{}",
             output
         );
+        // And NOT be two separate statements.
         assert!(
-            normalized.contains("i0.ɵɵcontentQuery(dirIndex,HeaderComponent,4);"),
-            "Second content query should be a separate statement.\nGot:\n{}",
-            output
-        );
-
-        // Make sure they're NOT chained
-        assert!(
-            !normalized.contains("contentQuery(dirIndex,ItemComponent,5)(dirIndex,HeaderComponent"),
-            "Content queries must NOT be chained (Angular 20 returns void).\nGot:\n{}",
+            !normalized.contains("i0.ɵɵcontentQuery(dirIndex,ItemComponent,5);"),
+            "First content query must not be a standalone statement.\nGot:\n{}",
             output
         );
     }
@@ -1133,7 +1220,7 @@ mod tests {
 
         let queries = [query];
         let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None);
+            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);

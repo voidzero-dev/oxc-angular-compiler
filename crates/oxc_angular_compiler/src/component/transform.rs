@@ -2685,6 +2685,7 @@ pub fn transform_angular_file(
                         allocator,
                         &directive_metadata,
                         shared_pool_index,
+                        options.angular_version,
                     );
 
                     // Update shared_pool_index for the next compilation
@@ -3430,6 +3431,7 @@ fn compile_component_full<'a>(
             view_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
+            options.angular_version,
         ))
     } else {
         None
@@ -3444,6 +3446,7 @@ fn compile_component_full<'a>(
             content_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
+            options.angular_version,
         ))
     } else {
         None
