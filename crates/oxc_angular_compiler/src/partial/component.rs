@@ -180,6 +180,12 @@ pub fn compile_declare_component_from_metadata<'a>(
         ));
     }
 
+    // ngImport closes the directive map (component.ts:114). Component-
+    // specific fields come AFTER ngImport — that's how upstream emits
+    // them (createComponentDefinitionMap calls createDirectiveDefinitionMap
+    // first, then appends).
+    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+
     // ---- Component-specific fields ----
 
     entries.push(LiteralMapEntry::new(
@@ -274,9 +280,6 @@ pub fn compile_declare_component_from_metadata<'a>(
             false,
         ));
     }
-
-    // ngImport is emitted LAST per upstream convention.
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
 
     invoke_declare(allocator, Identifiers::DECLARE_COMPONENT, entries)
 }
