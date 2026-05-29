@@ -6,32 +6,37 @@
 //! (`crate::linker`) is the inverse — it expands these calls into the
 //! corresponding `ɵɵdefine*` calls at consumer build time.
 //!
-//! Currently implemented:
+//! Implemented:
 //! - `factory` — `ɵɵngDeclareFactory`
-//! - `injectable` — `ɵɵngDeclareInjectable`. Wired into the Injectable
-//!   emit path.
-//! - `pipe` — `ɵɵngDeclarePipe`. Wired into the Pipe emit path.
+//! - `injectable` — `ɵɵngDeclareInjectable`
+//! - `pipe` — `ɵɵngDeclarePipe`
 //! - `ng_module` + `injector` — `ɵɵngDeclareNgModule` and
-//!   `ɵɵngDeclareInjector`. Both emit per `@NgModule`; wired into the
-//!   NgModule emit path. Partial mode banishes `setNgModuleScope`
+//!   `ɵɵngDeclareInjector`. Partial mode banishes `setNgModuleScope`
 //!   (matches upstream `ng_module/handler.ts:971`).
-//! - `directive` — `ɵɵngDeclareDirective`. Wired into the Directive emit
-//!   path. Inputs auto-select new (post-17.1) vs legacy shape based on
-//!   signal-input presence; minVersion bumps to 16.1.0 (transform fn),
-//!   17.1.0 (signal input), 17.2.0 (signal query).
+//! - `directive` — `ɵɵngDeclareDirective`. Inputs auto-select new
+//!   (post-17.1) vs legacy shape based on signal-input presence;
+//!   minVersion bumps to 16.1.0 (transform fn), 17.1.0 (signal input),
+//!   17.2.0 (signal query).
 //! - `component` — `ɵɵngDeclareComponent`. Wired in at
 //!   `component/transform.rs::compile_component_full` — partial mode
 //!   takes an early-return path that bypasses the entire template/IR
 //!   pipeline. Templates are emitted as verbatim string literals;
 //!   control-flow block syntax in the template bumps minVersion to
 //!   17.0.0.
+//! - `class_metadata` (sync) — `ɵɵngDeclareClassMetadata`. Replaces the
+//!   full-mode `(() => { (typeof ngDevMode === "undefined" || ngDevMode)
+//!   && i0.ɵsetClassMetadata(...); })();` IIFE.
 //!
 //! Setting `TransformOptions.compilation_mode = Partial` on a source
-//! containing the above decorators produces fully partial-form output.
+//! containing any of these decorators produces fully partial-form
+//! output that the existing linker (`crate::linker`) expands back into
+//! valid full Ivy form.
 //!
-//! Not yet implemented (and the dispatch from the per-decorator emit paths
-//! falls back to full mode): classMetadata.
+//! Not implemented:
+//! - `ɵɵngDeclareClassMetadataAsync` (async variant; needed only for
+//!   components with `@defer` deferrable imports).
 
+pub mod class_metadata;
 pub mod component;
 pub mod directive;
 pub mod factory;
@@ -40,6 +45,7 @@ pub mod injector;
 pub mod ng_module;
 pub mod pipe;
 
+pub use class_metadata::compile_declare_class_metadata;
 pub use component::{PartialComponentInputs, compile_declare_component_from_metadata};
 pub use directive::compile_declare_directive_from_metadata;
 pub use factory::compile_declare_factory_function;

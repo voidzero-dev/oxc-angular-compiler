@@ -787,7 +787,12 @@ fn build_set_class_metadata_decls<'a>(
             namespace_registry,
         ),
     };
-    let metadata_expr = compile_class_metadata(allocator, &class_metadata);
+    let metadata_expr = match options.compilation_mode {
+        crate::CompilationMode::Full => compile_class_metadata(allocator, &class_metadata),
+        crate::CompilationMode::Partial => {
+            crate::partial::compile_declare_class_metadata(allocator, &class_metadata)
+        }
+    };
     let emitter = JsEmitter::new();
     format!("{};", emitter.emit_expression(&metadata_expr))
 }
@@ -2575,14 +2580,29 @@ pub fn transform_angular_file(
                                     } else {
                                         oxc_allocator::Vec::new_in(allocator)
                                     };
-                                    let metadata_expr = if deferred_deps.is_empty() {
-                                        compile_class_metadata(allocator, &class_metadata)
-                                    } else {
-                                        compile_component_class_metadata(
-                                            allocator,
-                                            &class_metadata,
-                                            Some(deferred_deps.as_slice()),
-                                        )
+                                    let metadata_expr = match options.compilation_mode {
+                                        crate::CompilationMode::Partial => {
+                                            // Partial mode: emit a bare
+                                            // ɵɵngDeclareClassMetadata call. Deferred-deps
+                                            // (async variant) not yet supported; falls back
+                                            // to the sync form, which is correct unless the
+                                            // template uses @defer with deferrable imports.
+                                            crate::partial::compile_declare_class_metadata(
+                                                allocator,
+                                                &class_metadata,
+                                            )
+                                        }
+                                        crate::CompilationMode::Full => {
+                                            if deferred_deps.is_empty() {
+                                                compile_class_metadata(allocator, &class_metadata)
+                                            } else {
+                                                compile_component_class_metadata(
+                                                    allocator,
+                                                    &class_metadata,
+                                                    Some(deferred_deps.as_slice()),
+                                                )
+                                            }
+                                        }
                                     };
                                     let metadata_js = emitter.emit_expression(&metadata_expr);
 
