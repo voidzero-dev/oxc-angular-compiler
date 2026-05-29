@@ -20,6 +20,10 @@ pub enum FactoryTarget {
     NgModule,
     /// Injectable factory.
     Injectable,
+    /// Service factory (Angular v22+ `@Service`). Uses the same `ɵɵinject` token
+    /// resolution as `Injectable` — the v22 service runtime expects deps to be
+    /// resolved via `inject()` calls in the constructor body, not the ɵfac.
+    Service,
 }
 
 /// Delegate type for delegated factories.

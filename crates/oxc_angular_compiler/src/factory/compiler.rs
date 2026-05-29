@@ -661,7 +661,9 @@ fn get_inject_fn(target: FactoryTarget) -> &'static str {
         FactoryTarget::Component | FactoryTarget::Directive | FactoryTarget::Pipe => {
             Identifiers::DIRECTIVE_INJECT
         }
-        FactoryTarget::NgModule | FactoryTarget::Injectable => Identifiers::INJECT,
+        FactoryTarget::NgModule | FactoryTarget::Injectable | FactoryTarget::Service => {
+            Identifiers::INJECT
+        }
     }
 }
 
