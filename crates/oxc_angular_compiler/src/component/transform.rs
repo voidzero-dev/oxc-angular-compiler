@@ -3244,6 +3244,37 @@ struct FullCompilationResult {
 /// The `namespace_registry` parameter is used to track and assign namespace aliases
 /// for imported modules. It is shared across all components in the file to ensure
 /// consistent namespace assignments for factory generation and import statements.
+/// Partial-mode component compile: bypass the entire template/IR pipeline
+/// and emit `ɵɵngDeclareComponent` + `ɵɵngDeclareFactory` directly from the
+/// metadata. The linker re-parses the verbatim template at consumer build
+/// time. See `crate::partial::component` for the shape.
+fn compile_component_partial<'a>(
+    allocator: &'a Allocator,
+    template: &'a str,
+    metadata: &ComponentMetadata<'a>,
+    pool_starting_index: u32,
+) -> FullCompilationResult {
+    let inputs =
+        crate::partial::PartialComponentInputs { template, is_inline: metadata.template.is_some() };
+    let cmp_expr =
+        crate::partial::compile_declare_component_from_metadata(allocator, metadata, &inputs);
+    let fac_expr =
+        crate::partial::component::compile_declare_factory_for_component(allocator, metadata);
+
+    let emitter = JsEmitter::new();
+    FullCompilationResult {
+        template_js: String::new(),
+        cmp_js: emitter.emit_expression(&cmp_expr),
+        fac_js: emitter.emit_expression(&fac_expr),
+        declarations_js: String::new(),
+        hmr_initializer_js: None,
+        class_debug_info_js: None,
+        next_pool_index: pool_starting_index,
+        ng_content_selectors: Vec::new(),
+        has_defer_block: false,
+    }
+}
+
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -3258,6 +3289,13 @@ fn compile_component_full<'a>(
     import_map: &ImportMap<'a>,
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
+
+    // Partial-mode early branch: skip the entire template pipeline.
+    // Partial declarations carry the template as a verbatim string and
+    // let the linker re-parse at consumer build time.
+    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
+        return Ok(compile_component_partial(allocator, template, metadata, pool_starting_index));
+    }
 
     let mut diagnostics = Vec::new();
 
