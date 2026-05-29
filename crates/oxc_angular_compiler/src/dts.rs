@@ -18,6 +18,7 @@ use crate::directive::{R3DirectiveMetadata, R3InputMetadata};
 use crate::injectable::InjectableMetadata;
 use crate::ng_module::NgModuleMetadata;
 use crate::pipe::PipeMetadata;
+use crate::service::ServiceMetadata;
 use oxc_str::Ident;
 
 /// A `.d.ts` type declaration for an Angular class.
@@ -415,6 +416,31 @@ pub fn generate_injectable_dts(
         format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
 
     // ɵprov declaration
+    let prov = format!("static ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;");
+
+    let members = format!("{fac}\n{prov}");
+
+    DtsDeclaration { class_name: class_name.to_string(), members }
+}
+
+// =============================================================================
+// Service Declarations (Angular v22+ `@Service`)
+// =============================================================================
+
+/// Generate `.d.ts` declarations for a `@Service`-decorated class.
+///
+/// The shape is identical to `@Injectable` (the `.d.ts` type is reused for
+/// downstream consumers — see upstream `service_compiler.ts:55` which calls
+/// `createInjectableType`). The ctor deps tuple is always `never` because
+/// `@Service` ɵfac is generated with empty deps.
+pub fn generate_service_dts(
+    metadata: &ServiceMetadata,
+    type_argument_count: u32,
+) -> DtsDeclaration {
+    let class_name = metadata.class_name.as_str();
+    let type_with_params = type_with_parameters(class_name, type_argument_count);
+
+    let fac = format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, never>;");
     let prov = format!("static ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;");
 
     let members = format!("{fac}\n{prov}");

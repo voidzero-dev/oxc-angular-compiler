@@ -49,6 +49,10 @@ use crate::injectable::{
     extract_injectable_metadata, find_injectable_decorator, find_injectable_decorator_span,
     generate_injectable_definition_from_decorator,
 };
+use crate::service::{
+    extract_service_metadata, find_service_decorator_span,
+    generate_service_definition_from_decorator,
+};
 use crate::ng_module::{
     extract_ng_module_metadata, find_ng_module_decorator, find_ng_module_decorator_span,
     generate_full_ng_module_definition,
@@ -862,6 +866,79 @@ struct JitNonAngularMemberDecorator {
     is_property: bool,
     /// The decorator expression texts (e.g., "Selector()", "Action(AddTodo)").
     decorator_texts: std::vec::Vec<String>,
+}
+
+/// Return the `@Service` decorator on a class iff the `Service` identifier
+/// resolves to `@angular/core` via the import map. Returns `None` for a bare
+/// `@Service()` from a third-party library.
+///
+/// `Service` is a common export name in DI containers and web frameworks, so
+/// matching by name alone would misclassify unrelated decorators. Mirrors
+/// the gate in [`find_angular_decorator`].
+fn find_angular_service_decorator<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+    import_map: &ImportMap<'a>,
+) -> Option<&'a oxc_ast::ast::Decorator<'a>> {
+    for decorator in &class.decorators {
+        let Expression::CallExpression(call) = &decorator.expression else { continue };
+        let Expression::Identifier(id) = &call.callee else { continue };
+        if id.name != "Service" {
+            continue;
+        }
+        let from_angular_core = import_map
+            .get(&Ident::from(id.name.as_str()))
+            .map(|info| info.source_module.as_str() == "@angular/core")
+            .unwrap_or(false);
+        if from_angular_core {
+            return Some(decorator);
+        }
+    }
+    None
+}
+
+/// Return the name of the first non-`Service` `@angular/core` decorator on
+/// the class, if any. Used to enforce upstream's collision rule (see
+/// `service.ts:101-116`): `@Service` cannot coexist with another Angular
+/// decorator on the same class.
+fn find_conflicting_angular_decorator<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+    import_map: &ImportMap<'a>,
+) -> Option<&'a str> {
+    const ANGULAR_DECORATORS: &[&str] =
+        &["Component", "Directive", "Pipe", "Injectable", "NgModule"];
+
+    for decorator in &class.decorators {
+        let name = match &decorator.expression {
+            Expression::CallExpression(call) => match &call.callee {
+                Expression::Identifier(id) => id.name.as_str(),
+                Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        if !ANGULAR_DECORATORS.contains(&name) {
+            continue;
+        }
+        // For Identifier-callees, verify the import resolves to @angular/core.
+        // Namespace-style (`@core.Component()`) is treated as Angular without
+        // a lookup, matching `find_angular_decorator`'s behavior.
+        let is_angular = if let Expression::CallExpression(call) = &decorator.expression {
+            match &call.callee {
+                Expression::Identifier(id) => import_map
+                    .get(&Ident::from(id.name.as_str()))
+                    .map(|info| info.source_module.as_str() == "@angular/core")
+                    .unwrap_or(false),
+                Expression::StaticMemberExpression(_) => true,
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if is_angular {
+            return Some(name);
+        }
+    }
+    None
 }
 
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
@@ -2964,6 +3041,96 @@ pub fn transform_angular_file(
                         class_definitions.insert(
                             class_name,
                             (property_assignments, String::new(), external_decls),
+                        );
+                    }
+                } else if let Some(service_decorator) =
+                    find_angular_service_decorator(class, &import_map)
+                {
+                    // Standalone @Service (Angular v22+). Mirrors the standalone-@Injectable
+                    // branch below but emits ɵɵdefineService and a deps-less ɵfac.
+                    let class_name_for_diag =
+                        class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
+
+                    // Version gate: v22+ runtime introduced ɵɵdefineService. Unknown
+                    // version defaults to "supports" (matches the JIT-side gate).
+                    if !options
+                        .angular_version
+                        .map_or(true, |v| v.supports_service_decorator())
+                    {
+                        result.diagnostics.push(OxcDiagnostic::error(format!(
+                            "The @Service decorator on '{}' requires Angular v22 or later.",
+                            class_name_for_diag
+                        )));
+                        continue;
+                    }
+
+                    // Collision diagnostic: upstream service.ts:101-116 rejects
+                    // @Service co-located with any other @angular/core decorator.
+                    if let Some(conflict_name) =
+                        find_conflicting_angular_decorator(class, &import_map)
+                    {
+                        result.diagnostics.push(OxcDiagnostic::error(format!(
+                            "Cannot apply more than one Angular decorator on an @Service class. \
+                             '{}' is also decorated with @{}.",
+                            class_name_for_diag, conflict_name
+                        )));
+                        continue;
+                    }
+
+                    if let Some(service_metadata) =
+                        extract_service_metadata(allocator, class, Some(source))
+                    {
+                        // Track decorator span for removal
+                        if let Some(span) = find_service_decorator_span(class) {
+                            decorator_spans_to_remove.push(span);
+                        }
+                        // Even though @Service ɵfac doesn't inject ctor params, the
+                        // user's constructor may still carry @Inject/@Optional/etc.
+                        // decorators that need to be stripped from the output (the
+                        // class metadata IIFE will pick them up).
+                        collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                        let type_argument_count =
+                            class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
+                        let definition = generate_service_definition_from_decorator(
+                            allocator,
+                            &service_metadata,
+                            type_argument_count,
+                        );
+
+                        let emitter = JsEmitter::new();
+                        let class_name = service_metadata.class_name.to_string();
+
+                        let property_assignments = format!(
+                            "static ɵfac = {};\nstatic ɵprov = {};",
+                            emitter.emit_expression(&definition.fac_definition),
+                            emitter.emit_expression(&definition.prov_definition)
+                        );
+
+                        result
+                            .dts_declarations
+                            .push(dts::generate_service_dts(&service_metadata, type_argument_count));
+
+                        let decls_after_class = build_set_class_metadata_decls(
+                            allocator,
+                            class,
+                            &class_name,
+                            service_decorator,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+
+                        class_positions.push((
+                            class_name.clone(),
+                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                            class.body.span.end,
+                        ));
+                        class_definitions.insert(
+                            class_name,
+                            (property_assignments, String::new(), decls_after_class),
                         );
                     }
                 } else if let Some(mut injectable_metadata) =
