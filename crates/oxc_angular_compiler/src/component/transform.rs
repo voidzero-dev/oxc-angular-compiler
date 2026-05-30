@@ -73,10 +73,7 @@ use crate::pipeline::ingest::{
     HostBindingInput, IngestOptions, ingest_component, ingest_component_with_options,
     ingest_host_binding_with_version,
 };
-use crate::service::{
-    extract_service_metadata, find_service_decorator_span,
-    generate_service_definition_from_decorator,
-};
+use crate::service::{extract_service_metadata, generate_service_definition_from_decorator};
 use crate::transform::HtmlToR3Transform;
 use crate::transform::html_to_r3::TransformOptions as R3TransformOptions;
 
@@ -935,6 +932,17 @@ fn is_angular_core_export(
     }
 }
 
+/// Whether `local_name` is a namespace import (`import * as ns from ...`)
+/// from `@angular/core`. Used to validate namespace-style decorator calls
+/// like `@ns.Service()` — without this check, any third-party namespace
+/// `Service` decorator would classify as the Angular v22 decorator.
+fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: &str) -> bool {
+    import_map
+        .get(&Ident::from(local_name))
+        .map(|info| info.source_module.as_str() == "@angular/core" && !info.is_named_import)
+        .unwrap_or(false)
+}
+
 /// Return the name of the first non-`Service` `@angular/core` decorator on
 /// the class, if any. Used to enforce upstream's collision rule (see
 /// `service.ts:101-116`): `@Service` cannot coexist with another Angular
@@ -1014,10 +1022,24 @@ fn find_angular_decorator<'a>(
             };
 
             if matches!(kind, Some(AngularDecoratorKind::Service)) {
-                if let Expression::Identifier(id) = &call.callee {
-                    if !is_angular_core_export(import_map, id.name.as_str(), "Service") {
-                        continue;
+                let from_angular_core = match &call.callee {
+                    Expression::Identifier(id) => {
+                        is_angular_core_export(import_map, id.name.as_str(), "Service")
                     }
+                    // Namespace form `@ns.Service()`: verify `ns` is a
+                    // namespace import from `@angular/core`. Without this,
+                    // any `@third.Service()` from a third-party namespace
+                    // import would classify as the v22 decorator.
+                    Expression::StaticMemberExpression(member) => match &member.object {
+                        Expression::Identifier(ns) => {
+                            is_angular_core_namespace(import_map, ns.name.as_str())
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !from_angular_core {
+                    continue;
                 }
             }
 
@@ -3131,12 +3153,14 @@ pub fn transform_angular_file(
                     }
 
                     if let Some(service_metadata) =
-                        extract_service_metadata(allocator, class, Some(source))
+                        extract_service_metadata(allocator, class, service_decorator, Some(source))
                     {
-                        // Track decorator span for removal
-                        if let Some(span) = find_service_decorator_span(class) {
-                            decorator_spans_to_remove.push(span);
-                        }
+                        // Track decorator span for removal. Use the resolved
+                        // decorator directly so aliased imports
+                        // (`import { Service as NgService }`) still get
+                        // stripped — re-searching by literal name would miss
+                        // them.
+                        decorator_spans_to_remove.push(service_decorator.span);
                         // Even though @Service ɵfac doesn't inject ctor params, the
                         // user's constructor may still carry @Inject/@Optional/etc.
                         // decorators that need to be stripped from the output (the

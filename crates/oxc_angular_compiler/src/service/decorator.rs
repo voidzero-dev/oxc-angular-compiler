@@ -3,13 +3,14 @@
 //! Extracts metadata from `@Service({...})` decorators on TypeScript class
 //! declarations. Ported from `packages/compiler-cli/src/ngtsc/annotations/src/service.ts`.
 //!
-//! The caller is responsible for confirming that the `Service` identifier
-//! resolves to `@angular/core` (via the file's import map) before invoking
-//! `extract_service_metadata`. `Service` is a common library export name, so
-//! name-only matching would misclassify unrelated decorators. The matching
-//! helpers here intentionally only check the identifier name — see the JIT
-//! pipeline at `component/transform.rs::find_angular_decorator` for the
-//! upstream import-map gate that the AOT caller mirrors.
+//! The caller is responsible for confirming that the decorator's local
+//! identifier resolves to `Service` in `@angular/core` (via the file's
+//! import map) before invoking `extract_service_metadata`. The extractor
+//! takes the already-resolved `Decorator` reference rather than searching
+//! the class by literal name, so aliased imports like
+//! `import { Service as NgService }; @NgService()` flow through correctly.
+//! See `component/transform.rs::find_angular_service_decorator` for the
+//! import-map gate the AOT caller uses.
 
 use oxc_allocator::{Allocator, Box};
 use oxc_ast::ast::{Argument, Class, Decorator, Expression, ObjectPropertyKind, PropertyKey};
@@ -42,21 +43,22 @@ pub fn find_service_decorator_span(class: &Class<'_>) -> Option<Span> {
     class.decorators.iter().find(|d| is_service_decorator(d)).map(|d| d.span)
 }
 
-/// Extract `@Service` metadata from a class.
+/// Extract `@Service` metadata from a class given the already-resolved
+/// decorator node.
 ///
-/// The caller must have already confirmed that the `Service` identifier
-/// resolves to `@angular/core` — this function matches by name only and will
-/// happily return metadata for an unrelated `@Service` from a third-party
-/// library.
+/// The caller (the AOT dispatcher) has already verified via the file's import
+/// map that the decorator's local identifier resolves to `Service` in
+/// `@angular/core`. Accepting the decorator by reference avoids re-searching
+/// the class's decorators by literal name — which would skip aliased imports
+/// such as `import { Service as NgService }; @NgService()`.
 pub fn extract_service_metadata<'a>(
     _allocator: &'a Allocator,
     class: &'a Class<'a>,
+    decorator: &'a Decorator<'a>,
     source_text: Option<&'a str>,
 ) -> Option<ServiceMetadata<'a>> {
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
-
-    let decorator = class.decorators.iter().find(|d| is_service_decorator(d))?;
 
     let call_expr = match &decorator.expression {
         Expression::CallExpression(call) => call,

@@ -7012,6 +7012,45 @@ export class CounterService {
 }
 
 #[test]
+fn test_jit_third_party_namespace_service_decorator_is_ignored() {
+    // `@other.Service()` where `other` is a namespace import from a
+    // third-party library must NOT be classified as Angular's v22
+    // @Service. The Service classification's import-map gate needs to
+    // walk through `StaticMemberExpression` callees and verify the
+    // namespace object resolves to `@angular/core` — otherwise any
+    // namespaced `Service` decorator trips the v22 version gate.
+    let allocator = Allocator::default();
+    let source = r"
+import * as other from 'some-other-lib';
+
+@other.Service()
+export class CounterService {}
+";
+
+    let options = ComponentTransformOptions {
+        jit: true,
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
+
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Third-party namespace @Service should not trip the v22 diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.code.contains("other.Service"),
+        "Third-party namespace @Service decorator should be left intact. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn test_jit_full_component_example() {
     // Full example matching the issue #97 scenario
     let allocator = Allocator::default();
@@ -13665,6 +13704,39 @@ export class CounterService {}
     assert!(
         !result.code.contains("ɵɵdefineService"),
         "Aliased Injectable must not be compiled via the @Service path. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_aliased_service_import_still_emits_definition() {
+    // The mirror case of the prior test: `import { Service as NgService }`
+    // still resolves to Angular's v22 @Service. The AOT dispatcher accepts
+    // the aliased decorator via the import-map gate, and the extractor
+    // must consume the resolved decorator (rather than re-searching for a
+    // literal `Service` name) so ɵfac/ɵprov are still emitted.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service as NgService } from '@angular/core';
+
+@NgService()
+export class CounterService {}
+";
+
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Aliased @Service should compile without errors. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.code.contains("ɵɵdefineService"),
+        "Aliased @Service must still emit ɵɵdefineService. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("ɵfac") && result.code.contains("ɵprov"),
+        "Aliased @Service must emit both ɵfac and ɵprov. Got:\n{}",
         result.code
     );
 }
