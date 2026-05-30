@@ -250,3 +250,85 @@ export class WsComponent {}
         "expected preserveWhitespaces:true, got:\n{code}"
     );
 }
+
+/// Regression test for the codex P1 review on PR #325:
+///
+/// Standalone components with `imports: [...]` are extracted with
+/// `declaration_list_emit_mode = RuntimeResolved`, which means
+/// `metadata.declarations` stays empty (full mode emits
+/// `ɵɵgetComponentDepsFactory` at runtime instead). Partial mode can't
+/// do that — the linker emits a static `dependencies: [...]` array. The
+/// pre-fix behavior omitted the `dependencies` field entirely, so any
+/// standalone library component that imported `CommonModule`, child
+/// components, or pipes would render with the directives/pipes silently
+/// not registered.
+///
+/// Fix: in partial mode, when `meta.declarations.is_empty()` but
+/// `meta.imports` is non-empty, lower each import to a synthetic
+/// directive-shape dep on the fly. Our linker reads only the `type`
+/// expression from each entry, so the resulting `dependencies: [Import1,
+/// Import2, …]` array is byte-equivalent to what we'd get if the
+/// analyzer had populated `declarations` directly.
+#[test]
+fn standalone_component_with_imports_emits_dependencies_in_partial_mode() {
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { MyDir } from './my.directive';
+
+@Component({
+  selector: 'app-foo',
+  template: '<div *ngIf=\"show\" myDir>hi</div>',
+  standalone: true,
+  imports: [CommonModule, MyDir]
+})
+export class FooComponent {
+  show = true;
+}
+";
+    let code = compile_partial(&allocator, "foo.component.ts", source);
+
+    assert!(
+        code.contains("\u{0275}\u{0275}ngDeclareComponent"),
+        "expected ɵɵngDeclareComponent, got:\n{code}"
+    );
+    // The partial declaration should include both imports as deps.
+    assert!(code.contains("dependencies:"), "expected dependencies field, got:\n{code}");
+    assert!(
+        code.contains("type:CommonModule"),
+        "expected CommonModule in dependencies, got:\n{code}"
+    );
+    assert!(code.contains("type:MyDir"), "expected MyDir in dependencies, got:\n{code}");
+
+    // Round-trip through the linker — the full ɵcmp should carry both
+    // imports in its dependencies array.
+    let linked = link(&allocator, &code, "foo.component.mjs");
+    assert!(linked.linked, "linker should accept the partial output, emitted:\n{code}");
+    assert!(
+        linked.code.contains("\u{0275}\u{0275}defineComponent"),
+        "linked output should contain ɵɵdefineComponent, got:\n{}",
+        linked.code
+    );
+    // After linking, both import types must be in the final dependencies array.
+    assert!(
+        linked.code.contains("dependencies: [")
+            && linked.code.contains("CommonModule")
+            && linked.code.contains("MyDir"),
+        "linked dependencies array should preserve both imports, got:\n{}",
+        linked.code
+    );
+}
+
+/// Sanity: a non-standalone component or a standalone component with no
+/// imports should NOT get a synthetic `dependencies` field.
+#[test]
+fn standalone_component_with_no_imports_omits_dependencies() {
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+
+@Component({ selector: 'app-bar', template: '<p>hi</p>', standalone: true })
+export class BarComponent {}
+";
+    let code = compile_partial(&allocator, "bar.component.ts", source);
+    assert!(!code.contains("dependencies:"), "no imports → no dependencies field, got:\n{code}");
+}

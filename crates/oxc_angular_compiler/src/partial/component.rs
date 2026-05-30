@@ -217,12 +217,35 @@ pub fn compile_declare_component_from_metadata<'a>(
         ));
     }
 
-    if !meta.declarations.is_empty() {
+    // Standalone components with imports: OXC's analyzer sets
+    // `declaration_list_emit_mode = RuntimeResolved` when
+    // `metadata.raw_imports.is_some()` (decorator.rs:281) and does NOT
+    // populate `meta.declarations` — full mode emits
+    // `ɵɵgetComponentDepsFactory(MyComponent, [imports])` at runtime
+    // instead. Partial mode can't do that (the linker re-emits a static
+    // `dependencies: [...]` array), so when declarations is empty but
+    // imports is non-empty we lower each import to a synthetic
+    // directive-shape dependency on the fly. Mirrors the lowering at
+    // `decorator.rs::populate_declarations_from_imports` that only runs
+    // in Direct mode. The linker reads only the `type` expression from
+    // each entry (see `linker/mod.rs:1844`), so the placeholder kind/
+    // selector is harmless — the emitted full ɵcmp ends up with
+    // `dependencies: [Import1, Import2, …]` regardless.
+    let synthetic_declarations = if meta.declarations.is_empty() && !meta.imports.is_empty() {
+        Some(lower_imports_to_declarations(allocator, &meta.imports))
+    } else {
+        None
+    };
+    let declarations_to_emit = match &synthetic_declarations {
+        Some(d) => d.as_slice(),
+        None => meta.declarations.as_slice(),
+    };
+    if !declarations_to_emit.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("dependencies"),
-            create_dependencies_array(
+            create_dependencies_array_from_slice(
                 allocator,
-                &meta.declarations,
+                declarations_to_emit,
                 meta.declaration_list_emit_mode,
             ),
             false,
@@ -613,9 +636,34 @@ fn host_directives_mapping_array<'a>(
 
 // ---- dependencies --------------------------------------------------------
 
-fn create_dependencies_array<'a>(
+/// Constructs a synthetic `TemplateDependency` per identifier in
+/// `imports` for partial-mode lowering when the analyzer left
+/// `metadata.declarations` empty (`RuntimeResolved` mode — see callsite
+/// for the why). Each entry gets `kind: directive` + placeholder
+/// `selector: "*"` matching what
+/// `component/decorator.rs::populate_declarations_from_imports` produces
+/// for Direct mode. The linker reads only the `type` from each entry, so
+/// the placeholder fields are harmless and the linked output is
+/// `dependencies: [Import1, Import2, …]`.
+fn lower_imports_to_declarations<'a>(
     allocator: &'a Allocator,
-    deps: &Vec<'a, TemplateDependency<'a>>,
+    imports: &Vec<'a, Ident<'a>>,
+) -> Vec<'a, TemplateDependency<'a>> {
+    let mut out = Vec::with_capacity_in(imports.len(), allocator);
+    for name in imports {
+        out.push(TemplateDependency::directive(
+            allocator,
+            name.clone(),
+            Ident::from("*"),
+            false, // is_component — unknown at this point
+        ));
+    }
+    out
+}
+
+fn create_dependencies_array_from_slice<'a>(
+    allocator: &'a Allocator,
+    deps: &[TemplateDependency<'a>],
     emit_mode: DeclarationListEmitMode,
 ) -> OutputExpression<'a> {
     let wrap_in_forward_ref = matches!(
