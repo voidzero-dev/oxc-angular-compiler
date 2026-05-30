@@ -61,8 +61,9 @@ pub fn compile_directive<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveCompileResult<'a> {
-    compile_directive_from_metadata(allocator, metadata, pool_starting_index)
+    compile_directive_from_metadata(allocator, metadata, pool_starting_index, angular_version)
 }
 
 /// Internal implementation of directive compilation.
@@ -70,10 +71,11 @@ pub fn compile_directive_from_metadata<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveCompileResult<'a> {
     // Build the base directive fields, passing pool_starting_index for host bindings
     let (definition_map, next_pool_index, host_declarations) =
-        build_base_directive_fields(allocator, metadata, pool_starting_index);
+        build_base_directive_fields(allocator, metadata, pool_starting_index, angular_version);
 
     // Add features
     let mut definition_map = definition_map;
@@ -102,6 +104,7 @@ fn build_base_directive_fields<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> (Vec<'a, LiteralMapEntry<'a>>, u32, oxc_allocator::Vec<'a, OutputStatement<'a>>) {
     let mut entries = Vec::new_in(allocator);
     let mut next_pool_index = pool_starting_index;
@@ -130,6 +133,7 @@ fn build_base_directive_fields<'a>(
             &metadata.queries,
             Some(metadata.name.as_str()),
             None,
+            angular_version,
         );
         entries.push(LiteralMapEntry::new(
             Ident::from("contentQueries"),
@@ -147,6 +151,7 @@ fn build_base_directive_fields<'a>(
             &metadata.view_queries,
             Some(metadata.name.as_str()),
             None,
+            angular_version,
         );
         entries.push(LiteralMapEntry::new(Ident::from("viewQuery"), view_queries_fn, false));
     }
@@ -1003,7 +1008,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
@@ -1047,7 +1052,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1300,7 +1305,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1342,7 +1347,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1382,7 +1387,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1437,7 +1442,7 @@ mod tests {
             host_directives: Vec::new_in(&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1498,7 +1503,7 @@ mod tests {
             host_directives,
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");
@@ -1563,7 +1568,7 @@ mod tests {
             host_directives,
         };
 
-        let result = compile_directive(&allocator, &metadata, 0);
+        let result = compile_directive(&allocator, &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");

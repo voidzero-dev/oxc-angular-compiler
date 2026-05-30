@@ -72,6 +72,30 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Check if this version's runtime supports chained query instructions
+    /// (`ɵɵviewQuery(p1)(p2)`, `ɵɵcontentQuerySignal(...)(...)`).
+    ///
+    /// Until `angular/angular@ae1c0dc4` ("perf(compiler): chain query creation
+    /// instructions", landed in v21.1.0 and cherry-picked into v21.0.4 as
+    /// `f901cc9e`), `ɵɵviewQuery` / `ɵɵcontentQuery` / `ɵɵviewQuerySignal` /
+    /// `ɵɵcontentQuerySignal` all returned `void`. Chained emit on those
+    /// versions throws at runtime: `TypeError: ɵɵviewQuery(...) is not a
+    /// function`. From v21.0.4+ they return `typeof <fn>` and chain safely.
+    pub fn supports_chained_queries(&self) -> bool {
+        // v22+ unconditionally, v21.1.0+ on the v21 line, v21.0.4+ on the
+        // v21.0 cherry-pick. Anything below v21 is `void`-return territory.
+        if self.major >= 22 {
+            return true;
+        }
+        if self.major == 21 {
+            if self.minor >= 1 {
+                return true;
+            }
+            return self.minor == 0 && self.patch >= 4;
+        }
+        false
+    }
+
     /// Parse a version string like "19.0.0" or "19.0.0-rc.1".
     ///
     /// Returns `None` if the version string is invalid.
