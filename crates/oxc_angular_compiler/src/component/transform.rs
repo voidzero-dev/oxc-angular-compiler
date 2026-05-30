@@ -3282,6 +3282,18 @@ fn compile_component_partial<'a>(
     let fac_expr =
         crate::partial::component::compile_declare_factory_for_component(allocator, metadata);
 
+    // Detect `@defer` block presence by a cheap string scan — partial
+    // mode skips the template pipeline, but the caller's class-metadata
+    // dispatch uses this flag to decide whether to build deferred-deps
+    // and pick `ɵɵngDeclareClassMetadataAsync` over the sync form. A
+    // false positive (e.g. `@defer` inside a string literal in the
+    // template) is harmless: `deferred_deps` will be built from
+    // `metadata.deferred_imports`, which is empty when the user hasn't
+    // declared deferrable imports, and the dispatch falls back to sync.
+    // A false NEGATIVE silently strips the async lazy-loading metadata —
+    // so err on the side of detection.
+    let has_defer_block = template.contains("@defer");
+
     let emitter = JsEmitter::new();
     FullCompilationResult {
         template_js: String::new(),
@@ -3292,7 +3304,7 @@ fn compile_component_partial<'a>(
         class_debug_info_js: None,
         next_pool_index: pool_starting_index,
         ng_content_selectors: Vec::new(),
-        has_defer_block: false,
+        has_defer_block,
     }
 }
 

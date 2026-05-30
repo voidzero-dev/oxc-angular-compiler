@@ -15,7 +15,8 @@ use oxc_angular_compiler::output::ast::{
 };
 use oxc_angular_compiler::output::emitter::JsEmitter;
 use oxc_angular_compiler::{
-    compile_component_declare_class_metadata, compile_declare_class_metadata_async,
+    CompilationMode, TransformOptions, compile_component_declare_class_metadata,
+    compile_declare_class_metadata_async, transform_angular_file,
 };
 use oxc_str::Ident;
 
@@ -223,6 +224,85 @@ fn dispatch_helper_picks_async_when_deferred_deps_present() {
         "expected async ɵɵngDeclareClassMetadataAsync when deps present, got: {js}"
     );
     assert!(js.contains(r#"minVersion:"18.0.0""#), "expected async minVersion 18.0.0, got: {js}");
+}
+
+/// Regression test for the codex review on PR #325 (May 2026):
+///
+/// Partial mode bypasses the template/IR pipeline, so we can't compute
+/// `has_defer_block` from a parsed template. The original
+/// `compile_component_partial` hard-coded `has_defer_block: false`, which
+/// made the downstream class-metadata dispatch always build an empty
+/// `deferred_deps` array and pick the sync `ɵɵngDeclareClassMetadata` form
+/// — silently stripping the lazy-loading metadata for any component that
+/// combined `@defer` + `deferredImports`.
+///
+/// Fix: cheap string-scan for `@defer` in the template source. False
+/// positives are harmless (deferred_imports drives the dep list; empty
+/// imports → falls back to sync); false negatives silently break lazy
+/// loading.
+#[test]
+fn partial_mode_emits_async_class_metadata_for_defer_with_deferred_imports() {
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+import { LazyCmp } from './lazy';
+
+@Component({
+  selector: 'app-foo',
+  template: '@defer { <lazy-cmp /> }',
+  standalone: true,
+  deferredImports: [LazyCmp]
+})
+export class FooComponent {}
+";
+
+    let options =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "foo.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "should not have errors, got: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("\u{0275}\u{0275}ngDeclareClassMetadataAsync"),
+        "partial component with @defer + deferredImports must emit ɵɵngDeclareClassMetadataAsync, got:\n{}",
+        result.code
+    );
+    // Sanity: a static `import('./lazy')` resolver should be wired up.
+    assert!(
+        result.code.contains("import(") && result.code.contains("./lazy"),
+        "async metadata should carry the dynamic-import resolver, got:\n{}",
+        result.code
+    );
+}
+
+/// Sanity counterpart: a partial component WITHOUT `@defer` in its
+/// template still gets the sync class-metadata form even when the source
+/// happens to declare `deferredImports`. (Upstream only emits the async
+/// resolver when the template actually uses `@defer`.)
+#[test]
+fn partial_mode_emits_sync_class_metadata_when_no_defer_in_template() {
+    let allocator = Allocator::default();
+    let source = "import { Component } from '@angular/core';
+
+@Component({ selector: 'app-bar', template: '<p>no defer here</p>', standalone: true })
+export class BarComponent {}
+";
+
+    let options =
+        TransformOptions { compilation_mode: CompilationMode::Partial, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "bar.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "should not have errors, got: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("\u{0275}\u{0275}ngDeclareClassMetadata"),
+        "expected sync ɵɵngDeclareClassMetadata, got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("ngDeclareClassMetadataAsync"),
+        "should NOT emit the async variant when template has no @defer, got:\n{}",
+        result.code
+    );
 }
 
 #[test]
