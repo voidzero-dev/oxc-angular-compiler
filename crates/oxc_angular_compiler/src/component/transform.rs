@@ -2685,6 +2685,7 @@ pub fn transform_angular_file(
                         allocator,
                         &directive_metadata,
                         shared_pool_index,
+                        options.angular_version,
                     );
 
                     // Update shared_pool_index for the next compilation
@@ -3420,23 +3421,17 @@ fn compile_component_full<'a>(
     // See: packages/compiler/src/render3/view/compiler.ts lines 192-212
     let attrs_ref = pool_selector_attrs(allocator, &mut job, metadata);
 
-    // BEFORE template compilation: Pool view query predicates.
-    // TypeScript Angular pools query predicates BEFORE template compilation and pure functions.
-    // This ensures correct constant ordering: attrs -> query predicates -> pure functions.
-    let view_query_fn = if !view_queries.is_empty() {
-        let fn_name = Some(metadata.class_name.as_str());
-        Some(create_view_queries_function(
-            allocator,
-            view_queries.as_slice(),
-            fn_name,
-            Some(&mut job.pool),
-        ))
-    } else {
-        None
-    };
-
-    // BEFORE template compilation: Pool content query predicates.
-    // Similar to view queries, content query predicates are pooled before template compilation.
+    // BEFORE template compilation: Pool query predicates so they
+    // appear in the constant table as `attrs -> query predicates ->
+    // pure functions`.
+    //
+    // Order matters: upstream ngtsc pools **content queries first, then
+    // view queries** (compiler/src/render3/view/compiler.ts emits
+    // `contentQueries:` before `viewQuery:` in the metadata object, and
+    // pools predicates in the same order). Reversing this swaps the
+    // `_c<N>` indices visible in the emitted query calls — the runtime
+    // still works either way but the emit diverges from upstream and
+    // breaks goldens / source-anchored tooling.
     let content_queries_fn = if !content_queries.is_empty() {
         let fn_name = Some(metadata.class_name.as_str());
         Some(create_content_queries_function(
@@ -3444,6 +3439,20 @@ fn compile_component_full<'a>(
             content_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
+            options.angular_version,
+        ))
+    } else {
+        None
+    };
+
+    let view_query_fn = if !view_queries.is_empty() {
+        let fn_name = Some(metadata.class_name.as_str());
+        Some(create_view_queries_function(
+            allocator,
+            view_queries.as_slice(),
+            fn_name,
+            Some(&mut job.pool),
+            options.angular_version,
         ))
     } else {
         None

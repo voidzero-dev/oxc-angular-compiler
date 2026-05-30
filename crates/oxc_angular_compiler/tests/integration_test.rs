@@ -5761,20 +5761,18 @@ export class ChatBotTriggerComponent {
     }
 }
 
-/// Regression: Multiple view queries must emit separate statements, not chained calls.
+/// Multiple `@ViewChild` decorators on the same component should emit
+/// as a single chained `ɵɵviewQuery(p1)(p2)(p3)` call — matches upstream
+/// ngtsc's `instructionChainAfter()` emit. `ɵɵviewQuery` returns
+/// `typeof ɵɵviewQuery` (core/src/render3/instructions/queries.ts:58),
+/// so chaining is safe.
 ///
-/// Bug: Multiple `@ViewChild`/`@ViewChildren` queries were chained as
-/// `ɵɵviewQuery(pred1)(pred2)`, treating the return value of `ɵɵviewQuery` as a callable.
-/// Angular 20's `ɵɵviewQuery` returns `void`, so chaining causes:
-/// `TypeError: i0.ɵɵviewQuery(...) is not a function`.
-///
-/// Fix: Emit each query as a separate statement:
-///   `ɵɵviewQuery(pred1); ɵɵviewQuery(pred2);`
+/// Earlier versions of this compiler emitted three separate statements
+/// based on an incorrect "returns void" reading of Angular's source.
 #[test]
-fn test_multiple_view_queries_emit_separate_statements() {
+fn test_multiple_view_queries_emit_chained_call() {
     let allocator = Allocator::default();
 
-    // Reproduce the ClickUp LoginFormComponent pattern: multiple @ViewChild decorators
     let source = r"
 import { Component, ViewChild, ElementRef } from '@angular/core';
 
@@ -5789,26 +5787,38 @@ export class LoginFormComponent {
 }
 ";
 
-    let result = transform_angular_file(&allocator, "login-form.component.ts", source, None, None);
+    // Chained query emit requires Angular ≥ 21.0.4 (queries return
+    // `typeof <fn>`, not `void`). Pin the version explicitly so this
+    // test exercises the chained path; without it the compiler falls
+    // back to the older safe separate-statement form.
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "login-form.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let code = &result.code;
 
-    // Count separate ɵɵviewQuery calls - should be 3 (one per @ViewChild)
+    // Three decorator-form view queries — one chained call expression has
+    // the root identifier `ɵɵviewQuery` appearing exactly once, with two
+    // additional `(...)` argument groups appended via chaining.
     let view_query_count = code.matches("ɵɵviewQuery(").count();
     assert_eq!(
-        view_query_count, 3,
-        "Should have exactly 3 separate ɵɵviewQuery calls. Found {view_query_count}. Output:\n{code}"
+        view_query_count, 1,
+        "Three consecutive decorator queries should chain into a single \
+         `ɵɵviewQuery(...)...` expression. Found {view_query_count} root calls. \
+         Output:\n{code}"
     );
 
-    // Must NOT have chained calls: ɵɵviewQuery(...)(...) pattern
-    // This regex-free check: after each `ɵɵviewQuery(` find the matching `)` and check
-    // the next non-whitespace char is NOT `(`
+    // The single `ɵɵviewQuery(` must be followed (after its closing `)`)
+    // by another `(` — the chain continuation.
     let query_fn = "ɵɵviewQuery(";
+    let mut chain_followups = 0;
     for (start_idx, _) in code.match_indices(query_fn) {
         let after_fn = &code[start_idx + query_fn.len()..];
-        // Find the closing paren (handle nested parens)
         let mut depth = 1;
         let mut end = 0;
         for (i, ch) in after_fn.char_indices() {
@@ -5824,22 +5834,23 @@ export class LoginFormComponent {
                 _ => {}
             }
         }
-        // Check what comes after the closing paren
-        let after_close = after_fn[end..].trim_start();
-        assert!(
-            !after_close.starts_with('('),
-            "Found chained ɵɵviewQuery call (return value used as function). \
-             Angular 20's ɵɵviewQuery returns void. Output:\n{code}"
-        );
+        if after_fn[end..].trim_start().starts_with('(') {
+            chain_followups += 1;
+        }
     }
+    assert_eq!(
+        chain_followups, 1,
+        "Chained queries should produce one continuation `(...)` after the \
+         root call. Got {chain_followups}. Output:\n{code}"
+    );
 }
 
-/// Regression: Multiple content queries must emit separate statements, not chained calls.
-///
-/// Same issue as view queries but for `@ContentChild`/`@ContentChildren`.
-/// The fix applies to both `create_view_queries_function` and `create_content_queries_function`.
+/// Multiple `@ContentChild`/`@ContentChildren` queries should emit
+/// as a single chained `ɵɵcontentQuery(...)(...)(...)` call. Same
+/// contract as `ɵɵviewQuery` — `ɵɵcontentQuery` returns
+/// `typeof ɵɵcontentQuery` (core/src/render3/instructions/queries.ts:40).
 #[test]
-fn test_multiple_content_queries_emit_separate_statements() {
+fn test_multiple_content_queries_emit_chained_call() {
     let allocator = Allocator::default();
 
     let source = r"
@@ -5856,21 +5867,28 @@ export class TabsComponent {
 }
 ";
 
-    let result = transform_angular_file(&allocator, "tabs.component.ts", source, None, None);
+    // Pin to v22 — see note on the view-query chained test above.
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "tabs.component.ts", source, Some(&options), None);
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let code = &result.code;
 
-    // Count separate ɵɵcontentQuery calls - should be 3
     let content_query_count = code.matches("ɵɵcontentQuery(").count();
     assert_eq!(
-        content_query_count, 3,
-        "Should have exactly 3 separate ɵɵcontentQuery calls. Found {content_query_count}. Output:\n{code}"
+        content_query_count, 1,
+        "Three consecutive decorator content queries should chain into a single \
+         `ɵɵcontentQuery(...)...` expression. Found {content_query_count} root calls. \
+         Output:\n{code}"
     );
 
-    // Must NOT have chained calls
     let query_fn = "ɵɵcontentQuery(";
+    let mut chain_followups = 0;
     for (start_idx, _) in code.match_indices(query_fn) {
         let after_fn = &code[start_idx + query_fn.len()..];
         let mut depth = 1;
@@ -5888,21 +5906,24 @@ export class TabsComponent {
                 _ => {}
             }
         }
-        let after_close = after_fn[end..].trim_start();
-        assert!(
-            !after_close.starts_with('('),
-            "Found chained ɵɵcontentQuery call. Angular 20's query functions return void. Output:\n{code}"
-        );
+        if after_fn[end..].trim_start().starts_with('(') {
+            chain_followups += 1;
+        }
     }
+    assert_eq!(
+        chain_followups, 1,
+        "Should produce one continuation `(...)` after the root content-query call. \
+         Got {chain_followups}. Output:\n{code}"
+    );
 }
 
-/// Regression: Mixed view queries (signal + decorator) must all be separate statements.
-///
-/// Signal-based queries (`viewChild()`, `viewChildren()`) and decorator-based queries
-/// (`@ViewChild`, `@ViewChildren`) can coexist on the same component. All of them must
-/// emit as separate statements.
+/// Mixed signal + decorator view queries: consecutive same-kind calls
+/// chain (`ɵɵviewQuerySignal(...)(...)` for the two signal queries), but
+/// the chain breaks at the boundary to the decorator-form
+/// (`ɵɵviewQuery(...)`) because the two runtime symbols aren't
+/// interchangeable.
 #[test]
-fn test_mixed_signal_and_decorator_view_queries_separate_statements() {
+fn test_mixed_signal_and_decorator_view_queries_break_chain_on_boundary() {
     let allocator = Allocator::default();
 
     let source = r"
@@ -5919,21 +5940,42 @@ export class MixedQueryComponent {
 }
 ";
 
-    let result = transform_angular_file(&allocator, "mixed-query.component.ts", source, None, None);
+    // Pin to v22 — see note on the view-query chained test above.
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 0, 0)),
+        ..Default::default()
+    };
+    let result = transform_angular_file(
+        &allocator,
+        "mixed-query.component.ts",
+        source,
+        Some(&options),
+        None,
+    );
 
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
 
     let code = &result.code;
 
-    // Should have signal query calls AND decorator query calls, all separate
-    let total_query_calls = code.matches("ɵɵviewQuery").count();
-    assert!(
-        total_query_calls >= 3,
-        "Should have at least 3 view query calls (signal + decorator). Found {total_query_calls}. Output:\n{code}"
+    // Exactly one root ɵɵviewQuerySignal call (the two signal queries chain
+    // into it) and exactly one root ɵɵviewQuery call (the decorator one).
+    let signal_roots = code.matches("ɵɵviewQuerySignal(").count();
+    let decorator_roots = code.matches("ɵɵviewQuery(").count();
+    assert_eq!(
+        signal_roots, 1,
+        "Two signal view queries should chain into one root call. \
+         Found {signal_roots}. Output:\n{code}"
+    );
+    assert_eq!(
+        decorator_roots, 1,
+        "The single decorator view query should produce one root call after \
+         the signal chain breaks. Found {decorator_roots}. Output:\n{code}"
     );
 
-    // Verify no chaining for any view query variant
-    for query_fn in ["ɵɵviewQuerySignal(", "ɵɵviewQuery("] {
+    // Signal chain should have exactly one continuation `(...)` (the second
+    // signal call). The decorator call should have zero continuations.
+    fn count_chain_followups(code: &str, query_fn: &str) -> usize {
+        let mut followups = 0;
         for (start_idx, _) in code.match_indices(query_fn) {
             let after_fn = &code[start_idx + query_fn.len()..];
             let mut depth = 1;
@@ -5951,12 +5993,94 @@ export class MixedQueryComponent {
                     _ => {}
                 }
             }
-            let after_close = after_fn[end..].trim_start();
-            assert!(
-                !after_close.starts_with('('),
-                "Found chained {query_fn} call. Output:\n{code}"
-            );
+            if after_fn[end..].trim_start().starts_with('(') {
+                followups += 1;
+            }
         }
+        followups
+    }
+    assert_eq!(
+        count_chain_followups(code, "ɵɵviewQuerySignal("),
+        1,
+        "Two consecutive signal queries should chain (one continuation). \
+         Output:\n{code}"
+    );
+    assert_eq!(
+        count_chain_followups(code, "ɵɵviewQuery("),
+        0,
+        "Single decorator query should have no chain continuation. \
+         Output:\n{code}"
+    );
+}
+
+/// Compatibility guard. Two contracts at once:
+///
+/// 1. **`None` = assume latest.** Crates-wide convention: unset
+///    `angular_version` means the consumer is on latest, so the
+///    compiler emits the modern (chained) form. Mirrors
+///    `supports_implicit_standalone`/`supports_service_decorator`'s
+///    `map_or(true, …)`.
+/// 2. **Explicit pre-v21.0.4 falls back.** On Angular 19, 20, and
+///    v21.0.0–v21.0.3 the runtime query functions return `void`, so
+///    chained emit would throw at runtime. Consumers targeting those
+///    versions must pass `angular_version` explicitly to opt out of
+///    the chained form.
+#[test]
+fn test_query_chaining_obeys_angular_version_gate() {
+    let allocator = Allocator::default();
+
+    let source = r"
+import { Component, ViewChild, ElementRef } from '@angular/core';
+
+@Component({
+    selector: 'app-login',
+    template: '<input #a /><input #b /><input #c />',
+})
+export class LoginFormComponent {
+    @ViewChild('a') a: ElementRef;
+    @ViewChild('b') b: ElementRef;
+    @ViewChild('c') c: ElementRef;
+}
+";
+
+    // Versions where chained emit would crash at runtime — must produce
+    // three separate `ɵɵviewQuery(…)` statements.
+    let unsafe_versions: [AngularVersion; 3] = [
+        AngularVersion::new(19, 2, 0),
+        AngularVersion::new(20, 0, 0),
+        AngularVersion::new(21, 0, 3),
+    ];
+    for version in unsafe_versions {
+        let options =
+            ComponentTransformOptions { angular_version: Some(version), ..Default::default() };
+        let result =
+            transform_angular_file(&allocator, "login.component.ts", source, Some(&options), None);
+        assert!(!result.has_errors(), "v{version:?} should compile: {:?}", result.diagnostics);
+
+        let code = &result.code;
+        let root_calls = code.matches("ɵɵviewQuery(").count();
+        assert_eq!(
+            root_calls, 3,
+            "v{version:?}: expected 3 separate ɵɵviewQuery statements (chained emit \
+             unsafe pre-v21.0.4). Output:\n{code}"
+        );
+    }
+
+    // Versions where chained emit is safe — including `None` (assume
+    // latest) per the crate's convention.
+    let chained_versions: [Option<AngularVersion>; 3] =
+        [None, Some(AngularVersion::new(21, 0, 4)), Some(AngularVersion::new(22, 0, 0))];
+    for version in chained_versions {
+        let options = ComponentTransformOptions { angular_version: version, ..Default::default() };
+        let result =
+            transform_angular_file(&allocator, "login.component.ts", source, Some(&options), None);
+        let code = &result.code;
+        assert_eq!(
+            code.matches("ɵɵviewQuery(").count(),
+            1,
+            "v{version:?}: should chain — `None` defaults to assume-latest, \
+             v21.0.4+ has `typeof <fn>` return. Output:\n{code}"
+        );
     }
 }
 

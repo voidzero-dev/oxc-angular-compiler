@@ -72,6 +72,7 @@ pub fn generate_directive_definitions<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveDefinitions<'a> {
     // IMPORTANT: Generate ɵfac BEFORE ɵdir to match Angular's namespace index assignment order.
     // Angular processes results in order [fac, def, ...] during the transform phase
@@ -80,7 +81,7 @@ pub fn generate_directive_definitions<'a>(
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     let fac_definition = generate_fac_definition(allocator, metadata);
     let (dir_definition, next_pool_index) =
-        generate_dir_definition(allocator, metadata, pool_starting_index);
+        generate_dir_definition(allocator, metadata, pool_starting_index, angular_version);
 
     DirectiveDefinitions { dir_definition, fac_definition, next_pool_index }
 }
@@ -104,8 +105,9 @@ fn generate_dir_definition<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> (OutputExpression<'a>, u32) {
-    let result = compile_directive(allocator, metadata, pool_starting_index);
+    let result = compile_directive(allocator, metadata, pool_starting_index, angular_version);
     (result.expression, result.next_pool_index)
 }
 
@@ -228,7 +230,7 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let definitions = generate_directive_definitions(&allocator, &metadata, 0);
+        let definitions = generate_directive_definitions(&allocator, &metadata, 0, None);
 
         let emitter = JsEmitter::new();
 
@@ -398,7 +400,7 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let (dir, _next_pool_index) = generate_dir_definition(&allocator, &metadata, 0);
+        let (dir, _next_pool_index) = generate_dir_definition(&allocator, &metadata, 0, None);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&dir);
@@ -448,7 +450,7 @@ mod tests {
         };
 
         // Compile first directive
-        let definitions1 = generate_directive_definitions(&allocator, &metadata1, 0);
+        let definitions1 = generate_directive_definitions(&allocator, &metadata1, 0, None);
         let next_index = definitions1.next_pool_index;
 
         // The next_pool_index should be 0 when no constants are pooled
@@ -485,7 +487,7 @@ mod tests {
         };
 
         // Compile second directive starting from where first left off
-        let definitions2 = generate_directive_definitions(&allocator, &metadata2, next_index);
+        let definitions2 = generate_directive_definitions(&allocator, &metadata2, next_index, None);
 
         // Verify both directives compiled successfully
         let emitter = JsEmitter::new();
