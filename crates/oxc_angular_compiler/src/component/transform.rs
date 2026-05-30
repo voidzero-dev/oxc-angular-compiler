@@ -905,18 +905,34 @@ fn find_angular_service_decorator<'a>(
     for decorator in &class.decorators {
         let Expression::CallExpression(call) = &decorator.expression else { continue };
         let Expression::Identifier(id) = &call.callee else { continue };
-        if id.name != "Service" {
-            continue;
-        }
-        let from_angular_core = import_map
-            .get(&Ident::from(id.name.as_str()))
-            .map(|info| info.source_module.as_str() == "@angular/core")
-            .unwrap_or(false);
-        if from_angular_core {
+        if is_angular_core_export(import_map, id.name.as_str(), "Service") {
             return Some(decorator);
         }
     }
     None
+}
+
+/// Whether `local_name` resolves to the named `@angular/core` export.
+///
+/// Matches when the import is from `@angular/core` AND the original exported
+/// name equals `exported_name` — so `import { Injectable as Service }` does
+/// not pass `is_angular_core_export(.., "Service", "Service")` even though
+/// the local binding is `Service`. Bare `import { Service }` (no alias)
+/// passes because `imported_name` is `None`, meaning the local name and the
+/// exported name agree.
+fn is_angular_core_export(
+    import_map: &ImportMap<'_>,
+    local_name: &str,
+    exported_name: &str,
+) -> bool {
+    let Some(info) = import_map.get(&Ident::from(local_name)) else { return false };
+    if info.source_module.as_str() != "@angular/core" {
+        return false;
+    }
+    match &info.imported_name {
+        Some(imported) => imported.as_str() == exported_name,
+        None => local_name == exported_name,
+    }
 }
 
 /// Return the name of the first non-`Service` `@angular/core` decorator on
@@ -999,11 +1015,7 @@ fn find_angular_decorator<'a>(
 
             if matches!(kind, Some(AngularDecoratorKind::Service)) {
                 if let Expression::Identifier(id) = &call.callee {
-                    let info = import_map.get(&Ident::from(id.name.as_str()));
-                    let from_angular_core = info
-                        .map(|info| info.source_module.as_str() == "@angular/core")
-                        .unwrap_or(false);
-                    if !from_angular_core {
+                    if !is_angular_core_export(import_map, id.name.as_str(), "Service") {
                         continue;
                     }
                 }
@@ -2452,6 +2464,27 @@ pub fn transform_angular_file(
         };
 
         if let Some(class) = class {
+            // Pre-flight: catch @Service co-located with another Angular
+            // decorator before the primary-decorator branches dispatch.
+            // Upstream service.ts:101-116 rejects this combination; without
+            // this early check, @Component / @Directive / @Pipe / @NgModule /
+            // @Injectable would win the branch race and compile the class
+            // (leaving the @Service decorator removed inconsistently) instead
+            // of producing the intended diagnostic.
+            if find_angular_service_decorator(class, &import_map).is_some() {
+                if let Some(conflict_name) = find_conflicting_angular_decorator(class, &import_map)
+                {
+                    let class_name_for_diag =
+                        class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Cannot apply more than one Angular decorator on an @Service class. \
+                         '{}' is also decorated with @{}.",
+                        class_name_for_diag, conflict_name
+                    )));
+                    continue;
+                }
+            }
+
             // Compute implicit_standalone based on Angular version
             let implicit_standalone = options.implicit_standalone();
 
@@ -3080,19 +3113,6 @@ pub fn transform_angular_file(
                         result.diagnostics.push(OxcDiagnostic::error(format!(
                             "The @Service decorator on '{}' requires Angular v22 or later.",
                             class_name_for_diag
-                        )));
-                        continue;
-                    }
-
-                    // Collision diagnostic: upstream service.ts:101-116 rejects
-                    // @Service co-located with any other @angular/core decorator.
-                    if let Some(conflict_name) =
-                        find_conflicting_angular_decorator(class, &import_map)
-                    {
-                        result.diagnostics.push(OxcDiagnostic::error(format!(
-                            "Cannot apply more than one Angular decorator on an @Service class. \
-                             '{}' is also decorated with @{}.",
-                            class_name_for_diag, conflict_name
                         )));
                         continue;
                     }

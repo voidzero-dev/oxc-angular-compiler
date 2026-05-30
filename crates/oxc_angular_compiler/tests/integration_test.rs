@@ -13584,6 +13584,92 @@ export class CounterService {}
 }
 
 #[test]
+fn test_aot_service_decorator_collision_with_component() {
+    // The collision check must fire even when the co-located decorator is a
+    // primary (Component/Directive/Pipe/NgModule) branch. Without the
+    // pre-flight gate, the Component branch would win the dispatch race and
+    // silently compile the class as a component — leaving the @Service
+    // decorator removed inconsistently instead of surfacing the diagnostic.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service, Component } from '@angular/core';
+
+@Service()
+@Component({ selector: 'app-c', template: '' })
+export class CounterService {}
+";
+
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+
+    assert!(
+        result.has_errors(),
+        "@Service + @Component should produce a collision diagnostic. Got none.\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| {
+            let s = d.to_string();
+            s.contains("@Service") && s.contains("Component")
+        }),
+        "Diagnostic should call out @Service and Component. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineComponent"),
+        "Should NOT emit component definition when the collision rule fires. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Should NOT emit service definition when the collision rule fires. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_aliased_injectable_as_service_is_not_compiled_as_service() {
+    // `import { Injectable as Service }` aliases Injectable to the local
+    // name `Service`. The local-name-only gate would misclassify this as
+    // the v22 @Service decorator (and even emit `@Service requires v22` on
+    // pre-v22 targets). The fix consults the import's original exported
+    // name so only `import { Service }` from `@angular/core` qualifies.
+    //
+    // Note: this test asserts the negative claim only. Whether the class
+    // gets compiled as @Injectable via the aliased local name is a separate
+    // pre-existing concern of the Injectable branch.
+    let allocator = Allocator::default();
+    let source = r"
+import { Injectable as Service } from '@angular/core';
+
+@Service()
+export class CounterService {}
+";
+
+    // Target Angular v21 so a false-positive @Service classification would
+    // trip the v22 version gate.
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(21, 0, 0)),
+        ..Default::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "counter.service.ts", source, Some(&options), None);
+
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.to_string().contains("@Service") && d.to_string().contains("v22")),
+        "Aliased Injectable should not trip the @Service v22 gate. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        !result.code.contains("ɵɵdefineService"),
+        "Aliased Injectable must not be compiled via the @Service path. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn test_aot_non_angular_service_decorator_is_ignored() {
     // A `@Service()` from a non-Angular library must not be transformed —
     // no ɵfac/ɵprov emission, no version-gate diagnostic.
