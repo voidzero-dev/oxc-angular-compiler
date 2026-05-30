@@ -13742,6 +13742,70 @@ export class CounterService {}
 }
 
 #[test]
+fn test_aot_namespace_service_import_emits_definition() {
+    // `import * as ng from '@angular/core'; @ng.Service()` is a valid v22
+    // service in upstream Angular. The AOT dispatcher must accept the
+    // namespace form (the JIT classifier already does), otherwise the
+    // class silently skips the service branch and is emitted without
+    // ɵfac/ɵprov.
+    let allocator = Allocator::default();
+    let source = r"
+import * as ng from '@angular/core';
+
+@ng.Service()
+export class CounterService {}
+";
+
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "Namespaced @ng.Service() should compile without errors. Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.code.contains("ɵɵdefineService"),
+        "Namespaced @ng.Service() must emit ɵɵdefineService. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_aot_service_namespace_collision_preflight_ignores_third_party() {
+    // The collision preflight must use the import map to decide whether a
+    // namespace decorator like `@thirdParty.Component()` is actually an
+    // Angular decorator. Without this, an @Service class with an
+    // unrelated namespaced decorator would falsely trip the collision
+    // diagnostic and never get compiled.
+    let allocator = Allocator::default();
+    let source = r"
+import { Service } from '@angular/core';
+import * as thirdParty from 'some-other-lib';
+
+@Service()
+@thirdParty.Component()
+export class CounterService {}
+";
+
+    let result = transform_angular_file(&allocator, "counter.service.ts", source, None, None);
+
+    assert!(
+        !result.diagnostics.iter().any(|d| {
+            let s = d.to_string();
+            s.contains("@Service") && s.contains("@Component")
+        }),
+        "Third-party namespace @Component must not trip the @Service collision diagnostic. \
+         Got: {:?}",
+        result.diagnostics
+    );
+    assert!(
+        result.code.contains("ɵɵdefineService"),
+        "Service compilation must still proceed despite the unrelated namespace decorator. \
+         Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
 fn test_aot_non_angular_service_decorator_is_ignored() {
     // A `@Service()` from a non-Angular library must not be transformed —
     // no ɵfac/ɵprov emission, no version-gate diagnostic.

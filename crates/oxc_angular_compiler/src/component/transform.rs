@@ -901,8 +901,26 @@ fn find_angular_service_decorator<'a>(
 ) -> Option<&'a oxc_ast::ast::Decorator<'a>> {
     for decorator in &class.decorators {
         let Expression::CallExpression(call) = &decorator.expression else { continue };
-        let Expression::Identifier(id) = &call.callee else { continue };
-        if is_angular_core_export(import_map, id.name.as_str(), "Service") {
+        let from_angular_core = match &call.callee {
+            Expression::Identifier(id) => {
+                is_angular_core_export(import_map, id.name.as_str(), "Service")
+            }
+            // Namespace form `@ns.Service()`: accept when `ns` is a
+            // namespace import from `@angular/core`. Without this, AOT
+            // would silently skip namespaced services that the JIT path
+            // already classifies correctly.
+            Expression::StaticMemberExpression(member) => {
+                member.property.name.as_str() == "Service"
+                    && match &member.object {
+                        Expression::Identifier(ns) => {
+                            is_angular_core_namespace(import_map, ns.name.as_str())
+                        }
+                        _ => false,
+                    }
+            }
+            _ => false,
+        };
+        if from_angular_core {
             return Some(decorator);
         }
     }
@@ -966,16 +984,22 @@ fn find_conflicting_angular_decorator<'a>(
         if !ANGULAR_DECORATORS.contains(&name) {
             continue;
         }
-        // For Identifier-callees, verify the import resolves to @angular/core.
-        // Namespace-style (`@core.Component()`) is treated as Angular without
-        // a lookup, matching `find_angular_decorator`'s behavior.
+        // Verify the import resolves to @angular/core for both identifier
+        // and namespace callees. Without the namespace lookup, an unrelated
+        // `@thirdParty.Component()` on an @Service class would falsely
+        // trigger the collision preflight and block valid services.
         let is_angular = if let Expression::CallExpression(call) = &decorator.expression {
             match &call.callee {
                 Expression::Identifier(id) => import_map
                     .get(&Ident::from(id.name.as_str()))
                     .map(|info| info.source_module.as_str() == "@angular/core")
                     .unwrap_or(false),
-                Expression::StaticMemberExpression(_) => true,
+                Expression::StaticMemberExpression(member) => match &member.object {
+                    Expression::Identifier(ns) => {
+                        is_angular_core_namespace(import_map, ns.name.as_str())
+                    }
+                    _ => false,
+                },
                 _ => false,
             }
         } else {
