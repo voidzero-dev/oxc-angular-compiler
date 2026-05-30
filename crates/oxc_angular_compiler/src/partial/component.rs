@@ -50,7 +50,6 @@ use crate::output::ast::{
     InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry, LiteralMapExpr,
     LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
 };
-use crate::pipe::R3DependencyMetadata as PipeDep;
 use crate::r3::Identifiers;
 
 /// Inputs the partial Component emitter needs that aren't carried on the
@@ -769,11 +768,6 @@ fn clone_factory_deps<'a>(
         }
     }
 }
-
-// Suppress unused warning for type imported only to disambiguate names in
-// the public surface — keeps the API surface stable when we later need it.
-#[allow(dead_code)]
-fn _unused_imports_marker(_: PipeDep<'_>) {}
 
 // ---- low-level helpers ----------------------------------------------------
 

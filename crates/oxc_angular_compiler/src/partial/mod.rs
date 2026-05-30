@@ -136,21 +136,14 @@ pub const MIN_VERSION_FACTORY: &str = "12.0.0";
 
 /// Minimum linker version for the other partial-declaration kinds.
 ///
-/// These constants are used as new partial emitters land. Listed here so
-/// every minVersion lives in one place and stays in sync with upstream.
-#[allow(dead_code)]
+/// Listed here so every minVersion lives in one place and stays in sync
+/// with upstream's `packages/compiler/src/render3/partial/*.ts` files.
+/// Directive and Component compute their effective minVersion dynamically
+/// (signal inputs, signal queries, control-flow blocks all bump it) so no
+/// dedicated DIRECTIVE_BASE / COMPONENT_BASE constant is needed here.
 pub(crate) const MIN_VERSION_INJECTABLE: &str = "12.0.0";
-#[allow(dead_code)]
 pub(crate) const MIN_VERSION_INJECTOR: &str = "12.0.0";
-#[allow(dead_code)]
 pub(crate) const MIN_VERSION_CLASS_METADATA: &str = "12.0.0";
-#[allow(dead_code)]
 pub(crate) const MIN_VERSION_PIPE: &str = "14.0.0";
-#[allow(dead_code)]
 pub(crate) const MIN_VERSION_NG_MODULE: &str = "14.0.0";
-#[allow(dead_code)]
-pub(crate) const MIN_VERSION_DIRECTIVE_BASE: &str = "14.0.0";
-#[allow(dead_code)]
-pub(crate) const MIN_VERSION_COMPONENT_BASE: &str = "14.0.0";
-#[allow(dead_code)]
 pub(crate) const MIN_VERSION_CLASS_METADATA_ASYNC: &str = "18.0.0";
