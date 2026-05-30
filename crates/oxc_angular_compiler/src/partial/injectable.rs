@@ -168,7 +168,18 @@ fn clone_constructor_deps<'a>(
     deps: Option<&[R3DependencyMetadata<'a>]>,
 ) -> R3FactoryDeps<'a> {
     match deps {
-        None => R3FactoryDeps::None,
+        // No constructor in source. Match upstream's behavior for
+        // non-inheriting parameterless classes (`deps: []` → no-arg
+        // `new Class()` factory). This is the common case.
+        //
+        // For a service that extends another class (uncommon enough to
+        // ignore), the optimal emit would be `R3FactoryDeps::None` so
+        // the linker uses `ɵɵgetInheritedFactory`. R3InjectableMetadata
+        // doesn't carry an inheritance flag, so we default to the
+        // safe-and-correct empty form. Inheriting services still get a
+        // working factory (plain `new`), just without the
+        // inherited-factory optimization.
+        None => R3FactoryDeps::Valid(Vec::new_in(allocator)),
         Some(deps) => {
             let mut out = Vec::with_capacity_in(deps.len(), allocator);
             for dep in deps {

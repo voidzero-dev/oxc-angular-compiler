@@ -156,26 +156,23 @@ fn hello_world_ng_module_partial_emit_matches_upstream_shape() {
 }
 
 // ============================================================================
-// Known divergence: factory `deps` field for parameterless classes
+// Factory `deps` field for parameterless classes — matches upstream
 // ============================================================================
 //
 // Upstream emits `deps: []` (empty array) for classes with no explicit
-// constructor: the analyzer treats them as having an implicit no-arg
-// constructor.
+// constructor. OXC now matches this behavior for Pipe/Injectable/NgModule
+// partial factories — see `partial/pipe.rs`, `partial/injectable.rs`, and
+// `partial/ng_module.rs`. Previously OXC emitted `deps: null`, which the
+// linker interprets as "use ɵɵgetInheritedFactory" — wrong runtime
+// behavior for non-inheriting classes.
 //
-// OXC's R3PipeMetadata / ComponentMetadata uses `Option<Vec<...>>` ambiguously:
-//   - `None` is the "no constructor metadata" state — we emit `deps: null`.
-//   - `Some([])` would emit `deps: []` (the upstream-equivalent shape).
-//
-// Both produce a working factory when round-tripped through the linker
-// (the linker accepts either form and generates the appropriate factory).
-// Fixing this for true upstream parity needs the decorator analyzers to
-// emit `Some(vec![])` for parameterless classes instead of `None`.
-//
-// Tracked here so the divergence is documented rather than silent.
+// (OXC's analyzers for these decorators don't track inheritance today,
+// so a Pipe / Injectable / NgModule that explicitly `extends` another
+// class will get a no-arg factory rather than an inherited one. That's
+// still functionally correct — just misses an optimization.)
 
 #[test]
-fn known_divergence_factory_deps_for_parameterless_class() {
+fn parameterless_pipe_factory_emits_empty_deps_array() {
     let allocator = Allocator::default();
     let source = "import { Pipe } from '@angular/core';
 
@@ -184,21 +181,13 @@ export class ReversePipe {}
 ";
     let code = compile_partial(&allocator, "reverse.pipe.ts", source);
 
-    // OXC emits `deps: null` (or `deps: []` — either is acceptable; we
-    // just assert we emit *some* deps slot and let the round-trip prove
-    // correctness).
     assert!(
-        code.contains("deps:null") || code.contains("deps:[]") || code.contains("deps: []"),
-        "should emit a deps slot for parameterless pipe (got:\n{code})"
+        code.contains("deps:[]") || code.contains("deps: []"),
+        "expected deps:[] for parameterless pipe (matches upstream golden), got:\n{code}"
     );
-
-    // Upstream emits `deps: []`. OXC currently emits `deps: null`. We
-    // document this; the assertion below WILL pass today because we emit
-    // null, and intentionally fails if/when the analyzer is fixed — at
-    // which point this test should be updated.
     assert!(
-        code.contains("deps:null"),
-        "DOCUMENTING DIVERGENCE: OXC currently emits `deps: null` for parameterless classes; upstream emits `deps: []`. When the analyzer is updated to emit Some(vec![]), update this test. Got:\n{code}"
+        !code.contains("deps:null"),
+        "deps:null is the pre-fix divergence — should be deps:[] now. Got:\n{code}"
     );
 }
 

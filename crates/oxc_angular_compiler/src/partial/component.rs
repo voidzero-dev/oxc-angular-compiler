@@ -281,6 +281,20 @@ pub fn compile_declare_component_from_metadata<'a>(
         ));
     }
 
+    // NOTE: `deferBlockDependencies` (upstream component.ts:132-153) is not
+    // emitted here. Upstream walks `meta.defer.blocks` and writes one
+    // resolver entry per `@defer` block, gated on
+    // `DeferBlockDepsEmitMode::PerBlock`. OXC's `ComponentMetadata`
+    // doesn't carry the per-block resolver map — only
+    // `deferred_imports: Vec<Ident>` for the *class-level* async metadata
+    // resolver (which DOES land via `compile_declare_class_metadata_async`).
+    // The functional gap: components that use `@defer` blocks with
+    // deferrable imports get the async class metadata declaration but no
+    // per-block resolvers in `ɵcmp`, so the linker can't reconstruct the
+    // lazy-loading wiring. Closing this needs a metadata-pipeline change
+    // to populate per-block resolvers — out of scope for the partial
+    // emitter slice.
+
     invoke_declare(allocator, Identifiers::DECLARE_COMPONENT, entries)
 }
 

@@ -38,17 +38,19 @@ pub fn compile_declare_injector_from_metadata<'a>(
     entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
     entries.push(LiteralMapEntry::new(Ident::from("type"), meta.r#type.clone_in(allocator), false));
 
-    // providers: required by upstream. Emit literal-null if absent —
-    // matches upstream injector.ts:47 (providers slot is always set; may
-    // be `null` literal).
-    let providers_expr =
-        meta.providers.as_ref().map(|p| p.clone_in(allocator)).unwrap_or_else(|| {
-            OutputExpression::Literal(Box::new_in(
-                LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
-            ))
-        });
-    entries.push(LiteralMapEntry::new(Ident::from("providers"), providers_expr, false));
+    // providers: upstream emits this slot only when defined. Omitting it
+    // when our metadata has no providers matches the byte-shape of
+    // upstream's hello_world golden (`{ minVersion: ..., ngImport: ...,
+    // type: MyModule }` — no providers field). The linker treats the
+    // missing field as "no providers" — identical runtime to
+    // `providers: []`.
+    if let Some(providers) = &meta.providers {
+        entries.push(LiteralMapEntry::new(
+            Ident::from("providers"),
+            providers.clone_in(allocator),
+            false,
+        ));
+    }
 
     // imports: omitted when empty. Prefer raw_imports (preserves calls
     // like `StoreModule.forRoot(...)` and spread elements) over the

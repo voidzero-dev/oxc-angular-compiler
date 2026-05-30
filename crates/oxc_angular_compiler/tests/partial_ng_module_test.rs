@@ -134,9 +134,11 @@ fn injector_with_providers_only() {
 }
 
 #[test]
-fn injector_without_providers_emits_null() {
-    // Upstream's providers slot is always populated — emit a literal null
-    // when our metadata has no providers expression. Mirrors injector.ts:47.
+fn injector_without_providers_omits_field() {
+    // Upstream omits the `providers` field entirely when no providers are
+    // present (see hello_world GOLDEN_PARTIAL.js where MyModule's ɵinj
+    // has no providers field). Emit-mode parity: match upstream byte
+    // shape so library output stays compact.
     let allocator = Allocator::default();
     let meta = R3InjectorMetadataBuilder::new(&allocator)
         .name(Ident::from("EmptyModule"))
@@ -146,7 +148,7 @@ fn injector_without_providers_emits_null() {
     let expr = compile_declare_injector_from_metadata(&allocator, &meta);
 
     let js = emit(&expr);
-    assert!(js.contains("providers:null"), "expected providers:null, got: {js}");
+    assert!(!js.contains("providers"), "providers field should be omitted entirely, got: {js}");
 }
 
 #[test]

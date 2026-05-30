@@ -83,20 +83,22 @@ pub fn compile_declare_factory_for_ng_module<'a>(
     allocator: &'a Allocator,
     meta: &R3NgModuleMetadata<'a>,
 ) -> OutputExpression<'a> {
-    // NgModules in partial mode never have constructor deps in the metadata
-    // we receive — the upstream NgModule handler builds the factory with
-    // an empty deps array (see ng_module/handler.ts:962). The full-mode
-    // emit path threads the actual constructor deps from the decorator
-    // analyzer, but our R3NgModuleMetadata doesn't carry them. Emit
-    // `deps: null` so the linker generates an inherited factory — which
-    // is the standard behavior for parameterless NgModules (the common
-    // case).
+    // R3NgModuleMetadata doesn't carry constructor deps — the OXC
+    // NgModule analyzer doesn't extract them since NgModule classes are
+    // virtually always parameterless. Emit `deps: []` to match upstream's
+    // golden behavior (see compiler-cli/test/compliance/test_cases/
+    // r3_view_compiler/hello_world/GOLDEN_PARTIAL.js — every ɵfac for
+    // an NgModule carries `deps: []`). The linker then generates the
+    // simple `new MyModule()` factory.
+    //
+    // An NgModule that extends another class is exotic enough that
+    // accepting a suboptimal-but-correct factory there is fine.
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
         name: Ident::from("NgModuleFactory"),
         type_expr: meta.r#type.value.clone_in(allocator),
         type_decl: meta.r#type.value.clone_in(allocator),
         type_argument_count: 0,
-        deps: R3FactoryDeps::None,
+        deps: R3FactoryDeps::Valid(Vec::new_in(allocator)),
         target: FactoryTarget::NgModule,
     });
     compile_declare_factory_function(allocator, &factory_meta)
