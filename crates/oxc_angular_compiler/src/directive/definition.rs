@@ -16,11 +16,15 @@ use oxc_allocator::{Allocator, Vec};
 
 use super::compiler::compile_directive;
 use super::metadata::R3DirectiveMetadata;
+use crate::CompilationMode;
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata, compile_factory_function,
 };
 use crate::output::ast::OutputExpression;
+use crate::partial::directive::{
+    compile_declare_directive_from_metadata, compile_declare_factory_for_directive,
+};
 
 /// Result of generating directive definitions.
 pub struct DirectiveDefinitions<'a> {
@@ -72,6 +76,7 @@ pub fn generate_directive_definitions<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    compilation_mode: CompilationMode,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveDefinitions<'a> {
     // IMPORTANT: Generate ɵfac BEFORE ɵdir to match Angular's namespace index assignment order.
@@ -79,11 +84,28 @@ pub fn generate_directive_definitions<'a>(
     // (see packages/compiler-cli/src/ngtsc/annotations/directive/src/handler.ts:461-468),
     // so factory dependencies get registered first, followed by directive definition dependencies.
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
-    let fac_definition = generate_fac_definition(allocator, metadata);
-    let (dir_definition, next_pool_index) =
-        generate_dir_definition(allocator, metadata, pool_starting_index, angular_version);
-
-    DirectiveDefinitions { dir_definition, fac_definition, next_pool_index }
+    match compilation_mode {
+        CompilationMode::Full => {
+            let fac_definition = generate_fac_definition(allocator, metadata);
+            let (dir_definition, next_pool_index) =
+                generate_dir_definition(allocator, metadata, pool_starting_index, angular_version);
+            DirectiveDefinitions { dir_definition, fac_definition, next_pool_index }
+        }
+        CompilationMode::Partial => {
+            // Partial mode doesn't use the constant pool — the linker does
+            // template parsing and selector parsing at link time, so no
+            // constants are emitted here. `angular_version` is irrelevant
+            // because partial mode emits the verbatim selector and lets
+            // the linker pick up the consumer's runtime version.
+            let fac_definition = compile_declare_factory_for_directive(allocator, metadata);
+            let dir_definition = compile_declare_directive_from_metadata(allocator, metadata);
+            DirectiveDefinitions {
+                dir_definition,
+                fac_definition,
+                next_pool_index: pool_starting_index,
+            }
+        }
+    }
 }
 
 /// Generate the ɵdir definition.
@@ -230,7 +252,8 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let definitions = generate_directive_definitions(&allocator, &metadata, 0, None);
+        let definitions =
+            generate_directive_definitions(&allocator, &metadata, 0, CompilationMode::Full, None);
 
         let emitter = JsEmitter::new();
 
@@ -450,7 +473,8 @@ mod tests {
         };
 
         // Compile first directive
-        let definitions1 = generate_directive_definitions(&allocator, &metadata1, 0, None);
+        let definitions1 =
+            generate_directive_definitions(&allocator, &metadata1, 0, CompilationMode::Full, None);
         let next_index = definitions1.next_pool_index;
 
         // The next_pool_index should be 0 when no constants are pooled
@@ -487,7 +511,13 @@ mod tests {
         };
 
         // Compile second directive starting from where first left off
-        let definitions2 = generate_directive_definitions(&allocator, &metadata2, next_index, None);
+        let definitions2 = generate_directive_definitions(
+            &allocator,
+            &metadata2,
+            next_index,
+            CompilationMode::Full,
+            None,
+        );
 
         // Verify both directives compiled successfully
         let emitter = JsEmitter::new();

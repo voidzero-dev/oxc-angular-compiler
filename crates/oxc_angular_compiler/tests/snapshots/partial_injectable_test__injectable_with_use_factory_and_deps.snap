@@ -1,0 +1,7 @@
+---
+source: crates/oxc_angular_compiler/tests/partial_injectable_test.rs
+expression: js
+---
+i0.ɵɵngDeclareInjectable({minVersion:"12.0.0",version:"0.0.0-PLACEHOLDER",ngImport:i0,
+    type:MyService,providedIn:"root",useFactory:createService,deps:[{token:Dep1},{token:Dep2,
+        optional:true}]})

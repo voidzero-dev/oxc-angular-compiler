@@ -27,11 +27,13 @@ use oxc_allocator::{Allocator, Vec as OxcVec};
 use super::compiler::compile_pipe;
 use super::decorator::PipeMetadata;
 use super::metadata::R3PipeMetadata;
+use crate::CompilationMode;
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata, compile_factory_function,
 };
 use crate::output::ast::{OutputExpression, ReadVarExpr};
+use crate::partial::pipe::{compile_declare_factory_for_pipe, compile_declare_pipe_from_metadata};
 
 /// Result of generating pipe definition (ɵpipe only).
 ///
@@ -141,6 +143,7 @@ pub fn generate_pipe_definition_from_decorator<'a>(
 pub fn generate_full_pipe_definition_from_decorator<'a>(
     allocator: &'a Allocator,
     metadata: &PipeMetadata<'a>,
+    compilation_mode: CompilationMode,
 ) -> Option<FullPipeDefinition<'a>> {
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
     // IMPORTANT: Generate ɵfac BEFORE ɵpipe to match Angular's namespace index assignment order.
@@ -148,10 +151,18 @@ pub fn generate_full_pipe_definition_from_decorator<'a>(
     // (see packages/compiler-cli/src/ngtsc/annotations/src/pipe.ts:266-273),
     // so factory dependencies get registered first, followed by pipe definition dependencies.
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
-    let fac_definition = generate_pipe_fac(allocator, metadata);
-    let pipe_result = compile_pipe(allocator, &r3_metadata);
-
-    Some(FullPipeDefinition { pipe_definition: pipe_result.expression, fac_definition })
+    match compilation_mode {
+        CompilationMode::Full => {
+            let fac_definition = generate_pipe_fac(allocator, metadata);
+            let pipe_result = compile_pipe(allocator, &r3_metadata);
+            Some(FullPipeDefinition { pipe_definition: pipe_result.expression, fac_definition })
+        }
+        CompilationMode::Partial => {
+            let fac_definition = compile_declare_factory_for_pipe(allocator, &r3_metadata);
+            let pipe_definition = compile_declare_pipe_from_metadata(allocator, &r3_metadata);
+            Some(FullPipeDefinition { pipe_definition, fac_definition })
+        }
+    }
 }
 
 /// Generate ɵfac factory function for a pipe.

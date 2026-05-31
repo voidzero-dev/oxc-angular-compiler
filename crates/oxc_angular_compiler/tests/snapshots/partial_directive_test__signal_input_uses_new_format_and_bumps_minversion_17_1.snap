@@ -1,0 +1,7 @@
+---
+source: crates/oxc_angular_compiler/tests/partial_directive_test.rs
+expression: js
+---
+i0.ɵɵngDeclareDirective({minVersion:"17.1.0",version:"0.0.0-PLACEHOLDER",type:MyDir,
+    selector:"[myDir]",inputs:{value:{classPropertyName:"value",publicName:"value",
+        isSignal:true,isRequired:false,transformFunction:null}},ngImport:i0})

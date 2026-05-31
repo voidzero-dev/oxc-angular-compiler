@@ -26,4 +26,6 @@ pub use definition::{
     InjectableDefinition, generate_injectable_definition,
     generate_injectable_definition_from_decorator,
 };
-pub use metadata::{InjectableProvider, R3InjectableMetadata, R3InjectableMetadataBuilder};
+pub use metadata::{
+    InjectableProvider, ProvidedIn, R3InjectableMetadata, R3InjectableMetadataBuilder,
+};

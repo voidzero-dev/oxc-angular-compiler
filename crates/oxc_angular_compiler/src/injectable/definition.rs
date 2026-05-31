@@ -38,11 +38,15 @@ use oxc_allocator::{Allocator, Vec as OxcVec};
 use super::compiler::compile_injectable;
 use super::decorator::InjectableMetadata;
 use super::metadata::R3InjectableMetadata;
+use crate::CompilationMode;
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata, compile_factory_function,
 };
 use crate::output::ast::OutputExpression;
+use crate::partial::injectable::{
+    compile_declare_factory_for_injectable, compile_declare_injectable_from_metadata,
+};
 
 /// Result of generating injectable definitions.
 ///
@@ -93,16 +97,25 @@ pub struct InjectableDefinition<'a> {
 pub fn generate_injectable_definition<'a>(
     allocator: &'a Allocator,
     metadata: &R3InjectableMetadata<'a>,
+    compilation_mode: CompilationMode,
 ) -> InjectableDefinition<'a> {
     // IMPORTANT: Generate ɵfac BEFORE ɵprov to match Angular's namespace index assignment order.
     // Angular processes results in order [fac, prov, ...] during the transform phase
     // (see packages/compiler-cli/src/ngtsc/annotations/src/injectable.ts:218-253),
     // so factory dependencies get registered first, followed by prov definition dependencies.
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
-    let fac_definition = generate_fac_definition(allocator, metadata);
-    let prov_result = compile_injectable(allocator, metadata);
-
-    InjectableDefinition { prov_definition: prov_result.expression, fac_definition }
+    match compilation_mode {
+        CompilationMode::Full => {
+            let fac_definition = generate_fac_definition(allocator, metadata);
+            let prov_result = compile_injectable(allocator, metadata);
+            InjectableDefinition { prov_definition: prov_result.expression, fac_definition }
+        }
+        CompilationMode::Partial => {
+            let fac_definition = compile_declare_factory_for_injectable(allocator, metadata);
+            let prov_definition = compile_declare_injectable_from_metadata(allocator, metadata);
+            InjectableDefinition { prov_definition, fac_definition }
+        }
+    }
 }
 
 /// Generate the ɵfac factory function for an injectable.
@@ -194,9 +207,10 @@ fn generate_fac_definition<'a>(
 pub fn generate_injectable_definition_from_decorator<'a>(
     allocator: &'a Allocator,
     metadata: &InjectableMetadata<'a>,
+    compilation_mode: CompilationMode,
 ) -> Option<InjectableDefinition<'a>> {
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
-    Some(generate_injectable_definition(allocator, &r3_metadata))
+    Some(generate_injectable_definition(allocator, &r3_metadata, compilation_mode))
 }
 
 #[cfg(test)]
@@ -223,7 +237,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let definition = generate_injectable_definition(&allocator, &metadata);
+        let definition =
+            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -254,7 +269,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let definition = generate_injectable_definition(&allocator, &metadata);
+        let definition =
+            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -280,7 +296,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let definition = generate_injectable_definition(&allocator, &metadata);
+        let definition =
+            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -303,7 +320,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let definition = generate_injectable_definition(&allocator, &metadata);
+        let definition =
+            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -329,7 +347,8 @@ mod tests {
             .build()
             .unwrap();
 
-        let definition = generate_injectable_definition(&allocator, &metadata);
+        let definition =
+            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
 
         // The prov_definition should be an InvokeFunction with pure=true
         match &definition.prov_definition {
@@ -378,7 +397,11 @@ mod tests {
         assert_eq!(deps.len(), 3, "Should have 3 dependencies");
 
         // Generate the full definition and check the output
-        let definition = generate_injectable_definition_from_decorator(&allocator, &metadata);
+        let definition = generate_injectable_definition_from_decorator(
+            &allocator,
+            &metadata,
+            CompilationMode::Full,
+        );
         let definition = definition.expect("Should generate definition");
 
         let emitter = JsEmitter::new();
@@ -432,7 +455,11 @@ mod tests {
         assert!(metadata.deps.is_none(), "Should not have constructor deps");
 
         // Generate definition
-        let definition = generate_injectable_definition_from_decorator(&allocator, &metadata);
+        let definition = generate_injectable_definition_from_decorator(
+            &allocator,
+            &metadata,
+            CompilationMode::Full,
+        );
         let definition = definition.expect("Should generate definition");
 
         let emitter = JsEmitter::new();
@@ -474,7 +501,11 @@ mod tests {
         let metadata = metadata.expect("Should extract Injectable metadata");
 
         // Generate definition
-        let definition = generate_injectable_definition_from_decorator(&allocator, &metadata);
+        let definition = generate_injectable_definition_from_decorator(
+            &allocator,
+            &metadata,
+            CompilationMode::Full,
+        );
         let definition = definition.expect("Should generate definition");
 
         let emitter = JsEmitter::new();

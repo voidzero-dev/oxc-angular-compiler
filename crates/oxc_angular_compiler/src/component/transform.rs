@@ -190,6 +190,13 @@ pub struct TransformOptions {
     /// This runs after Angular style encapsulation, so it applies to the same
     /// final CSS strings that are embedded in component definitions.
     pub minify_component_styles: bool,
+
+    /// Selects between full Ivy emit (`ɵɵdefine*`) and partial-declaration
+    /// emit (`ɵɵngDeclare*`).
+    ///
+    /// `Full` (default) targets applications; `Partial` targets library
+    /// builds, where consumers run the linker to expand declarations.
+    pub compilation_mode: crate::CompilationMode,
 }
 
 /// Input for host metadata when passed via TransformOptions.
@@ -241,6 +248,7 @@ impl Default for TransformOptions {
             // it; production bundles strip the guarded call via tree-shaking.
             emit_class_metadata: true,
             minify_component_styles: false,
+            compilation_mode: crate::CompilationMode::Full,
         }
     }
 }
@@ -779,7 +787,12 @@ fn build_set_class_metadata_decls<'a>(
             namespace_registry,
         ),
     };
-    let metadata_expr = compile_class_metadata(allocator, &class_metadata);
+    let metadata_expr = match options.compilation_mode {
+        crate::CompilationMode::Full => compile_class_metadata(allocator, &class_metadata),
+        crate::CompilationMode::Partial => {
+            crate::partial::compile_declare_class_metadata(allocator, &class_metadata)
+        }
+    };
     let emitter = JsEmitter::new();
     format!("{};", emitter.emit_expression(&metadata_expr))
 }
@@ -2460,6 +2473,7 @@ pub fn transform_angular_file(
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                     allocator,
                                     injectable_metadata,
+                                    options.compilation_mode,
                                 ) {
                                     let emitter = JsEmitter::new();
                                     property_assignments.push_str(&format!(
@@ -2566,14 +2580,30 @@ pub fn transform_angular_file(
                                     } else {
                                         oxc_allocator::Vec::new_in(allocator)
                                     };
-                                    let metadata_expr = if deferred_deps.is_empty() {
-                                        compile_class_metadata(allocator, &class_metadata)
-                                    } else {
-                                        compile_component_class_metadata(
-                                            allocator,
-                                            &class_metadata,
-                                            Some(deferred_deps.as_slice()),
-                                        )
+                                    let metadata_expr = match options.compilation_mode {
+                                        crate::CompilationMode::Partial => {
+                                            // Partial mode mirrors upstream's
+                                            // compileComponentDeclareClassMetadata
+                                            // (class_metadata.ts:50): empty deferred
+                                            // deps → sync ɵɵngDeclareClassMetadata; one
+                                            // or more → async ɵɵngDeclareClassMetadataAsync.
+                                            crate::partial::compile_component_declare_class_metadata(
+                                                allocator,
+                                                &class_metadata,
+                                                deferred_deps.as_slice(),
+                                            )
+                                        }
+                                        crate::CompilationMode::Full => {
+                                            if deferred_deps.is_empty() {
+                                                compile_class_metadata(allocator, &class_metadata)
+                                            } else {
+                                                compile_component_class_metadata(
+                                                    allocator,
+                                                    &class_metadata,
+                                                    Some(deferred_deps.as_slice()),
+                                                )
+                                            }
+                                        }
                                     };
                                     let metadata_js = emitter.emit_expression(&metadata_expr);
 
@@ -2685,6 +2715,7 @@ pub fn transform_angular_file(
                         allocator,
                         &directive_metadata,
                         shared_pool_index,
+                        options.compilation_mode,
                         options.angular_version,
                     );
 
@@ -2713,6 +2744,7 @@ pub fn transform_angular_file(
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
                             allocator,
                             injectable_metadata,
+                            options.compilation_mode,
                         ) {
                             property_assignments.push_str(&format!(
                                 "\nstatic ɵprov = {};",
@@ -2783,9 +2815,11 @@ pub fn transform_angular_file(
                     }
 
                     // Compile pipe and generate both ɵfac and ɵpipe definitions as external property assignments
-                    if let Some(definition) =
-                        generate_full_pipe_definition_from_decorator(allocator, &pipe_metadata)
-                    {
+                    if let Some(definition) = generate_full_pipe_definition_from_decorator(
+                        allocator,
+                        &pipe_metadata,
+                        options.compilation_mode,
+                    ) {
                         // Use JsEmitter to emit both expressions
                         let emitter = JsEmitter::new();
                         let class_name = pipe_metadata.class_name.to_string();
@@ -2808,6 +2842,7 @@ pub fn transform_angular_file(
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
                                 injectable_metadata,
+                                options.compilation_mode,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -2880,9 +2915,11 @@ pub fn transform_angular_file(
                     }
 
                     // Compile NgModule and generate all definitions as external property assignments
-                    if let Some(definition) =
-                        generate_full_ng_module_definition(allocator, &ng_module_metadata)
-                    {
+                    if let Some(definition) = generate_full_ng_module_definition(
+                        allocator,
+                        &ng_module_metadata,
+                        options.compilation_mode,
+                    ) {
                         let emitter = JsEmitter::new();
                         let class_name = ng_module_metadata.class_name.to_string();
 
@@ -2907,6 +2944,7 @@ pub fn transform_angular_file(
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 allocator,
                                 injectable_metadata,
+                                options.compilation_mode,
                             ) {
                                 property_assignments.push_str(&format!(
                                     "\nstatic ɵprov = {};",
@@ -2996,6 +3034,7 @@ pub fn transform_angular_file(
                     if let Some(definition) = generate_injectable_definition_from_decorator(
                         allocator,
                         &injectable_metadata,
+                        options.compilation_mode,
                     ) {
                         let emitter = JsEmitter::new();
                         let class_name = injectable_metadata.class_name.to_string();
@@ -3227,6 +3266,49 @@ struct FullCompilationResult {
 /// The `namespace_registry` parameter is used to track and assign namespace aliases
 /// for imported modules. It is shared across all components in the file to ensure
 /// consistent namespace assignments for factory generation and import statements.
+/// Partial-mode component compile: bypass the entire template/IR pipeline
+/// and emit `ɵɵngDeclareComponent` + `ɵɵngDeclareFactory` directly from the
+/// metadata. The linker re-parses the verbatim template at consumer build
+/// time. See `crate::partial::component` for the shape.
+fn compile_component_partial<'a>(
+    allocator: &'a Allocator,
+    template: &'a str,
+    metadata: &ComponentMetadata<'a>,
+    pool_starting_index: u32,
+) -> FullCompilationResult {
+    let inputs =
+        crate::partial::PartialComponentInputs { template, is_inline: metadata.template.is_some() };
+    let cmp_expr =
+        crate::partial::compile_declare_component_from_metadata(allocator, metadata, &inputs);
+    let fac_expr =
+        crate::partial::component::compile_declare_factory_for_component(allocator, metadata);
+
+    // Detect `@defer` block presence by a cheap string scan — partial
+    // mode skips the template pipeline, but the caller's class-metadata
+    // dispatch uses this flag to decide whether to build deferred-deps
+    // and pick `ɵɵngDeclareClassMetadataAsync` over the sync form. A
+    // false positive (e.g. `@defer` inside a string literal in the
+    // template) is harmless: `deferred_deps` will be built from
+    // `metadata.deferred_imports`, which is empty when the user hasn't
+    // declared deferrable imports, and the dispatch falls back to sync.
+    // A false NEGATIVE silently strips the async lazy-loading metadata —
+    // so err on the side of detection.
+    let has_defer_block = template.contains("@defer");
+
+    let emitter = JsEmitter::new();
+    FullCompilationResult {
+        template_js: String::new(),
+        cmp_js: emitter.emit_expression(&cmp_expr),
+        fac_js: emitter.emit_expression(&fac_expr),
+        declarations_js: String::new(),
+        hmr_initializer_js: None,
+        class_debug_info_js: None,
+        next_pool_index: pool_starting_index,
+        ng_content_selectors: Vec::new(),
+        has_defer_block,
+    }
+}
+
 fn compile_component_full<'a>(
     allocator: &'a Allocator,
     template: &'a str,
@@ -3241,6 +3323,13 @@ fn compile_component_full<'a>(
     import_map: &ImportMap<'a>,
 ) -> Result<FullCompilationResult, Vec<OxcDiagnostic>> {
     use oxc_allocator::FromIn;
+
+    // Partial-mode early branch: skip the entire template pipeline.
+    // Partial declarations carry the template as a verbatim string and
+    // let the linker re-parse at consumer build time.
+    if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
+        return Ok(compile_component_partial(allocator, template, metadata, pool_starting_index));
+    }
 
     let mut diagnostics = Vec::new();
 

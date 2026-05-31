@@ -122,6 +122,30 @@ export interface PluginOptions {
    * Default: `true` — matches `ngc`, which always emits class metadata.
    */
   emitClassMetadata?: boolean
+
+  /**
+   * Compilation mode.
+   *
+   * - `'full'` (default) emits fully-resolved Ivy definitions
+   *   (`ɵɵdefineComponent`, `ɵɵdefineDirective`, …) — what application
+   *   builds need.
+   * - `'partial'` emits partial declarations (`ɵɵngDeclareComponent`,
+   *   `ɵɵngDeclareDirective`, …) — what library builds publish. Consumer
+   *   apps then run this package's linker (already integrated for
+   *   `node_modules` code) to expand the declarations back into full
+   *   Ivy form at their build time.
+   *
+   * Setting `'partial'` on an app build is almost certainly wrong: the
+   * runtime needs full definitions and the linker only runs on
+   * `node_modules`. Use it from a separate library build pipeline
+   * (e.g. rolldown/tsdown producing an FESM).
+   *
+   * @example
+   * ```ts
+   * angular({ compilationMode: 'partial' }) // ng-packagr-style library build
+   * ```
+   */
+  compilationMode?: 'full' | 'partial'
 }
 
 // Match all TypeScript files - we'll filter by @Component/@Directive decorator in the handler
@@ -197,6 +221,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     fileReplacements,
     angularVersion: options.angularVersion,
     emitClassMetadata: options.emitClassMetadata ?? true,
+    compilationMode: options.compilationMode ?? 'full',
   }
 
   let resolvedConfig: ResolvedConfig
@@ -634,6 +659,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             angularVersion: pluginOptions.angularVersion,
             minifyComponentStyles: getMinifyComponentStyles(this as any),
             emitClassMetadata: pluginOptions.emitClassMetadata,
+            compilationMode: pluginOptions.compilationMode,
           }
 
           const result = await transformAngularFile(code, actualId, transformOptions, resources)
