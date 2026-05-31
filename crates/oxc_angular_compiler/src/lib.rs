@@ -49,6 +49,7 @@ pub mod pipe;
 pub mod pipeline;
 pub mod r3;
 pub mod schema;
+pub mod service;
 pub mod styles;
 pub mod transform;
 
@@ -121,6 +122,13 @@ pub use injectable::{
     R3InjectableMetadata, R3InjectableMetadataBuilder, compile_injectable,
     compile_injectable_from_metadata, extract_injectable_metadata, find_injectable_decorator_span,
     generate_injectable_definition, generate_injectable_definition_from_decorator,
+};
+
+// Re-export service types
+pub use service::{
+    R3ServiceMetadata, ServiceCompileResult, ServiceDefinition, ServiceMetadata, compile_service,
+    extract_service_metadata, find_service_decorator, find_service_decorator_span,
+    generate_service_definition, generate_service_definition_from_decorator,
 };
 
 // Re-export ng_module types

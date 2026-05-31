@@ -73,6 +73,7 @@ use crate::pipeline::ingest::{
     HostBindingInput, IngestOptions, ingest_component, ingest_component_with_options,
     ingest_host_binding_with_version,
 };
+use crate::service::{extract_service_metadata, generate_service_definition_from_decorator};
 use crate::transform::HtmlToR3Transform;
 use crate::transform::html_to_r3::TransformOptions as R3TransformOptions;
 
@@ -877,6 +878,153 @@ struct JitNonAngularMemberDecorator {
     decorator_texts: std::vec::Vec<String>,
 }
 
+/// Whether the class declares its own constructor with at least one parameter.
+///
+/// Used by the `@Service` handler to catch the common-but-broken pattern of
+/// declaring constructor-based DI on a service: upstream service.ts:278-309
+/// surfaces a diagnostic because `@Service` ɵfac is generated with empty
+/// deps, so those parameters would silently become `undefined` at runtime.
+///
+/// Unlike upstream, we don't walk to base classes — that requires cross-file
+/// resolution that oxc doesn't perform. Upstream's LOCAL compilation mode
+/// also skips that walk, and our single-file transform is closer to LOCAL
+/// mode than to a full reflector.
+fn class_has_own_constructor_params(class: &oxc_ast::ast::Class<'_>) -> bool {
+    use oxc_ast::ast::{ClassElement, MethodDefinitionKind};
+    class.body.body.iter().any(|element| {
+        if let ClassElement::MethodDefinition(method) = element {
+            method.kind == MethodDefinitionKind::Constructor
+                && !method.value.params.items.is_empty()
+        } else {
+            false
+        }
+    })
+}
+
+/// Return the `@Service` decorator on a class iff the `Service` identifier
+/// resolves to `@angular/core` via the import map. Returns `None` for a bare
+/// `@Service()` from a third-party library.
+///
+/// `Service` is a common export name in DI containers and web frameworks, so
+/// matching by name alone would misclassify unrelated decorators. Mirrors
+/// the gate in [`find_angular_decorator`].
+fn find_angular_service_decorator<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+    import_map: &ImportMap<'a>,
+) -> Option<&'a oxc_ast::ast::Decorator<'a>> {
+    for decorator in &class.decorators {
+        let Expression::CallExpression(call) = &decorator.expression else { continue };
+        let from_angular_core = match &call.callee {
+            Expression::Identifier(id) => {
+                is_angular_core_export(import_map, id.name.as_str(), "Service")
+            }
+            // Namespace form `@ns.Service()`: accept when `ns` is a
+            // namespace import from `@angular/core`. Without this, AOT
+            // would silently skip namespaced services that the JIT path
+            // already classifies correctly.
+            Expression::StaticMemberExpression(member) => {
+                member.property.name.as_str() == "Service"
+                    && match &member.object {
+                        Expression::Identifier(ns) => {
+                            is_angular_core_namespace(import_map, ns.name.as_str())
+                        }
+                        _ => false,
+                    }
+            }
+            _ => false,
+        };
+        if from_angular_core {
+            return Some(decorator);
+        }
+    }
+    None
+}
+
+/// Whether `local_name` resolves to the named `@angular/core` export.
+///
+/// Matches when the import is from `@angular/core` AND the original exported
+/// name equals `exported_name` — so `import { Injectable as Service }` does
+/// not pass `is_angular_core_export(.., "Service", "Service")` even though
+/// the local binding is `Service`. Bare `import { Service }` (no alias)
+/// passes because `imported_name` is `None`, meaning the local name and the
+/// exported name agree.
+fn is_angular_core_export(
+    import_map: &ImportMap<'_>,
+    local_name: &str,
+    exported_name: &str,
+) -> bool {
+    let Some(info) = import_map.get(&Ident::from(local_name)) else { return false };
+    if info.source_module.as_str() != "@angular/core" {
+        return false;
+    }
+    match &info.imported_name {
+        Some(imported) => imported.as_str() == exported_name,
+        None => local_name == exported_name,
+    }
+}
+
+/// Whether `local_name` is a namespace import (`import * as ns from ...`)
+/// from `@angular/core`. Used to validate namespace-style decorator calls
+/// like `@ns.Service()` — without this check, any third-party namespace
+/// `Service` decorator would classify as the Angular v22 decorator.
+fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: &str) -> bool {
+    import_map
+        .get(&Ident::from(local_name))
+        .map(|info| info.source_module.as_str() == "@angular/core" && !info.is_named_import)
+        .unwrap_or(false)
+}
+
+/// Return the name of the first non-`Service` `@angular/core` decorator on
+/// the class, if any. Used to enforce upstream's collision rule (see
+/// `service.ts:101-116`): `@Service` cannot coexist with another Angular
+/// decorator on the same class.
+fn find_conflicting_angular_decorator<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+    import_map: &ImportMap<'a>,
+) -> Option<&'a str> {
+    const ANGULAR_DECORATORS: &[&str] =
+        &["Component", "Directive", "Pipe", "Injectable", "NgModule"];
+
+    for decorator in &class.decorators {
+        let name = match &decorator.expression {
+            Expression::CallExpression(call) => match &call.callee {
+                Expression::Identifier(id) => id.name.as_str(),
+                Expression::StaticMemberExpression(member) => member.property.name.as_str(),
+                _ => continue,
+            },
+            _ => continue,
+        };
+        if !ANGULAR_DECORATORS.contains(&name) {
+            continue;
+        }
+        // Verify the import resolves to @angular/core for both identifier
+        // and namespace callees. Without the namespace lookup, an unrelated
+        // `@thirdParty.Component()` on an @Service class would falsely
+        // trigger the collision preflight and block valid services.
+        let is_angular = if let Expression::CallExpression(call) = &decorator.expression {
+            match &call.callee {
+                Expression::Identifier(id) => import_map
+                    .get(&Ident::from(id.name.as_str()))
+                    .map(|info| info.source_module.as_str() == "@angular/core")
+                    .unwrap_or(false),
+                Expression::StaticMemberExpression(member) => match &member.object {
+                    Expression::Identifier(ns) => {
+                        is_angular_core_namespace(import_map, ns.name.as_str())
+                    }
+                    _ => false,
+                },
+                _ => false,
+            }
+        } else {
+            false
+        };
+        if is_angular {
+            return Some(name);
+        }
+    }
+    None
+}
+
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
 ///
 /// For the `Service` identifier specifically, the import map is consulted so a
@@ -911,14 +1059,24 @@ fn find_angular_decorator<'a>(
             };
 
             if matches!(kind, Some(AngularDecoratorKind::Service)) {
-                if let Expression::Identifier(id) = &call.callee {
-                    let info = import_map.get(&Ident::from(id.name.as_str()));
-                    let from_angular_core = info
-                        .map(|info| info.source_module.as_str() == "@angular/core")
-                        .unwrap_or(false);
-                    if !from_angular_core {
-                        continue;
+                let from_angular_core = match &call.callee {
+                    Expression::Identifier(id) => {
+                        is_angular_core_export(import_map, id.name.as_str(), "Service")
                     }
+                    // Namespace form `@ns.Service()`: verify `ns` is a
+                    // namespace import from `@angular/core`. Without this,
+                    // any `@third.Service()` from a third-party namespace
+                    // import would classify as the v22 decorator.
+                    Expression::StaticMemberExpression(member) => match &member.object {
+                        Expression::Identifier(ns) => {
+                            is_angular_core_namespace(import_map, ns.name.as_str())
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if !from_angular_core {
+                    continue;
                 }
             }
 
@@ -2365,6 +2523,27 @@ pub fn transform_angular_file(
         };
 
         if let Some(class) = class {
+            // Pre-flight: catch @Service co-located with another Angular
+            // decorator before the primary-decorator branches dispatch.
+            // Upstream service.ts:101-116 rejects this combination; without
+            // this early check, @Component / @Directive / @Pipe / @NgModule /
+            // @Injectable would win the branch race and compile the class
+            // (leaving the @Service decorator removed inconsistently) instead
+            // of producing the intended diagnostic.
+            if find_angular_service_decorator(class, &import_map).is_some() {
+                if let Some(conflict_name) = find_conflicting_angular_decorator(class, &import_map)
+                {
+                    let class_name_for_diag =
+                        class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Cannot apply more than one Angular decorator on an @Service class. \
+                         '{}' is also decorated with @{}.",
+                        class_name_for_diag, conflict_name
+                    )));
+                    continue;
+                }
+            }
+
             // Compute implicit_standalone based on Angular version
             let implicit_standalone = options.implicit_standalone();
 
@@ -3003,6 +3182,96 @@ pub fn transform_angular_file(
                         class_definitions.insert(
                             class_name,
                             (property_assignments, String::new(), external_decls),
+                        );
+                    }
+                } else if let Some(service_decorator) =
+                    find_angular_service_decorator(class, &import_map)
+                {
+                    // Standalone @Service (Angular v22+). Mirrors the standalone-@Injectable
+                    // branch below but emits ɵɵdefineService and a deps-less ɵfac.
+                    let class_name_for_diag =
+                        class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
+
+                    // Version gate: v22+ runtime introduced ɵɵdefineService. Unknown
+                    // version defaults to "supports" (matches the JIT-side gate).
+                    if !options.angular_version.map_or(true, |v| v.supports_service_decorator()) {
+                        result.diagnostics.push(OxcDiagnostic::error(format!(
+                            "The @Service decorator on '{}' requires Angular v22 or later.",
+                            class_name_for_diag
+                        )));
+                        continue;
+                    }
+
+                    // Constructor DI diagnostic: @Service ɵfac is generated with
+                    // empty deps, so any constructor parameter would silently
+                    // become `undefined` at runtime. Surface upstream's error
+                    // (service.ts:312-318) instead of emitting broken code.
+                    if class_has_own_constructor_params(class) {
+                        result.diagnostics.push(OxcDiagnostic::error(
+                            "@Service class cannot use constructor dependency injection. \
+                             Use the `inject` function instead."
+                                .to_string(),
+                        ));
+                        continue;
+                    }
+
+                    if let Some(service_metadata) =
+                        extract_service_metadata(allocator, class, service_decorator, Some(source))
+                    {
+                        // Track decorator span for removal. Use the resolved
+                        // decorator directly so aliased imports
+                        // (`import { Service as NgService }`) still get
+                        // stripped — re-searching by literal name would miss
+                        // them.
+                        decorator_spans_to_remove.push(service_decorator.span);
+                        // Even though @Service ɵfac doesn't inject ctor params, the
+                        // user's constructor may still carry @Inject/@Optional/etc.
+                        // decorators that need to be stripped from the output (the
+                        // class metadata IIFE will pick them up).
+                        collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+
+                        let type_argument_count =
+                            class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
+                        let definition = generate_service_definition_from_decorator(
+                            allocator,
+                            &service_metadata,
+                            type_argument_count,
+                        );
+
+                        let emitter = JsEmitter::new();
+                        let class_name = service_metadata.class_name.to_string();
+
+                        let property_assignments = format!(
+                            "static ɵfac = {};\nstatic ɵprov = {};",
+                            emitter.emit_expression(&definition.fac_definition),
+                            emitter.emit_expression(&definition.prov_definition)
+                        );
+
+                        result.dts_declarations.push(dts::generate_service_dts(
+                            &service_metadata,
+                            type_argument_count,
+                        ));
+
+                        let decls_after_class = build_set_class_metadata_decls(
+                            allocator,
+                            class,
+                            &class_name,
+                            service_decorator,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+
+                        class_positions.push((
+                            class_name.clone(),
+                            compute_effective_start(class, &decorator_spans_to_remove, stmt_start),
+                            class.body.span.end,
+                        ));
+                        class_definitions.insert(
+                            class_name,
+                            (property_assignments, String::new(), decls_after_class),
                         );
                     }
                 } else if let Some(mut injectable_metadata) =

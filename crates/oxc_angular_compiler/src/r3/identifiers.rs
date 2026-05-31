@@ -673,6 +673,11 @@ impl Identifiers {
     /// Injectable declaration type.
     pub const INJECTABLE_DECLARATION: &'static str = "ɵɵInjectableDeclaration";
 
+    /// Define a service (Angular v22+ `@Service`). The declared static field is
+    /// still `ɵprov` and the `.d.ts` type is still `ɵɵInjectableDeclaration` —
+    /// only the initializer call changes.
+    pub const DEFINE_SERVICE: &'static str = "ɵɵdefineService";
+
     // ========================================================================
     // Resolution Instructions
     // ========================================================================
