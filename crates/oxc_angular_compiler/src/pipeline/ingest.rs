@@ -1115,23 +1115,32 @@ fn ingest_element<'a>(
     // (v21 only emitted this for `formField`; v22 broadened it, notably to
     // two-way `[(ngModel)]`, which now also emits `ɵɵcontrolCreate()`.)
     use crate::ast::expression::BindingType;
+    // `formField` is the v21 baseline; the extended set (formControl/
+    // formControlName/ngModel) was added in v22. Default to latest when unknown.
+    let extended_controls =
+        job.angular_version.map_or(true, |v| v.supports_extended_control_properties());
     let field_input_span = element
         .inputs
         .iter()
         .find_map(|input| {
             let eligible = match input.name.as_str() {
-                "formField" | "formControl" => input.binding_type == BindingType::Property,
-                "formControlName" => input.binding_type == BindingType::Property,
-                "ngModel" => matches!(
-                    input.binding_type,
-                    BindingType::Property | BindingType::TwoWay
-                ),
+                "formField" => input.binding_type == BindingType::Property,
+                "formControl" if extended_controls => input.binding_type == BindingType::Property,
+                "formControlName" if extended_controls => {
+                    input.binding_type == BindingType::Property
+                }
+                "ngModel" if extended_controls => {
+                    matches!(input.binding_type, BindingType::Property | BindingType::TwoWay)
+                }
                 _ => false,
             };
             eligible.then_some(input.source_span)
         })
         .or_else(|| {
-            // Static attributes (`formControlName="name"`, `ngModel`) -> Attribute op.
+            // Static attributes (`formControlName="name"`, `ngModel`) -> Attribute op (v22+).
+            if !extended_controls {
+                return None;
+            }
             element.attributes.iter().find_map(|attr| {
                 matches!(attr.name.as_str(), "formControlName" | "ngModel")
                     .then_some(attr.source_span)
