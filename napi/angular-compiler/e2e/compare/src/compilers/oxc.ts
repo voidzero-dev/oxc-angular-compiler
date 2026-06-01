@@ -11,8 +11,19 @@ import {
   transformSync as oxcTransformSync,
   type TransformOptions as OxcTransformOptions,
 } from 'oxc-transform'
+import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
 
 import type { CompilerOutput, ProjectCompilationResult } from '../types.js'
+
+// Target the same Angular version the comparison baseline (@angular/compiler)
+// is on, so version-gated emit (e.g. modern vs legacy safe-navigation `?.`,
+// gated at major >= 22) matches. Without this, OXC falls back to its
+// conservative legacy default and diverges from a newer Angular.
+const OXC_ANGULAR_VERSION = {
+  major: Number.parseInt(ANGULAR_VERSION.major, 10) || 0,
+  minor: Number.parseInt(ANGULAR_VERSION.minor, 10) || 0,
+  patch: Number.parseInt(ANGULAR_VERSION.patch, 10) || 0,
+}
 
 // Re-export ResolvedResources type for use in runner
 export type { ResolvedResources } from '@oxc-angular/vite/api'
@@ -63,6 +74,8 @@ export function compileWithOxcFullFileRaw(
     jit: false,
     hmr: false,
     advancedOptimizations: false,
+    // Match the installed @angular/compiler so version-gated emit aligns.
+    angularVersion: OXC_ANGULAR_VERSION,
     // Enable cross-file analysis for barrel export tracing
     crossFileElision: true,
     baseDir: path.dirname(filePath),
