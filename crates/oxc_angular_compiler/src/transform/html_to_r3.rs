@@ -2367,7 +2367,7 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Consecutive cases without bodies are grouped together into a single `SwitchBlockCaseGroup`.
     fn visit_switch_block(&mut self, block: &HtmlBlock<'a>) -> Option<R3Node<'a>> {
         use crate::ast::html::{BlockType, HtmlNode};
-        use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup};
+        use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup, R3SwitchExhaustiveCheck};
 
         // Validation: @switch must have exactly one parameter.
         // Match Angular's createSwitchBlock: always parse the first parameter when present
@@ -2389,6 +2389,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let mut collected_cases: std::vec::Vec<R3SwitchBlockCase<'a>> = std::vec::Vec::new();
         let mut first_case_start: Option<Span> = None;
         let mut has_default = false;
+        let mut exhaustive_check: Option<R3SwitchExhaustiveCheck<'a>> = None;
 
         for child in &block.children {
             // Skip comments and whitespace-only text nodes (same as Angular)
@@ -2408,6 +2409,37 @@ impl<'a> HtmlToR3Transform<'a> {
                 );
                 continue;
             };
+
+            // v22: `@default never;` is an exhaustive check, not a case. Its block
+            // name is the literal "default never". It carries an optional expression
+            // (`@default never(expr);`), no body, and produces no runtime output.
+            if child_block.name.as_str() == "default never" {
+                let check_expression = if child_block.parameters.is_empty() {
+                    None
+                } else {
+                    let expr_str = child_block.parameters[0].expression.as_str();
+                    Some(
+                        self.binding_parser
+                            .parse_binding(expr_str, child_block.parameters[0].span)
+                            .ast,
+                    )
+                };
+                if exhaustive_check.is_some() {
+                    self.report_error(
+                        "@default block with \"never\" parameter must be the last case in a switch",
+                        child_block.span,
+                    );
+                } else {
+                    exhaustive_check = Some(R3SwitchExhaustiveCheck {
+                        expression: check_expression,
+                        source_span: child_block.span,
+                        start_source_span: child_block.start_span,
+                        end_source_span: child_block.end_span,
+                        name_span: child_block.name_span,
+                    });
+                }
+                continue;
+            }
 
             // Validate: only @case and @default are allowed inside @switch
             if child_block.block_type != BlockType::Case
@@ -2553,6 +2585,7 @@ impl<'a> HtmlToR3Transform<'a> {
             expression,
             groups,
             unknown_blocks,
+            exhaustive_check,
             source_span: block.span,
             start_source_span: block.start_span,
             end_source_span: block.end_span,

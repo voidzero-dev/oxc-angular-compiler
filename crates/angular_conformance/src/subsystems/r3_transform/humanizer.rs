@@ -675,6 +675,16 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for group in &block.groups {
             self.visit_switch_block_case_group(group);
         }
+        if let Some(check) = &block.exhaustive_check {
+            let row = if self.mode == HumanizeMode::SourceSpans {
+                let source_span = self.span_text(&check.source_span);
+                let start_span = self.span_text(&check.start_source_span);
+                vec!["SwitchExhaustiveCheck".to_string(), source_span, start_span]
+            } else {
+                vec!["SwitchExhaustiveCheck".to_string()]
+            };
+            self.result.push(row);
+        }
     }
 
     fn visit_switch_block_case_group(
