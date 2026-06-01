@@ -2890,9 +2890,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
         for attr in attrs {
             let raw_name = attr.name.as_str();
-            // Normalize name early (case-insensitive data- prefix stripping)
-            // This must happen before ANY binding syntax checks
-            let name = self.normalize_attribute_name(raw_name);
+            // Angular v22 removed the `data-` prefix normalization: binding syntax
+            // (`bind-`, `on-`, `bindon-`, `ref-`, `let-`, `*`, `@`) is matched against
+            // the raw attribute name, so e.g. `data-ref-a` is a plain text attribute.
+            let name = raw_name;
 
             // Skip i18n-* attributes early - they are metadata for other attributes, not bindings.
             // In Angular's TypeScript compiler, these are filtered out by I18nMetaVisitor before
@@ -3131,18 +3132,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Normalizes an attribute name by stripping the data- prefix (case-insensitive).
     /// This matches TypeScript's behavior: /^data-/i.test(attrName) ? attrName.substring(5) : attrName
-    fn normalize_attribute_name<'b>(&self, name: &'b str) -> &'b str {
-        // Case-insensitive data- prefix stripping
-        if name.len() > 5 && name[..5].eq_ignore_ascii_case("data-") { &name[5..] } else { name }
-    }
-
-    /// Parses a binding prefix from an attribute name.
-    /// Handles the data- prefix as per Angular's normalization:
-    /// `data-bind-*`, `data-on-*`, `data-ref-*`, `data-let-*`, `data-bindon-*`
+    /// Parses a binding prefix (`bind-`, `let-`, `ref-`, `on-`, `bindon-`) from an
+    /// attribute name. Angular v22 matches these against the raw name; a `data-`
+    /// prefix is no longer stripped, so `data-on-x` is not an event binding.
     fn parse_binding_prefix<'b>(&self, name: &'b str) -> Option<(BindingPrefix, &'b str)> {
-        // Strip data- prefix if present (case-insensitive)
-        let name = self.normalize_attribute_name(name);
-
         for (prefix, kind) in BIND_NAME_PREFIXES {
             if let Some(rest) = name.strip_prefix(prefix) {
                 return Some((*kind, rest));

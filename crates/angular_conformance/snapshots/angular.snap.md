@@ -12,10 +12,10 @@
 | html_lexer | 286 | 3 | 0 | 0 | 289 | 99.0% |
 | html_parser | 85 | 2 | 0 | 0 | 87 | 97.7% |
 | html_whitespace | 21 | 0 | 0 | 0 | 21 | 100.0% |
-| r3_transform | 168 | 9 | 0 | 0 | 177 | 94.9% |
+| r3_transform | 173 | 4 | 0 | 0 | 177 | 97.7% |
 | shadow_css | 160 | 9 | 0 | 0 | 169 | 94.7% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1241** | **23** | **0** | **0** | **1264** | **98.2%** |
+| **Total** | **1246** | **18** | **0** | **0** | **1264** | **98.6%** |
 
 ## Failed Tests
 
@@ -89,123 +89,6 @@ Path: `HtmlParser/parse/let declaration/should store the source location of a @l
 ```
 
 ### r3_transform
-
-#### is correct for bound properties via data-: ExpectFromHtml { input: "<div data-prop=\"{{v}}\"></div>", expected: [Array [String("Element"), String("<div data-prop=\"{{v}}\"></div>"), String("<div data-prop=\"{{v}}\">"), String("</div>")], Array [String("BoundAttribute"), String("data-prop=\"{{v}}\""), String("data-prop"), String("{{v}}")]], ignore_error: false }
-Path: `R3 AST source spans/bound attributes/is correct for bound properties via data-`
-
-**Expected:**
-```
-[Element, <div data-prop="{{v}}"></div>, <div data-prop="{{v}}">, </div>]
-[BoundAttribute, data-prop="{{v}}", data-prop, {{v}}]
-```
-
-**Actual:**
-```
-[Element, <div data-prop="{{v}}"></div>, <div data-prop="{{v}}">, </div>]
-[BoundAttribute, data-prop="{{v}}", prop, {{v}}]
-```
-
-**Diff:**
-```diff
- [Element, <div data-prop="{{v}}"></div>, <div data-prop="{{v}}">, </div>]
--[BoundAttribute, data-prop="{{v}}", data-prop, {{v}}]
-+[BoundAttribute, data-prop="{{v}}", prop, {{v}}]
-
-```
-
-#### is correct for data-ref-... attribute: ExpectFromHtml { input: "<ng-template data-ref-a></ng-template>", expected: [Array [String("Template"), String("<ng-template data-ref-a></ng-template>"), String("<ng-template data-ref-a>"), String("</ng-template>")], Array [String("TextAttribute"), String("data-ref-a"), String("data-ref-a"), String("<empty>")]], ignore_error: false }
-Path: `R3 AST source spans/templates/is correct for data-ref-... attribute`
-
-**Expected:**
-```
-[Template, <ng-template data-ref-a></ng-template>, <ng-template data-ref-a>, </ng-template>]
-[TextAttribute, data-ref-a, data-ref-a, <empty>]
-```
-
-**Actual:**
-```
-[Template, <ng-template data-ref-a></ng-template>, <ng-template data-ref-a>, </ng-template>]
-[Reference, data-ref-a, a, <empty>]
-```
-
-**Diff:**
-```diff
- [Template, <ng-template data-ref-a></ng-template>, <ng-template data-ref-a>, </ng-template>]
--[TextAttribute, data-ref-a, data-ref-a, <empty>]
-+[Reference, data-ref-a, a, <empty>]
-
-```
-
-#### is correct for data-let-... attribute: ExpectFromHtml { input: "<ng-template data-let-a=\"b\"></ng-template>", expected: [Array [String("Template"), String("<ng-template data-let-a=\"b\"></ng-template>"), String("<ng-template data-let-a=\"b\">"), String("</ng-template>")], Array [String("TextAttribute"), String("data-let-a=\"b\""), String("data-let-a"), String("b")]], ignore_error: false }
-Path: `R3 AST source spans/templates/is correct for data-let-... attribute`
-
-**Expected:**
-```
-[Template, <ng-template data-let-a="b"></ng-template>, <ng-template data-let-a="b">, </ng-template>]
-[TextAttribute, data-let-a="b", data-let-a, b]
-```
-
-**Actual:**
-```
-[Template, <ng-template data-let-a="b"></ng-template>, <ng-template data-let-a="b">, </ng-template>]
-[Variable, data-let-a="b", a, b]
-```
-
-**Diff:**
-```diff
- [Template, <ng-template data-let-a="b"></ng-template>, <ng-template data-let-a="b">, </ng-template>]
--[TextAttribute, data-let-a="b", data-let-a, b]
-+[Variable, data-let-a="b", a, b]
-
-```
-
-#### is correct for text attribute via data-on-: ExpectFromHtml { input: "<div data-on-event=\"v\"></div>", expected: [Array [String("Element"), String("<div data-on-event=\"v\"></div>"), String("<div data-on-event=\"v\">"), String("</div>")], Array [String("TextAttribute"), String("data-on-event=\"v\""), String("data-on-event"), String("v")]], ignore_error: false }
-Path: `R3 AST source spans/events/is correct for text attribute via data-on-`
-
-**Expected:**
-```
-[Element, <div data-on-event="v"></div>, <div data-on-event="v">, </div>]
-[TextAttribute, data-on-event="v", data-on-event, v]
-```
-
-**Actual:**
-```
-[Element, <div data-on-event="v"></div>, <div data-on-event="v">, </div>]
-[BoundEvent, data-on-event="v", event, v]
-```
-
-**Diff:**
-```diff
- [Element, <div data-on-event="v"></div>, <div data-on-event="v">, </div>]
--[TextAttribute, data-on-event="v", data-on-event, v]
-+[BoundEvent, data-on-event="v", event, v]
-
-```
-
-#### is correct for TextAttribute and properties via data-bindon-: ExpectFromHtml { input: "<div data-bindon-prop=\"v\"></div>", expected: [Array [String("Element"), String("<div data-bindon-prop=\"v\"></div>"), String("<div data-bindon-prop=\"v\">"), String("</div>")], Array [String("TextAttribute"), String("data-bindon-prop=\"v\""), String("data-bindon-prop"), String("v")]], ignore_error: false }
-Path: `R3 AST source spans/events/is correct for TextAttribute and properties via data-bindon-`
-
-**Expected:**
-```
-[Element, <div data-bindon-prop="v"></div>, <div data-bindon-prop="v">, </div>]
-[TextAttribute, data-bindon-prop="v", data-bindon-prop, v]
-```
-
-**Actual:**
-```
-[Element, <div data-bindon-prop="v"></div>, <div data-bindon-prop="v">, </div>]
-[BoundAttribute, data-bindon-prop="v", prop, v]
-[BoundEvent, data-bindon-prop="v", prop, v]
-```
-
-**Diff:**
-```diff
- [Element, <div data-bindon-prop="v"></div>, <div data-bindon-prop="v">, </div>]
--[TextAttribute, data-bindon-prop="v", data-bindon-prop, v]
-+[BoundAttribute, data-bindon-prop="v", prop, v]
-+[BoundEvent, data-bindon-prop="v", prop, v]
-
-```
 
 #### is correct for switch blocks with exhaustive checking: ExpectFromHtml { input: "@switch (cond.kind) {@case (x()) {X case}@default never;}", expected: [Array [String("SwitchBlock"), String("@switch (cond.kind) {@case (x()) {X case}@default never;}"), String("@switch (cond.kind) {"), String("}")], Array [String("SwitchBlockCaseGroup"), String("@case (x()) {X case}"), String("@case (x()) {")], Array [String("SwitchBlockCase"), String("@case (x()) {X case}"), String("@case (x()) {")], Array [String("Text"), String("X case")], Array [String("SwitchExhaustiveCheck"), String("@default never;"), String("@default never;")]], ignore_error: false }
 Path: `R3 AST source spans/switch blocks/is correct for switch blocks with exhaustive checking`
