@@ -12,10 +12,10 @@
 | html_lexer | 286 | 3 | 0 | 0 | 289 | 99.0% |
 | html_parser | 86 | 1 | 0 | 0 | 87 | 98.9% |
 | html_whitespace | 21 | 0 | 0 | 0 | 21 | 100.0% |
-| r3_transform | 174 | 3 | 0 | 0 | 177 | 98.3% |
+| r3_transform | 175 | 2 | 0 | 0 | 177 | 98.9% |
 | shadow_css | 169 | 0 | 0 | 0 | 169 | 100.0% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1257** | **7** | **0** | **0** | **1264** | **99.4%** |
+| **Total** | **1258** | **6** | **0** | **0** | **1264** | **99.5%** |
 
 ## Failed Tests
 
@@ -105,30 +105,6 @@ Path: `R3 AST source spans/switch blocks/is correct for switch blocks with exhau
 -[Text, X case]
 -[SwitchExhaustiveCheck, @default never;, @default never;]
 +[Text, X case]
-
-```
-
-#### should not ignore namespaced SVG <style> elements: ExpectFromHtml { input: "<svg><style>.a { fill: none; }</style></svg>", expected: [Array [String("Element"), String(":svg:svg")], Array [String("Element"), String(":svg:style")], Array [String("Text"), String(".a { fill: none; }")]], ignore_error: false }
-Path: `R3 template transform/<script> and <style> elements/should not ignore namespaced SVG <style> elements`
-
-**Expected:**
-```
-[Element, :svg:svg]
-[Element, :svg:style]
-[Text, .a { fill: none; }]
-```
-
-**Actual:**
-```
-[Element, :svg:svg]
-```
-
-**Diff:**
-```diff
--[Element, :svg:svg]
--[Element, :svg:style]
--[Text, .a { fill: none; }]
-+[Element, :svg:svg]
 
 ```
 

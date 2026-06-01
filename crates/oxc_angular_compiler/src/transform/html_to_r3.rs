@@ -308,11 +308,15 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Check for special elements
-        if raw_name == "script" {
+        // Check for special elements. `<script>`/`<style>` are only treated
+        // specially in the HTML namespace: Angular classifies them by the
+        // lowercased element name, so a namespaced SVG `<style>` (`:svg:style`)
+        // is a normal element, not a stylesheet to extract (v22 conformance).
+        let in_html_namespace = self.current_namespace() == ElementNamespace::Html;
+        if in_html_namespace && raw_name == "script" {
             return None;
         }
-        if raw_name == "style" {
+        if in_html_namespace && raw_name == "style" {
             // Extract style content
             if let Some(content) = self.get_text_content(element) {
                 self.styles.push(content);
