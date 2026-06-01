@@ -300,9 +300,14 @@ fn specialize_in_view<'a>(
                             });
                             cursor.replace_current(new_op);
                         }
-                    } else if name.as_str() == "formField" {
-                        // [formField] still binds as a regular property, but Angular also emits
-                        // a separate control instruction after the property update.
+                    } else if matches!(
+                        name.as_str(),
+                        "formField" | "formControl" | "formControlName" | "ngModel"
+                    ) {
+                        // A control property (`[formField]`, `[formControl]`,
+                        // `[formControlName]`, `[ngModel]`) still binds as a regular property,
+                        // but Angular v22 also emits a separate control instruction
+                        // (`ɵɵcontrol()`) after the property update.
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(
                                 &mut binding.expression,
@@ -360,6 +365,7 @@ fn specialize_in_view<'a>(
                 BindingKind::TwoWayProperty => {
                     // Two-way property binding
                     if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
+                        let name = binding.name.clone();
                         let expression = std::mem::replace(
                             &mut binding.expression,
                             create_placeholder_expression(allocator),
@@ -367,12 +373,26 @@ fn specialize_in_view<'a>(
                         let new_op = UpdateOp::TwoWayProperty(TwoWayPropertyOp {
                             base: UpdateOpBase { source_span, ..Default::default() },
                             target,
-                            name: binding.name.clone(),
+                            name: name.clone(),
                             expression,
                             security_context,
                             sanitizer: None,
                         });
                         cursor.replace_current(new_op);
+                        // Angular v22: a two-way `[(ngModel)]` is a control property, so it
+                        // also emits a control update instruction (`ɵɵcontrol()`) after the
+                        // two-way property update (paired with the `ɵɵcontrolCreate()` added
+                        // during ingest).
+                        if name.as_str() == "ngModel" {
+                            let control_op = UpdateOp::Control(ControlOp {
+                                base: UpdateOpBase { source_span, ..Default::default() },
+                                target,
+                                name,
+                                expression: create_placeholder_expression(allocator),
+                                security_context,
+                            });
+                            cursor.insert_after(control_op);
+                        }
                     }
                 }
                 BindingKind::I18n | BindingKind::ClassName | BindingKind::StyleProperty => {

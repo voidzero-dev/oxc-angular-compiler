@@ -1106,19 +1106,37 @@ fn ingest_element<'a>(
     // Process local references
     let local_refs = ingest_references_owned(allocator, element.references);
 
-    // Check for formField property binding to create ControlCreateOp.
-    // This matches TypeScript's ingest.ts which checks:
-    // const fieldInput = element.inputs.find(
-    //   (input) => input.name === 'formField' && input.type === e.BindingType.Property
-    // );
+    // Check for a control property binding to create a ControlCreateOp, matching
+    // Angular v22's `specializeControlProperties`. The eligible properties and the
+    // binding kinds they accept are:
+    //   - formField / formControl: `[..]` property binding
+    //   - formControlName:          property binding or static attribute
+    //   - ngModel:                  property, two-way `[(ngModel)]`, or static attribute
+    // (v21 only emitted this for `formField`; v22 broadened it, notably to
+    // two-way `[(ngModel)]`, which now also emits `ɵɵcontrolCreate()`.)
     use crate::ast::expression::BindingType;
-    let field_input_span = element.inputs.iter().find_map(|input| {
-        if input.name.as_str() == "formField" && input.binding_type == BindingType::Property {
-            Some(input.source_span)
-        } else {
-            None
-        }
-    });
+    let field_input_span = element
+        .inputs
+        .iter()
+        .find_map(|input| {
+            let eligible = match input.name.as_str() {
+                "formField" | "formControl" => input.binding_type == BindingType::Property,
+                "formControlName" => input.binding_type == BindingType::Property,
+                "ngModel" => matches!(
+                    input.binding_type,
+                    BindingType::Property | BindingType::TwoWay
+                ),
+                _ => false,
+            };
+            eligible.then_some(input.source_span)
+        })
+        .or_else(|| {
+            // Static attributes (`formControlName="name"`, `ngModel`) -> Attribute op.
+            element.attributes.iter().find_map(|attr| {
+                matches!(attr.name.as_str(), "formControlName" | "ngModel")
+                    .then_some(attr.source_span)
+            })
+        });
 
     // Always create ElementStart/ElementEnd pairs, even for void/self-closing elements.
     // The empty_elements phase will collapse them to Element when appropriate.

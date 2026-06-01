@@ -10,6 +10,10 @@ function TestComponent_Template(rf,ctx) {
       return $event;
     });
     i0.ɵɵelementEnd();
+    i0.ɵɵcontrolCreate();
   }
-  if ((rf & 2)) { i0.ɵɵtwoWayProperty("ngModel",ctx.name); }
+  if ((rf & 2)) {
+    i0.ɵɵtwoWayProperty("ngModel",ctx.name);
+    i0.ɵɵcontrol();
+  }
 }
