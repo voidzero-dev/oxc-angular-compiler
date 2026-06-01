@@ -1,6 +1,6 @@
 {
   "name": "html_parser_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_parser_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_parser_spec.ts",
   "test_groups": [
     {
       "name": "HtmlParser",
@@ -19,7 +19,16 @@
                     {
                       "type": "HumanizeDom",
                       "input": "a",
-                      "expected": [["html.Text", "a", 0.0, ["a"]]]
+                      "expected": [
+                        [
+                          "html.Text",
+                          "a",
+                          0.0,
+                          [
+                            "a"
+                          ]
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -31,8 +40,19 @@
                       "type": "HumanizeDom",
                       "input": "<div>a</div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Text", "a", 1.0, ["a"]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "a",
+                          1.0,
+                          [
+                            "a"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -45,8 +65,19 @@
                       "type": "HumanizeDom",
                       "input": "<ng-template>a</ng-template>",
                       "expected": [
-                        ["html.Element", "ng-template", 0.0],
-                        ["html.Text", "a", 1.0, ["a"]]
+                        [
+                          "html.Element",
+                          "ng-template",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "a",
+                          1.0,
+                          [
+                            "a"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -58,7 +89,16 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<![CDATA[text]]>",
-                      "expected": [["html.Text", "text", 0.0, ["text"]]]
+                      "expected": [
+                        [
+                          "html.Text",
+                          "text",
+                          0.0,
+                          [
+                            "text"
+                          ]
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -70,8 +110,26 @@
                       "type": "HumanizeDom",
                       "input": "<div>&#x1F6C8;</div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Text", "🛈", 1.0, [""], ["🛈", "&#x1F6C8;"], [""]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "🛈",
+                          1.0,
+                          [
+                            ""
+                          ],
+                          [
+                            "🛈",
+                            "&#x1F6C8;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -84,8 +142,84 @@
                       "type": "HumanizeDom",
                       "input": "<div>&#128712;</div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Text", "🛈", 1.0, [""], ["🛈", "&#128712;"], [""]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "🛈",
+                          1.0,
+                          [
+                            ""
+                          ],
+                          [
+                            "🛈",
+                            "&#128712;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "should parse named HTML entities containing digits",
+                  "path": "HtmlParser/parse/text nodes/should parse named HTML entities containing digits",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&sup1;</div>",
+                      "expected": [
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "¹",
+                          1.0,
+                          [
+                            ""
+                          ],
+                          [
+                            "¹",
+                            "&sup1;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
+                      ]
+                    },
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&frac12;</div>",
+                      "expected": [
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "½",
+                          1.0,
+                          [
+                            ""
+                          ],
+                          [
+                            "½",
+                            "&frac12;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -108,7 +242,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<div></div>",
-                      "expected": [["html.Element", "div", 0.0]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -120,8 +260,16 @@
                       "type": "HumanizeDom",
                       "input": "<div><span></span></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Element", "span", 1.0]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "span",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -134,8 +282,16 @@
                       "type": "HumanizeDom",
                       "input": "<ng-template><span></span></ng-template>",
                       "expected": [
-                        ["html.Element", "ng-template", 0.0],
-                        ["html.Element", "span", 1.0]
+                        [
+                          "html.Element",
+                          "ng-template",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "span",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -148,9 +304,27 @@
                       "type": "HumanizeDom",
                       "input": "<link rel=\"author license\" href=\"/about\">",
                       "expected": [
-                        ["html.Element", "link", 0.0],
-                        ["html.Attribute", "rel", "author license", ["author license"]],
-                        ["html.Attribute", "href", "/about", ["/about"]]
+                        [
+                          "html.Element",
+                          "link",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "rel",
+                          "author license",
+                          [
+                            "author license"
+                          ]
+                        ],
+                        [
+                          "html.Attribute",
+                          "href",
+                          "/about",
+                          [
+                            "/about"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -173,10 +347,32 @@
                       "type": "HumanizeDom",
                       "input": "<p>before<br>after</p>",
                       "expected": [
-                        ["html.Element", "p", 0.0],
-                        ["html.Text", "before", 1.0, ["before"]],
-                        ["html.Element", "br", 1.0],
-                        ["html.Text", "after", 1.0, ["after"]]
+                        [
+                          "html.Element",
+                          "p",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "before",
+                          1.0,
+                          [
+                            "before"
+                          ]
+                        ],
+                        [
+                          "html.Element",
+                          "br",
+                          1.0
+                        ],
+                        [
+                          "html.Text",
+                          "after",
+                          1.0,
+                          [
+                            "after"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -189,11 +385,37 @@
                       "type": "HumanizeDom",
                       "input": "<div><p>1<p>2</div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Element", "p", 1.0],
-                        ["html.Text", "1", 2.0, ["1"]],
-                        ["html.Element", "p", 1.0],
-                        ["html.Text", "2", 2.0, ["2"]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "p",
+                          1.0
+                        ],
+                        [
+                          "html.Text",
+                          "1",
+                          2.0,
+                          [
+                            "1"
+                          ]
+                        ],
+                        [
+                          "html.Element",
+                          "p",
+                          1.0
+                        ],
+                        [
+                          "html.Text",
+                          "2",
+                          2.0,
+                          [
+                            "2"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -206,10 +428,26 @@
                       "type": "HumanizeDom",
                       "input": "<ul><li><ul><li></li></ul></li></ul>",
                       "expected": [
-                        ["html.Element", "ul", 0.0],
-                        ["html.Element", "li", 1.0],
-                        ["html.Element", "ul", 2.0],
-                        ["html.Element", "li", 3.0]
+                        [
+                          "html.Element",
+                          "ul",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "li",
+                          1.0
+                        ],
+                        [
+                          "html.Element",
+                          "ul",
+                          2.0
+                        ],
+                        [
+                          "html.Element",
+                          "li",
+                          3.0
+                        ]
                       ]
                     }
                   ]
@@ -222,8 +460,16 @@
                       "type": "HumanizeDom",
                       "input": "<div><tr></tr></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Element", "tr", 1.0]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "tr",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -235,7 +481,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<myns:div></myns:div>",
-                      "expected": [["html.Element", ":myns:div", 0.0]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          ":myns:div",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -246,7 +498,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<svg></svg>",
-                      "expected": [["html.Element", ":svg:svg", 0.0]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          ":svg:svg",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -258,8 +516,16 @@
                       "type": "HumanizeDom",
                       "input": "<myns:div><p></p></myns:div>",
                       "expected": [
-                        ["html.Element", ":myns:div", 0.0],
-                        ["html.Element", ":myns:p", 1.0]
+                        [
+                          "html.Element",
+                          ":myns:div",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          ":myns:p",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -276,7 +542,14 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<input />",
-                      "expected": [["html.Element", "input", 0.0, "#selfClosing"]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          "input",
+                          0.0,
+                          "#selfClosing"
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -287,7 +560,14 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<math />",
-                      "expected": [["html.Element", ":math:math", 0.0, "#selfClosing"]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          ":math:math",
+                          0.0,
+                          "#selfClosing"
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -299,13 +579,50 @@
                       "type": "HumanizeDom",
                       "input": "<p>\n</p><textarea>\n</textarea><pre>\n\n</pre><listing>\n\n</listing>",
                       "expected": [
-                        ["html.Element", "p", 0.0],
-                        ["html.Text", "\n", 1.0, ["\n"]],
-                        ["html.Element", "textarea", 0.0],
-                        ["html.Element", "pre", 0.0],
-                        ["html.Text", "\n", 1.0, ["\n"]],
-                        ["html.Element", "listing", 0.0],
-                        ["html.Text", "\n", 1.0, ["\n"]]
+                        [
+                          "html.Element",
+                          "p",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "\n",
+                          1.0,
+                          [
+                            "\n"
+                          ]
+                        ],
+                        [
+                          "html.Element",
+                          "textarea",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "pre",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "\n",
+                          1.0,
+                          [
+                            "\n"
+                          ]
+                        ],
+                        [
+                          "html.Element",
+                          "listing",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "\n",
+                          1.0,
+                          [
+                            "\n"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -322,7 +639,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<constructor></constructor>",
-                      "expected": [["html.Element", "constructor", 0.0]]
+                      "expected": [
+                        [
+                          "html.Element",
+                          "constructor",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 }
@@ -343,8 +666,19 @@
                           "type": "HumanizeDom",
                           "input": "<div animate.enter=\"foo\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "animate.enter", "foo", ["foo"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "animate.enter",
+                              "foo",
+                              [
+                                "foo"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -357,8 +691,19 @@
                           "type": "HumanizeDom",
                           "input": "<div animate.leave=\"bar\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "animate.leave", "bar", ["bar"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "animate.leave",
+                              "bar",
+                              [
+                                "bar"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -371,8 +716,19 @@
                           "type": "HumanizeDom",
                           "input": "<div animateAbc=\"bar\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "animateAbc", "bar", ["bar"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "animateAbc",
+                              "bar",
+                              [
+                                "bar"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -385,9 +741,27 @@
                           "type": "HumanizeDom",
                           "input": "<div animate.enter=\"foo\" animate.leave=\"bar\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "animate.enter", "foo", ["foo"]],
-                            ["html.Attribute", "animate.leave", "bar", ["bar"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "animate.enter",
+                              "foo",
+                              [
+                                "foo"
+                              ]
+                            ],
+                            [
+                              "html.Attribute",
+                              "animate.leave",
+                              "bar",
+                              [
+                                "bar"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -400,8 +774,19 @@
                           "type": "HumanizeDom",
                           "input": "<div [animate.enter]=\"'foo'\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "[animate.enter]", "'foo'", ["'foo'"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "[animate.enter]",
+                              "'foo'",
+                              [
+                                "'foo'"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -414,12 +799,18 @@
                           "type": "HumanizeDom",
                           "input": "<div [animate.leave]=\"['bar', 'baz']\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
                             [
                               "html.Attribute",
                               "[animate.leave]",
                               "['bar', 'baz']",
-                              ["['bar', 'baz']"]
+                              [
+                                "['bar', 'baz']"
+                              ]
                             ]
                           ]
                         }
@@ -433,12 +824,18 @@
                           "type": "HumanizeDom",
                           "input": "<div (animate.enter)=\"onAnimation($event)\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
                             [
                               "html.Attribute",
                               "(animate.enter)",
                               "onAnimation($event)",
-                              ["onAnimation($event)"]
+                              [
+                                "onAnimation($event)"
+                              ]
                             ]
                           ]
                         }
@@ -452,12 +849,18 @@
                           "type": "HumanizeDom",
                           "input": "<div (animate.leave)=\"onAnimation($event)\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
                             [
                               "html.Attribute",
                               "(animate.leave)",
                               "onAnimation($event)",
-                              ["onAnimation($event)"]
+                              [
+                                "onAnimation($event)"
+                              ]
                             ]
                           ]
                         }
@@ -471,8 +874,19 @@
                           "type": "HumanizeDom",
                           "input": "<div (animateXYZ)=\"onAnimation()\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "(animateXYZ)", "onAnimation()", ["onAnimation()"]]
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "(animateXYZ)",
+                              "onAnimation()",
+                              [
+                                "onAnimation()"
+                              ]
+                            ]
                           ]
                         }
                       ]
@@ -485,13 +899,26 @@
                           "type": "HumanizeDom",
                           "input": "<div [animate.enter]=\"'foo'\" (animate.leave)=\"onAnimation($event)\"></div>",
                           "expected": [
-                            ["html.Element", "div", 0.0],
-                            ["html.Attribute", "[animate.enter]", "'foo'", ["'foo'"]],
+                            [
+                              "html.Element",
+                              "div",
+                              0.0
+                            ],
+                            [
+                              "html.Attribute",
+                              "[animate.enter]",
+                              "'foo'",
+                              [
+                                "'foo'"
+                              ]
+                            ],
                             [
                               "html.Attribute",
                               "(animate.leave)",
                               "onAnimation($event)",
-                              ["onAnimation($event)"]
+                              [
+                                "onAnimation($event)"
+                              ]
                             ]
                           ]
                         }
@@ -509,9 +936,27 @@
                       "type": "HumanizeDom",
                       "input": "<div kEy=\"v\" key2=v2></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Attribute", "kEy", "v", ["v"]],
-                        ["html.Attribute", "key2", "v2", ["v2"]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "kEy",
+                          "v",
+                          [
+                            "v"
+                          ]
+                        ],
+                        [
+                          "html.Attribute",
+                          "key2",
+                          "v2",
+                          [
+                            "v2"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -524,14 +969,26 @@
                       "type": "HumanizeDom",
                       "input": "<div foo=\"1{{message}}2\"></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
                         [
                           "html.Attribute",
                           "foo",
                           "1{{message}}2",
-                          ["1"],
-                          ["{{", "message", "}}"],
-                          ["2"]
+                          [
+                            "1"
+                          ],
+                          [
+                            "{{",
+                            "message",
+                            "}}"
+                          ],
+                          [
+                            "2"
+                          ]
                         ]
                       ]
                     }
@@ -545,14 +1002,26 @@
                       "type": "HumanizeDom",
                       "input": "<div foo={{message}}></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
                         [
                           "html.Attribute",
                           "foo",
                           "{{message}}",
-                          [""],
-                          ["{{", "message", "}}"],
-                          [""]
+                          [
+                            ""
+                          ],
+                          [
+                            "{{",
+                            "message",
+                            "}}"
+                          ],
+                          [
+                            ""
+                          ]
                         ]
                       ]
                     }
@@ -571,8 +1040,26 @@
                       "type": "HumanizeDom",
                       "input": "<div foo=\"&amp;\"></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Attribute", "foo", "&", [""], ["&", "&amp;"], [""]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "foo",
+                          "&",
+                          [
+                            ""
+                          ],
+                          [
+                            "&",
+                            "&amp;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -585,8 +1072,26 @@
                       "type": "HumanizeDom",
                       "input": "<div foo=\"&#x1F6C8;\"></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Attribute", "foo", "🛈", [""], ["🛈", "&#x1F6C8;"], [""]]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "foo",
+                          "🛈",
+                          [
+                            ""
+                          ],
+                          [
+                            "🛈",
+                            "&#x1F6C8;"
+                          ],
+                          [
+                            ""
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -599,37 +1104,29 @@
                       "type": "HumanizeDom",
                       "input": "<div foo=\"&#128712;\"></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Attribute", "foo", "🛈", [""], ["🛈", "&#128712;"], [""]]
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "name": "should parse attributes containing unquoted interpolation",
-                  "path": "HtmlParser/parse/attributes/should parse attributes containing unquoted interpolation",
-                  "assertions": [
-                    {
-                      "type": "HumanizeDom",
-                      "input": "<div foo={{message}}></div>",
-                      "expected": [
-                        ["html.Element", "div", 0.0],
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
                         [
                           "html.Attribute",
                           "foo",
-                          "{{message}}",
-                          [""],
-                          ["{{", "message", "}}"],
-                          [""]
+                          "🛈",
+                          [
+                            ""
+                          ],
+                          [
+                            "🛈",
+                            "&#128712;"
+                          ],
+                          [
+                            ""
+                          ]
                         ]
                       ]
                     }
                   ]
-                },
-                {
-                  "name": "should parse bound inputs with expressions containing newlines",
-                  "path": "HtmlParser/parse/attributes/should parse bound inputs with expressions containing newlines",
-                  "assertions": []
                 },
                 {
                   "name": "should decode HTML entities in interpolated attributes",
@@ -651,9 +1148,17 @@
                           "html.Attribute",
                           "foo",
                           "{{&}}",
-                          [""],
-                          ["{{", "&amp;", "}}"],
-                          [""],
+                          [
+                            ""
+                          ],
+                          [
+                            "{{",
+                            "&amp;",
+                            "}}"
+                          ],
+                          [
+                            ""
+                          ],
                           "foo=\"{{&amp;}}\""
                         ]
                       ],
@@ -674,8 +1179,16 @@
                       "type": "HumanizeDom",
                       "input": "<div k></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0],
-                        ["html.Attribute", "k", ""]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "k",
+                          ""
+                        ]
                       ]
                     }
                   ]
@@ -688,8 +1201,19 @@
                       "type": "HumanizeDom",
                       "input": "<svg viewBox=\"0\"></svg>",
                       "expected": [
-                        ["html.Element", ":svg:svg", 0.0],
-                        ["html.Attribute", "viewBox", "0", ["0"]]
+                        [
+                          "html.Element",
+                          ":svg:svg",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "viewBox",
+                          "0",
+                          [
+                            "0"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -702,8 +1226,19 @@
                       "type": "HumanizeDom",
                       "input": "<ng-template k=\"v\"></ng-template>",
                       "expected": [
-                        ["html.Element", "ng-template", 0.0],
-                        ["html.Attribute", "k", "v", ["v"]]
+                        [
+                          "html.Element",
+                          "ng-template",
+                          0.0
+                        ],
+                        [
+                          "html.Attribute",
+                          "k",
+                          "v",
+                          [
+                            "v"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -716,8 +1251,20 @@
                       "type": "HumanizeDom",
                       "input": "<svg:use xlink:href=\"Port\" />",
                       "expected": [
-                        ["html.Element", ":svg:use", 0.0, "#selfClosing"],
-                        ["html.Attribute", ":xlink:href", "Port", ["Port"]]
+                        [
+                          "html.Element",
+                          ":svg:use",
+                          0.0,
+                          "#selfClosing"
+                        ],
+                        [
+                          "html.Attribute",
+                          ":xlink:href",
+                          "Port",
+                          [
+                            "Port"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -746,8 +1293,16 @@
                       "type": "HumanizeDom",
                       "input": "<!-- comment --><div></div>",
                       "expected": [
-                        ["html.Comment", "comment", 0.0],
-                        ["html.Element", "div", 0.0]
+                        [
+                          "html.Comment",
+                          "comment",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "div",
+                          0.0
+                        ]
                       ]
                     }
                   ]
@@ -759,7 +1314,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "<!-- line 1 \r\n line 2 -->",
-                      "expected": [["html.Comment", "line 1 \n line 2", 0.0]]
+                      "expected": [
+                        [
+                          "html.Comment",
+                          "line 1 \n line 2",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 }
@@ -770,8 +1331,8 @@
               "groups": [],
               "tests": [
                 {
-                  "name": "should parse out expansion forms",
-                  "path": "HtmlParser/parse/expansion forms/should parse out expansion forms",
+                  "name": "should parse out expansion forms (with multiple cases)",
+                  "path": "HtmlParser/parse/expansion forms/should parse out expansion forms (with multiple cases)",
                   "assertions": []
                 },
                 {
@@ -790,8 +1351,8 @@
                   "assertions": []
                 },
                 {
-                  "name": "should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set",
-                  "path": "HtmlParser/parse/expansion forms/should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set",
+                  "name": "should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set (escapedString:false)",
+                  "path": "HtmlParser/parse/expansion forms/should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set (escapedString:false)",
                   "assertions": []
                 },
                 {
@@ -863,10 +1424,27 @@
                       "type": "HumanizeDom",
                       "input": "@defer (a b; c d){hello}",
                       "expected": [
-                        ["html.Block", "defer", 0.0],
-                        ["html.BlockParameter", "a b"],
-                        ["html.BlockParameter", "c d"],
-                        ["html.Text", "hello", 1.0, ["hello"]]
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "a b"
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "c d"
+                        ],
+                        [
+                          "html.Text",
+                          "hello",
+                          1.0,
+                          [
+                            "hello"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -879,8 +1457,17 @@
                       "type": "HumanizeDom",
                       "input": "@defer {<my-cmp/>}",
                       "expected": [
-                        ["html.Block", "defer", 0.0],
-                        ["html.Element", "my-cmp", 1.0, "#selfClosing"]
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "my-cmp",
+                          1.0,
+                          "#selfClosing"
+                        ]
                       ]
                     }
                   ]
@@ -903,10 +1490,26 @@
                       "type": "HumanizeDom",
                       "input": "<svg>@if (cond) {<circle/>}</svg>",
                       "expected": [
-                        ["html.Element", ":svg:svg", 0.0],
-                        ["html.Block", "if", 1.0],
-                        ["html.BlockParameter", "cond"],
-                        ["html.Element", ":svg:circle", 2.0, "#selfClosing"]
+                        [
+                          "html.Element",
+                          ":svg:svg",
+                          0.0
+                        ],
+                        [
+                          "html.Block",
+                          "if",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "cond"
+                        ],
+                        [
+                          "html.Element",
+                          ":svg:circle",
+                          2.0,
+                          "#selfClosing"
+                        ]
                       ]
                     }
                   ]
@@ -918,7 +1521,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "@defer{}",
-                      "expected": [["html.Block", "defer", 0.0]]
+                      "expected": [
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -930,8 +1539,16 @@
                       "type": "HumanizeDom",
                       "input": "@defer {<br>}",
                       "expected": [
-                        ["html.Block", "defer", 0.0],
-                        ["html.Element", "br", 1.0]
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ],
+                        [
+                          "html.Element",
+                          "br",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -944,15 +1561,54 @@
                       "type": "HumanizeDom",
                       "input": "@switch (expr) {@case ('foo') @case ('bar') { <input> }}",
                       "expected": [
-                        ["html.Block", "switch", 0.0],
-                        ["html.BlockParameter", "expr"],
-                        ["html.Block", "case", 1.0],
-                        ["html.BlockParameter", "'foo'"],
-                        ["html.Block", "case", 1.0],
-                        ["html.BlockParameter", "'bar'"],
-                        ["html.Text", " ", 2.0, [" "]],
-                        ["html.Element", "input", 2.0],
-                        ["html.Text", " ", 2.0, [" "]]
+                        [
+                          "html.Block",
+                          "switch",
+                          0.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "expr"
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'foo'"
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'bar'"
+                        ],
+                        [
+                          "html.Text",
+                          " ",
+                          2.0,
+                          [
+                            " "
+                          ]
+                        ],
+                        [
+                          "html.Element",
+                          "input",
+                          2.0
+                        ],
+                        [
+                          "html.Text",
+                          " ",
+                          2.0,
+                          [
+                            " "
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -965,18 +1621,117 @@
                       "type": "HumanizeDom",
                       "input": "@switch (expr) {@case ('foo') {} @case ('bar') {bar} @case('baz') { baz }}",
                       "expected": [
-                        ["html.Block", "switch", 0.0],
-                        ["html.BlockParameter", "expr"],
-                        ["html.Block", "case", 1.0],
-                        ["html.BlockParameter", "'foo'"],
-                        ["html.Text", " ", 1.0, [" "]],
-                        ["html.Block", "case", 1.0],
-                        ["html.BlockParameter", "'bar'"],
-                        ["html.Text", "bar", 2.0, ["bar"]],
-                        ["html.Text", " ", 1.0, [" "]],
-                        ["html.Block", "case", 1.0],
-                        ["html.BlockParameter", "'baz'"],
-                        ["html.Text", " baz ", 2.0, [" baz "]]
+                        [
+                          "html.Block",
+                          "switch",
+                          0.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "expr"
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'foo'"
+                        ],
+                        [
+                          "html.Text",
+                          " ",
+                          1.0,
+                          [
+                            " "
+                          ]
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'bar'"
+                        ],
+                        [
+                          "html.Text",
+                          "bar",
+                          2.0,
+                          [
+                            "bar"
+                          ]
+                        ],
+                        [
+                          "html.Text",
+                          " ",
+                          1.0,
+                          [
+                            " "
+                          ]
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'baz'"
+                        ],
+                        [
+                          "html.Text",
+                          " baz ",
+                          2.0,
+                          [
+                            " baz "
+                          ]
+                        ]
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "should parse exhaustive default checks in a switch block",
+                  "path": "HtmlParser/parse/blocks/should parse exhaustive default checks in a switch block",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "@switch (expr) {@case ('foo') {} @default never;}",
+                      "expected": [
+                        [
+                          "html.Block",
+                          "switch",
+                          0.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "expr"
+                        ],
+                        [
+                          "html.Block",
+                          "case",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "'foo'"
+                        ],
+                        [
+                          "html.Text",
+                          " ",
+                          1.0,
+                          [
+                            " "
+                          ]
+                        ],
+                        [
+                          "html.Block",
+                          "default never",
+                          1.0
+                        ]
                       ]
                     }
                   ]
@@ -989,9 +1744,24 @@
                       "type": "HumanizeDom",
                       "input": "<img>@defer {hello}",
                       "expected": [
-                        ["html.Element", "img", 0.0],
-                        ["html.Block", "defer", 0.0],
-                        ["html.Text", "hello", 1.0, ["hello"]]
+                        [
+                          "html.Element",
+                          "img",
+                          0.0
+                        ],
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ],
+                        [
+                          "html.Text",
+                          "hello",
+                          1.0,
+                          [
+                            "hello"
+                          ]
+                        ]
                       ]
                     }
                   ]
@@ -1032,8 +1802,8 @@
                   "assertions": []
                 },
                 {
-                  "name": "should parse an incomplete block with no parameters",
-                  "path": "HtmlParser/parse/blocks/should parse an incomplete block with no parameters",
+                  "name": "should parse an incomplete block with no body",
+                  "path": "HtmlParser/parse/blocks/should parse an incomplete block with no body",
                   "assertions": []
                 }
               ]
@@ -1049,7 +1819,13 @@
                     {
                       "type": "HumanizeDom",
                       "input": "@let foo = 123;",
-                      "expected": [["html.LetDeclaration", "foo", "123"]]
+                      "expected": [
+                        [
+                          "html.LetDeclaration",
+                          "foo",
+                          "123"
+                        ]
+                      ]
                     }
                   ]
                 },
@@ -1061,10 +1837,25 @@
                       "type": "HumanizeDom",
                       "input": "@defer {@if (true) {@let foo = 123;}}",
                       "expected": [
-                        ["html.Block", "defer", 0.0],
-                        ["html.Block", "if", 1.0],
-                        ["html.BlockParameter", "true"],
-                        ["html.LetDeclaration", "foo", "123"]
+                        [
+                          "html.Block",
+                          "defer",
+                          0.0
+                        ],
+                        [
+                          "html.Block",
+                          "if",
+                          1.0
+                        ],
+                        [
+                          "html.BlockParameter",
+                          "true"
+                        ],
+                        [
+                          "html.LetDeclaration",
+                          "foo",
+                          "123"
+                        ]
                       ]
                     }
                   ]
@@ -1081,7 +1872,7 @@
                           "html.LetDeclaration",
                           "foo",
                           "123 + 456",
-                          "@let foo = 123 + 456",
+                          "@let foo = 123 + 456;",
                           "foo",
                           "123 + 456"
                         ]
@@ -1324,11 +2115,48 @@
                           "<div [prop]=\"v1\" (e)=\"do()\" attr=\"v2\" noValue>",
                           "</div>"
                         ],
-                        ["html.Attribute", "[prop]", "v1", ["v1"], "[prop]=\"v1\""],
-                        ["html.Attribute", "(e)", "do()", ["do()"], "(e)=\"do()\""],
-                        ["html.Attribute", "attr", "v2", ["v2"], "attr=\"v2\""],
-                        ["html.Attribute", "noValue", "", "noValue"],
-                        ["html.Text", "\na\n", 1.0, ["\na\n"], "\na\n"]
+                        [
+                          "html.Attribute",
+                          "[prop]",
+                          "v1",
+                          [
+                            "v1"
+                          ],
+                          "[prop]=\"v1\""
+                        ],
+                        [
+                          "html.Attribute",
+                          "(e)",
+                          "do()",
+                          [
+                            "do()"
+                          ],
+                          "(e)=\"do()\""
+                        ],
+                        [
+                          "html.Attribute",
+                          "attr",
+                          "v2",
+                          [
+                            "v2"
+                          ],
+                          "attr=\"v2\""
+                        ],
+                        [
+                          "html.Attribute",
+                          "noValue",
+                          "",
+                          "noValue"
+                        ],
+                        [
+                          "html.Text",
+                          "\na\n",
+                          1.0,
+                          [
+                            "\na\n"
+                          ],
+                          "\na\n"
+                        ]
                       ],
                       "options": null
                     }
@@ -1369,9 +2197,17 @@
                           "html.Text",
                           " pre {{ value }} post ",
                           1.0,
-                          [" pre "],
-                          ["{{", " value ", "}}"],
-                          [" post "],
+                          [
+                            " pre "
+                          ],
+                          [
+                            "{{",
+                            " value ",
+                            "}}"
+                          ],
+                          [
+                            " post "
+                          ],
                           " pre {{ value }} post "
                         ]
                       ],
@@ -1387,8 +2223,22 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<div><br></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0, "<div><br></div>", "<div>", "</div>"],
-                        ["html.Element", "br", 1.0, "<br>", "<br>", null]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0,
+                          "<div><br></div>",
+                          "<div>",
+                          "</div>"
+                        ],
+                        [
+                          "html.Element",
+                          "br",
+                          1.0,
+                          "<br>",
+                          "<br>",
+                          null
+                        ]
                       ],
                       "options": null
                     }
@@ -1402,9 +2252,30 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<div><br><hr></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0, "<div><br><hr></div>", "<div>", "</div>"],
-                        ["html.Element", "br", 1.0, "<br>", "<br>", null],
-                        ["html.Element", "hr", 1.0, "<hr>", "<hr>", null]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0,
+                          "<div><br><hr></div>",
+                          "<div>",
+                          "</div>"
+                        ],
+                        [
+                          "html.Element",
+                          "br",
+                          1.0,
+                          "<br>",
+                          "<br>",
+                          null
+                        ],
+                        [
+                          "html.Element",
+                          "hr",
+                          1.0,
+                          "<hr>",
+                          "<hr>",
+                          null
+                        ]
                       ],
                       "options": null
                     }
@@ -1417,7 +2288,16 @@
                     {
                       "type": "HumanizeDomSourceSpans",
                       "input": "<br>",
-                      "expected": [["html.Element", "br", 0.0, "<br>", "<br>", null]],
+                      "expected": [
+                        [
+                          "html.Element",
+                          "br",
+                          0.0,
+                          "<br>",
+                          "<br>",
+                          null
+                        ]
+                      ],
                       "options": null
                     }
                   ]
@@ -1430,7 +2310,15 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<br/>",
                       "expected": [
-                        ["html.Element", "br", 0.0, "<br/>", "#selfClosing", "<br/>", "<br/>"]
+                        [
+                          "html.Element",
+                          "br",
+                          0.0,
+                          "<br/>",
+                          "#selfClosing",
+                          "<br/>",
+                          "<br/>"
+                        ]
                       ],
                       "options": null
                     }
@@ -1444,8 +2332,23 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<div><br/></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0, "<div><br/></div>", "<div>", "</div>"],
-                        ["html.Element", "br", 1.0, "<br/>", "#selfClosing", "<br/>", "<br/>"]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0,
+                          "<div><br/></div>",
+                          "<div>",
+                          "</div>"
+                        ],
+                        [
+                          "html.Element",
+                          "br",
+                          1.0,
+                          "<br/>",
+                          "#selfClosing",
+                          "<br/>",
+                          "<br/>"
+                        ]
                       ],
                       "options": null
                     }
@@ -1468,13 +2371,51 @@
                           "<input type=\"text\" />",
                           "<input type=\"text\" />"
                         ],
-                        ["html.Attribute", "type", "text", ["text"], "type=\"text\""],
-                        ["html.Text", "\n\n\n  ", 0.0, ["\n\n\n  "], "", "\n\n\n  "],
-                        ["html.Element", "span", 0.0, "<span>\n</span>", "<span>", "</span>"],
-                        ["html.Text", "\n", 1.0, ["\n"], "", "\n"]
+                        [
+                          "html.Attribute",
+                          "type",
+                          "text",
+                          [
+                            "text"
+                          ],
+                          "type=\"text\""
+                        ],
+                        [
+                          "html.Text",
+                          "\n\n\n  ",
+                          0.0,
+                          [
+                            "\n\n\n  "
+                          ],
+                          "",
+                          "\n\n\n  "
+                        ],
+                        [
+                          "html.Element",
+                          "span",
+                          0.0,
+                          "<span>\n</span>",
+                          "<span>",
+                          "</span>"
+                        ],
+                        [
+                          "html.Text",
+                          "\n",
+                          1.0,
+                          [
+                            "\n"
+                          ],
+                          "",
+                          "\n"
+                        ]
                       ],
                       "options": {
-                        "leading_trivia_chars": [" ", "\n", "\r", "\t"]
+                        "leading_trivia_chars": [
+                          " ",
+                          "\n",
+                          "\r",
+                          "\t"
+                        ]
                       }
                     }
                   ]
@@ -1487,8 +2428,22 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<div><p></div>",
                       "expected": [
-                        ["html.Element", "div", 0.0, "<div><p></div>", "<div>", "</div>"],
-                        ["html.Element", "p", 1.0, "<p>", "<p>", null]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0,
+                          "<div><p></div>",
+                          "<div>",
+                          "</div>"
+                        ],
+                        [
+                          "html.Element",
+                          "p",
+                          1.0,
+                          "<p>",
+                          "<p>",
+                          null
+                        ]
                       ],
                       "options": null
                     },
@@ -1496,11 +2451,48 @@
                       "type": "HumanizeDomSourceSpans",
                       "input": "<div><li>A<li>B</div>",
                       "expected": [
-                        ["html.Element", "div", 0.0, "<div><li>A<li>B</div>", "<div>", "</div>"],
-                        ["html.Element", "li", 1.0, "<li>", "<li>", null],
-                        ["html.Text", "A", 2.0, ["A"], "A"],
-                        ["html.Element", "li", 1.0, "<li>", "<li>", null],
-                        ["html.Text", "B", 2.0, ["B"], "B"]
+                        [
+                          "html.Element",
+                          "div",
+                          0.0,
+                          "<div><li>A<li>B</div>",
+                          "<div>",
+                          "</div>"
+                        ],
+                        [
+                          "html.Element",
+                          "li",
+                          1.0,
+                          "<li>",
+                          "<li>",
+                          null
+                        ],
+                        [
+                          "html.Text",
+                          "A",
+                          2.0,
+                          [
+                            "A"
+                          ],
+                          "A"
+                        ],
+                        [
+                          "html.Element",
+                          "li",
+                          1.0,
+                          "<li>",
+                          "<li>",
+                          null
+                        ],
+                        [
+                          "html.Text",
+                          "B",
+                          2.0,
+                          [
+                            "B"
+                          ],
+                          "B"
+                        ]
                       ],
                       "options": null
                     }
@@ -1522,8 +2514,19 @@
                           "<div>",
                           "</div>"
                         ],
-                        ["html.Expansion", "count", "plural", 1.0, "{count, plural, =0 {msg}}"],
-                        ["html.ExpansionCase", "=0", 2.0, "=0 {msg}"]
+                        [
+                          "html.Expansion",
+                          "count",
+                          "plural",
+                          1.0,
+                          "{count, plural, =0 {msg}}"
+                        ],
+                        [
+                          "html.ExpansionCase",
+                          "=0",
+                          2.0,
+                          "=0 {msg}"
+                        ]
                       ],
                       "options": null
                     }

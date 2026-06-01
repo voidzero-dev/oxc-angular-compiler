@@ -1,6 +1,6 @@
 {
   "name": "host_and_host_context_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/host_and_host_context_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/host_and_host_context_spec.ts",
   "test_groups": [
     {
       "name": "ShadowCss, :host and :host-context",
@@ -88,28 +88,6 @@
               ]
             },
             {
-              "name": "should handle multiple tag selectors",
-              "path": "ShadowCss, :host and :host-context/:host/should handle multiple tag selectors",
-              "assertions": [
-                {
-                  "type": "ShimCss",
-                  "input": ":host(ul,li) {}",
-                  "content_attr": "contenta",
-                  "host_attr": "a-host",
-                  "expected": "ul[a-host], li[a-host] {}",
-                  "normalized": true
-                },
-                {
-                  "type": "ShimCss",
-                  "input": ":host(ul,li) > .z {}",
-                  "content_attr": "contenta",
-                  "host_attr": "a-host",
-                  "expected": "ul[a-host] > .z[contenta], li[a-host] > .z[contenta] {}",
-                  "normalized": true
-                }
-              ]
-            },
-            {
               "name": "should handle compound class selectors",
               "path": "ShadowCss, :host and :host-context/:host/should handle compound class selectors",
               "assertions": [
@@ -124,37 +102,23 @@
               ]
             },
             {
-              "name": "should handle multiple class selectors",
-              "path": "ShadowCss, :host and :host-context/:host/should handle multiple class selectors",
+              "name": "should ignore :host with a selector list containing top-level commas",
+              "path": "ShadowCss, :host and :host-context/:host/should ignore :host with a selector list containing top-level commas",
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": ":host(.x,.y) {}",
+                  "input": ":host(.a, .b) {}",
                   "content_attr": "contenta",
                   "host_attr": "a-host",
-                  "expected": ".x[a-host], .y[a-host] {}",
+                  "expected": "[contenta]:host(.a, .b) {}",
                   "normalized": true
                 },
                 {
                   "type": "ShimCss",
-                  "input": ":host(.x,.y) > .z {}",
+                  "input": ".outer :host(.a, .b) .inner {}",
                   "content_attr": "contenta",
                   "host_attr": "a-host",
-                  "expected": ".x[a-host] > .z[contenta], .y[a-host] > .z[contenta] {}",
-                  "normalized": true
-                }
-              ]
-            },
-            {
-              "name": "should handle multiple attribute selectors",
-              "path": "ShadowCss, :host and :host-context/:host/should handle multiple attribute selectors",
-              "assertions": [
-                {
-                  "type": "ShimCss",
-                  "input": ":host([a=\"b\"],[c=d]) {}",
-                  "content_attr": "contenta",
-                  "host_attr": "a-host",
-                  "expected": "[a=\"b\"][a-host], [c=d][a-host] {}",
+                  "expected": ".outer[contenta] [contenta]:host(.a, .b) .inner[contenta] {}",
                   "normalized": true
                 }
               ]
@@ -546,7 +510,7 @@
                   "input": ":host-context .inner {}",
                   "content_attr": "contenta",
                   "host_attr": "a-host",
-                  "expected": "[a-host] .inner[contenta] {}",
+                  "expected": "[contenta]:host-context .inner[contenta] {}",
                   "normalized": true
                 },
                 {
@@ -554,7 +518,7 @@
                   "input": ":host-context() .inner {}",
                   "content_attr": "contenta",
                   "host_attr": "a-host",
-                  "expected": "[a-host] .inner[contenta] {}",
+                  "expected": "[contenta]:host-context() .inner[contenta] {}",
                   "normalized": true
                 },
                 {
@@ -562,7 +526,7 @@
                   "input": ":host-context :host-context(.a) {}",
                   "content_attr": "contenta",
                   "host_attr": "host-a",
-                  "expected": ".a[host-a], .a [host-a] {}",
+                  "expected": ":host-context .a[host-a], .a [host-a] {}",
                   "normalized": true
                 }
               ]

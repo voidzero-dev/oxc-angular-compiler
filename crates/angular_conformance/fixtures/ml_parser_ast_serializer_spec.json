@@ -1,6 +1,6 @@
 {
   "name": "ast_serializer_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/ast_serializer_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/ast_serializer_spec.ts",
   "test_groups": [
     {
       "name": "Node serializer",
@@ -13,7 +13,9 @@
             {
               "type": "SerializeNodes",
               "input": "<p></p>",
-              "expected": ["<p></p>"]
+              "expected": [
+                "<p></p>"
+              ]
             }
           ]
         },
@@ -24,7 +26,9 @@
             {
               "type": "SerializeNodes",
               "input": "<p k=\"value\"></p>",
-              "expected": ["<p k=\"value\"></p>"]
+              "expected": [
+                "<p k=\"value\"></p>"
+              ]
             }
           ]
         },
@@ -35,7 +39,9 @@
             {
               "type": "SerializeNodes",
               "input": "some text",
-              "expected": ["some text"]
+              "expected": [
+                "some text"
+              ]
             }
           ]
         },
@@ -46,7 +52,9 @@
             {
               "type": "SerializeNodes",
               "input": "{number, plural, =0 {none} =1 {one} other {many}}",
-              "expected": ["{number, plural, =0 {none} =1 {one} other {many}}"]
+              "expected": [
+                "{number, plural, =0 {none} =1 {one} other {many}}"
+              ]
             }
           ]
         },
@@ -57,7 +65,9 @@
             {
               "type": "SerializeNodes",
               "input": "<!--comment-->",
-              "expected": ["<!--comment-->"]
+              "expected": [
+                "<!--comment-->"
+              ]
             }
           ]
         },
