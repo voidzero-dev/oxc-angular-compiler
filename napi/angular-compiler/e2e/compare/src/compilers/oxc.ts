@@ -1,5 +1,6 @@
 import * as path from 'path'
 
+import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
 import {
   transformAngularFileSync,
   compileClassMetadata,
@@ -11,7 +12,6 @@ import {
   transformSync as oxcTransformSync,
   type TransformOptions as OxcTransformOptions,
 } from 'oxc-transform'
-import { VERSION as ANGULAR_VERSION } from '@angular/compiler'
 
 import type { CompilerOutput, ProjectCompilationResult } from '../types.js'
 
