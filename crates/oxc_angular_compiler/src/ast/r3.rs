@@ -1038,6 +1038,9 @@ pub struct R3NeverDeferredTrigger {
 /// An idle deferred trigger.
 #[derive(Debug)]
 pub struct R3IdleDeferredTrigger {
+    /// Optional timeout in milliseconds (v22+: `on idle(100)`). `f64` to
+    /// preserve fractional precision, mirroring the timer trigger's delay.
+    pub timeout: Option<f64>,
     /// Source span.
     pub source_span: Span,
     /// Name span.

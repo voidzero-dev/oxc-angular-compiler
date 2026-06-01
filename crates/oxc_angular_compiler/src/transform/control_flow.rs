@@ -1299,15 +1299,29 @@ fn parse_single_on_trigger<'a>(
 
     match name {
         "idle" => {
-            if params.is_some() {
-                errors.push("'idle' trigger cannot have parameters".to_string());
-                return;
-            }
+            // v22+: `idle` accepts an optional timeout parameter, e.g. `on idle(100)`.
+            let timeout = if let Some(param_str) = params {
+                if param_str.contains(',') {
+                    errors
+                        .push("\"idle\" trigger can only have zero or one parameters".to_string());
+                    return;
+                }
+                match parse_deferred_time(param_str) {
+                    Some(t) => Some(t),
+                    None => {
+                        errors.push("Could not parse time value of trigger \"idle\"".to_string());
+                        return;
+                    }
+                }
+            } else {
+                None
+            };
             if triggers.idle.is_some() {
                 errors.push("Duplicate 'idle' trigger is not allowed".to_string());
                 return;
             }
             triggers.idle = Some(R3IdleDeferredTrigger {
+                timeout,
                 source_span,
                 name_span: Some(trigger_span),
                 prefetch_span,

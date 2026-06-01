@@ -78,6 +78,8 @@ impl<'s> R3Humanizer<'s> {
         if let Some(trigger) = &triggers.idle {
             let row = if self.mode == HumanizeMode::SourceSpans {
                 vec!["IdleDeferredTrigger".to_string(), self.span_text(&trigger.source_span)]
+            } else if let Some(timeout) = trigger.timeout {
+                vec!["IdleDeferredTrigger".to_string(), timeout.to_string()]
             } else {
                 vec!["IdleDeferredTrigger".to_string()]
             };

@@ -12,10 +12,10 @@
 | html_lexer | 286 | 3 | 0 | 0 | 289 | 99.0% |
 | html_parser | 85 | 2 | 0 | 0 | 87 | 97.7% |
 | html_whitespace | 21 | 0 | 0 | 0 | 21 | 100.0% |
-| r3_transform | 165 | 12 | 0 | 0 | 177 | 93.2% |
+| r3_transform | 168 | 9 | 0 | 0 | 177 | 94.9% |
 | shadow_css | 160 | 9 | 0 | 0 | 169 | 94.7% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1238** | **26** | **0** | **0** | **1264** | **97.9%** |
+| **Total** | **1241** | **23** | **0** | **0** | **1264** | **98.2%** |
 
 ## Failed Tests
 
@@ -279,84 +279,6 @@ Path: `R3 template transform/<script> and <style> elements/should not ignore nam
 -[Element, :svg:style]
 -[Text, .a { fill: none; }]
 +[Element, :svg:svg]
-
-```
-
-#### should parse prefetch `on idle(100)` trigger and preserve timeout: ExpectFromHtml { input: "@defer (on idle; prefetch on idle(100)){hello}", expected: [Array [String("DeferredBlock")], Array [String("IdleDeferredTrigger")], Array [String("IdleDeferredTrigger"), Number(100.0)], Array [String("Text"), String("hello")]], ignore_error: false }
-Path: `R3 template transform/deferred blocks/should parse prefetch `on idle(100)` trigger and preserve timeout`
-
-**Expected:**
-```
-[DeferredBlock]
-[IdleDeferredTrigger]
-[IdleDeferredTrigger, 100]
-[Text, hello]
-```
-
-**Actual:**
-```
-[DeferredBlock]
-[IdleDeferredTrigger]
-[Text, hello]
-```
-
-**Diff:**
-```diff
- [DeferredBlock]
- [IdleDeferredTrigger]
--[IdleDeferredTrigger, 100]
- [Text, hello]
-
-```
-
-#### should parse hydrate `on idle(100)` trigger and preserve timeout: ExpectFromHtml { input: "@defer (on idle; hydrate on idle(100)){hello}", expected: [Array [String("DeferredBlock")], Array [String("IdleDeferredTrigger"), Number(100.0)], Array [String("IdleDeferredTrigger")], Array [String("Text"), String("hello")]], ignore_error: false }
-Path: `R3 template transform/deferred blocks/should parse hydrate `on idle(100)` trigger and preserve timeout`
-
-**Expected:**
-```
-[DeferredBlock]
-[IdleDeferredTrigger, 100]
-[IdleDeferredTrigger]
-[Text, hello]
-```
-
-**Actual:**
-```
-[DeferredBlock]
-[IdleDeferredTrigger]
-[Text, hello]
-```
-
-**Diff:**
-```diff
- [DeferredBlock]
--[IdleDeferredTrigger, 100]
- [IdleDeferredTrigger]
- [Text, hello]
-
-```
-
-#### should allow optional parameter on `idle` trigger and parse timeout: ExpectFromHtml { input: "@defer (on idle(1)) {hello}", expected: [Array [String("DeferredBlock")], Array [String("IdleDeferredTrigger"), Number(1.0)], Array [String("Text"), String("hello")]], ignore_error: false }
-Path: `R3 template transform/deferred blocks/block validations/should allow optional parameter on `idle` trigger and parse timeout`
-
-**Expected:**
-```
-[DeferredBlock]
-[IdleDeferredTrigger, 1]
-[Text, hello]
-```
-
-**Actual:**
-```
-[DeferredBlock]
-[Text, hello]
-```
-
-**Diff:**
-```diff
- [DeferredBlock]
--[IdleDeferredTrigger, 1]
- [Text, hello]
 
 ```
 
