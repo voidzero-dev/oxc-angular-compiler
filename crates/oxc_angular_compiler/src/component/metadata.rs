@@ -72,6 +72,20 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Check if this version uses modern optional-chaining semantics (v22.0.0+).
+    ///
+    /// Angular v22 changed the safe-navigation operator (`?.`) in template
+    /// expressions to yield `undefined` (native optional chaining) instead of the
+    /// legacy `null`. Earlier versions default to the legacy `== null ? null`
+    /// expansion. Users can opt back into legacy behavior with the
+    /// `legacyOptionalChaining` compiler option, or per-expression by wrapping it
+    /// in the `$safeNavigationMigration(...)` magic function.
+    ///
+    /// See `angular/angular@2896c93cc1`.
+    pub fn supports_modern_optional_chaining(&self) -> bool {
+        self.major >= 22
+    }
+
     /// Check if this version's runtime supports chained query instructions
     /// (`ɵɵviewQuery(p1)(p2)`, `ɵɵcontentQuerySignal(...)(...)`).
     ///

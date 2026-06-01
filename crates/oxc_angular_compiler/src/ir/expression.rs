@@ -592,6 +592,7 @@ impl<'a> IrExpression<'a> {
                     ResolvedPropertyReadExpr {
                         receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
                         name: e.name.clone(),
+                        optional: e.optional,
                         source_span: e.source_span,
                     },
                     allocator,
@@ -615,6 +616,7 @@ impl<'a> IrExpression<'a> {
                     ResolvedCallExpr {
                         receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
                         args,
+                        optional: e.optional,
                         source_span: e.source_span,
                     },
                     allocator,
@@ -624,6 +626,7 @@ impl<'a> IrExpression<'a> {
                 ResolvedKeyedReadExpr {
                     receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
                     key: Box::new_in(e.key.clone_in(allocator), allocator),
+                    optional: e.optional,
                     source_span: e.source_span,
                 },
                 allocator,
@@ -923,6 +926,12 @@ pub struct ResolvedPropertyReadExpr<'a> {
     pub receiver: Box<'a, IrExpression<'a>>,
     /// Property name to read.
     pub name: Ident<'a>,
+    /// Whether to read via native optional chaining (`receiver?.name`).
+    ///
+    /// Set to `true` when a safe property read (`a?.b`) is expanded under modern
+    /// (Angular v22+) optional-chaining semantics, where `?.` yields `undefined`.
+    /// Legacy reads and plain (non-safe) reads leave this `false`.
+    pub optional: bool,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -955,6 +964,12 @@ pub struct ResolvedCallExpr<'a> {
     pub receiver: Box<'a, IrExpression<'a>>,
     /// The call arguments (resolved or original).
     pub args: Vec<'a, IrExpression<'a>>,
+    /// Whether to invoke via native optional chaining (`receiver?.()`).
+    ///
+    /// Set to `true` when a safe call (`a?.()`) is expanded under modern
+    /// (Angular v22+) optional-chaining semantics. Legacy and plain calls
+    /// leave this `false`.
+    pub optional: bool,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -970,6 +985,12 @@ pub struct ResolvedKeyedReadExpr<'a> {
     pub receiver: Box<'a, IrExpression<'a>>,
     /// The key expression (original, e.g., a number or expression).
     pub key: Box<'a, IrExpression<'a>>,
+    /// Whether to read via native optional chaining (`receiver?.[key]`).
+    ///
+    /// Set to `true` when a safe keyed read (`a?.[k]`) is expanded under modern
+    /// (Angular v22+) optional-chaining semantics. Legacy and plain keyed reads
+    /// leave this `false`.
+    pub optional: bool,
     /// Source span.
     pub source_span: Option<Span>,
 }

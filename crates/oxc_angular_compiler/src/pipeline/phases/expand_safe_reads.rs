@@ -5,9 +5,23 @@
 //! finds all unresolved safe read expressions and converts them into the appropriate output AST
 //! reads, guarded by null checks.
 //!
+//! ## Optional-chaining semantics
+//!
+//! Since Angular v22, safe reads default to **native optional chaining** (`a?.b`),
+//! which yields `undefined`. Earlier versions (and projects that opt in via the
+//! `legacyOptionalChaining` compiler option) use the **legacy** `== null ? null`
+//! expansion, which yields `null`. The choice per compilation is resolved by
+//! [`ComponentCompilationJob::legacy_optional_chaining`].
+//!
+//! A single expression can opt back into legacy semantics on a modern target by
+//! wrapping it in the `$safeNavigationMigration(...)` magic function — this phase
+//! detects that wrapper, forces the legacy expansion on the wrapped subtree, and
+//! strips the wrapper. Mirrors Angular's `removeSafeNavigationMigration` +
+//! `expandSafeReads` phases (`angular/angular@2896c93cc1`).
+//!
 //! ## Algorithm
 //!
-//! This phase performs two transformations:
+//! **Legacy** mode performs two transformations:
 //!
 //! 1. **Safe Transform**: Converts safe access expressions to `SafeTernaryExpr`
 //!    - `a?.b` → `SafeTernaryExpr { guard: a, expr: a.b }`
@@ -16,6 +30,12 @@
 //!
 //! 2. **Ternary Transform**: Converts `SafeTernaryExpr` to `ConditionalExpr`
 //!    - `SafeTernaryExpr { guard, expr }` → `(guard == null ? null : expr)`
+//!
+//! **Modern** mode instead rewrites each safe access into the equivalent resolved
+//! read flagged as optional, which reifies to native `?.`:
+//!    - `a?.b` → `ResolvedPropertyRead { receiver: a, name: b, optional: true }`
+//!    - `a?.[k]` → `ResolvedKeyedRead { receiver: a, key: k, optional: true }`
+//!    - `a?.()` → `ResolvedCall { receiver: a, optional: true }`
 //!
 //! ## Temporary Variables
 //!
@@ -54,7 +74,8 @@ use oxc_str::Ident;
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
     ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
-    transform_expressions_in_create_op, transform_expressions_in_update_op,
+    transform_expressions_in_create_op, transform_expressions_in_expression,
+    transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -95,6 +116,10 @@ impl<'a> SafeTransformContext<'a> {
 pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
 
+    // Resolve whether `?.` uses legacy (`== null ? null`) or modern (native `?.`)
+    // semantics for this compilation. Read before borrowing views mutably.
+    let legacy = job.legacy_optional_chaining();
+
     // Get the current xref counter value - we'll track allocations ourselves
     // and sync back at the end
     let starting_xref = job.allocate_xref_id().0;
@@ -104,12 +129,15 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
     for view in job.all_views_mut() {
         let ctx = SafeTransformContext { allocator, next_xref: xref_counter.clone() };
 
-        // Transform safe access expressions to SafeTernary
+        // Pass 1: resolve `$safeNavigationMigration(...)` markers. This forces the
+        // legacy expansion on the wrapped subtree and strips the wrapper. Runs in
+        // both modes (the wrapper must always be removed so it never reifies as a
+        // real call).
         for op in view.create.iter_mut() {
             transform_expressions_in_create_op(
                 op,
                 &|expr, _flags| {
-                    safe_transform(expr, &ctx);
+                    resolve_safe_navigation_migration(expr, &ctx);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -118,11 +146,146 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
             transform_expressions_in_update_op(
                 op,
                 &|expr, _flags| {
-                    safe_transform(expr, &ctx);
+                    resolve_safe_navigation_migration(expr, &ctx);
                 },
                 VisitorContextFlag::NONE,
             );
         }
+
+        // Pass 2: expand the remaining safe access expressions per the resolved mode.
+        for op in view.create.iter_mut() {
+            transform_expressions_in_create_op(
+                op,
+                &|expr, _flags| {
+                    expand_safe_access(expr, &ctx, legacy);
+                },
+                VisitorContextFlag::NONE,
+            );
+        }
+        for op in view.update.iter_mut() {
+            transform_expressions_in_update_op(
+                op,
+                &|expr, _flags| {
+                    expand_safe_access(expr, &ctx, legacy);
+                },
+                VisitorContextFlag::NONE,
+            );
+        }
+    }
+}
+
+/// Dispatch a single node to the legacy or modern safe-read expansion.
+fn expand_safe_access<'a>(
+    expr: &mut IrExpression<'a>,
+    ctx: &SafeTransformContext<'a>,
+    legacy: bool,
+) {
+    if legacy {
+        safe_transform(expr, ctx);
+    } else {
+        safe_transform_modern(expr, ctx);
+    }
+}
+
+/// Rewrites `$safeNavigationMigration(arg)` into `arg`, expanding any safe reads
+/// inside `arg` with legacy (`== null ? null`) semantics.
+///
+/// After name resolution the wrapper appears as a `ResolvedCall` whose receiver is
+/// a `ResolvedPropertyRead` of the magic name `$safeNavigationMigration` on the
+/// component context. The wrapped argument's receivers are already resolved at this
+/// point, so it is safe to run the legacy expansion on the detached subtree here.
+///
+/// Mirrors Angular's `removeSafeNavigationMigration` phase combined with the
+/// `InSafeNavigationMigration` flag handling in `expandSafeReads`.
+fn resolve_safe_navigation_migration<'a>(
+    expr: &mut IrExpression<'a>,
+    ctx: &SafeTransformContext<'a>,
+) {
+    let allocator = ctx.allocator;
+
+    let is_marker = match expr {
+        IrExpression::ResolvedCall(call) => {
+            call.args.len() == 1
+                && matches!(
+                    call.receiver.as_ref(),
+                    IrExpression::ResolvedPropertyRead(p)
+                        if p.name.as_str() == "$safeNavigationMigration"
+                )
+        }
+        _ => false,
+    };
+    if !is_marker {
+        return;
+    }
+
+    let IrExpression::ResolvedCall(call) = expr else { return };
+    let mut arg = std::mem::replace(&mut call.args[0], make_placeholder(allocator));
+
+    // Force legacy null semantics on the wrapped subtree.
+    transform_expressions_in_expression(
+        &mut arg,
+        &|e: &mut IrExpression<'a>, _flags| {
+            safe_transform(e, ctx);
+        },
+        VisitorContextFlag::NONE,
+    );
+
+    *expr = arg;
+}
+
+/// Modern (Angular v22+) safe-read expansion: rewrite each safe access into the
+/// equivalent resolved read flagged as optional, which reifies to native `?.`.
+///
+/// Unlike the legacy expansion this needs no temporaries or ternary restructuring:
+/// each safe node becomes optional independently, and the post-order visitor has
+/// already converted any nested safe receivers.
+fn safe_transform_modern<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a>) {
+    let allocator = ctx.allocator;
+
+    match expr {
+        IrExpression::SafePropertyRead(p) => {
+            let receiver = std::mem::replace(p.receiver.as_mut(), make_placeholder(allocator));
+            let name = p.name.clone();
+            let source_span = p.source_span;
+            *expr = IrExpression::ResolvedPropertyRead(ArenaBox::new_in(
+                ResolvedPropertyReadExpr {
+                    receiver: ArenaBox::new_in(receiver, allocator),
+                    name,
+                    optional: true,
+                    source_span,
+                },
+                allocator,
+            ));
+        }
+        IrExpression::SafeKeyedRead(k) => {
+            let receiver = std::mem::replace(k.receiver.as_mut(), make_placeholder(allocator));
+            let key = std::mem::replace(k.index.as_mut(), make_placeholder(allocator));
+            let source_span = k.source_span;
+            *expr = IrExpression::ResolvedKeyedRead(ArenaBox::new_in(
+                ResolvedKeyedReadExpr {
+                    receiver: ArenaBox::new_in(receiver, allocator),
+                    key: ArenaBox::new_in(key, allocator),
+                    optional: true,
+                    source_span,
+                },
+                allocator,
+            ));
+        }
+        IrExpression::SafeInvokeFunction(c) => {
+            let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
+            let args = std::mem::replace(&mut c.args, ArenaVec::new_in(allocator));
+            let source_span = c.source_span;
+            *expr = IrExpression::ResolvedCall(ArenaBox::new_in(
+                ResolvedCallExpr {
+                    receiver: ArenaBox::new_in(receiver, allocator),
+                    args,
+                    optional: true,
+                    source_span,
+                },
+                allocator,
+            ));
+        }
+        _ => {}
     }
 }
 
@@ -402,6 +565,9 @@ fn create_access_expr<'a>(
                 ResolvedPropertyReadExpr {
                     receiver: ArenaBox::new_in(receiver, allocator),
                     name,
+                    // Legacy expansion produces a plain read inside the `== null ? null`
+                    // ternary, not native optional chaining.
+                    optional: false,
                     source_span,
                 },
                 allocator,
@@ -412,13 +578,19 @@ fn create_access_expr<'a>(
                 ResolvedKeyedReadExpr {
                     receiver: ArenaBox::new_in(receiver, allocator),
                     key: ArenaBox::new_in(key, allocator),
+                    optional: false,
                     source_span,
                 },
                 allocator,
             ))
         }
         AccessInfo::Call { args, source_span } => IrExpression::ResolvedCall(ArenaBox::new_in(
-            ResolvedCallExpr { receiver: ArenaBox::new_in(receiver, allocator), args, source_span },
+            ResolvedCallExpr {
+                receiver: ArenaBox::new_in(receiver, allocator),
+                args,
+                optional: false,
+                source_span,
+            },
             allocator,
         )),
     }
@@ -559,17 +731,19 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
 pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
 
+    let legacy = job.legacy_optional_chaining();
+
     // Get the current xref counter value
     let starting_xref = job.allocate_xref_id().0;
     let xref_counter = RefCell::new(starting_xref);
     let ctx = SafeTransformContext { allocator, next_xref: xref_counter };
 
-    // Transform safe access expressions to SafeTernary
+    // Pass 1: resolve `$safeNavigationMigration(...)` markers.
     for op in job.root.create.iter_mut() {
         transform_expressions_in_create_op(
             op,
             &|expr, _flags| {
-                safe_transform(expr, &ctx);
+                resolve_safe_navigation_migration(expr, &ctx);
             },
             VisitorContextFlag::NONE,
         );
@@ -578,7 +752,27 @@ pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                safe_transform(expr, &ctx);
+                resolve_safe_navigation_migration(expr, &ctx);
+            },
+            VisitorContextFlag::NONE,
+        );
+    }
+
+    // Pass 2: expand the remaining safe access expressions per the resolved mode.
+    for op in job.root.create.iter_mut() {
+        transform_expressions_in_create_op(
+            op,
+            &|expr, _flags| {
+                expand_safe_access(expr, &ctx, legacy);
+            },
+            VisitorContextFlag::NONE,
+        );
+    }
+    for op in job.root.update.iter_mut() {
+        transform_expressions_in_update_op(
+            op,
+            &|expr, _flags| {
+                expand_safe_access(expr, &ctx, legacy);
             },
             VisitorContextFlag::NONE,
         );

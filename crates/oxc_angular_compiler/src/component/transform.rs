@@ -110,6 +110,17 @@ pub struct TransformOptions {
     /// When `None`, assumes latest Angular version (v19+ behavior).
     pub angular_version: Option<AngularVersion>,
 
+    /// Override for the `legacyOptionalChaining` Angular compiler option.
+    ///
+    /// Controls how the safe-navigation operator (`?.`) in template expressions is
+    /// emitted. When `Some(true)`, always uses the legacy `== null ? null` ternary;
+    /// when `Some(false)`, always emits native optional chaining (yielding
+    /// `undefined`). When `None`, the default is derived from `angular_version`
+    /// (legacy for < v22, modern for >= v22, legacy when the version is unknown).
+    ///
+    /// See `angular/angular@2896c93cc1`.
+    pub legacy_optional_chaining: Option<bool>,
+
     // Component metadata overrides for template-only compilation.
     // These allow the build tool to pass component metadata when compiling
     // templates in isolation (e.g., for testing or compare tool).
@@ -227,8 +238,9 @@ impl Default for TransformOptions {
             jit: false,
             hmr: false,
             advanced_optimizations: false,
-            i18n_use_external_ids: true, // Angular's JIT default
-            angular_version: None,       // None means assume latest (v19+ behavior)
+            i18n_use_external_ids: true,    // Angular's JIT default
+            angular_version: None,          // None means assume latest (v19+ behavior)
+            legacy_optional_chaining: None, // None: derive default from angular_version
             // Metadata overrides default to None (use extracted/default values)
             selector: None,
             standalone: None,
@@ -3764,6 +3776,7 @@ fn compile_component_full<'a>(
         pool_starting_index,
         // Pass Angular version for feature-gated instruction selection
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     let mut job = ingest_component_with_options(
@@ -3827,6 +3840,7 @@ fn compile_component_full<'a>(
         metadata,
         template_pool_index,
         options.angular_version,
+        options.legacy_optional_chaining,
     );
 
     // Extract the result and update pool index if host bindings were compiled
@@ -4217,6 +4231,7 @@ pub fn compile_template_to_js_with_options<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // Standalone template compilation starts from 0
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     // Stage 3-5: Ingest and compile
@@ -4271,6 +4286,7 @@ pub fn compile_template_to_js_with_options<'a>(
             options.selector.as_deref(),
             host_pool_starting_index,
             options.angular_version,
+            options.legacy_optional_chaining,
         ) {
             // Add host binding pool declarations (pure functions, etc.)
             for decl in host_result.declarations {
@@ -4390,6 +4406,7 @@ pub fn compile_template_for_hmr<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // HMR template compilation starts from 0
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     // Stage 3-5: Ingest and compile
@@ -4535,6 +4552,7 @@ fn compile_component_host_bindings<'a>(
     metadata: &ComponentMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> Option<HostBindingCompilationOutput<'a>> {
     let host = metadata.host.as_ref()?;
 
@@ -4558,8 +4576,13 @@ fn compile_component_host_bindings<'a>(
 
     // Ingest and compile the host bindings with the pool starting index
     // This ensures constant names continue from where template compilation left off
-    let mut job =
-        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
+    let mut job = ingest_host_binding_with_version(
+        allocator,
+        input,
+        pool_starting_index,
+        angular_version,
+        legacy_optional_chaining,
+    );
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation
@@ -4883,6 +4906,7 @@ fn compile_host_bindings_from_input<'a>(
     selector: Option<&str>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> Option<HostBindingCompilationResult<'a>> {
     use oxc_allocator::FromIn;
 
@@ -4908,8 +4932,13 @@ fn compile_host_bindings_from_input<'a>(
     // Convert to HostBindingInput and compile
     let input =
         convert_host_metadata_to_input(allocator, &host, component_name_atom, component_selector);
-    let mut job =
-        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
+    let mut job = ingest_host_binding_with_version(
+        allocator,
+        input,
+        pool_starting_index,
+        angular_version,
+        legacy_optional_chaining,
+    );
     let result = compile_host_bindings(&mut job);
 
     Some(result)
@@ -4945,6 +4974,7 @@ pub fn compile_host_bindings_for_linker(
         selector,
         pool_starting_index,
         None, // Linker always targets latest Angular version
+        None, // legacyOptionalChaining: derive from (absent) version
     )?;
 
     let emitter = JsEmitter::new();
@@ -5064,6 +5094,7 @@ pub fn compile_template_for_linker<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0,
         angular_version: None,
+        legacy_optional_chaining: None,
     };
 
     let component_name_atom = Ident::from_in(component_name, allocator);
