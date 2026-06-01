@@ -10,12 +10,12 @@
 | expression_parser | 270 | 0 | 0 | 0 | 270 | 100.0% |
 | expression_serializer | 38 | 0 | 0 | 0 | 38 | 100.0% |
 | html_lexer | 286 | 3 | 0 | 0 | 289 | 99.0% |
-| html_parser | 85 | 2 | 0 | 0 | 87 | 97.7% |
+| html_parser | 86 | 1 | 0 | 0 | 87 | 98.9% |
 | html_whitespace | 21 | 0 | 0 | 0 | 21 | 100.0% |
-| r3_transform | 173 | 4 | 0 | 0 | 177 | 97.7% |
+| r3_transform | 174 | 3 | 0 | 0 | 177 | 98.3% |
 | shadow_css | 160 | 9 | 0 | 0 | 169 | 94.7% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1246** | **18** | **0** | **0** | **1264** | **98.6%** |
+| **Total** | **1248** | **16** | **0** | **0** | **1264** | **98.7%** |
 
 ## Failed Tests
 
@@ -75,19 +75,6 @@ Path: `HtmlParser/parse/blocks/should parse exhaustive default checks in a switc
 [Array [String("html.Block"), String("switch"), Number(0)], Array [String("html.BlockParameter"), String("expr")], Array [String("html.Block"), String("case"), Number(1)], Array [String("html.BlockParameter"), String("'foo'")], Array [String("html.Text"), String(" "), Number(1), Array [String(" ")]], Array [String("html.Text"), String(";"), Number(1), Array [String(";")]]]
 ```
 
-#### should store the source location of a @let declaration: HumanizeDomSourceSpans { input: "@let foo = 123 + 456;", expected: [Array [String("html.LetDeclaration"), String("foo"), String("123 + 456"), String("@let foo = 123 + 456;"), String("foo"), String("123 + 456")]], options: None }
-Path: `HtmlParser/parse/let declaration/should store the source location of a @let declaration`
-
-**Expected:**
-```
-[Array [String("html.LetDeclaration"), String("foo"), String("123 + 456"), String("@let foo = 123 + 456;"), String("foo"), String("123 + 456")]]
-```
-
-**Actual:**
-```
-[Array [String("html.LetDeclaration"), String("foo"), String("123 + 456"), String("@let foo = 123 + 456"), String("foo"), String("123 + 456")]]
-```
-
 ### r3_transform
 
 #### is correct for switch blocks with exhaustive checking: ExpectFromHtml { input: "@switch (cond.kind) {@case (x()) {X case}@default never;}", expected: [Array [String("SwitchBlock"), String("@switch (cond.kind) {@case (x()) {X case}@default never;}"), String("@switch (cond.kind) {"), String("}")], Array [String("SwitchBlockCaseGroup"), String("@case (x()) {X case}"), String("@case (x()) {")], Array [String("SwitchBlockCase"), String("@case (x()) {X case}"), String("@case (x()) {")], Array [String("Text"), String("X case")], Array [String("SwitchExhaustiveCheck"), String("@default never;"), String("@default never;")]], ignore_error: false }
@@ -118,26 +105,6 @@ Path: `R3 AST source spans/switch blocks/is correct for switch blocks with exhau
 -[Text, X case]
 -[SwitchExhaustiveCheck, @default never;, @default never;]
 +[Text, X case]
-
-```
-
-#### is correct for a let declaration: ExpectFromHtml { input: "@let foo = 123;", expected: [Array [String("LetDeclaration"), String("@let foo = 123;"), String("foo"), String("123")]], ignore_error: false }
-Path: `R3 AST source spans/@let declaration/is correct for a let declaration`
-
-**Expected:**
-```
-[LetDeclaration, @let foo = 123;, foo, 123]
-```
-
-**Actual:**
-```
-[LetDeclaration, @let foo = 123, foo, 123]
-```
-
-**Diff:**
-```diff
--[LetDeclaration, @let foo = 123;, foo, 123]
-+[LetDeclaration, @let foo = 123, foo, 123]
 
 ```
 
