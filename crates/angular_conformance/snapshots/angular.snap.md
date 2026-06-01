@@ -7,7 +7,7 @@
 | ast_serializer | 6 | 0 | 0 | 0 | 6 | 100.0% |
 | ast_spans | 55 | 0 | 0 | 0 | 55 | 100.0% |
 | expression_lexer | 137 | 0 | 0 | 0 | 137 | 100.0% |
-| expression_parser | 267 | 3 | 0 | 0 | 270 | 98.9% |
+| expression_parser | 270 | 0 | 0 | 0 | 270 | 100.0% |
 | expression_serializer | 38 | 0 | 0 | 0 | 38 | 100.0% |
 | html_lexer | 286 | 3 | 0 | 0 | 289 | 99.0% |
 | html_parser | 85 | 2 | 0 | 0 | 87 | 97.7% |
@@ -15,50 +15,9 @@
 | r3_transform | 165 | 12 | 0 | 0 | 177 | 93.2% |
 | shadow_css | 160 | 9 | 0 | 0 | 169 | 94.7% |
 | style_parser | 15 | 0 | 0 | 0 | 15 | 100.0% |
-| **Total** | **1235** | **29** | **0** | **0** | **1264** | **97.7%** |
+| **Total** | **1238** | **26** | **0** | **0** | **1264** | **97.9%** |
 
 ## Failed Tests
-
-### expression_parser
-
-#### should throw on invalid in expressions: ExpectActionError { input: "in", error_contains: "Unexpected token in" }
-Path: `parser/parseAction/should throw on invalid in expressions`
-
-**Expected:**
-```
-Error containing: Unexpected token in
-```
-
-**Actual:**
-```
-No errors
-```
-
-#### should throw on invalid in expressions: ExpectActionError { input: "in foo", error_contains: "Unexpected token in" }
-Path: `parser/parseAction/should throw on invalid in expressions`
-
-**Expected:**
-```
-Error containing: Unexpected token in
-```
-
-**Actual:**
-```
-Errors: ["Unexpected token 'foo' at column 4 in [in foo]"]
-```
-
-#### should throw on invalid in expressions: ExpectActionError { input: "'foo' in", error_contains: "Unexpected end of expression: 'foo' in at the end of the expression ['foo' in]" }
-Path: `parser/parseAction/should throw on invalid in expressions`
-
-**Expected:**
-```
-Error containing: Unexpected end of expression: 'foo' in at the end of the expression ['foo' in]
-```
-
-**Actual:**
-```
-No errors
-```
 
 ### html_lexer
 
