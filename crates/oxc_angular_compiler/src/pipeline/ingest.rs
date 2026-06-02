@@ -4085,60 +4085,6 @@ fn ingest_host_dom_property<'a>(
     job.root.update.push(op);
 }
 
-/// Computes the security context for an attribute binding.
-///
-/// This is a simplified implementation of Angular's `calcPossibleSecurityContexts`
-/// that handles the most common cases based on element and property names.
-///
-/// Ported from Angular's `binding_parser.ts` and `dom_security_schema.ts`.
-fn compute_security_context(selector: &str, attr_name: &str) -> SecurityContext {
-    use crate::schema::{calc_security_context_for_unknown_element, get_security_context};
-
-    // Extract element name from selector if present (e.g., "a[myDirective]" → "a")
-    let element = extract_element_from_selector(selector);
-
-    match element {
-        Some(element_name) => {
-            // Element is known - use the specific lookup
-            get_security_context(&element_name, attr_name)
-        }
-        None => {
-            // Element is unknown (e.g., attribute-only directive like [myDirective])
-            // Use the ambiguous lookup that checks all possible elements
-            calc_security_context_for_unknown_element(attr_name)
-        }
-    }
-}
-
-/// Extracts the element name from a CSS selector.
-///
-/// Examples:
-/// - "a[myDirective]" → Some("a")
-/// - "div.my-class" → Some("div")
-/// - "[myDirective]" → None
-/// - ".my-class" → None
-fn extract_element_from_selector(selector: &str) -> Option<String> {
-    // Skip leading whitespace
-    let s = selector.trim();
-
-    // If starts with [, ., or :, there's no element
-    if s.starts_with('[') || s.starts_with('.') || s.starts_with(':') || s.starts_with('#') {
-        return None;
-    }
-
-    // Find the element name (alphanumeric and hyphens until a special char)
-    let mut element_end = 0;
-    for (i, c) in s.char_indices() {
-        if c.is_alphanumeric() || c == '-' || c == '_' {
-            element_end = i + c.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    if element_end > 0 { Some(s[..element_end].to_lowercase()) } else { None }
-}
-
 /// Ingests a static host attribute.
 ///
 /// Host attributes are static attributes that should be extracted to `hostAttrs`
@@ -4153,6 +4099,7 @@ fn ingest_host_attribute<'a>(
 ) {
     use crate::ir::expression::IrExpression;
     use crate::ir::ops::{BindingOp, UpdateOp, UpdateOpBase};
+    use crate::schema::compute_security_context;
 
     let allocator = job.allocator;
 

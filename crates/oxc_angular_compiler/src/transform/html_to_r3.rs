@@ -29,7 +29,8 @@ use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::decode_entities_in_string;
-use crate::schema::get_security_context;
+use crate::parser::html::split_ns_name;
+use crate::schema::{get_security_context, is_trusted_types_sink};
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
 
@@ -308,18 +309,46 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Check for special elements
-        if raw_name == "script" {
+        // Classify special elements the way upstream `template_preparser.ts` does.
+        // It computes `nodeName = ast.name.toLowerCase()` — the FULL (lower-cased)
+        // node name *including* any namespace prefix — and then compares it against:
+        //   - SCRIPT_ELEMENT = 'script'  (singular string, NOT a set)
+        //   - STYLE_ELEMENT  = 'style'
+        //   - LINK_ELEMENT   = 'link'
+        // (v21.2.7 template_preparser.ts:18,45,49-53). Because the comparison uses the
+        // FULL node name, only the un-namespaced `<script>` / `<style>` / `<link>` are
+        // classified as SCRIPT / STYLE / STYLESHEET and dropped; an explicitly
+        // namespaced `<svg:script>` (stored `:svg:script`) does NOT equal 'script', so
+        // it stays `PreparsedElementType.OTHER` and is KEPT as an element. This is the
+        // real XSS sink for an SVGScriptElement, whose `href`/`xlink:href` is sanitized
+        // as a RESOURCE_URL (see dom_security_schema). (NOTE: angular/angular MAIN later
+        // changed SCRIPT_ELEMENT to a Set including ':svg:script' via commit 90494cd909,
+        // which DOES strip it — but that is POST-v21.2.7 and is not our pinned version.)
+        // All matches are case-insensitive.
+        let lower_name = raw_name.to_ascii_lowercase();
+        // Namespace-stripped local name with original case, used for the structural
+        // element checks below (ng-content / ng-template / ng-container). Upstream
+        // detects these via `isNgContent`/`isNgTemplate`/`isNgContainer`, which all
+        // compare `splitNsName(name)[1]` — i.e. they ignore the namespace prefix, so a
+        // `:svg:ng-content` produced by parent-namespace inheritance is still treated
+        // as projection ("regardless the namespace"). This is distinct from the
+        // STYLE/LINK checks above, which deliberately compare the FULL node name.
+        let (_, raw_local_name) = split_ns_name(raw_name);
+
+        // Check for special elements. Upstream compares the FULL lower-cased node
+        // name against SCRIPT_ELEMENT='script', so plain `<script>` is dropped but a
+        // namespaced `:svg:script` is kept (v21.2.7 template_preparser.ts:45,51).
+        if lower_name == "script" {
             return None;
         }
-        if raw_name == "style" {
+        if lower_name == "style" {
             // Extract style content
             if let Some(content) = self.get_text_content(element) {
                 self.styles.push(content);
             }
             return None;
         }
-        if raw_name == "link" {
+        if lower_name == "link" {
             // Collect stylesheet URLs
             if let Some(href) = self.get_stylesheet_href(element) {
                 self.style_urls.push(href);
@@ -330,21 +359,124 @@ impl<'a> HtmlToR3Transform<'a> {
             }
         }
 
-        // Parse attributes
-        let (attributes, inputs, outputs, references, variables, template_attr) =
-            self.parse_attributes(&element.attrs, raw_name, raw_name == "ng-template");
+        // Determine whether this element node is actually a selectorless COMPONENT.
+        // The parser stores a selectorless component as an `HtmlElement` whose `name`
+        // is the component CLASS name and whose resolved host tag is carried
+        // separately in `component_prefix` / `component_tag_name`. The discriminator
+        // is the parser-produced `is_component` marker — set true ONLY when the lexer
+        // tokenized a `ComponentOpenStart`, which requires selectorless mode to be
+        // enabled. This is the authoritative source of truth: it correctly
+        // distinguishes a bare component `<MyCmp>` from an uppercase NORMAL element
+        // like `<IFRAME>` / `<OBJECT>` (identical at this node otherwise), which a
+        // leading-character casing heuristic would conflate. In the default
+        // (selectorless-off) pipeline the real compiler uses, no component is ever
+        // produced, so an uppercase tag stays a normal element and its
+        // security-context / i18n trusted-types lookups route through its own name
+        // (lowercased internally) — e.g. `<IFRAME [src]>` -> `iframe|src` ->
+        // RESOURCE_URL, matching upstream v21.2.7 `parseTemplate(html, url, {})`.
+        let is_component = element.is_component;
+
+        // Resolve the host tag name (upstream `component.tagName`) up-front, BEFORE
+        // attribute categorization, so the security-context and i18n trusted-types
+        // sink lookups use the resolved HOST TAG (e.g. `iframe` / `:svg:image`) rather
+        // than the component class name. This mirrors v21.2.7, where:
+        //   * the security context is computed via
+        //     `categorizePropertyAttributes(component.tagName, ...)` ->
+        //     `createBoundElementProperty(elementName=component.tagName, ...)`
+        //     (render3/r3_template_transform.ts:411-415, binding_parser.ts:594-615), and
+        //   * the i18n trusted-types guard uses
+        //     `node instanceof html.Component ? node.tagName : node.name`
+        //     (render3/view/i18n/meta.ts:205-208).
+        // The formula matches upstream `_getComponentTagName` exactly (null when no
+        // prefix and no tag part; the bare tag when no prefix; else
+        // `mergeNsAndName(prefix, tag || 'ng-component')` i.e. `:prefix:tag`).
+        let component_tag_name: Option<Ident<'a>> = if is_component {
+            match (&element.component_prefix, &element.component_tag_name) {
+                (None, None) => None,
+                (None, Some(tag)) => Some(*tag),
+                (Some(prefix), None) => {
+                    Some(Ident::from_in(&format!(":{prefix}:ng-component"), self.allocator))
+                }
+                (Some(prefix), Some(tag)) => {
+                    Some(Ident::from_in(&format!(":{prefix}:{tag}"), self.allocator))
+                }
+            }
+        } else {
+            None
+        };
+
+        // Element name used for the bound-attribute SECURITY-CONTEXT lookup inside
+        // `parse_attributes` (`get_security_context`, which itself ns-strips internally
+        // — faithful, because upstream routes the security context through `CssSelector`
+        // which strips the namespace).
+        //   * Normal element  -> the element's own name (`raw_name`), unchanged.
+        //   * Selectorless component with a host tag -> the resolved host tag
+        //     (`component.tagName`), so `<MyCmp:iframe [src]>` sanitizes as
+        //     `iframe|src` (RESOURCE_URL).
+        //   * Bare selectorless component (`<MyCmp>`, tagName null) -> empty string,
+        //     faithfully reproducing upstream's null-tagName behavior:
+        //     `calcPossibleSecurityContexts` with a null selector yields `NONE` for
+        //     element-specific props (the empty element name never matches an
+        //     `element|prop` key, only `*|prop` wildcards). This also fixes a latent
+        //     divergence where a class name that happens to collide with a real element
+        //     name (e.g. `<Object [data]>`) would otherwise be looked up as that element.
+        let security_element_name: &str = if is_component {
+            component_tag_name.as_ref().map_or("", Ident::as_str)
+        } else {
+            raw_name
+        };
+
+        // Element name used SEPARATELY for the i18n trusted-types sink check inside
+        // `parse_attributes`. This path does NOT ns-strip and is faithful to v21.2.7
+        // `render3/view/i18n/meta.ts` (~210-214):
+        //   isTrustedType = node instanceof html.Component
+        //     ? (node.tagName === null ? false : isTrustedTypesSink(node.tagName, name))
+        //     : isTrustedTypesSink(node.name, name);
+        // and `schema/trusted_types_sinks.ts` `isTrustedTypesSink`, which ONLY lowercases
+        // the tag (no namespace strip) before testing `${tag}|${name}` / `*|${name}`.
+        //   * Normal element  -> the FULL element name `node.name` un-stripped, so
+        //     `<svg:iframe i18n-src>` looks up `:svg:iframe|src` (NOT a sink) -> ALLOWED.
+        //   * Component with a host tag -> the resolved `node.tagName` un-stripped, so
+        //     `<MyCmp:iframe i18n-src>` -> `iframe|src` (sink) -> BLOCKED, but
+        //     `<svg><MyCmp:iframe i18n-src>` -> `:svg:iframe|src` (NOT a sink) -> ALLOWED.
+        //   * Bare component (tagName null) -> `None`, so the sink check is SKIPPED
+        //     entirely (short-circuit to false). Passing an empty string here would
+        //     wrongly match the `*|innerhtml` / `*|outerhtml` wildcards, so we model it
+        //     as `Option::None` instead. Verified against @angular/compiler@21.2.7
+        //     `parseTemplate(.., {enableSelectorless:true})`.
+        let i18n_sink_element_name: Option<&str> = if is_component {
+            component_tag_name.as_ref().map(Ident::as_str)
+        } else {
+            Some(raw_name)
+        };
+
+        // Parse attributes. The `is_template` flag mirrors upstream
+        // `isTemplateElement = isNgTemplate(element.name)`, which strips the namespace,
+        // so `let-` handling works for a namespace-inherited `:svg:ng-template` too.
+        let (attributes, inputs, outputs, references, variables, template_attr) = self
+            .parse_attributes(
+                &element.attrs,
+                security_element_name,
+                i18n_sink_element_name,
+                raw_local_name == "ng-template",
+            );
 
         // Resolve namespace for this element and its children.
-        // Note: foreignObject is an SVG element but its children use HTML namespace.
-        // We need to distinguish between the element's own namespace (for naming) and
-        // the namespace for its children (pushed to stack).
+        // Note: foreignObject is an SVG element but its children use HTML namespace
+        // (upstream html_tags.ts: implicitNamespacePrefix:'svg' +
+        // preventNamespaceInheritance:true). We distinguish the element's own
+        // namespace (for naming) from the namespace its children inherit
+        // (pushed onto the stack). `resolve_namespace` returns the CHILD namespace,
+        // which for foreignObject is HTML.
         let parent_namespace = self.current_namespace();
         let child_namespace = self.resolve_namespace(raw_name, parent_namespace);
 
-        // For foreignObject in SVG context: the element itself is SVG, only children are HTML.
-        // For all other elements: element namespace equals child namespace.
+        // For foreignObject in an SVG context the element itself stays SVG (it is
+        // stored `:svg:foreignObject`), only its children reset to HTML. Detect it
+        // by LOCAL name so the prefixed `:svg:foreignObject` form also matches.
+        // For all other elements the element namespace equals the child namespace.
         let element_namespace = if parent_namespace == ElementNamespace::Svg
-            && raw_name.eq_ignore_ascii_case("foreignObject")
+            && split_ns_name(raw_name).1.eq_ignore_ascii_case("foreignObject")
         {
             ElementNamespace::Svg
         } else {
@@ -465,7 +597,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // Check for ng-content
         // Reference: r3_template_transform.ts lines 191-204
         // Children are passed directly without extra whitespace filtering
-        if raw_name == "ng-content" {
+        if raw_local_name == "ng-content" {
             let selector = self.get_ng_content_selector(element);
             self.ng_content_selectors.push(selector);
 
@@ -516,7 +648,7 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Check for ng-template
-        if raw_name == "ng-template" {
+        if raw_local_name == "ng-template" {
             let name = self.qualify_element_name(element.name, element_namespace);
             let template = R3Template {
                 tag_name: Some(name),
@@ -546,7 +678,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // Validate ng-container attribute bindings
         // Reference: r3_template_transform.ts lines 238-247
-        if raw_name == "ng-container" {
+        if raw_local_name == "ng-container" {
             use crate::ast::expression::BindingType;
             for input in &inputs {
                 if input.binding_type == BindingType::Attribute {
@@ -560,38 +692,42 @@ impl<'a> HtmlToR3Transform<'a> {
 
         let name = self.qualify_element_name(element.name, element_namespace);
 
-        // Check if this is a component (uppercase first letter or underscore)
-        let first_char = raw_name.chars().next().unwrap_or('a');
-        let is_component = first_char.is_ascii_uppercase() || first_char == '_';
-
         let mut result = if is_component {
-            // Validate selectorless component - check for unsupported tags
-            let tag_name_lower = raw_name.to_ascii_lowercase();
-            if UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag_name_lower.as_str()) {
-                self.report_error(
-                    &format!("Tag name \"{raw_name}\" cannot be used as a component tag"),
-                    element.start_span,
-                );
-                return None;
+            // The resolved host tag (`component.tagName`) was already computed up-front
+            // (`component_tag_name`) so the security-context and i18n trusted-types sink
+            // lookups in `parse_attributes` could consume it. Reuse that exact value
+            // here for the unsupported-tag check, `full_name` composition, and the R3
+            // node, so the security path and the AST stay in lock-step. It matches
+            // upstream `_getComponentTagName` (ml_parser/parser.ts:946-961): null when
+            // no prefix and no tag part; the bare tag when no prefix;
+            // `mergeNsAndName(prefix, tag||'ng-component')` (`:prefix:tag`) otherwise.
+            let tag_name = component_tag_name;
+
+            // Validate selectorless component — reject unsupported HOST tags.
+            // Upstream `HtmlAstToIvyAst.visitComponent`
+            // (render3/r3_template_transform.ts:378-384) tests `component.tagName`
+            // (the RESOLVED tag name, NOT the component class name) against
+            // UNSUPPORTED_SELECTORLESS_TAGS={link,style,script,ng-template,
+            // ng-container,ng-content} and does NOT strip the namespace first. So a
+            // bare `script`/`style`/`link` (no prefix) is rejected, but a namespaced
+            // `:svg:script` (explicit OR parent-inherited) is NOT a member and is
+            // accepted; a `null` tagName (bare `<MyComp>` / class-only `<Script>`) is
+            // never rejected. The error message quotes the resolved tag name.
+            // NOTE: the membership test is CASE-SENSITIVE (upstream `Set.has` on the raw
+            // `component.tagName`, set members are lowercase), so `<MyComp:SCRIPT>`
+            // (tagName "SCRIPT") is NOT a member and is accepted — matching upstream.
+            if let Some(tag) = &tag_name {
+                if UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag.as_str()) {
+                    self.report_error(
+                        &format!("Tag name \"{tag}\" cannot be used as a component tag"),
+                        element.start_span,
+                    );
+                    return None;
+                }
             }
 
             // Validate selectorless references
             self.validate_selectorless_references(&references);
-
-            // Compute tag_name from component_prefix and component_tag_name
-            // Format: ":prefix:tag_name" (e.g., ":svg:rect") or just "tag_name"
-            let tag_name = match (&element.component_prefix, &element.component_tag_name) {
-                (None, None) => None,
-                (None, Some(tag)) => Some(*tag),
-                (Some(prefix), None) => {
-                    // Has prefix but no tag name - use "ng-component" as default
-                    Some(Ident::from_in(&format!(":{prefix}:ng-component"), self.allocator))
-                }
-                (Some(prefix), Some(tag)) => {
-                    // Both prefix and tag name: ":prefix:tag_name"
-                    Some(Ident::from_in(&format!(":{prefix}:{tag}"), self.allocator))
-                }
-            };
 
             // Compute full_name: "ComponentName:prefix:tag_name" or "ComponentName:tag_name"
             let full_name = match &tag_name {
@@ -654,9 +790,19 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Visits an HTML component (selectorless component AST node).
     fn visit_html_component(&mut self, component: &HtmlComponent<'a>) -> Option<R3Node<'a>> {
+        // i18n trusted-types sink name: the resolved host `tag_name` (un-stripped,
+        // `node.tagName`), or `None` for a bare `<MyComp>` (tagName null -> skip the
+        // sink check). See the FAITHFULNESS NOTE in `parse_attributes`; this mirrors
+        // v21.2.7 `render3/view/i18n/meta.ts` (~210-214).
+        let i18n_sink_element_name: Option<&str> = component.tag_name.as_ref().map(Ident::as_str);
         // Parse attributes
-        let (attributes, inputs, outputs, references, _variables, template_attr) =
-            self.parse_attributes(&component.attrs, component.full_name.as_str(), false);
+        let (attributes, inputs, outputs, references, _variables, template_attr) = self
+            .parse_attributes(
+                &component.attrs,
+                component.full_name.as_str(),
+                i18n_sink_element_name,
+                false,
+            );
 
         // Resolve namespace for this component and its children.
         let parent_namespace = self.current_namespace();
@@ -741,7 +887,25 @@ impl<'a> HtmlToR3Transform<'a> {
         self.namespace_stack.last().copied().unwrap_or(ElementNamespace::Html)
     }
 
+    /// Resolves the namespace that an element's *children* inherit (the value
+    /// pushed onto `namespace_stack`). The element's own naming namespace is
+    /// computed separately in `visit_element` (see `element_namespace`).
+    ///
+    /// Mirrors upstream `html_tags.ts`: `foreignObject` is declared with
+    /// `implicitNamespacePrefix:'svg'` (the element itself is SVG) AND
+    /// `preventNamespaceInheritance:true` (its children do NOT inherit svg and
+    /// reset to HTML — v21.2.7 html_tags.ts:132-142). foreignObject is detected
+    /// by its LOCAL name so that BOTH `<foreignObject>` and the prefix-inherited
+    /// `:svg:foreignObject` (stored by the parser's implicit-prefix rule) reset
+    /// their children — this check runs before the explicit-prefix branch so the
+    /// `:svg:` prefix does not pre-empt the reset.
     fn resolve_namespace(&self, raw_name: &str, parent: ElementNamespace) -> ElementNamespace {
+        // foreignObject's children reset to HTML regardless of the element's own
+        // (svg) prefix. Detect by local name so `:svg:foreignObject` also matches.
+        if split_ns_name(raw_name).1.eq_ignore_ascii_case("foreignObject") {
+            return ElementNamespace::Html;
+        }
+
         if let Some(explicit) = Self::namespace_from_prefixed_name(raw_name) {
             return explicit;
         }
@@ -754,13 +918,7 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         match parent {
-            ElementNamespace::Svg => {
-                if raw_name.eq_ignore_ascii_case("foreignObject") {
-                    ElementNamespace::Html
-                } else {
-                    ElementNamespace::Svg
-                }
-            }
+            ElementNamespace::Svg => ElementNamespace::Svg,
             ElementNamespace::Math => ElementNamespace::Math,
             ElementNamespace::Html => ElementNamespace::Html,
         }
@@ -1780,8 +1938,8 @@ impl<'a> HtmlToR3Transform<'a> {
                 )))
             }
             BlockType::Switch => self.visit_switch_block(block),
-            BlockType::Case | BlockType::Default => {
-                // Standalone @case/@default outside @switch - emit error and create UnknownBlock
+            BlockType::Case | BlockType::Default | BlockType::DefaultNever => {
+                // Standalone @case/@default/@default never outside @switch - emit error and create UnknownBlock
                 // Reference: r3_template_transform.ts:518 - falls through to "Unrecognized block"
                 self.report_error(&format!("Unrecognized block @{}.", block.name), block.span);
                 Some(R3Node::UnknownBlock(Box::new_in(
@@ -2385,6 +2543,8 @@ impl<'a> HtmlToR3Transform<'a> {
         let mut collected_cases: std::vec::Vec<R3SwitchBlockCase<'a>> = std::vec::Vec::new();
         let mut first_case_start: Option<Span> = None;
         let mut has_default = false;
+        // Angular v21.2.7 exhaustive-switch feature: tracks an `@default never;` marker.
+        let mut exhaustive_check: Option<crate::ast::r3::R3SwitchExhaustiveCheck> = None;
 
         for child in &block.children {
             // Skip comments and whitespace-only text nodes (same as Angular)
@@ -2405,9 +2565,10 @@ impl<'a> HtmlToR3Transform<'a> {
                 continue;
             };
 
-            // Validate: only @case and @default are allowed inside @switch
+            // Validate: only @case, @default and `@default never;` are allowed inside @switch
             if child_block.block_type != BlockType::Case
                 && child_block.block_type != BlockType::Default
+                && child_block.block_type != BlockType::DefaultNever
             {
                 self.report_error(
                     "@switch block can only contain @case and @default blocks",
@@ -2419,6 +2580,64 @@ impl<'a> HtmlToR3Transform<'a> {
                     name_span: child_block.name_span,
                 });
                 continue;
+            }
+
+            // Angular v21.2.7 exhaustive-switch feature: `@default never;` becomes a
+            // `SwitchExhaustiveCheck` node stored on the switch block (not a case group).
+            // Reference: r3_control_flow.ts createSwitchBlock + validateSwitchBlock.
+            if child_block.block_type == BlockType::DefaultNever {
+                // Validation (validateSwitchBlock): `default never` counts as a @default.
+                if has_default {
+                    self.report_error(
+                        "@switch block can only have one @default block",
+                        child_block.start_span,
+                    );
+                }
+                has_default = true;
+
+                // Must be the last case in the switch.
+                if exhaustive_check.is_some() {
+                    self.report_error(
+                        "@default block with \"never\" parameter must be the last case in a switch",
+                        child_block.span,
+                    );
+                }
+
+                // Cannot have a body (no children and a zero-length end span).
+                let has_body = !child_block.children.is_empty()
+                    || child_block.end_span.is_some_and(|end_span| end_span.start != end_span.end);
+                if has_body {
+                    self.report_error(
+                        "@default block with \"never\" parameter cannot have a body",
+                        child_block.span,
+                    );
+                }
+
+                // A fallthrough @case (no body) cannot be followed by `@default never;`.
+                if !collected_cases.is_empty() {
+                    self.report_error(
+                        "A @case block with no body cannot be followed by a @default block with \"never\" parameter",
+                        child_block.span,
+                    );
+                }
+
+                exhaustive_check = Some(crate::ast::r3::R3SwitchExhaustiveCheck {
+                    source_span: child_block.span,
+                    start_source_span: child_block.start_span,
+                    end_source_span: child_block.end_span,
+                    name_span: child_block.name_span,
+                });
+                continue;
+            }
+
+            // Angular v21.2.7: a normal @case/@default following `@default never;`
+            // is invalid — the exhaustive check must be the last case.
+            // Reference: r3_control_flow.ts createSwitchBlock (`exhaustiveCheck !== null`).
+            if exhaustive_check.is_some() {
+                self.report_error(
+                    "@default block with \"never\" parameter must be the last case in a switch",
+                    child_block.span,
+                );
             }
 
             let is_default = child_block.block_type == BlockType::Default;
@@ -2549,6 +2768,7 @@ impl<'a> HtmlToR3Transform<'a> {
             expression,
             groups,
             unknown_blocks,
+            exhaustive_check,
             source_span: block.span,
             start_source_span: block.start_span,
             end_source_span: block.end_span,
@@ -2859,6 +3079,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &mut self,
         attrs: &[HtmlAttribute<'a>],
         element_name: &str,
+        i18n_sink_element_name: Option<&str>,
         is_template: bool,
     ) -> (
         Vec<'a, R3TextAttribute<'a>>,  // Static attributes
@@ -2882,6 +3103,49 @@ impl<'a> HtmlToR3Transform<'a> {
         for attr in attrs {
             let name = attr.name.as_str();
             if let Some(target_attr) = name.strip_prefix("i18n-") {
+                // Issue #315 sub-gap 1: refuse to translate trusted-types sink attributes
+                // (e.g. `iframe src`), mirroring upstream `I18nMetaVisitor` in
+                // `render3/view/i18n/meta.ts` (~210-214):
+                //   isTrustedType = node instanceof html.Component
+                //     ? (node.tagName === null ? false : isTrustedTypesSink(node.tagName, name))
+                //     : isTrustedTypesSink(node.name, name);
+                // A translated value flowing into such a sink is an XSS vector, so emit an
+                // error and skip extracting it as a message.
+                //
+                // FAITHFULNESS NOTE (no namespace strip; bare component skips):
+                // `is_trusted_types_sink` only LOWERCASES the tag — it does NOT strip a
+                // `:ns:` prefix (matching `schema/trusted_types_sinks.ts`
+                // `isTrustedTypesSink`, which tests `${tag}|${name}` / `*|${name}` after a
+                // single `.toLowerCase()`). So the element name fed here must be the FULL,
+                // un-stripped name that upstream passes:
+                //   * normal element -> `node.name`  (e.g. `:svg:iframe` -> `:svg:iframe|src`
+                //     is NOT a sink -> ALLOWED);
+                //   * component with a host tag -> resolved `node.tagName` un-stripped
+                //     (`<MyCmp:iframe>` -> `iframe|src` blocked; `<svg><MyCmp:iframe>` ->
+                //     `:svg:iframe|src` allowed);
+                //   * bare component (tagName null) -> `i18n_sink_element_name` is `None`,
+                //     so we SKIP the check (short-circuit to false). Passing an empty string
+                //     would wrongly match the `*|innerhtml`/`*|outerhtml` wildcards.
+                // (The SECURITY-CONTEXT path above still ns-strips via `get_security_context`
+                // — that is faithful because upstream routes it through `CssSelector`.)
+                //
+                // SCOPE NOTE (deliberate upstream parity): like upstream `I18nMetaVisitor`,
+                // this only blocks *trusted-types sink* attributes — it does NOT block other
+                // security-sensitive contexts (e.g. `ResourceUrl`/`Html`). So a translatable
+                // `<svg:script i18n-href>` is accepted here and emitted as a static const
+                // with no sanitizer, exactly as v21.2.7 does (`script|href` is intentionally
+                // absent from `TRUSTED_TYPES_SINKS`). This shared gap is left as-is for
+                // faithfulness to the pinned compiler rather than hardened beyond upstream.
+                if i18n_sink_element_name.is_some_and(|tag| is_trusted_types_sink(tag, target_attr))
+                {
+                    self.report_error(
+                        &format!(
+                            "Translating attribute '{target_attr}' is disallowed for security reasons."
+                        ),
+                        attr.span,
+                    );
+                    continue;
+                }
                 let instance_id = self.allocate_i18n_message_instance_id();
                 let meta = parse_i18n_meta(self.allocator, attr.value.as_str(), instance_id);
                 i18n_attrs_meta.insert(target_attr, meta);
@@ -3167,6 +3431,34 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
+    /// Applies upstream's `mergeNsAndName` namespace normalization to an
+    /// attribute binding name, mirroring `createBoundElementProperty`
+    /// (binding_parser.ts:582-587):
+    ///
+    /// ```ts
+    /// const nsSeparatorIdx = boundPropertyName.indexOf(':');
+    /// if (nsSeparatorIdx > -1) {
+    ///   const ns = boundPropertyName.substring(0, nsSeparatorIdx);
+    ///   const name = boundPropertyName.substring(nsSeparatorIdx + 1);
+    ///   boundPropertyName = mergeNsAndName(ns, name);   // -> `:ns:name`
+    /// }
+    /// ```
+    ///
+    /// Only `BindingType::Attribute` bindings are merged; the split is on the
+    /// FIRST `:` and applies to ANY namespace prefix (not just well-known ones),
+    /// so e.g. `xlink:href` -> `:xlink:href` and `custom:foo` -> `:custom:foo`.
+    /// Non-namespaced names and non-attribute bindings are returned unchanged.
+    fn merge_attr_ns_name(&self, binding_type: BindingType, name: &str) -> String {
+        if binding_type == BindingType::Attribute {
+            if let Some(idx) = name.find(':') {
+                let ns = &name[..idx];
+                let local = &name[idx + 1..];
+                return crate::parser::html::merge_ns_and_name(Some(ns), local);
+            }
+        }
+        name.to_string()
+    }
+
     /// Creates a bound attribute.
     fn create_bound_attribute(
         &mut self,
@@ -3178,10 +3470,22 @@ impl<'a> HtmlToR3Transform<'a> {
     ) -> R3BoundAttribute<'a> {
         let value_span = attr.value_span.unwrap_or(attr.span);
         let value = self.parse_binding_expression(&attr.value, value_span);
-        let name_atom = Ident::from(self.allocator.alloc_str(property_name));
 
-        // Look up security context based on element and property
+        // Look up security context based on element and the PLAIN property name.
+        // This mirrors upstream `createBoundElementProperty`
+        // (binding_parser.ts:575-580): the security lookup uses the un-merged
+        // `attr.`-stripped name (e.g. `xlink:href`) BEFORE the namespace merge.
         let security_context = get_security_context(element_name, property_name);
+
+        // For attribute bindings, store the namespace-bearing INTERNAL form
+        // `:ns:local` via `mergeNsAndName` (binding_parser.ts:582-587). This lets
+        // the downstream binding-specialization `split_ns_name` split it into the
+        // local name + namespace for ANY prefix, so codegen emits the namespace
+        // argument of `ɵɵattribute(name, value, sanitizer?, namespace?)` — exactly
+        // like v21.2.7. Non-namespaced attrs and non-attribute bindings keep the
+        // plain name.
+        let stored_name = self.merge_attr_ns_name(binding_type, property_name);
+        let name_atom = Ident::from(self.allocator.alloc_str(&stored_name));
 
         R3BoundAttribute {
             name: name_atom,
@@ -4546,7 +4850,11 @@ impl<'a> HtmlToR3Transform<'a> {
                 (BindingType::Property, name, None, security_context)
             };
 
-        let name_atom = Ident::from(self.allocator.alloc_str(final_name));
+        // For attribute bindings, store the namespace-bearing `:ns:local` form
+        // (upstream `mergeNsAndName`) so downstream codegen emits the namespace
+        // argument. Security was already computed above with the PLAIN name.
+        let stored_name = self.merge_attr_ns_name(binding_type, final_name);
+        let name_atom = Ident::from(self.allocator.alloc_str(&stored_name));
 
         Some(R3BoundAttribute {
             name: name_atom,

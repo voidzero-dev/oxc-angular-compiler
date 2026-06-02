@@ -764,6 +764,151 @@ mod errors {
         let (_nodes, errors) = parse_with_errors("@if (cond) {");
         assert!(!errors.is_empty(), "Expected errors for incomplete template");
     }
+
+    // `@default never` WITHOUT a trailing `;` is an incomplete block. The lexer emits an
+    // IncompleteBlockOpen token; the parser must route it to `_consumeIncompleteBlock`
+    // (upstream v21.2.7 ml_parser/parser.ts:786-812), preserve the block node, and report
+    // the exact "Incomplete block ..." diagnostic. Previously the token hit the default
+    // `_ => advance()` arm and the `@default never` was SILENTLY dropped with 0 errors.
+    #[test]
+    fn incomplete_default_never_without_semicolon_reports_error() {
+        let errors = parse_errors("@switch (cond) { @default never }");
+        assert!(
+            errors.iter().any(|e| e.contains("Incomplete block \"default never\"")),
+            "Expected incomplete block error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn incomplete_default_never_reports_exact_upstream_message() {
+        // Verify the diagnostic matches upstream v21.2.7 verbatim, including the
+        // `&#64;` HTML entity guidance.
+        let errors = parse_errors("@switch (cond) { @default never }");
+        let expected = "Incomplete block \"default never\". If you meant to write the @ character, \
+                        you should use the \"&#64;\" HTML entity instead.";
+        assert!(
+            errors.iter().any(|e| e == expected),
+            "Expected exact upstream message, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn incomplete_default_never_block_is_not_dropped() {
+        // The block node must be preserved in the tree (not silently lost), mirroring
+        // upstream's push+immediate-pop of the incomplete block.
+        let (nodes, _errors) = parse_with_errors("@switch (cond) { @default never }");
+        // The @switch block contains a child @default-never block.
+        let block_names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.node_type() == Some("Block"))
+            .filter_map(|n| n.name().map(|s| s.to_string()))
+            .collect();
+        assert!(
+            block_names.iter().any(|n| n == "default never"),
+            "Expected a preserved 'default never' block, got blocks: {block_names:?}"
+        );
+    }
+
+    #[test]
+    fn valid_default_never_with_semicolon_has_no_incomplete_error() {
+        // The VALID self-terminating `@default never;` (with `;`) must NOT regress: it
+        // produces a complete `default never` block and no "Incomplete block" diagnostic.
+        let (nodes, errors) = parse_with_errors("@switch (cond) { @default never; }");
+        assert!(
+            !errors.iter().any(|e| e.contains("Incomplete block")),
+            "Valid @default never; should not report incomplete block, got: {errors:?}"
+        );
+        let block_names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.node_type() == Some("Block"))
+            .filter_map(|n| n.name().map(|s| s.to_string()))
+            .collect();
+        assert!(
+            block_names.iter().any(|n| n == "default never"),
+            "Expected a complete 'default never' block, got blocks: {block_names:?}"
+        );
+    }
+
+    // Upstream v21.2.7 `_getBlockName` (ml_parser/lexer.ts:294) only `.trim()`s the
+    // raw block name; it does NOT collapse internal whitespace. The exhaustive marker
+    // is recognized by an EXACT equality `parts[0] === 'default never'` (single space,
+    // lexer.ts:302). So `@default   never;` (multiple internal spaces) does NOT match
+    // the marker and falls through to INCOMPLETE_BLOCK_OPEN, reporting an incomplete
+    // block whose name PRESERVES the raw internal whitespace ("default   never").
+    // Verified by executing @angular/compiler@21.2.7 parseTemplate:
+    //   "@switch (x) { @case (1) { a } @default   never; }"
+    //   -> errors: ['Incomplete block "default   never". ...'], exhaustive=0
+    #[test]
+    fn default_never_multiple_internal_spaces_is_incomplete_block() {
+        let (nodes, errors) = parse_with_errors("@switch (cond) { @default   never; }");
+        // Incomplete-block diagnostic preserving the raw (uncollapsed) internal spaces.
+        assert!(
+            errors.iter().any(|e| e.contains("Incomplete block \"default   never\"")),
+            "Expected incomplete block with raw internal spaces, got: {errors:?}"
+        );
+        // NOT recognized as the canonical exhaustive marker.
+        let block_names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.node_type() == Some("Block"))
+            .filter_map(|n| n.name().map(|s| s.to_string()))
+            .collect();
+        assert!(
+            !block_names.iter().any(|n| n == "default never"),
+            "Multi-space form must NOT become the canonical 'default never' marker, \
+             got blocks: {block_names:?}"
+        );
+    }
+
+    // Same as above but with a TAB between `default` and `never`. Upstream
+    // `chars.isWhitespace` (chars.ts:78) treats TAB as whitespace inside the name
+    // scan, but `.trim()` does not strip it internally, so the name stays
+    // "default\tnever" and never matches the single-space marker.
+    // Verified by executing @angular/compiler@21.2.7:
+    //   "@switch (x) { @case (1) { a } @default\tnever; }"
+    //   -> errors: ['Incomplete block "default\tnever". ...'], exhaustive=0
+    #[test]
+    fn default_never_tab_separator_is_incomplete_block() {
+        let (nodes, errors) = parse_with_errors("@switch (cond) { @default\tnever; }");
+        assert!(
+            errors.iter().any(|e| e.contains("Incomplete block \"default\tnever\"")),
+            "Expected incomplete block with raw tab separator, got: {errors:?}"
+        );
+        let block_names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.node_type() == Some("Block"))
+            .filter_map(|n| n.name().map(|s| s.to_string()))
+            .collect();
+        assert!(
+            !block_names.iter().any(|n| n == "default never"),
+            "Tab form must NOT become the canonical 'default never' marker, \
+             got blocks: {block_names:?}"
+        );
+    }
+
+    // CONTROL: a single trailing space before the `;` IS faithful-valid upstream.
+    // The name scan greedily consumes the trailing space (spacesInNameAllowed=true),
+    // then `.trim()` removes it, yielding exactly "default never"; the cursor lands
+    // on `;`, so the marker is recognized.
+    // Verified by executing @angular/compiler@21.2.7:
+    //   "@switch (x) { @case (1) { a } @default never ; }" -> errors: [], exhaustive=1
+    #[test]
+    fn default_never_trailing_space_before_semicolon_is_valid() {
+        let (nodes, errors) = parse_with_errors("@switch (cond) { @default never ; }");
+        assert!(
+            !errors.iter().any(|e| e.contains("Incomplete block")),
+            "Trailing-space @default never ; should be valid, got: {errors:?}"
+        );
+        let block_names: Vec<_> = nodes
+            .iter()
+            .filter(|n| n.node_type() == Some("Block"))
+            .filter_map(|n| n.name().map(|s| s.to_string()))
+            .collect();
+        assert!(
+            block_names.iter().any(|n| n == "default never"),
+            "Expected canonical 'default never' marker for trailing-space form, \
+             got blocks: {block_names:?}"
+        );
+    }
 }
 
 // ============================================================================
@@ -843,6 +988,54 @@ mod void_elements {
             result,
             vec![element("div", 0), element("input", 1), element("br", 1), element("span", 1),]
         );
+    }
+
+    // Finding 2 (issue #315): the void-element end-tag check must run on the
+    // RESOLVED FULL name, not the NS-stripped local name. Upstream
+    // `_consumeElementEndTag` checks `_getTagDefinition(fullName)?.isVoid`
+    // (ml_parser/parser.ts:572), and `getHtmlTagDefinition(':svg:input')` falls
+    // back to the DEFAULT non-void definition (html_tags.ts:192). Verified by
+    // running @angular/compiler@21.2.7 HtmlParser.parse:
+    //   '<svg:input></svg:input>'      -> 0 errors, element ':svg:input'
+    //   '<svg><input></input></svg>'   -> 0 errors, ':svg:input' under ':svg:svg'
+    //   '<input></input>'              -> 1 error "Void elements do not have end
+    //                                     tags \"input\"", element 'input'
+    #[test]
+    fn explicit_namespaced_void_local_close_is_accepted() {
+        let (nodes, errors) = parse_with_errors("<svg:input></svg:input>");
+        assert!(
+            errors.is_empty(),
+            "`</svg:input>` must NOT trigger the void-element error \
+             (`:svg:input` is non-void). Got: {errors:?}"
+        );
+        // The namespaced element is popped/parsed (single root element).
+        assert_eq!(nodes, vec![element(":svg:input", 0)]);
+    }
+
+    #[test]
+    fn implicit_svg_namespaced_void_local_close_is_accepted() {
+        let (nodes, errors) = parse_with_errors("<svg><input></input></svg>");
+        assert!(
+            errors.is_empty(),
+            "`<input>` under `<svg>` resolves to `:svg:input` (non-void) and its \
+             close must be accepted. Got: {errors:?}"
+        );
+        assert_eq!(nodes, vec![element(":svg:svg", 0), element(":svg:input", 1)]);
+    }
+
+    // Control: a plain (non-namespaced) `<input>` is `input` -> void, so the
+    // explicit end tag still errors with the LOCAL name in the message
+    // (`endTagToken.parts[1]`, upstream parity).
+    #[test]
+    fn plain_void_input_explicit_close_still_errors() {
+        let (nodes, errors) = parse_with_errors("<input></input>");
+        assert_eq!(
+            errors,
+            vec!["Void elements do not have end tags \"input\"".to_string()],
+            "plain `<input></input>` must still report the void end-tag error"
+        );
+        // The element is still parsed.
+        assert_eq!(nodes, vec![element("input", 0)]);
     }
 }
 
@@ -1287,9 +1480,354 @@ mod namespaces {
 
     #[test]
     fn should_parse_svg_with_children() {
+        // Upstream namespaces both the `<svg>` root and its implicit children
+        // (`<circle>` inherits `:svg:` from its parent).
         let result = parse_and_humanize("<svg><circle></circle></svg>");
         assert_eq!(result.len(), 2);
-        assert_eq!(result, vec![element("svg", 0), element("circle", 1),]);
+        assert_eq!(result, vec![element(":svg:svg", 0), element(":svg:circle", 1),]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Inherited foreign self-closing elements (F5 namespace inheritance).
+    //
+    // Upstream v21.2.7 `Parser._consumeElementStartTag` (ml_parser/parser.ts:405):
+    //   `if (!(tagDef?.canSelfClose || getNsPrefix(fullName) !== null || tagDef?.isVoid))`
+    // The "foreign" test is `getNsPrefix(fullName) !== null` on the RESOLVED full name,
+    // not on whether the source tag had an explicit prefix. `getNsPrefix(':svg:p')` is
+    // `'svg'` (tags.ts:62-64 -> splitNsName), so an inherited `:svg:p` may self-close.
+    // `getNsPrefix('p')` is `null` and `p` has `canSelfClose: false`, so a real-HTML
+    // `<p/>` still reports the error (the negative control below).
+
+    /// Finds the first element in a parsed template and returns
+    /// `(name, is_self_closing)`. Bypasses the error-asserting humanizer so the
+    /// self-closing tests can inspect the resolved element directly.
+    fn first_element(html: &str) -> (String, bool) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::new(&allocator, html, "TestComp");
+        let result = parser.parse();
+        fn find<'a>(nodes: &'a [HtmlNode<'a>]) -> Option<&'a HtmlElement<'a>> {
+            for n in nodes {
+                if let HtmlNode::Element(e) = n {
+                    return Some(e);
+                }
+            }
+            None
+        }
+        let el = find(&result.nodes).expect("expected an element");
+        (el.name.to_string(), el.is_self_closing)
+    }
+
+    #[test]
+    fn inherited_svg_p_self_closes_without_error() {
+        // `<svg><p/></svg>`: the implicit `<p>` inherits the `svg` namespace ->
+        // resolved `:svg:p`, which is foreign (getNsPrefix non-null), so the
+        // self-close is allowed with NO "Only void..." error.
+        let errors = parse_errors("<svg><p/></svg>");
+        assert!(
+            errors.is_empty(),
+            "expected no errors for inherited foreign <svg><p/></svg>, got: {errors:?}"
+        );
+        // The inner element resolves to `:svg:p` and is self-closing.
+        let result = parse_and_humanize("<svg><p/></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0), element(":svg:p", 1)]);
+    }
+
+    #[test]
+    fn inherited_svg_title_self_closes_without_error() {
+        // `<svg><title/></svg>`: inherited `:svg:title` is foreign -> no error.
+        let errors = parse_errors("<svg><title/></svg>");
+        assert!(
+            errors.is_empty(),
+            "expected no errors for inherited foreign <svg><title/></svg>, got: {errors:?}"
+        );
+        let result = parse_and_humanize("<svg><title/></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0), element(":svg:title", 1)]);
+    }
+
+    #[test]
+    fn inherited_math_mi_self_closes_without_error() {
+        // `<math><mi/></math>`: inherited `:math:mi` is foreign -> no error.
+        let errors = parse_errors("<math><mi/></math>");
+        assert!(
+            errors.is_empty(),
+            "expected no errors for inherited foreign <math><mi/></math>, got: {errors:?}"
+        );
+        let result = parse_and_humanize("<math><mi/></math>");
+        assert_eq!(result, vec![element(":math:math", 0), element(":math:mi", 1)]);
+    }
+
+    #[test]
+    fn explicit_namespaced_self_close_still_allowed() {
+        // Sanity: an explicitly namespaced foreign element self-closes (resolved
+        // `:svg:rect` is foreign). This already worked via the explicit-prefix
+        // path and must keep working through the resolved-name check.
+        let (name, self_closing) = first_element("<svg:rect/>");
+        assert_eq!(name, ":svg:rect");
+        assert!(self_closing, "explicit <svg:rect/> should be self-closing");
+        assert!(parse_errors("<svg:rect/>").is_empty());
+    }
+
+    #[test]
+    fn real_html_self_close_still_errors() {
+        // NEGATIVE control: a genuine top-level HTML `<p/>` (resolved name `p`,
+        // getNsPrefix == null, not void, canSelfClose == false) MUST still report
+        // the self-closing error. This proves the fix did not disable the check for
+        // real HTML.
+        //
+        // NOTE: `<p>` (not `<div>`) is used deliberately. OXC's
+        // `get_html_tag_definition` does not register the full DOM element-name
+        // list with `canSelfClose: false` the way upstream's
+        // `allKnownElementNames().forEach` does, so OXC treats `div`/`span` as
+        // unknown tags (`canSelfClose: true`) and does NOT error on `<div/>` —
+        // a PRE-EXISTING divergence outside this fix's scope. `p` IS an explicitly
+        // defined tag with `canSelfClose: false` in BOTH OXC and upstream
+        // v21.2.7, so it is the faithful negative control here.
+        let errors = parse_errors("<p/>");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("Only void, custom and foreign elements can be self closed")),
+            "expected self-closing error for real-HTML <p/>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn real_html_p_in_div_self_close_still_errors() {
+        // NEGATIVE control with a non-foreign parent: `<div><p/></div>` keeps `<p>`
+        // in the HTML namespace (resolved `p`, getNsPrefix == null), so the
+        // self-close error still fires — confirming inheritance, not the bare tag,
+        // is what flips the foreign decision.
+        let errors = parse_errors("<div><p/></div>");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("Only void, custom and foreign elements can be self closed")),
+            "expected self-closing error for <div><p/></div>, got: {errors:?}"
+        );
+    }
+
+    // Faithful to upstream v21.2.7: a namespaced raw-text element (e.g. `<svg:script>`,
+    // `<svg:style>`) closes on its LOCAL name only (`script`/`style`), matched
+    // case-insensitively. In `_consumeTagOpen` (ml_parser/lexer.ts:837-839) a REGULAR tag
+    // sets `tagName = closingTagName = openToken.parts[1]` — the local name, WITHOUT the
+    // namespace prefix; only the selectorless-component path (lines 821-827) appends the
+    // prefix. The boundary is matched via `_attemptStrCaseInsensitive(tagName)` (line 900).
+    // Therefore `</svg:script>` does NOT close `<svg:script>` (the boundary is bare
+    // `script`, but the source close tag reads `svg:script`), and the raw-text scan runs to
+    // EOF, swallowing the trailing `<div>after</div>` into the script's raw text. Only a
+    // BARE `</script>` (any case) closes it. The parser stores namespaced names in
+    // Angular's internal `:ns:name` form. These assertions were verified empirically against
+    // the lexer and match v21.2.7 1:1.
+    #[test]
+    fn svg_script_closes_on_local_name_and_swallows_until_bare_close() {
+        // No bare `</script>` is present, so `</svg:script>` does not close the raw-text
+        // element and everything runs to EOF as the script's raw text (v21.2.7-faithful).
+        let result = parse_and_humanize("<svg:script>evil</svg:script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:script", 0), text("evil</svg:script><div>after</div>", 1)]
+        );
+
+        // A BARE `</script>` (local name) DOES close it case-insensitively, leaving the
+        // following `<div>after</div>` as a sibling — proving local-name close matching.
+        let result = parse_and_humanize("<svg:script>evil</script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:script", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn svg_style_closes_on_local_name_and_swallows_until_bare_close() {
+        // No bare `</style>`: `</svg:style>` does not close; runs to EOF (v21.2.7-faithful).
+        let result = parse_and_humanize("<svg:style>x</svg:style><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:style", 0), text("x</svg:style><div>after</div>", 1)]
+        );
+
+        // A bare `</style>` closes it; the `<div>` survives as a sibling.
+        let result = parse_and_humanize("<svg:style>x</style><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:style", 0), text("x", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn svg_script_close_tag_is_case_insensitive_on_local_name() {
+        // Local-name close matching is case-insensitive (`_attemptStrCaseInsensitive`).
+        // `</SVG:SCRIPT>` does NOT close `<svg:script>` — the boundary is the local name
+        // `script`, but the source close tag reads `SVG:SCRIPT` (a prefixed name), so the
+        // raw-text scan runs to EOF (v21.2.7-faithful).
+        let result = parse_and_humanize("<svg:script>evil</SVG:SCRIPT><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:script", 0), text("evil</SVG:SCRIPT><div>after</div>", 1)]
+        );
+
+        // A BARE upper-case `</SCRIPT>` DOES close it (case-insensitive local match),
+        // leaving the `<div>` as a sibling.
+        let result = parse_and_humanize("<svg:script>evil</SCRIPT><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element(":svg:script", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn plain_script_still_keeps_following_sibling() {
+        // Guard against regressions in the non-namespaced raw-text path.
+        let result = parse_and_humanize("<script>a</script><div>b</div>");
+        assert_eq!(
+            result,
+            vec![element("script", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    #[test]
+    fn plain_style_still_keeps_following_sibling() {
+        let result = parse_and_humanize("<style>.a{}</style><div>b</div>");
+        assert_eq!(
+            result,
+            vec![element("style", 0), text(".a{}", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    // Issue: an UPPER-case (or mixed-case) raw-text opening tag (`<SCRIPT>`, `<Script>`,
+    // `<svg:SCRIPT>`, `<TEXTAREA>`, `<TITLE>`) must close on its matching close tag and
+    // keep following content as SIBLINGS, not nest them under the raw-text element.
+    //
+    // The lexer detects the raw-text boundary case-insensitively (correct), but it must
+    // emit the synthetic TAG_CLOSE token with the ORIGINAL-case open-tag name so the parser
+    // pairs open/close by exact name. Upstream v21.2.7 `_consumeRawTextWithTagClose`
+    // (ml_parser/lexer.ts:911) emits the close token with `openToken.parts` (original case),
+    // while the boundary is matched via `_attemptStrCaseInsensitive(tagName)` (line 900).
+    // Previously OXC emitted the close token with the LOWER-cased name, so `<SCRIPT>` (open)
+    // never matched `script` (synthetic close), and `<div>` nested under SCRIPT with an
+    // "Unexpected closing tag" error.
+    #[test]
+    fn uppercase_script_keeps_following_sibling() {
+        let (nodes, errors) = parse_with_errors("<SCRIPT>a</SCRIPT><div>b</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element("SCRIPT", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    #[test]
+    fn mixedcase_script_keeps_following_sibling() {
+        let (nodes, errors) = parse_with_errors("<Script>a</Script><div>b</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element("Script", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    #[test]
+    fn uppercase_namespaced_script_closes_on_bare_local_name() {
+        // v21.2.7-faithful: a namespaced raw-text element closes on its LOCAL name only,
+        // case-insensitively. `</svg:SCRIPT>` does NOT close `<svg:SCRIPT>` (the boundary is
+        // local `script`, but the source close tag reads `svg:SCRIPT`), so the scan runs to
+        // EOF and swallows the following content as raw text.
+        let (nodes, errors) = parse_with_errors("<svg:SCRIPT>evil</svg:SCRIPT><div>after</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element(":svg:SCRIPT", 0), text("evil</svg:SCRIPT><div>after</div>", 1)]
+        );
+
+        // A BARE `</SCRIPT>` closes it (case-insensitive local match). The element keeps its
+        // ORIGINAL-case name `:svg:SCRIPT` (H2: the synthetic close token carries the
+        // original-case open-tag parts), so open/close pair with no errors and the `<div>`
+        // survives as a sibling.
+        let (nodes, errors) = parse_with_errors("<svg:SCRIPT>evil</SCRIPT><div>after</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element(":svg:SCRIPT", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn uppercase_textarea_keeps_following_sibling() {
+        let (nodes, errors) = parse_with_errors("<TEXTAREA>a</TEXTAREA><div>b</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element("TEXTAREA", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    #[test]
+    fn uppercase_title_keeps_following_sibling() {
+        let (nodes, errors) = parse_with_errors("<TITLE>a</TITLE><div>b</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element("TITLE", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    #[test]
+    fn lowercase_script_still_keeps_following_sibling_with_no_errors() {
+        // Confirm the lower-case path (already correct) is unaffected by the case fix.
+        let (nodes, errors) = parse_with_errors("<script>a</script><div>b</div>");
+        assert!(errors.is_empty(), "Expected no errors, got: {errors:?}");
+        assert_eq!(
+            nodes,
+            vec![element("script", 0), text("a", 1), element("div", 0), text("b", 1),]
+        );
+    }
+
+    // Codex finding F5: an IMPLICIT (un-prefixed) child of an SVG element must
+    // inherit the parent's namespace prefix, mirroring upstream `_getPrefix`.
+    // `<svg>` itself gets `:svg:` from its own `implicitNamespacePrefix`.
+
+    #[test]
+    fn svg_root_gets_implicit_namespace_prefix() {
+        // Upstream: `<svg></svg>` -> `:svg:svg` (implicitNamespacePrefix='svg').
+        let result = parse_and_humanize("<svg></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0)]);
+    }
+
+    #[test]
+    fn svg_implicit_child_inherits_namespace() {
+        // `<svg><rect></rect></svg>` -> `:svg:svg`, `:svg:rect`.
+        let result = parse_and_humanize("<svg><rect></rect></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0), element(":svg:rect", 1)]);
+    }
+
+    #[test]
+    fn svg_implicit_style_child_inherits_namespace() {
+        // The whole point of F5: an implicit `<style>` inside `<svg>` is `:svg:style`,
+        // NOT bare `style`, so it is not treated as a component-style element.
+        let result = parse_and_humanize("<svg><style>.x{}</style></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0), element(":svg:style", 1), text(".x{}", 2)]);
+    }
+
+    #[test]
+    fn foreign_object_children_reset_to_html() {
+        // `foreignObject` sets preventNamespaceInheritance, so its children do NOT
+        // inherit the svg namespace and stay in the HTML namespace (bare `div`).
+        // `foreignObject` itself is `:svg:foreignObject` (implicitNamespacePrefix='svg').
+        let result = parse_and_humanize("<svg><foreignObject><div></div></foreignObject></svg>");
+        assert_eq!(
+            result,
+            vec![element(":svg:svg", 0), element(":svg:foreignObject", 1), element("div", 2),]
+        );
+    }
+
+    #[test]
+    fn explicit_svg_style_still_namespaced() {
+        // Explicit `<svg:style>` keeps working and is namespaced `:svg:style` (regression
+        // guard for the explicit path). v21.2.7-faithful: the raw-text element closes on its
+        // LOCAL name, so the close tag here must be the bare `</style>`; `</svg:style>` would
+        // not close it (it would run to EOF as raw text).
+        let result = parse_and_humanize("<svg:style>x</style>");
+        assert_eq!(result, vec![element(":svg:style", 0), text("x", 1)]);
     }
 }
 
@@ -1724,6 +2262,140 @@ mod parser_component_tags {
         // TS: parser.parse("<Comp/>", "TestComp", {selectorlessEnabled: true})
         let result = parse_selectorless_and_humanize("<Comp/>");
         assert!(!result.is_empty());
+    }
+
+    // Faithful to upstream v21.2.7: a selectorless-COMPONENT raw-text element
+    // (e.g. `<Comp:script>`, whose suffix `script` is RAW_TEXT, or `<Comp:title>`,
+    // whose suffix `title` is ESCAPABLE_RAW_TEXT) closes on the FULL prefixed component
+    // close name, matched CASE-INSENSITIVELY. In `_consumeTagOpen`
+    // (ml_parser/lexer.ts:821-827) the component branch builds
+    // `closingTagName = parts[0](+ ":" + prefix)(+ ":" + tagName)` (e.g. `Comp:script`),
+    // then closes via the SAME `_consumeRawTextWithTagClose(openToken, closingTagName, ...)`
+    // used by the regular path, whose boundary match is `_attemptStrCaseInsensitive`
+    // (line 900) — case-insensitive — while the emitted ComponentClose token uses
+    // `_endToken(openToken.parts)` (line 911), i.e. the ORIGINAL-case open-tag parts.
+    // So `</COMP:SCRIPT>` (different case) DOES close `<Comp:script>`, and the following
+    // `<div>after</div>` survives as a sibling. A genuinely different prefixed close name
+    // (`</Other:script>`) does NOT match and the raw text runs to EOF. These assertions
+    // were verified empirically against the lexer.
+    #[test]
+    fn component_raw_text_close_is_case_insensitive_and_keeps_sibling() {
+        // Same-case close: closes `<Comp:script>` and `<div>after</div>` is a sibling.
+        let result =
+            parse_selectorless_and_humanize("<Comp:script>evil</Comp:script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+
+        // DIFFERENT-case close `</COMP:SCRIPT>` closes the component raw-text element
+        // case-insensitively, leaving `<div>after</div>` as a sibling (the F1 fix). Before
+        // the fix this byte-sensitive compare failed and the scan swallowed to EOF.
+        let result =
+            parse_selectorless_and_humanize("<Comp:script>evil</COMP:SCRIPT><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+
+        // Mixed-case close `</Comp:SCRIPT>` (only the suffix differs) also closes it.
+        let result =
+            parse_selectorless_and_humanize("<Comp:script>evil</Comp:SCRIPT><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("evil", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn component_escapable_raw_text_close_is_case_insensitive() {
+        // `<Comp:title>` has an ESCAPABLE_RAW_TEXT suffix (`title`); a different-case
+        // close `</COMP:TITLE>` closes it case-insensitively, `<div>after</div>` survives.
+        let result = parse_selectorless_and_humanize("<Comp:title>x</COMP:TITLE><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("x", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    #[test]
+    fn component_raw_text_non_matching_close_runs_to_eof() {
+        // A genuinely DIFFERENT prefixed component close name does NOT match the boundary
+        // (the full prefixed name compare fails even case-insensitively), so the raw-text
+        // scan runs to EOF and swallows the trailing markup — proving the boundary is the
+        // FULL prefixed component close name, not a bare local name.
+        let result =
+            parse_selectorless_and_humanize("<Comp:script>evil</Other:script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("evil</Other:script><div>after</div>", 1),]
+        );
+    }
+
+    // CURSOR ROLLBACK (faithful to upstream v21.2.7 `_consumeRawText`,
+    // ml_parser/lexer.ts:741-746): before each `</...>` close attempt the cursor is
+    // SNAPSHOTTED; on a FAILED attempt the cursor is RESTORED to the snapshot and the `<`
+    // is consumed as one ordinary text char, so a later VALID close is still found. Both
+    // the regular raw-text path and the component path now share that core, so a
+    // non-matching `</bad...>` candidate preceding the real `</Comp:script>` does NOT
+    // swallow the following `<div>` sibling to EOF. Before unification the component fork
+    // never rolled back the cursor, so the non-matching candidate consumed the real close
+    // and everything ran to EOF.
+    #[test]
+    fn component_raw_text_rolls_back_failed_close_and_keeps_real_close() {
+        let result =
+            parse_selectorless_and_humanize("<Comp:script>x</bad</Comp:script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("x</bad", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    // REGULAR-path parity sanity for the same rollback behavior (`<script>` is RAW_TEXT;
+    // its boundary is the bare local name `script`). A non-matching `</bad...>` candidate
+    // is rolled back and the real `</script>` still closes, keeping `<div>` as a sibling.
+    #[test]
+    fn regular_raw_text_rolls_back_failed_close_and_keeps_real_close() {
+        let result = parse_selectorless_and_humanize("<script>x</bad</script><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("script", 0), text("x</bad", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    // ENTITY DECODING for ESCAPABLE component raw text (faithful to upstream v21.2.7
+    // `_consumeRawText`, ml_parser/lexer.ts:747-751: when `consumeEntities` is true and the
+    // next char is `&`, the entity is decoded into an ENCODED_ENTITY token). `<Comp:title>`
+    // has an ESCAPABLE_RAW_TEXT suffix (`title`), so `&amp;` DECODES to `&`. The close is
+    // matched case-insensitively (`</COMP:TITLE>`) and `<div>after</div>` survives. Before
+    // unification the component fork used `consume_entities` only to pick the token type and
+    // never decoded, leaving the literal `&amp;`.
+    #[test]
+    fn component_escapable_raw_text_decodes_entities() {
+        let result =
+            parse_selectorless_and_humanize("<Comp:title>&amp;</COMP:TITLE><div>after</div>");
+        assert_eq!(
+            result,
+            vec![element("Comp", 0), text("&", 1), element("div", 0), text("after", 1),]
+        );
+    }
+
+    // ENTITY NON-DECODING for FLAT component raw text (faithful to upstream: `<Comp:script>`
+    // is RAW_TEXT, `consumeEntities=false`, so `_consumeRawText` never enters the entity
+    // branch and `&amp;` stays LITERAL). This mirrors the regular `<script>&amp;</script>`
+    // behavior — see `regular_raw_text_does_not_decode_entities` below.
+    #[test]
+    fn component_raw_text_does_not_decode_entities() {
+        let result = parse_selectorless_and_humanize("<Comp:script>&amp;</Comp:script>");
+        assert_eq!(result, vec![element("Comp", 0), text("&amp;", 1)]);
+    }
+
+    // REGULAR-path parity for entity non-decoding: `<script>` is RAW_TEXT, so `&amp;` stays
+    // literal — identical to the component `<Comp:script>` case above.
+    #[test]
+    fn regular_raw_text_does_not_decode_entities() {
+        let result = parse_selectorless_and_humanize("<script>&amp;</script>");
+        assert_eq!(result, vec![element("script", 0), text("&amp;", 1)]);
     }
 }
 
@@ -2191,9 +2863,11 @@ mod more_blocks {
     #[test]
     fn should_infer_namespace_through_block_boundary() {
         // TS: it("should infer namespace through block boundary")
+        // The @if block is skipped when finding the closest element-like parent, so
+        // `<circle/>` still inherits `:svg:` from the enclosing `<svg>`.
         let result = parse_and_humanize("<svg>@if (cond) {<circle/>}</svg>");
-        assert!(result.iter().any(|n| n.name() == Some("svg")));
-        assert!(result.iter().any(|n| n.name() == Some("circle")));
+        assert!(result.iter().any(|n| n.name() == Some(":svg:svg")));
+        assert!(result.iter().any(|n| n.name() == Some(":svg:circle")));
     }
 }
 
@@ -2442,5 +3116,475 @@ mod visitor_tests {
         assert!(result.iter().any(|n| n == &text("a", 2)));
         assert!(result.iter().any(|n| n == &text("b", 2)));
         assert!(result.iter().filter(|n| n.node_type() == Some("Attribute")).count() == 2);
+    }
+}
+
+// ============================================================================
+// Selectorless component namespace inheritance
+//
+// Mirrors upstream `Parser._getComponentTagName` / `_getComponentFullName` /
+// `_getPrefix` (ml_parser/parser.ts ~924-1002): a selectorless component's tag
+// name inherits the parent implicit namespace exactly like a normal element.
+// OXC stores the *resolved* prefix in `HtmlElement.component_prefix` and the raw
+// tag name in `HtmlElement.component_tag_name`; the R3 transform then merges them
+// into `:prefix:tag`. These tests assert the resolved prefix/tag directly on the
+// parsed AST so they don't depend on the R3 transform.
+//
+// Ported from `html_parser_spec.ts` "component nodes" group, which the conformance
+// harness cannot capture: those upstream tests use the two-statement
+// `const parsed = humanizeDom(...); expect(parsed).toEqual([...])` pattern, which
+// the extractor stores as `expected: []`, and the conformance Humanizer humanizes
+// selectorless components as plain `html.Element` nodes (no component fields).
+// ============================================================================
+mod selectorless_component_namespace {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::ast::html::{HtmlElement, HtmlNode};
+    use oxc_angular_compiler::parser::html::HtmlParser;
+
+    /// Finds the first selectorless component element (one whose `name` is the
+    /// component class name, i.e. starts uppercase) anywhere in the tree and
+    /// returns its `(component_name, component_prefix, component_tag_name)`.
+    fn first_component<'a>(
+        nodes: &[HtmlNode<'a>],
+    ) -> Option<(String, Option<String>, Option<String>)> {
+        for node in nodes {
+            if let HtmlNode::Element(el) = node {
+                if el
+                    .name
+                    .as_str()
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+                {
+                    return Some((
+                        el.name.to_string(),
+                        el.component_prefix.as_ref().map(|p| p.to_string()),
+                        el.component_tag_name.as_ref().map(|t| t.to_string()),
+                    ));
+                }
+                if let Some(found) = first_component(&el.children) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    fn parse_component(html: &str) -> (String, Option<String>, Option<String>) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "TestComp");
+        let result = parser.parse();
+        assert!(
+            result.errors.is_empty(),
+            "Unexpected parse errors for '{}': {:?}",
+            html,
+            result.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+        first_component(&result.nodes).unwrap_or_else(|| panic!("no component found in '{html}'"))
+    }
+
+    /// Local mirror of the R3 transform's tag-name/full-name composition
+    /// (html_to_r3.rs `visit_html_element` component branch) so the test asserts
+    /// the *observable* tagName/fullName upstream humanizes.
+    fn tag_and_full(
+        name: &str,
+        prefix: Option<&str>,
+        tag: Option<&str>,
+    ) -> (Option<String>, String) {
+        let tag_name = match (prefix, tag) {
+            (None, None) => None,
+            (None, Some(t)) => Some(t.to_string()),
+            (Some(p), None) => Some(format!(":{p}:ng-component")),
+            (Some(p), Some(t)) => Some(format!(":{p}:{t}")),
+        };
+        let full_name = match &tag_name {
+            Some(t) if t.starts_with(':') => format!("{name}{t}"),
+            Some(t) => format!("{name}:{t}"),
+            None => name.to_string(),
+        };
+        (tag_name, full_name)
+    }
+
+    #[test]
+    fn simple_component_no_namespace() {
+        // <MyComp> -> tagName null, fullName "MyComp"
+        let (name, prefix, tag) = parse_component("<MyComp>Hello</MyComp>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (None, None));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name, None);
+        assert_eq!(full_name, "MyComp");
+    }
+
+    #[test]
+    fn component_with_tag_name_no_namespace() {
+        // <MyComp:button> -> tagName "button", fullName "MyComp:button"
+        let (name, prefix, tag) = parse_component("<MyComp:button>Hello</MyComp:button>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (None, Some("button")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some("button"));
+        assert_eq!(full_name, "MyComp:button");
+    }
+
+    #[test]
+    fn component_with_explicit_namespace() {
+        // <MyComp:svg:title> -> tagName ":svg:title", fullName "MyComp:svg:title"
+        let (name, prefix, tag) = parse_component("<MyComp:svg:title>Hello</MyComp:svg:title>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (Some("svg"), Some("title")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some(":svg:title"));
+        assert_eq!(full_name, "MyComp:svg:title");
+    }
+
+    #[test]
+    fn inferred_svg_namespace_no_tag_name() {
+        // <svg><MyComp>...</svg> -> tagName ":svg:ng-component",
+        // fullName "MyComp:svg:ng-component" (parent <svg> implicit ns inherited).
+        let (name, prefix, tag) = parse_component("<svg><MyComp>Hello</MyComp></svg>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (Some("svg"), None));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some(":svg:ng-component"));
+        assert_eq!(full_name, "MyComp:svg:ng-component");
+    }
+
+    #[test]
+    fn inferred_svg_namespace_with_tag_name() {
+        // <svg><MyComp:button>...</svg> -> tagName ":svg:button",
+        // fullName "MyComp:svg:button" (THE divergence case from the finding).
+        let (name, prefix, tag) =
+            parse_component("<svg><MyComp:button>Hello</MyComp:button></svg>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (Some("svg"), Some("button")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some(":svg:button"));
+        assert_eq!(full_name, "MyComp:svg:button");
+    }
+
+    #[test]
+    fn inferred_math_with_explicit_svg_namespace_wins() {
+        // <math><MyComp:svg:title>...</math>: an EXPLICIT prefix beats inheritance,
+        // so tagName stays ":svg:title", fullName "MyComp:svg:title".
+        let (name, prefix, tag) =
+            parse_component("<math><MyComp:svg:title>Hello</MyComp:svg:title></math>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (Some("svg"), Some("title")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some(":svg:title"));
+        assert_eq!(full_name, "MyComp:svg:title");
+    }
+
+    #[test]
+    fn non_svg_control_stays_unnamespaced() {
+        // Control: <div><MyComp:button>...</div> — a non-namespaced parent does NOT
+        // inject a namespace, so tagName stays "button", fullName "MyComp:button".
+        let (name, prefix, tag) =
+            parse_component("<div><MyComp:button>Hello</MyComp:button></div>");
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (None, Some("button")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some("button"));
+        assert_eq!(full_name, "MyComp:button");
+    }
+
+    #[test]
+    fn foreign_object_prevents_namespace_inheritance() {
+        // <svg><foreignObject><MyComp:button>...: foreignObject prevents namespace
+        // inheritance, so the component does NOT inherit `:svg:` -> tagName "button".
+        let (name, prefix, tag) = parse_component(
+            "<svg><foreignObject><MyComp:button>Hello</MyComp:button></foreignObject></svg>",
+        );
+        assert_eq!((prefix.as_deref(), tag.as_deref()), (None, Some("button")));
+        let (tag_name, full_name) = tag_and_full(&name, prefix.as_deref(), tag.as_deref());
+        assert_eq!(tag_name.as_deref(), Some("button"));
+        assert_eq!(full_name, "MyComp:button");
+    }
+
+    // Silence unused-import warnings if the helper signature changes.
+    #[allow(dead_code)]
+    fn _uses(_e: &HtmlElement<'_>) {}
+}
+
+// ============================================================================
+// Selectorless-component CHILD namespace inheritance (the iteration-11 finding)
+//
+// Upstream `_getPrefix` (ml_parser/parser.ts:990-998) inherits a child's namespace
+// from the closest element-like parent's NAME: for an `html.Element` parent that is
+// `parent.name`, but for an `html.Component` parent it is `parent.tagName` (line 991:
+// `parent instanceof html.Element ? parent.name : parent.tagName`) — i.e. the
+// RESOLVED component tag name (`:svg:button`), NOT the component class name (`MyComp`).
+// `getNsPrefix(':svg:button')` is `'svg'`, so a child with no explicit/implicit
+// namespace inherits `:svg:`. These tests assert the resolved CHILD element names.
+// ============================================================================
+mod selectorless_component_child_namespace {
+    use super::{HumanizedNode, element, parse_selectorless_and_humanize, text};
+
+    /// Returns the resolved name of the first element whose humanized name equals
+    /// `child_name` is unnecessary; instead we assert on the full humanized tree.
+    fn humanize(html: &str) -> Vec<HumanizedNode> {
+        parse_selectorless_and_humanize(html)
+    }
+
+    #[test]
+    fn child_div_inherits_svg_through_component_with_tag_name() {
+        // <svg><MyComp:button><div></div></MyComp:button></svg>
+        // Component tagName resolves to `:svg:button`; getNsPrefix -> 'svg', so the
+        // child <div> inherits and resolves to `:svg:div` (NOT plain html `div`).
+        let result = humanize("<svg><MyComp:button><div></div></MyComp:button></svg>");
+        assert_eq!(
+            result,
+            vec![
+                element(":svg:svg", 0),
+                // Component humanizes by its class name at depth 1.
+                element("MyComp", 1),
+                element(":svg:div", 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn child_script_inherits_svg_and_is_kept_namespaced() {
+        // The security-relevant case: a <script> child under a namespaced component
+        // parent resolves to `:svg:script`, which is foreign and parsed as a normal
+        // element (children/raw-text handled by the svg path), NOT the plain-html
+        // `script` special path. The parser keeps it as `:svg:script`.
+        let result = humanize("<svg><MyComp:button><script>x</script></MyComp:button></svg>");
+        assert_eq!(
+            result,
+            vec![
+                element(":svg:svg", 0),
+                element("MyComp", 1),
+                element(":svg:script", 2),
+                text("x", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn child_style_inherits_svg_and_is_kept_namespaced() {
+        let result = humanize("<svg><MyComp:button><style>x</style></MyComp:button></svg>");
+        assert_eq!(
+            result,
+            vec![
+                element(":svg:svg", 0),
+                element("MyComp", 1),
+                element(":svg:style", 2),
+                text("x", 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn child_inherits_svg_through_explicitly_namespaced_component() {
+        // Explicit `<MyComp:svg:rect>` (no enclosing <svg> needed): tagName `:svg:rect`,
+        // getNsPrefix -> 'svg', so the child <circle> inherits -> `:svg:circle`.
+        let result = humanize("<MyComp:svg:rect><circle></circle></MyComp:svg:rect>");
+        assert_eq!(result, vec![element("MyComp", 0), element(":svg:circle", 1)]);
+    }
+
+    #[test]
+    fn child_inherits_svg_through_component_without_tag_part_under_svg() {
+        // <svg><MyComp><div></div></MyComp></svg>: per `_getComponentTagName`
+        // (parser.ts:946-961), with prefix='svg' (inherited) and no tagName, the
+        // component tagName is `mergeNsAndName('svg','ng-component')` = `:svg:ng-component`
+        // (NOT null). getNsPrefix(':svg:ng-component') -> 'svg', so the child <div>
+        // inherits -> `:svg:div`.
+        let result = humanize("<svg><MyComp><div></div></MyComp></svg>");
+        assert_eq!(
+            result,
+            vec![element(":svg:svg", 0), element("MyComp", 1), element(":svg:div", 2),]
+        );
+    }
+
+    #[test]
+    fn control_non_svg_component_child_stays_html() {
+        // CONTROL: <MyComp:button><div></div></MyComp:button> outside any svg.
+        // Component tagName resolves to `button` (no namespace); getNsPrefix('button')
+        // -> null, so the child <div> stays plain html `div`.
+        let result = humanize("<MyComp:button><div></div></MyComp:button>");
+        assert_eq!(result, vec![element("MyComp", 0), element("div", 1)]);
+    }
+
+    #[test]
+    fn control_bare_component_child_stays_html() {
+        // CONTROL: bare <MyComp><div></div></MyComp> outside any svg.
+        // `_getComponentTagName` with no prefix and no tagName returns null
+        // (parser.ts:953-954) -> fullName is `MyComp`; getNsPrefix(null)/'' -> null,
+        // so the child <div> stays plain html `div`.
+        let result = humanize("<MyComp><div></div></MyComp>");
+        assert_eq!(result, vec![element("MyComp", 0), element("div", 1)]);
+    }
+
+    #[test]
+    fn grandchild_inherits_svg_transitively_through_component() {
+        // Deeper nesting: <svg><MyComp:button><g><circle/></g></MyComp:button></svg>
+        // <g> inherits `:svg:` from the component (-> `:svg:g`), and <circle> then
+        // inherits `:svg:` from `:svg:g` (a normal element parent) -> `:svg:circle`.
+        let result = humanize("<svg><MyComp:button><g><circle></circle></g></MyComp:button></svg>");
+        assert_eq!(
+            result,
+            vec![
+                element(":svg:svg", 0),
+                element("MyComp", 1),
+                element(":svg:g", 2),
+                element(":svg:circle", 3),
+            ]
+        );
+    }
+}
+
+// ============================================================================
+// FINDING 2: a selectorless-component CLOSE tag must match the open element by its
+// RESOLVED FULL name (`componentName(+:prefix):tag`), not the bare class name.
+//
+// Upstream v21.2.7 `Parser._consumeComponentEndTag` (ml_parser/parser.ts:530-546):
+//   const fullName = this._getComponentFullName(endToken, this._getClosestElementLikeParent());
+//   if (!this._popContainer(fullName, html.Component, endToken.sourceSpan)) {
+//     const container = this._containerStack[this._containerStack.length - 1];
+//     let suffix: string;
+//     if (container instanceof html.Component && container.componentName === endToken.parts[0]) {
+//       suffix = `, did you mean "${container.fullName}"?`;
+//     } else {
+//       suffix = '. It may happen when the tag has already been closed by another tag.';
+//     }
+//     const errMsg = `Unexpected closing tag "${fullName}"${suffix}`;
+//     this.errors.push(TreeError.create(fullName, endToken.sourceSpan, errMsg));
+//   }
+// `_popContainer` (lines 592-621) matches against `node.fullName` for an
+// `html.Component` (line 600), so the close full name is composed via the SAME
+// `_getComponentFullName`/`_getComponentTagName`/`_getPrefix` logic as the open —
+// INCLUDING parent-namespace inheritance from the closest element-like parent (which,
+// at close time, is the still-open component itself, carrying its resolved tagName).
+// ============================================================================
+mod selectorless_component_close_match {
+    use super::{element, parse_selectorless_and_humanize, text};
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+
+    fn selectorless_errors(html: &str) -> Vec<String> {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "TestComp");
+        let result = parser.parse();
+        result.errors.iter().map(|e| e.msg.clone()).collect()
+    }
+
+    #[test]
+    fn mismatched_tag_part_reports_error() {
+        // Open `MyComp:button`, close `MyComp:link`: full names differ
+        // (MyComp:button vs MyComp:link) -> does NOT silently close. Same componentName
+        // -> "did you mean" suffix quoting the open full name.
+        let errors = selectorless_errors("<MyComp:button></MyComp:link>");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e
+                    == "Unexpected closing tag \"MyComp:link\", did you mean \"MyComp:button\"?"),
+            "expected mismatch error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn mismatched_class_name_reports_error() {
+        // Open `MyComp:button`, close `Other:button`: full names differ; different
+        // componentName -> generic "may happen" suffix.
+        let errors = selectorless_errors("<MyComp:button></Other:button>");
+        assert!(
+            errors.iter().any(|e| e
+                == "Unexpected closing tag \"Other:button\". It may happen when the tag has already been closed by another tag."),
+            "expected class-mismatch error, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn matching_full_name_closes_cleanly() {
+        // Open and close both `MyComp:button` -> closes cleanly, no error.
+        let errors = selectorless_errors("<MyComp:button></MyComp:button>");
+        assert!(errors.is_empty(), "expected no error, got: {errors:?}");
+
+        let result = parse_selectorless_and_humanize("<MyComp:button></MyComp:button>");
+        assert_eq!(result, vec![element("MyComp", 0)]);
+    }
+
+    #[test]
+    fn matching_full_name_under_svg_closes_cleanly() {
+        // SUBTLE inheritance case: open `<MyComp:button>` under `<svg>` resolves to
+        // fullName `MyComp:svg:button` (button inherits svg). The close
+        // `</MyComp:button>` (no explicit svg) ALSO inherits svg from the closest
+        // element-like parent (the still-open MyComp, whose resolved tagName is
+        // `:svg:button`), so its full name is ALSO `MyComp:svg:button` -> they MATCH.
+        // Upstream-faithful: NO error.
+        let errors = selectorless_errors("<svg><MyComp:button></MyComp:button></svg>");
+        assert!(errors.is_empty(), "expected no error under svg, got: {errors:?}");
+
+        let result = parse_selectorless_and_humanize("<svg><MyComp:button></MyComp:button></svg>");
+        assert_eq!(result, vec![element(":svg:svg", 0), element("MyComp", 1)]);
+    }
+
+    #[test]
+    fn bare_component_closes_cleanly() {
+        // Open/close bare `<MyComp>` -> closes cleanly, no error.
+        let errors = selectorless_errors("<MyComp></MyComp>");
+        assert!(errors.is_empty(), "expected no error, got: {errors:?}");
+
+        let result = parse_selectorless_and_humanize("<MyComp>hi</MyComp>");
+        assert_eq!(result, vec![element("MyComp", 0), text("hi", 1)]);
+    }
+}
+
+// ============================================================================
+// FINDING 3: the void-element end-tag error must attach the FULL close-token
+// source span (`endTagToken.sourceSpan`), not a zero-length caret at the start.
+//
+// Upstream v21.2.7 `_consumeElementEndTag` (ml_parser/parser.ts:569-584):
+//   if (this._getTagDefinition(fullName)?.isVoid) {
+//     this.errors.push(TreeError.create(
+//       fullName, endTagToken.sourceSpan,
+//       `Void elements do not have end tags "${endTagToken.parts[1]}"`));
+//   }
+//
+// Oracle (@angular/compiler@21.2.7 HtmlParser.parse):
+//   "<input></input>"                  -> msg `Void elements do not have end
+//        tags "input"`, span offset 7..15, line 0 col 7..15
+//   "<div>\n  <input></input>\n</div>" -> span offset 15..23, line 1 col 9..17
+// ============================================================================
+mod void_end_tag_span {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+
+    #[test]
+    fn void_input_close_uses_full_close_token_span() {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::new(&allocator, "<input></input>", "TestComp");
+        let result = parser.parse();
+        let err = result
+            .errors
+            .iter()
+            .find(|e| e.msg.contains("Void elements do not have end tags"))
+            .expect("expected a void end-tag error");
+        assert_eq!(err.msg, "Void elements do not have end tags \"input\"");
+        // FULL close-token span `</input>` (offset 7..15), NOT a zero-length caret.
+        assert_eq!(err.span.start.offset, 7, "start offset");
+        assert_eq!(err.span.end.offset, 15, "end offset (must NOT equal start)");
+        assert_ne!(err.span.start.offset, err.span.end.offset, "must not be zero-length");
+        assert_eq!(err.span.start.line, 0);
+        assert_eq!(err.span.start.col, 7);
+        assert_eq!(err.span.end.line, 0);
+        assert_eq!(err.span.end.col, 15);
+    }
+
+    #[test]
+    fn void_input_close_multiline_span_has_correct_line_col() {
+        let allocator = Allocator::default();
+        let src = "<div>\n  <input></input>\n</div>";
+        let parser = HtmlParser::new(&allocator, src, "TestComp");
+        let result = parser.parse();
+        let err = result
+            .errors
+            .iter()
+            .find(|e| e.msg.contains("Void elements do not have end tags"))
+            .expect("expected a void end-tag error");
+        assert_eq!(err.msg, "Void elements do not have end tags \"input\"");
+        // `</input>` on the second line: offset 15..23, line 1, col 9..17.
+        assert_eq!(err.span.start.offset, 15, "start offset");
+        assert_eq!(err.span.end.offset, 23, "end offset");
+        assert_eq!(err.span.start.line, 1, "start line");
+        assert_eq!(err.span.start.col, 9, "start col");
+        assert_eq!(err.span.end.line, 1, "end line");
+        assert_eq!(err.span.end.col, 17, "end col");
     }
 }

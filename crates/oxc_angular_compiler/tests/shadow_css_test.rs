@@ -524,9 +524,24 @@ fn test_not_selector() {
 // ============================================================================
 
 #[test]
-fn test_replace_comments_with_newline() {
+fn test_remove_inline_comments_without_adding_extra_lines() {
+    // Upstream v21.2.7: a single-line comment collapses to nothing (no extra newline);
+    // only the literal space following it remains.
     let result = shim("/* b {c} */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_preserve_internal_newlines_from_multiline_comments() {
+    // Upstream v21.2.7: only the newline INSIDE the comment is preserved.
+    let result = shim("/* b {c}\n */ b {c}", "contenta");
     assert_eq!(result, "\n b[contenta] {c}");
+}
+
+#[test]
+fn test_remove_multiple_inline_comments_without_adding_extra_lines() {
+    let result = shim("/* b {c} */ b {c} /* a {c} */ a {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}  a[contenta] {c}");
 }
 
 #[test]
@@ -537,8 +552,175 @@ fn test_keep_sourcemapping_url_comments() {
 
 #[test]
 fn test_handle_adjacent_comments() {
+    // Upstream v21.2.7: adjacent single-line comments collapse to nothing; only the two
+    // literal spaces (between the comments and before the selector) remain.
     let result = shim("/* comment 1 */ /* comment 2 */ b {c}", "contenta");
-    assert_eq!(result, "\n \n b[contenta] {c}");
+    assert_eq!(result, "  b[contenta] {c}");
+}
+
+// ----------------------------------------------------------------------------
+// FINDING 2 [MEDIUM]: ShadowCss preserves ONLY `sourceURL=` / `sourceMappingURL=`
+// hash comments; every other comment (including `/* # source: ... */`) is
+// stripped to its interior newlines, so no comment text leaks.
+//
+// Matches upstream v21.2.7 `_commentWithHashRe` (shadow_css.ts:1114):
+//   const _commentWithHashRe = /\/\*\s*#\s*source(Mapping)?URL=/g;
+// i.e. `/*`, optional ws, `#`, optional ws, then literally `sourceURL=` OR
+// `sourceMappingURL=` (trailing `=` REQUIRED; case-sensitive). Ground truth below
+// was confirmed by running upstream's exact `stripComments` regex logic.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_preserve_source_url_comment() {
+    // `/*#sourceURL=foo*/` matches -> PRESERVED verbatim.
+    let result = shim("/*#sourceURL=foo*/ b {c}", "contenta");
+    assert_eq!(result, "/*#sourceURL=foo*/ b[contenta] {c}");
+}
+
+#[test]
+fn test_preserve_source_mapping_url_comment_with_spaces() {
+    // `/* # sourceMappingURL=foo */` matches -> PRESERVED verbatim.
+    let result = shim("/* # sourceMappingURL=foo */ b {c}", "contenta");
+    assert_eq!(result, "/* # sourceMappingURL=foo */ b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_non_sourcemap_hash_comment() {
+    // `/* # source: secret */` does NOT match `source(Mapping)?URL=` -> STRIPPED.
+    // (single line -> collapses to nothing, leaving only the trailing space).
+    let result = shim("/* # source: secret */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_url_without_equals() {
+    // `/* #sourceURLx */` -> `#sourceURL` not followed by `=` -> STRIPPED.
+    let result = shim("/* #sourceURLx */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_url_without_hash() {
+    // `/* sourceURL= */` -> no `#` -> STRIPPED.
+    let result = shim("/* sourceURL= */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_map_hash_comment() {
+    // `/* # sourceMap */` -> `sourceMap` is neither `sourceURL=` nor
+    // `sourceMappingURL=` -> STRIPPED.
+    let result = shim("/* # sourceMap */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_non_sourcemap_hash_comment_preserves_interior_newline() {
+    // A stripped non-sourcemap comment still keeps its interior `\n` (line-count
+    // stability), collapsing to just that newline plus the trailing space.
+    let result = shim("/* # source:\nsecret */ b {c}", "contenta");
+    assert_eq!(result, "\n b[contenta] {c}");
+}
+
+// ============================================================================
+// FINDING 2 [MEDIUM]: ShadowCss comment handling must match upstream's two
+// regexes — CLOSED comments only, and ECMAScript `\s` semantics.
+//
+// Upstream v21.2.7 `shadow_css.ts`:
+//   const _commentRe = /\/\*[\s\S]*?\*\//g;                  // CLOSED comments only
+//   const _commentWithHashRe = /\/\*\s*#\s*source(Mapping)?URL=/g;
+//   const _newLinesRe = /\r?\n/g;
+// `\s` here is ECMAScript whitespace: it INCLUDES U+FEFF (BOM/ZWNBSP) but does
+// NOT include U+0085 (NEL). Rust `char::is_whitespace`/`trim` is the opposite for
+// these two code points, so a faithful predicate is required.
+//
+// All expected outputs below were computed by executing upstream's EXACT regexes
+// in Node:
+//   const _newLinesRe = /\r?\n/g;
+//   const _commentRe = /\/\*[\s\S]*?\*\//g;
+//   const _commentWithHashRe = /\/\*\s*#\s*source(Mapping)?URL=/g;
+//   cssText.replace(_commentRe, m => m.match(_commentWithHashRe)
+//     ? PLACEHOLDER /* preserve */ : (m.match(_newLinesRe)?.join('') ?? ''));
+//   // then restore placeholders verbatim
+// ============================================================================
+
+#[test]
+fn test_nel_inside_hash_comment_is_not_js_whitespace_so_stripped() {
+    // `/*<U+0085>#sourceURL=secret*/` — U+0085 (NEL) is NOT ECMAScript `\s`, so the
+    // upstream `\/\*\s*#` cannot match across it -> NOT a sourcemap comment -> STRIPPED.
+    // (Pre-fix OXC used Rust `trim_start`, which treats NEL as whitespace, so it
+    // wrongly matched `#sourceURL=` and PRESERVED the comment.)
+    let result = shim("/*\u{0085}#sourceURL=secret*/ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_bom_inside_hash_comment_is_js_whitespace_so_preserved() {
+    // `/*<U+FEFF>#sourceURL=ok*/` — U+FEFF (BOM/ZWNBSP) IS ECMAScript `\s`, so
+    // upstream `\/\*\s*#\s*source...URL=` matches -> PRESERVED verbatim.
+    // (Pre-fix OXC used Rust `trim_start`, which does NOT treat U+FEFF as whitespace,
+    // so it failed to match and wrongly STRIPPED the comment.)
+    let result = shim("/*\u{FEFF}#sourceURL=ok*/ b {c}", "contenta");
+    assert_eq!(result, "/*\u{FEFF}#sourceURL=ok*/ b[contenta] {c}");
+}
+
+#[test]
+fn test_unterminated_comment_is_left_unchanged() {
+    // Upstream `_commentRe` matches only CLOSED `/* ... */`. An unterminated trailing
+    // `/*` is NOT a comment and must be left UNCHANGED (the `b {c}` before it is still
+    // scoped). (Pre-fix OXC treated the dangling `/*` as a complete comment and
+    // stripped it.)
+    let result = shim("b {c} /* trailing unclosed", "contenta");
+    assert_eq!(result, "b[contenta] {c} /* trailing unclosed");
+}
+
+#[test]
+fn test_mixed_preserved_then_stripped_comments() {
+    // `/* #sourceURL=x */` is a sourcemap comment -> PRESERVED; `/* secret */` is a
+    // plain comment -> STRIPPED (collapses to nothing). The `p{}` between them is
+    // scoped.
+    let result = shim("/* #sourceURL=x */ p{} /* secret */", "contenta");
+    assert_eq!(result, "/* #sourceURL=x */ p[contenta]{} ");
+}
+
+#[test]
+fn test_nested_inner_source_url_is_unanchored_so_preserved() {
+    // FINDING 1: upstream `_commentWithHashRe` is UNANCHORED — `m.match(...)` searches
+    // the ENTIRE closed comment string for `/\/\*\s*#\s*source(Mapping)?URL=/`. The
+    // pattern starts with a literal `/*`, so it can match an INNER `/*#sourceURL=`
+    // inside the comment body. `/* outer /*#sourceURL=x */` is a single closed comment
+    // (`_commentRe` is non-greedy to the first `*/`); it contains the inner
+    // `/*#sourceURL=` -> PRESERVED verbatim.
+    // (Pre-fix OXC only inspected text right after the FIRST `/*` — saw " outer …",
+    // not `#` — and wrongly STRIPPED it.)
+    // Ground truth: @angular/compiler@21.2.7 ShadowCss.shimCssText.
+    let result = shim("/* outer /*#sourceURL=x */ b {c}", "contenta");
+    assert_eq!(result, "/* outer /*#sourceURL=x */ b[contenta] {c}");
+}
+
+#[test]
+fn test_literal_placeholder_inside_preserved_comment_survives_verbatim() {
+    // FINDING 2: a preserved (`sourceURL=`) comment whose body literally contains the
+    // extraction sentinel `%COMMENT%` must survive verbatim, and following comments
+    // must still restore correctly. Upstream restores with a SINGLE global
+    // `String.replace(re, replacer)` pass, which never rescans replacement text, so
+    // the literal `%COMMENT%` inside the restored comment stays literal.
+    // (Pre-fix OXC re-searched the whole result after each `replacen`, so it treated
+    // the literal `%COMMENT%` inside the restored comment as another placeholder slot
+    // and corrupted the output.)
+    // Ground truth: @angular/compiler@21.2.7 ShadowCss.shimCssText.
+    let result = shim("/*#sourceURL=%COMMENT%*/ p{} /* secret */", "contenta");
+    assert_eq!(result, "/*#sourceURL=%COMMENT%*/ p[contenta]{} ");
+}
+
+#[test]
+fn test_two_preserved_comments_first_with_literal_placeholder() {
+    // FINDING 2 (ordering): two preserved comments, the first containing a literal
+    // `%COMMENT%`. The literal must stay literal AND the second preserved comment must
+    // still restore (no index shift / no corruption).
+    // Ground truth: @angular/compiler@21.2.7 ShadowCss.shimCssText.
+    let result = shim("/*#sourceURL=%COMMENT%a*/ p{} /*#sourceURL=second*/", "contenta");
+    assert_eq!(result, "/*#sourceURL=%COMMENT%a*/ p[contenta]{} /*#sourceURL=second*/");
 }
 
 // ============================================================================

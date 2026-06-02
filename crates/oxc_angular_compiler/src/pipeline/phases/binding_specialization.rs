@@ -31,6 +31,7 @@ use crate::ir::ops::{
     AnimationBindingOp, AttributeOp, ControlOp, CreateOp, DomPropertyOp, PropertyOp,
     TwoWayPropertyOp, UpdateOp, UpdateOpBase, XrefId,
 };
+use crate::parser::html::split_ns_name;
 use crate::pipeline::compilation::{
     ComponentCompilationJob, HostBindingCompilationJob, TemplateCompilationMode,
 };
@@ -46,39 +47,21 @@ fn is_aria_attribute(name: &str) -> bool {
     name.starts_with(ARIA_PREFIX) && name.len() > ARIA_PREFIX.len()
 }
 
-/// Known XML/SVG namespace prefixes.
-/// These are standard namespace prefixes that should be separated from the local name.
-const KNOWN_NS_PREFIXES: &[&str] = &["xlink", "xml", "xmlns"];
-
-/// Splits a namespaced name into (namespace, local_name).
+/// Splits a namespaced attribute name into (namespace, local_name), faithfully
+/// matching upstream `splitNsName` (`ml_parser/tags.ts:27-43`): ONLY the
+/// internal `:namespace:name` form is split; a plain `prefix:name` (e.g. the
+/// host-binding `xlink:href`) is returned as `(None, "prefix:name")` — exactly
+/// what the binding-specialization phase's `splitNsName(op.name)` does upstream.
 ///
-/// Handles two formats:
-/// - `:namespace:name` → (Some("namespace"), "name") - Angular's internal format
-/// - `namespace:name` → (Some("namespace"), "name") - for known namespaces like xlink, xml, xmlns
-/// - `name` → (None, "name") - no namespace
-fn split_ns_name(name: &str) -> (Option<&str>, &str) {
-    // Check Angular's internal format first: `:namespace:name`
-    if name.starts_with(':') {
-        if let Some(colon_index) = name[1..].find(':') {
-            let namespace = &name[1..colon_index + 1];
-            let local_name = &name[colon_index + 2..];
-            return (Some(namespace), local_name);
-        }
-        // Malformed `:` prefix - fall through
-    }
-
-    // Check for known namespace prefixes: `namespace:name`
-    if let Some(colon_index) = name.find(':') {
-        let prefix = &name[..colon_index];
-        if KNOWN_NS_PREFIXES.contains(&prefix) {
-            let local_name = &name[colon_index + 1..];
-            return (Some(prefix), local_name);
-        }
-    }
-
-    // No namespace
-    (None, name)
-}
+/// The TEMPLATE attribute path stores the merged `:ns:name` form (via
+/// `mergeNsAndName` in `html_to_r3.rs`, mirroring `createBoundElementProperty`),
+/// so namespaced template attrs split here and emit the namespace argument of
+/// `ɵɵattribute(name, value, sanitizer?, namespace?)`. The HOST attribute path
+/// stores the plain name (upstream host ingest never merges), so it does NOT
+/// split and emits `ɵɵattribute("xlink:href", ...)` with no namespace — both
+/// faithful to v21.2.7.
+///
+/// (See the `split_ns_name` import at the top of this module.)
 
 /// Specializes generic bindings to specific binding operations.
 ///
