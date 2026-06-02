@@ -1,6 +1,6 @@
 {
   "name": "dom_element_schema_registry_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/schema/dom_element_schema_registry_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/schema/dom_element_schema_registry_spec.ts",
   "test_groups": [
     {
       "name": "DOMElementSchema",
@@ -148,11 +148,6 @@
         {
           "name": "should check security contexts for attributes",
           "path": "DOMElementSchema/should check security contexts for attributes",
-          "assertions": []
-        },
-        {
-          "name": "generate a new schema",
-          "path": "DOMElementSchema/generate a new schema",
           "assertions": []
         },
         {

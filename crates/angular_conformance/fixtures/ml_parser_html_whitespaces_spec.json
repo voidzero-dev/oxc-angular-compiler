@@ -1,6 +1,6 @@
 {
   "name": "html_whitespaces_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_whitespaces_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_whitespaces_spec.ts",
   "test_groups": [
     {
       "name": "removeWhitespaces",
@@ -44,10 +44,26 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<br>  <br>\t<br>\n<br>",
               "expected": [
-                ["html.Element", "br", 0.0],
-                ["html.Element", "br", 0.0],
-                ["html.Element", "br", 0.0],
-                ["html.Element", "br", 0.0]
+                [
+                  "html.Element",
+                  "br",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "br",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "br",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "br",
+                  0.0
+                ]
               ],
               "options": null
             }
@@ -61,8 +77,16 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<div><span> </span></div>",
               "expected": [
-                ["html.Element", "div", 0.0],
-                ["html.Element", "span", 1.0]
+                [
+                  "html.Element",
+                  "div",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "span",
+                  1.0
+                ]
               ],
               "options": null
             }
@@ -75,7 +99,13 @@
             {
               "type": "ParseAndRemoveWhitespace",
               "input": " <br>\t",
-              "expected": [["html.Element", "br", 0.0]],
+              "expected": [
+                [
+                  "html.Element",
+                  "br",
+                  0.0
+                ]
+              ],
               "options": null
             }
           ]
@@ -88,12 +118,52 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<div><span>foo</span>&ngsp;<span>bar</span></div>",
               "expected": [
-                ["html.Element", "div", 0.0],
-                ["html.Element", "span", 1.0],
-                ["html.Text", "foo", 2.0, ["foo"]],
-                ["html.Text", " ", 1.0, [""], ["NGSP_UNICODE", "&ngsp;"], [""]],
-                ["html.Element", "span", 1.0],
-                ["html.Text", "bar", 2.0, ["bar"]]
+                [
+                  "html.Element",
+                  "div",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "span",
+                  1.0
+                ],
+                [
+                  "html.Text",
+                  "foo",
+                  2.0,
+                  [
+                    "foo"
+                  ]
+                ],
+                [
+                  "html.Text",
+                  " ",
+                  1.0,
+                  [
+                    ""
+                  ],
+                  [
+                    "NGSP_UNICODE",
+                    "&ngsp;"
+                  ],
+                  [
+                    ""
+                  ]
+                ],
+                [
+                  "html.Element",
+                  "span",
+                  1.0
+                ],
+                [
+                  "html.Text",
+                  "bar",
+                  2.0,
+                  [
+                    "bar"
+                  ]
+                ]
               ],
               "options": null
             }
@@ -106,13 +176,31 @@
             {
               "type": "ParseAndRemoveWhitespace",
               "input": "\n\n\nfoo\t\t\t",
-              "expected": [["html.Text", " foo ", 0.0, [" foo "]]],
+              "expected": [
+                [
+                  "html.Text",
+                  " foo ",
+                  0.0,
+                  [
+                    " foo "
+                  ]
+                ]
+              ],
               "options": null
             },
             {
               "type": "ParseAndRemoveWhitespace",
               "input": "   \n foo  \t ",
-              "expected": [["html.Text", " foo ", 0.0, [" foo "]]],
+              "expected": [
+                [
+                  "html.Text",
+                  " foo ",
+                  0.0,
+                  [
+                    " foo "
+                  ]
+                ]
+              ],
               "options": null
             }
           ]
@@ -129,7 +217,23 @@
             {
               "type": "ParseAndRemoveWhitespace",
               "input": "&nbsp;",
-              "expected": [["html.Text", " ", 0.0, [""], [" ", "&nbsp;"], [""]]],
+              "expected": [
+                [
+                  "html.Text",
+                  " ",
+                  0.0,
+                  [
+                    ""
+                  ],
+                  [
+                    " ",
+                    "&nbsp;"
+                  ],
+                  [
+                    ""
+                  ]
+                ]
+              ],
               "options": null
             }
           ]
@@ -146,15 +250,37 @@
                   "html.Text",
                   "  foo  ",
                   0.0,
-                  [""],
-                  [" ", "&nbsp;"],
-                  [""],
-                  [" ", "&nbsp;"],
-                  ["foo"],
-                  [" ", "&nbsp;"],
-                  [""],
-                  [" ", "&nbsp;"],
-                  [""]
+                  [
+                    ""
+                  ],
+                  [
+                    " ",
+                    "&nbsp;"
+                  ],
+                  [
+                    ""
+                  ],
+                  [
+                    " ",
+                    "&nbsp;"
+                  ],
+                  [
+                    "foo"
+                  ],
+                  [
+                    " ",
+                    "&nbsp;"
+                  ],
+                  [
+                    ""
+                  ],
+                  [
+                    " ",
+                    "&nbsp;"
+                  ],
+                  [
+                    ""
+                  ]
                 ]
               ],
               "options": null
@@ -168,13 +294,31 @@
             {
               "type": "ParseAndRemoveWhitespace",
               "input": "\nfoo",
-              "expected": [["html.Text", "\nfoo", 0.0, ["\nfoo"]]],
+              "expected": [
+                [
+                  "html.Text",
+                  "\nfoo",
+                  0.0,
+                  [
+                    "\nfoo"
+                  ]
+                ]
+              ],
               "options": null
             },
             {
               "type": "ParseAndRemoveWhitespace",
               "input": "\tfoo",
-              "expected": [["html.Text", "\tfoo", 0.0, ["\tfoo"]]],
+              "expected": [
+                [
+                  "html.Text",
+                  "\tfoo",
+                  0.0,
+                  [
+                    "\tfoo"
+                  ]
+                ]
+              ],
               "options": null
             }
           ]
@@ -191,11 +335,25 @@
                   "html.Text",
                   "{{fooExp}} {{barExp}}",
                   0.0,
-                  [""],
-                  ["{{", "fooExp", "}}"],
-                  [" "],
-                  ["{{", "barExp", "}}"],
-                  [""]
+                  [
+                    ""
+                  ],
+                  [
+                    "{{",
+                    "fooExp",
+                    "}}"
+                  ],
+                  [
+                    " "
+                  ],
+                  [
+                    "{{",
+                    "barExp",
+                    "}}"
+                  ],
+                  [
+                    ""
+                  ]
                 ]
               ],
               "options": null
@@ -208,11 +366,25 @@
                   "html.Text",
                   "{{fooExp}}\t{{barExp}}",
                   0.0,
-                  [""],
-                  ["{{", "fooExp", "}}"],
-                  ["\t"],
-                  ["{{", "barExp", "}}"],
-                  [""]
+                  [
+                    ""
+                  ],
+                  [
+                    "{{",
+                    "fooExp",
+                    "}}"
+                  ],
+                  [
+                    "\t"
+                  ],
+                  [
+                    "{{",
+                    "barExp",
+                    "}}"
+                  ],
+                  [
+                    ""
+                  ]
                 ]
               ],
               "options": null
@@ -225,11 +397,25 @@
                   "html.Text",
                   "{{fooExp}}\n{{barExp}}",
                   0.0,
-                  [""],
-                  ["{{", "fooExp", "}}"],
-                  ["\n"],
-                  ["{{", "barExp", "}}"],
-                  [""]
+                  [
+                    ""
+                  ],
+                  [
+                    "{{",
+                    "fooExp",
+                    "}}"
+                  ],
+                  [
+                    "\n"
+                  ],
+                  [
+                    "{{",
+                    "barExp",
+                    "}}"
+                  ],
+                  [
+                    ""
+                  ]
                 ]
               ],
               "options": null
@@ -243,7 +429,24 @@
             {
               "type": "ParseAndRemoveWhitespace",
               "input": " {{exp}} ",
-              "expected": [["html.Text", " {{exp}} ", 0.0, [" "], ["{{", "exp", "}}"], [" "]]],
+              "expected": [
+                [
+                  "html.Text",
+                  " {{exp}} ",
+                  0.0,
+                  [
+                    " "
+                  ],
+                  [
+                    "{{",
+                    "exp",
+                    "}}"
+                  ],
+                  [
+                    " "
+                  ]
+                ]
+              ],
               "options": null
             }
           ]
@@ -256,11 +459,38 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<span> {a, b, =4 {c}} </span>",
               "expected": [
-                ["html.Element", "span", 0.0],
-                ["html.Text", " ", 1.0, [" "]],
-                ["html.Expansion", "a", "b", 1.0],
-                ["html.ExpansionCase", "=4", 2.0],
-                ["html.Text", " ", 1.0, [" "]]
+                [
+                  "html.Element",
+                  "span",
+                  0.0
+                ],
+                [
+                  "html.Text",
+                  " ",
+                  1.0,
+                  [
+                    " "
+                  ]
+                ],
+                [
+                  "html.Expansion",
+                  "a",
+                  "b",
+                  1.0
+                ],
+                [
+                  "html.ExpansionCase",
+                  "=4",
+                  2.0
+                ],
+                [
+                  "html.Text",
+                  " ",
+                  1.0,
+                  [
+                    " "
+                  ]
+                ]
               ],
               "options": {
                 "tokenize_expansion_forms": true,
@@ -281,12 +511,45 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<pre><strong>foo</strong>\n<strong>bar</strong></pre>",
               "expected": [
-                ["html.Element", "pre", 0.0],
-                ["html.Element", "strong", 1.0],
-                ["html.Text", "foo", 2.0, ["foo"]],
-                ["html.Text", "\n", 1.0, ["\n"]],
-                ["html.Element", "strong", 1.0],
-                ["html.Text", "bar", 2.0, ["bar"]]
+                [
+                  "html.Element",
+                  "pre",
+                  0.0
+                ],
+                [
+                  "html.Element",
+                  "strong",
+                  1.0
+                ],
+                [
+                  "html.Text",
+                  "foo",
+                  2.0,
+                  [
+                    "foo"
+                  ]
+                ],
+                [
+                  "html.Text",
+                  "\n",
+                  1.0,
+                  [
+                    "\n"
+                  ]
+                ],
+                [
+                  "html.Element",
+                  "strong",
+                  1.0
+                ],
+                [
+                  "html.Text",
+                  "bar",
+                  2.0,
+                  [
+                    "bar"
+                  ]
+                ]
               ],
               "options": null
             }
@@ -300,8 +563,19 @@
               "type": "ParseAndRemoveWhitespace",
               "input": "<textarea>foo\n\n  bar</textarea>",
               "expected": [
-                ["html.Element", "textarea", 0.0],
-                ["html.Text", "foo\n\n  bar", 1.0, ["foo\n\n  bar"]]
+                [
+                  "html.Element",
+                  "textarea",
+                  0.0
+                ],
+                [
+                  "html.Text",
+                  "foo\n\n  bar",
+                  1.0,
+                  [
+                    "foo\n\n  bar"
+                  ]
+                ]
               ],
               "options": null
             }
