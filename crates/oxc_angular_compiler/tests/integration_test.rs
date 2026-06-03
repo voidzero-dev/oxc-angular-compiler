@@ -865,6 +865,53 @@ export class Parent {}
     );
 }
 
+/// The `@default never;` exhaustive marker must be the last case in a `@switch`
+/// (Angular v22). A `@case`/`@default` that appears after it is a diagnostic.
+#[test]
+fn test_switch_default_never_must_be_last() {
+    let allocator = Allocator::default();
+    let ordering_msg = "must be the last case in a switch";
+
+    // Exhaustive check followed by a @case -> diagnostic.
+    let bad = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @default never; @case (1) {} }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", bad, None, None);
+    assert!(
+        result.has_errors(),
+        "A @case after `@default never;` must be a diagnostic. Output:\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "Expected a 'must be the last case' diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+
+    // Exhaustive check as the last case (after a case with a body) -> no ordering error.
+    let good = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @case (1) {x} @default never; }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", good, None, None);
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "`@default never;` as the last case should not report the ordering diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+}
+
 #[test]
 #[should_panic(
     expected = "Cannot specify additional `hydrate` triggers if `hydrate never` is present"

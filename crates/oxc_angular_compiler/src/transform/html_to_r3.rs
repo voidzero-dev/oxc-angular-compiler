@@ -2492,6 +2492,19 @@ impl<'a> HtmlToR3Transform<'a> {
                 });
                 continue;
             }
+
+            // The `@default never;` exhaustive marker must be the last case in the
+            // switch. Any recognized @case/@default that follows it is an error
+            // (reference: r3_control_flow.ts reports this for every block once the
+            // exhaustive check has been seen). A second `@default never;` is rejected
+            // in its own branch above.
+            if exhaustive_check.is_some() {
+                self.report_error(
+                    "@default block with \"never\" parameter must be the last case in a switch",
+                    child_block.span,
+                );
+            }
+
             if is_case && child_block.parameters.len() > 1 {
                 self.report_error(
                     "@case block must have exactly one parameter",
