@@ -2115,6 +2115,22 @@ fn test_safe_navigation_migration_forces_legacy_on_v22() {
     );
 }
 
+#[test]
+fn test_safe_navigation_migration_ignores_qualified_call() {
+    // Only the *unqualified* `$safeNavigationMigration(...)` helper is magic. A
+    // method named `$safeNavigationMigration` on some object is a legitimate call
+    // and must be preserved (matching Angular, which keys on a bare lexical read).
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ svc.$safeNavigationMigration(user) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(
+        js.contains("$safeNavigationMigration"),
+        "a qualified `svc.$safeNavigationMigration(...)` call must not be stripped, got:\n{js}"
+    );
+}
+
 // ============================================================================
 // Event Modifier Tests
 // ============================================================================

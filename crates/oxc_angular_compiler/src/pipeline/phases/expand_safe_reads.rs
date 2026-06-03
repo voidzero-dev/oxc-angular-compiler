@@ -14,10 +14,13 @@
 //! [`ComponentCompilationJob::legacy_optional_chaining`].
 //!
 //! A single expression can opt back into legacy semantics on a modern target by
-//! wrapping it in the `$safeNavigationMigration(...)` magic function — this phase
-//! detects that wrapper, forces the legacy expansion on the wrapped subtree, and
-//! strips the wrapper. Mirrors Angular's `removeSafeNavigationMigration` +
-//! `expandSafeReads` phases (`angular/angular@2896c93cc1`).
+//! wrapping it in the `$safeNavigationMigration(...)` magic function. The earlier
+//! `removeSafeNavigationMigration` phase converts that call into a
+//! [`IrExpression::SafeNavigationMigration`] wrapper whose subtree is visited with
+//! the [`VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION`] flag; this phase honors
+//! that flag (forcing the legacy expansion on the wrapped subtree) and unwraps the
+//! marker. Mirrors Angular's `removeSafeNavigationMigration` + `expandSafeReads`
+//! phases (`angular/angular@2896c93cc1`).
 //!
 //! ## Algorithm
 //!
@@ -74,8 +77,7 @@ use oxc_str::Ident;
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
     ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
-    transform_expressions_in_create_op, transform_expressions_in_expression,
-    transform_expressions_in_update_op,
+    transform_expressions_in_create_op, transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -129,15 +131,15 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
     for view in job.all_views_mut() {
         let ctx = SafeTransformContext { allocator, next_xref: xref_counter.clone() };
 
-        // Pass 1: resolve `$safeNavigationMigration(...)` markers. This forces the
-        // legacy expansion on the wrapped subtree and strips the wrapper. Runs in
-        // both modes (the wrapper must always be removed so it never reifies as a
-        // real call).
+        // Expand each safe access per the resolved mode, unwrapping any
+        // `$safeNavigationMigration(...)` wrapper as it is reached. Nodes inside a
+        // wrapper carry the `IN_SAFE_NAVIGATION_MIGRATION` flag and so expand under
+        // legacy null semantics regardless of the compilation default.
         for op in view.create.iter_mut() {
             transform_expressions_in_create_op(
                 op,
-                &|expr, _flags| {
-                    resolve_safe_navigation_migration(expr, &ctx);
+                &|expr, flags| {
+                    expand_safe_access(expr, &ctx, legacy, flags);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -145,28 +147,8 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
         for op in view.update.iter_mut() {
             transform_expressions_in_update_op(
                 op,
-                &|expr, _flags| {
-                    resolve_safe_navigation_migration(expr, &ctx);
-                },
-                VisitorContextFlag::NONE,
-            );
-        }
-
-        // Pass 2: expand the remaining safe access expressions per the resolved mode.
-        for op in view.create.iter_mut() {
-            transform_expressions_in_create_op(
-                op,
-                &|expr, _flags| {
-                    expand_safe_access(expr, &ctx, legacy);
-                },
-                VisitorContextFlag::NONE,
-            );
-        }
-        for op in view.update.iter_mut() {
-            transform_expressions_in_update_op(
-                op,
-                &|expr, _flags| {
-                    expand_safe_access(expr, &ctx, legacy);
+                &|expr, flags| {
+                    expand_safe_access(expr, &ctx, legacy, flags);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -175,62 +157,34 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
 }
 
 /// Dispatch a single node to the legacy or modern safe-read expansion.
+///
+/// A `$safeNavigationMigration(...)` wrapper is unwrapped here: by the time this
+/// runs (post-order) its subtree has already been expanded under legacy null
+/// semantics via the [`VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION`] flag, so
+/// only the marker itself needs removing. Every other node uses legacy
+/// `== null ? null` semantics when the compilation is legacy *or* the node sits
+/// inside a migration wrapper; otherwise native optional chaining.
+///
+/// Mirrors Angular's `safeTransform` in `expand_safe_reads.ts`.
 fn expand_safe_access<'a>(
     expr: &mut IrExpression<'a>,
     ctx: &SafeTransformContext<'a>,
     legacy: bool,
+    flags: VisitorContextFlag,
 ) {
-    if legacy {
+    if let IrExpression::SafeNavigationMigration(m) = expr {
+        let inner = std::mem::replace(m.expr.as_mut(), make_placeholder(ctx.allocator));
+        *expr = inner;
+        return;
+    }
+
+    let use_null_semantics =
+        legacy || flags.contains(VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION);
+    if use_null_semantics {
         safe_transform(expr, ctx);
     } else {
         safe_transform_modern(expr, ctx);
     }
-}
-
-/// Rewrites `$safeNavigationMigration(arg)` into `arg`, expanding any safe reads
-/// inside `arg` with legacy (`== null ? null`) semantics.
-///
-/// After name resolution the wrapper appears as a `ResolvedCall` whose receiver is
-/// a `ResolvedPropertyRead` of the magic name `$safeNavigationMigration` on the
-/// component context. The wrapped argument's receivers are already resolved at this
-/// point, so it is safe to run the legacy expansion on the detached subtree here.
-///
-/// Mirrors Angular's `removeSafeNavigationMigration` phase combined with the
-/// `InSafeNavigationMigration` flag handling in `expandSafeReads`.
-fn resolve_safe_navigation_migration<'a>(
-    expr: &mut IrExpression<'a>,
-    ctx: &SafeTransformContext<'a>,
-) {
-    let allocator = ctx.allocator;
-
-    let is_marker = match expr {
-        IrExpression::ResolvedCall(call) => {
-            call.args.len() == 1
-                && matches!(
-                    call.receiver.as_ref(),
-                    IrExpression::ResolvedPropertyRead(p)
-                        if p.name.as_str() == "$safeNavigationMigration"
-                )
-        }
-        _ => false,
-    };
-    if !is_marker {
-        return;
-    }
-
-    let IrExpression::ResolvedCall(call) = expr else { return };
-    let mut arg = std::mem::replace(&mut call.args[0], make_placeholder(allocator));
-
-    // Force legacy null semantics on the wrapped subtree.
-    transform_expressions_in_expression(
-        &mut arg,
-        &|e: &mut IrExpression<'a>, _flags| {
-            safe_transform(e, ctx);
-        },
-        VisitorContextFlag::NONE,
-    );
-
-    *expr = arg;
 }
 
 /// Modern (Angular v22+) safe-read expansion: rewrite each safe access into the
@@ -738,12 +692,13 @@ pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let xref_counter = RefCell::new(starting_xref);
     let ctx = SafeTransformContext { allocator, next_xref: xref_counter };
 
-    // Pass 1: resolve `$safeNavigationMigration(...)` markers.
+    // Expand each safe access per the resolved mode, unwrapping any
+    // `$safeNavigationMigration(...)` wrapper as it is reached.
     for op in job.root.create.iter_mut() {
         transform_expressions_in_create_op(
             op,
-            &|expr, _flags| {
-                resolve_safe_navigation_migration(expr, &ctx);
+            &|expr, flags| {
+                expand_safe_access(expr, &ctx, legacy, flags);
             },
             VisitorContextFlag::NONE,
         );
@@ -751,28 +706,8 @@ pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
     for op in job.root.update.iter_mut() {
         transform_expressions_in_update_op(
             op,
-            &|expr, _flags| {
-                resolve_safe_navigation_migration(expr, &ctx);
-            },
-            VisitorContextFlag::NONE,
-        );
-    }
-
-    // Pass 2: expand the remaining safe access expressions per the resolved mode.
-    for op in job.root.create.iter_mut() {
-        transform_expressions_in_create_op(
-            op,
-            &|expr, _flags| {
-                expand_safe_access(expr, &ctx, legacy);
-            },
-            VisitorContextFlag::NONE,
-        );
-    }
-    for op in job.root.update.iter_mut() {
-        transform_expressions_in_update_op(
-            op,
-            &|expr, _flags| {
-                expand_safe_access(expr, &ctx, legacy);
+            &|expr, flags| {
+                expand_safe_access(expr, &ctx, legacy, flags);
             },
             VisitorContextFlag::NONE,
         );

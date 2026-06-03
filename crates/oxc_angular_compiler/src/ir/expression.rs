@@ -50,6 +50,12 @@ impl VisitorContextFlag {
     pub const IN_CHILD_OPERATION: Self = Self(0b0001);
     /// Inside an arrow function operation.
     pub const IN_ARROW_FUNCTION_OPERATION: Self = Self(0b0010);
+    /// Inside a `$safeNavigationMigration(...)` wrapper. Safe reads in this subtree
+    /// expand under legacy (`== null ? null`) semantics even when the compilation
+    /// targets native optional chaining.
+    ///
+    /// Mirrors Angular's `VisitorContextFlag.InSafeNavigationMigration` (`0b0100`).
+    pub const IN_SAFE_NAVIGATION_MIGRATION: Self = Self(0b0100);
 
     /// Check if a flag is set.
     pub fn contains(self, other: Self) -> bool {
@@ -153,6 +159,10 @@ pub enum IrExpression<'a> {
     /// Safe property read with resolved receiver (created during name resolution).
     /// Used when an expression like `item?.name` has the receiver resolved to a variable.
     ResolvedSafePropertyRead(Box<'a, ResolvedSafePropertyReadExpr<'a>>),
+    /// `$safeNavigationMigration(...)` wrapper marking its subtree for legacy
+    /// (`== null ? null`) safe-read semantics. Created by the
+    /// `removeSafeNavigationMigration` phase and removed by `expandSafeReads`.
+    SafeNavigationMigration(Box<'a, SafeNavigationMigrationExpr<'a>>),
     /// Derived literal array for pure function bodies.
     /// Contains IrExpression entries that can include PureFunctionParameter references.
     DerivedLiteralArray(Box<'a, DerivedLiteralArrayExpr<'a>>),
@@ -260,6 +270,7 @@ impl<'a> IrExpression<'a> {
             // ArrowFunction is an arrow function expression
             IrExpression::ArrowFunction(_) => ExpressionKind::ArrowFunction,
             IrExpression::Parenthesized(_) => ExpressionKind::Parenthesized,
+            IrExpression::SafeNavigationMigration(_) => ExpressionKind::SafeNavigationMigration,
         }
     }
 }
@@ -793,6 +804,15 @@ impl<'a> IrExpression<'a> {
                 },
                 allocator,
             )),
+            IrExpression::SafeNavigationMigration(e) => {
+                IrExpression::SafeNavigationMigration(Box::new_in(
+                    SafeNavigationMigrationExpr {
+                        expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                        source_span: e.source_span,
+                    },
+                    allocator,
+                ))
+            }
         }
     }
 }
@@ -932,6 +952,25 @@ pub struct ResolvedPropertyReadExpr<'a> {
     /// (Angular v22+) optional-chaining semantics, where `?.` yields `undefined`.
     /// Legacy reads and plain (non-safe) reads leave this `false`.
     pub optional: bool,
+    /// Source span.
+    pub source_span: Option<Span>,
+}
+
+/// `$safeNavigationMigration(expr)` wrapper.
+///
+/// A magic marker that opts `expr`'s safe reads into legacy `== null ? null`
+/// semantics even when the compilation targets native optional chaining. Created
+/// by the `removeSafeNavigationMigration` phase from an unqualified
+/// `$safeNavigationMigration(...)` call, and unwrapped in `expandSafeReads` after
+/// its subtree has been expanded under the
+/// [`VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION`] flag.
+///
+/// Ported from Angular's `SafeNavigationMigrationExpr` in
+/// `template/pipeline/ir/src/expression.ts`.
+#[derive(Debug)]
+pub struct SafeNavigationMigrationExpr<'a> {
+    /// The wrapped expression.
+    pub expr: Box<'a, IrExpression<'a>>,
     /// Source span.
     pub source_span: Option<Span>,
 }
@@ -1685,6 +1724,13 @@ pub fn transform_expressions_in_expression<'a, F>(
         IrExpression::Parenthesized(e) => {
             transform_expressions_in_expression(&mut e.expr, transform, flags);
         }
+        IrExpression::SafeNavigationMigration(e) => {
+            // Mirror Angular's `SafeNavigationMigrationExpr.transformInternalExpressions`:
+            // the wrapped subtree is visited with the `InSafeNavigationMigration` flag so
+            // its safe reads expand under legacy `== null ? null` semantics.
+            let child_flags = flags.union(VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION);
+            transform_expressions_in_expression(&mut e.expr, transform, child_flags);
+        }
         // These expressions have no internal expressions
         IrExpression::LexicalRead(_)
         | IrExpression::Reference(_)
@@ -1864,6 +1910,10 @@ pub fn visit_expressions_in_expression<'a, F>(
         }
         IrExpression::Parenthesized(e) => {
             visit_expressions_in_expression(&e.expr, visitor, flags);
+        }
+        IrExpression::SafeNavigationMigration(e) => {
+            let child_flags = flags.union(VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION);
+            visit_expressions_in_expression(&e.expr, visitor, child_flags);
         }
         // These expressions have no internal expressions
         IrExpression::LexicalRead(_)
@@ -2833,6 +2883,9 @@ pub fn vars_used_by_ir_expression(expr: &IrExpression<'_>) -> u32 {
         IrExpression::ResolvedBinary(b) => {
             vars_used_by_ir_expression(&b.left) + vars_used_by_ir_expression(&b.right)
         }
+
+        // The $safeNavigationMigration wrapper consumes no slots itself; recurse.
+        IrExpression::SafeNavigationMigration(m) => vars_used_by_ir_expression(&m.expr),
 
         // SafePropertyRead has a receiver expression
         IrExpression::SafePropertyRead(spr) => vars_used_by_ir_expression(&spr.receiver),

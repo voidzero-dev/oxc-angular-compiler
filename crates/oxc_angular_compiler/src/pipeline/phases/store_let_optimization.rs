@@ -306,6 +306,14 @@ fn transform_nested_expressions<'a>(
     declare_lets_to_remove: &mut HashSet<XrefId>,
 ) {
     match expr.as_mut() {
+        IrExpression::SafeNavigationMigration(m) => {
+            transform_store_let_in_expr_value(
+                allocator,
+                &mut m.expr,
+                let_used_externally,
+                declare_lets_to_remove,
+            );
+        }
         IrExpression::PureFunction(pf) => {
             if let Some(ref mut body) = pf.body {
                 transform_store_let_in_expr(
@@ -702,6 +710,14 @@ fn transform_nested_in_expr_value<'a>(
     declare_lets_to_remove: &mut HashSet<XrefId>,
 ) {
     match expr {
+        IrExpression::SafeNavigationMigration(m) => {
+            transform_store_let_in_expr_value(
+                allocator,
+                &mut m.expr,
+                let_used_externally,
+                declare_lets_to_remove,
+            );
+        }
         IrExpression::PureFunction(pf) => {
             if let Some(ref mut body) = pf.body {
                 transform_store_let_in_expr(
@@ -1092,6 +1108,7 @@ fn transform_nested_in_expr_value<'a>(
 fn has_pipe(expr: &IrExpression<'_>) -> bool {
     match expr {
         IrExpression::PipeBinding(_) | IrExpression::PipeBindingVariadic(_) => true,
+        IrExpression::SafeNavigationMigration(m) => has_pipe(&m.expr),
         IrExpression::PureFunction(pf) => {
             pf.body.as_ref().is_some_and(|b| has_pipe(b))
                 || pf.fn_ref.as_ref().is_some_and(|f| has_pipe(f))
@@ -1226,6 +1243,9 @@ fn collect_context_let_refs_in_expr(expr: &IrExpression<'_>, refs: &mut HashSet<
     match expr {
         IrExpression::ContextLetReference(let_ref) => {
             refs.insert(let_ref.target);
+        }
+        IrExpression::SafeNavigationMigration(m) => {
+            collect_context_let_refs_in_expr(&m.expr, refs);
         }
         IrExpression::PureFunction(pf) => {
             if let Some(ref body) = pf.body {

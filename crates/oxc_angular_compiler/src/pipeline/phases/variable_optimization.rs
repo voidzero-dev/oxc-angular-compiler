@@ -93,6 +93,9 @@ fn collect_fences(expr: &IrExpression<'_>) -> Fence {
                 fences |= collect_fences(arg);
             }
         }
+        IrExpression::SafeNavigationMigration(m) => {
+            fences |= collect_fences(&m.expr);
+        }
         IrExpression::Interpolation(interp) => {
             for e in interp.expressions.iter() {
                 fences |= collect_fences(e);
@@ -2533,6 +2536,9 @@ fn collect_variable_xrefs(expr: &IrExpression<'_>, xrefs: &mut Vec<XrefId>) {
         IrExpression::ReadVariable(read_var) => {
             xrefs.push(read_var.xref);
         }
+        IrExpression::SafeNavigationMigration(m) => {
+            collect_variable_xrefs(&m.expr, xrefs);
+        }
         IrExpression::PureFunction(pf) => {
             if let Some(ref body) = pf.body {
                 collect_variable_xrefs(body, xrefs);
@@ -3198,6 +3204,19 @@ where
         | IrExpression::OutputExpr(_) => {
             // Leaf nodes - just clone
             expr.clone_in(allocator)
+        }
+        IrExpression::SafeNavigationMigration(m) => {
+            use crate::ir::expression::SafeNavigationMigrationExpr;
+            IrExpression::SafeNavigationMigration(OxcBox::new_in(
+                SafeNavigationMigrationExpr {
+                    expr: OxcBox::new_in(
+                        transform_expression(&m.expr, allocator, transform),
+                        allocator,
+                    ),
+                    source_span: m.source_span,
+                },
+                allocator,
+            ))
         }
         IrExpression::PureFunction(pf) => {
             use crate::ir::expression::PureFunctionExpr;
