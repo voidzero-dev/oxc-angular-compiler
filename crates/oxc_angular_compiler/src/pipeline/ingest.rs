@@ -1107,17 +1107,45 @@ fn ingest_element<'a>(
     let local_refs = ingest_references_owned(allocator, element.references);
 
     // Check for a control property binding to create a ControlCreateOp, matching
-    // Angular's `specializeControlProperties`. Control instructions are ONLY
-    // emitted for signal-based form directives like FormField, not for legacy
-    // FormsModule directives (ngModel, formControl, formControlName).
-    // The eligible property binding:
-    //   - formField: `[formField]` property binding
+    // Angular v22's `specializeControlProperties`. The eligible properties and the
+    // binding kinds they accept are:
+    //   - formField / formControl: `[..]` property binding
+    //   - formControlName:          property binding or static attribute
+    //   - ngModel:                  property, two-way `[(ngModel)]`, or static attribute
+    // (v21 only emitted this for `formField`; v22 broadened it, notably to
+    // two-way `[(ngModel)]`, which now also emits `ɵɵcontrolCreate()`.)
     use crate::ast::expression::BindingType;
-    let field_input_span = element.inputs.iter().find_map(|input| {
-        let eligible = matches!(input.name.as_str(), "formField")
-            && input.binding_type == BindingType::Property;
-        eligible.then_some(input.source_span)
-    });
+    // `formField` is the v21 baseline; the extended set (formControl/
+    // formControlName/ngModel) was added in v22. Default to latest when unknown.
+    let extended_controls =
+        job.angular_version.map_or(true, |v| v.supports_extended_control_properties());
+    let field_input_span = element
+        .inputs
+        .iter()
+        .find_map(|input| {
+            let eligible = match input.name.as_str() {
+                "formField" => input.binding_type == BindingType::Property,
+                "formControl" if extended_controls => input.binding_type == BindingType::Property,
+                "formControlName" if extended_controls => {
+                    input.binding_type == BindingType::Property
+                }
+                "ngModel" if extended_controls => {
+                    matches!(input.binding_type, BindingType::Property | BindingType::TwoWay)
+                }
+                _ => false,
+            };
+            eligible.then_some(input.source_span)
+        })
+        .or_else(|| {
+            // Static attributes (`formControlName="name"`, `ngModel`) -> Attribute op (v22+).
+            if !extended_controls {
+                return None;
+            }
+            element.attributes.iter().find_map(|attr| {
+                matches!(attr.name.as_str(), "formControlName" | "ngModel")
+                    .then_some(attr.source_span)
+            })
+        });
 
     // Always create ElementStart/ElementEnd pairs, even for void/self-closing elements.
     // The empty_elements phase will collapse them to Element when appropriate.
