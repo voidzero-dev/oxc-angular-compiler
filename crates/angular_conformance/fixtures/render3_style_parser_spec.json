@@ -1,6 +1,6 @@
 {
   "name": "style_parser_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/style_parser_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/style_parser_spec.ts",
   "test_groups": [
     {
       "name": "style parsing",

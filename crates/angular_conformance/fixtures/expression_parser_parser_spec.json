@@ -1,6 +1,6 @@
 {
   "name": "parser_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/parser_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/parser_spec.ts",
   "test_groups": [
     {
       "name": "parser",
@@ -1474,6 +1474,32 @@
                   "type": "CheckAction",
                   "input": "('key' in obj) && true",
                   "expected": "(\"key\" in obj) && true"
+                },
+                {
+                  "type": "CheckAction",
+                  "input": "'in' in {in: foo}",
+                  "expected": "\"in\" in {in: foo}"
+                }
+              ]
+            },
+            {
+              "name": "should throw on invalid in expressions",
+              "path": "parser/parseAction/should throw on invalid in expressions",
+              "assertions": [
+                {
+                  "type": "ExpectActionError",
+                  "input": "in",
+                  "error_contains": "Unexpected token in"
+                },
+                {
+                  "type": "ExpectActionError",
+                  "input": "in foo",
+                  "error_contains": "Unexpected token in"
+                },
+                {
+                  "type": "ExpectActionError",
+                  "input": "'foo' in",
+                  "error_contains": "Unexpected end of expression: 'foo' in at the end of the expression ['foo' in]"
                 }
               ]
             },
@@ -2071,17 +2097,6 @@
                           "type": "ExpectBindingError",
                           "input": "a) => a + 1",
                           "error_contains": "Unexpected token ')'"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "should report missing comma between arrow function parameters",
-                      "path": "parser/parseBinding/arrow functions/arrow function validations/should report missing comma between arrow function parameters",
-                      "assertions": [
-                        {
-                          "type": "ExpectBindingError",
-                          "input": "(a b) => a + b",
-                          "error_contains": "Missing expected ,"
                         }
                       ]
                     },

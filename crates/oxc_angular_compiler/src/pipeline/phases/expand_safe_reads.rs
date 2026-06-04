@@ -77,7 +77,8 @@ use oxc_str::Ident;
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
     ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
-    transform_expressions_in_create_op, transform_expressions_in_update_op,
+    transform_expressions_in_create_op, transform_expressions_in_expression,
+    transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};

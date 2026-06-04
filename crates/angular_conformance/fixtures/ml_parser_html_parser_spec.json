@@ -1,6 +1,6 @@
 {
   "name": "html_parser_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_parser_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/html_parser_spec.ts",
   "test_groups": [
     {
       "name": "HtmlParser",
@@ -86,6 +86,28 @@
                       "expected": [
                         ["html.Element", "div", 0.0],
                         ["html.Text", "🛈", 1.0, [""], ["🛈", "&#128712;"], [""]]
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "should parse named HTML entities containing digits",
+                  "path": "HtmlParser/parse/text nodes/should parse named HTML entities containing digits",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&sup1;</div>",
+                      "expected": [
+                        ["html.Element", "div", 0.0],
+                        ["html.Text", "¹", 1.0, [""], ["¹", "&sup1;"], [""]]
+                      ]
+                    },
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&frac12;</div>",
+                      "expected": [
+                        ["html.Element", "div", 0.0],
+                        ["html.Text", "½", 1.0, [""], ["½", "&frac12;"], [""]]
                       ]
                     }
                   ]
@@ -606,32 +628,6 @@
                   ]
                 },
                 {
-                  "name": "should parse attributes containing unquoted interpolation",
-                  "path": "HtmlParser/parse/attributes/should parse attributes containing unquoted interpolation",
-                  "assertions": [
-                    {
-                      "type": "HumanizeDom",
-                      "input": "<div foo={{message}}></div>",
-                      "expected": [
-                        ["html.Element", "div", 0.0],
-                        [
-                          "html.Attribute",
-                          "foo",
-                          "{{message}}",
-                          [""],
-                          ["{{", "message", "}}"],
-                          [""]
-                        ]
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "name": "should parse bound inputs with expressions containing newlines",
-                  "path": "HtmlParser/parse/attributes/should parse bound inputs with expressions containing newlines",
-                  "assertions": []
-                },
-                {
                   "name": "should decode HTML entities in interpolated attributes",
                   "path": "HtmlParser/parse/attributes/should decode HTML entities in interpolated attributes",
                   "assertions": [
@@ -770,8 +766,8 @@
               "groups": [],
               "tests": [
                 {
-                  "name": "should parse out expansion forms",
-                  "path": "HtmlParser/parse/expansion forms/should parse out expansion forms",
+                  "name": "should parse out expansion forms (with multiple cases)",
+                  "path": "HtmlParser/parse/expansion forms/should parse out expansion forms (with multiple cases)",
                   "assertions": []
                 },
                 {
@@ -790,8 +786,8 @@
                   "assertions": []
                 },
                 {
-                  "name": "should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set",
-                  "path": "HtmlParser/parse/expansion forms/should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set",
+                  "name": "should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set (escapedString:false)",
+                  "path": "HtmlParser/parse/expansion forms/should not normalize line-endings in ICU expressions in external templates when `i18nNormalizeLineEndingsInICUs` is not set (escapedString:false)",
                   "assertions": []
                 },
                 {
@@ -982,6 +978,24 @@
                   ]
                 },
                 {
+                  "name": "should parse exhaustive default checks in a switch block",
+                  "path": "HtmlParser/parse/blocks/should parse exhaustive default checks in a switch block",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "@switch (expr) {@case ('foo') {} @default never;}",
+                      "expected": [
+                        ["html.Block", "switch", 0.0],
+                        ["html.BlockParameter", "expr"],
+                        ["html.Block", "case", 1.0],
+                        ["html.BlockParameter", "'foo'"],
+                        ["html.Text", " ", 1.0, [" "]],
+                        ["html.Block", "default never", 1.0]
+                      ]
+                    }
+                  ]
+                },
+                {
                   "name": "should close void elements used right before a block",
                   "path": "HtmlParser/parse/blocks/should close void elements used right before a block",
                   "assertions": [
@@ -1032,8 +1046,8 @@
                   "assertions": []
                 },
                 {
-                  "name": "should parse an incomplete block with no parameters",
-                  "path": "HtmlParser/parse/blocks/should parse an incomplete block with no parameters",
+                  "name": "should parse an incomplete block with no body",
+                  "path": "HtmlParser/parse/blocks/should parse an incomplete block with no body",
                   "assertions": []
                 }
               ]
@@ -1081,7 +1095,7 @@
                           "html.LetDeclaration",
                           "foo",
                           "123 + 456",
-                          "@let foo = 123 + 456",
+                          "@let foo = 123 + 456;",
                           "foo",
                           "123 + 456"
                         ]

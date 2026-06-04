@@ -1,6 +1,6 @@
 {
   "name": "lexer_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/lexer_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/lexer_spec.ts",
   "test_groups": [
     {
       "name": "HtmlLexer",
@@ -961,8 +961,8 @@
                           "assertions": []
                         },
                         {
-                          "name": "should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined",
-                          "path": "HtmlLexer/open tags/expansion forms/[line ending normalization/{escapedString: false}/should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined",
+                          "name": "should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined (escapedString:false)",
+                          "path": "HtmlLexer/open tags/expansion forms/[line ending normalization/{escapedString: false}/should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined (escapedString:false)",
                           "assertions": []
                         },
                         {
@@ -2716,30 +2716,6 @@
               ]
             },
             {
-              "name": "should parse bound inputs with expressions containing newlines",
-              "path": "HtmlLexer/attributes/should parse bound inputs with expressions containing newlines",
-              "assertions": [
-                {
-                  "type": "HtmlLexerTest",
-                  "input": "<app-component\n        [attr]=\"[\n        {text: 'some text',url:'//www.google.com'},\n        {text:'other text',url:'//www.google.com'}]\">",
-                  "test_type": "HumanizeParts",
-                  "expected": [
-                    ["TokenType.TAG_OPEN_START", "", "app-component"],
-                    ["TokenType.ATTR_NAME", "", "[attr]"],
-                    ["TokenType.ATTR_QUOTE", "\""],
-                    [
-                      "TokenType.ATTR_VALUE_TEXT",
-                      "[\n        {text: 'some text',url:'//www.google.com'},\n        {text:'other text',url:'//www.google.com'}]"
-                    ],
-                    ["TokenType.ATTR_QUOTE", "\""],
-                    ["TokenType.TAG_OPEN_END"],
-                    ["TokenType.EOF"]
-                  ],
-                  "options": null
-                }
-              ]
-            },
-            {
               "name": "should allow whitespace",
               "path": "HtmlLexer/attributes/should allow whitespace",
               "assertions": [
@@ -3130,6 +3106,48 @@
                     ["TokenType.TEXT", "a"],
                     ["TokenType.ENCODED_ENTITY", "&", "&amp;"],
                     ["TokenType.TEXT", "b"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse named entities containing digits",
+              "path": "HtmlLexer/entities/should parse named entities containing digits",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&sup1;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "¹", "&sup1;"],
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                },
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&frac12;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "½", "&frac12;"],
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                },
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&blk34;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "▓", "&blk34;"],
+                    ["TokenType.TEXT", ""],
                     ["TokenType.EOF"]
                   ],
                   "options": null
@@ -4055,8 +4073,8 @@
                       "assertions": []
                     },
                     {
-                      "name": "should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined",
-                      "path": "HtmlLexer/expansion forms/[line ending normalization/{escapedString: false}/should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined",
+                      "name": "should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined (escapeString: false)",
+                      "path": "HtmlLexer/expansion forms/[line ending normalization/{escapedString: false}/should not normalize line-endings in ICU expressions when `i18nNormalizeLineEndingsInICUs` is not defined (escapeString: false)",
                       "assertions": []
                     },
                     {
@@ -5006,6 +5024,61 @@
                   "input": "@if(){hello}",
                   "test_type": "HumanizeParts",
                   "expected": [],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse @default never;",
+              "path": "HtmlLexer/blocks/should parse @default never;",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "@default never;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.BLOCK_OPEN_START", "default never"],
+                    ["TokenType.BLOCK_OPEN_END"],
+                    ["TokenType.BLOCK_CLOSE"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse @default never(expr);",
+              "path": "HtmlLexer/blocks/should parse @default never(expr);",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "@default never(expr);",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.BLOCK_OPEN_START", "default never"],
+                    ["TokenType.BLOCK_PARAMETER", "expr"],
+                    ["TokenType.BLOCK_OPEN_END"],
+                    ["TokenType.BLOCK_CLOSE"],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
+              "name": "should parse @default never ;",
+              "path": "HtmlLexer/blocks/should parse @default never ;",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "@default never ;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.BLOCK_OPEN_START", "default never"],
+                    ["TokenType.BLOCK_OPEN_END"],
+                    ["TokenType.BLOCK_CLOSE"],
+                    ["TokenType.EOF"]
+                  ],
                   "options": null
                 }
               ]

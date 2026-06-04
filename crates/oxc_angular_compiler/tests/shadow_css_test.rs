@@ -524,9 +524,10 @@ fn test_not_selector() {
 // ============================================================================
 
 #[test]
-fn test_replace_comments_with_newline() {
+fn test_replace_comments_without_adding_lines() {
+    // Angular v22 removes inline comments without inserting an extra newline.
     let result = shim("/* b {c} */ b {c}", "contenta");
-    assert_eq!(result, "\n b[contenta] {c}");
+    assert_eq!(result, " b[contenta] {c}");
 }
 
 #[test]
@@ -538,7 +539,7 @@ fn test_keep_sourcemapping_url_comments() {
 #[test]
 fn test_handle_adjacent_comments() {
     let result = shim("/* comment 1 */ /* comment 2 */ b {c}", "contenta");
-    assert_eq!(result, "\n \n b[contenta] {c}");
+    assert_eq!(result, "  b[contenta] {c}");
 }
 
 // ============================================================================

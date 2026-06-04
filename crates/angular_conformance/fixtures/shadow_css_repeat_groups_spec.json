@@ -1,6 +1,6 @@
 {
   "name": "repeat_groups_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/repeat_groups_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/repeat_groups_spec.ts",
   "test_groups": [
     {
       "name": "ShadowCss, repeatGroups()",

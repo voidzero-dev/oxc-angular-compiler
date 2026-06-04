@@ -1,6 +1,6 @@
 {
   "name": "xtb_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/i18n/serializers/xtb_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/i18n/serializers/xtb_spec.ts",
   "test_groups": [
     {
       "name": "XTB serializer",

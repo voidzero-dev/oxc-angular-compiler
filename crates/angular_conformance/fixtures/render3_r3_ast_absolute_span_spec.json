@@ -1,6 +1,6 @@
 {
   "name": "r3_ast_absolute_span_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_absolute_span_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_absolute_span_spec.ts",
   "test_groups": [
     {
       "name": "expression AST absolute source spans",
@@ -837,8 +837,8 @@
               "assertions": []
             },
             {
-              "name": "is correct for variables and placeholders",
-              "path": "expression AST absolute source spans/ICU expressions/is correct for variables and placeholders",
+              "name": "is correct for variables and placeholders in nested ICUs",
+              "path": "expression AST absolute source spans/ICU expressions/is correct for variables and placeholders in nested ICUs",
               "assertions": []
             }
           ]

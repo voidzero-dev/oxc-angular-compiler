@@ -865,6 +865,53 @@ export class Parent {}
     );
 }
 
+/// The `@default never;` exhaustive marker must be the last case in a `@switch`
+/// (Angular v22). A `@case`/`@default` that appears after it is a diagnostic.
+#[test]
+fn test_switch_default_never_must_be_last() {
+    let allocator = Allocator::default();
+    let ordering_msg = "must be the last case in a switch";
+
+    // Exhaustive check followed by a @case -> diagnostic.
+    let bad = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @default never; @case (1) {} }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", bad, None, None);
+    assert!(
+        result.has_errors(),
+        "A @case after `@default never;` must be a diagnostic. Output:\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "Expected a 'must be the last case' diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+
+    // Exhaustive check as the last case (after a case with a body) -> no ordering error.
+    let good = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @case (1) {x} @default never; }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", good, None, None);
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "`@default never;` as the last case should not report the ordering diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+}
+
 #[test]
 #[should_panic(
     expected = "Cannot specify additional `hydrate` triggers if `hydrate never` is present"
@@ -6174,6 +6221,48 @@ export class LoginFormComponent {
             "v{version:?}: should chain — `None` defaults to assume-latest, \
              v21.0.4+ has `typeof <fn>` return. Output:\n{code}"
         );
+    }
+}
+
+/// The control instructions (`ɵɵcontrolCreate()` / `ɵɵcontrol()`) for a
+/// two-way `[(ngModel)]` were added in Angular v22
+/// (`supports_extended_control_properties`); v21 only emitted control
+/// instructions for `[formField]`. Pre-v22 targets must therefore emit only the
+/// `ɵɵtwoWayProperty` for `[(ngModel)]`, while v22+ — and `None`, which assumes
+/// latest — also emit the paired control instructions.
+#[test]
+fn test_ng_model_control_instructions_obey_angular_version_gate() {
+    let template = r#"<input [(ngModel)]="name">"#;
+
+    // Pre-v22: no control instructions, just the two-way property.
+    for version in [
+        AngularVersion::new(19, 0, 0),
+        AngularVersion::new(20, 0, 0),
+        AngularVersion::new(21, 2, 0),
+    ] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", Some(version));
+        assert!(
+            code.contains("ɵɵtwoWayProperty("),
+            "v{version:?}: expected ɵɵtwoWayProperty. Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: must NOT emit ɵɵcontrolCreate (v22+ only). Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrol("),
+            "v{version:?}: must NOT emit ɵɵcontrol (v22+ only). Output:\n{code}"
+        );
+    }
+
+    // v22+ and `None` (assume latest): emit the paired control instructions.
+    for version in [Some(AngularVersion::new(22, 0, 0)), None] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", version);
+        assert!(
+            code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: expected ɵɵcontrolCreate. Output:\n{code}"
+        );
+        assert!(code.contains("ɵɵcontrol("), "v{version:?}: expected ɵɵcontrol. Output:\n{code}");
     }
 }
 

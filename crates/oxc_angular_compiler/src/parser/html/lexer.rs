@@ -1162,6 +1162,17 @@ impl<'a> HtmlLexer<'a> {
         // Skip whitespace before {
         self.skip_whitespace();
 
+        // v22: `@default never;` (optionally `@default never(expr);`) is a switch
+        // exhaustive check terminated by `;` rather than a `{ ... }` body. Emit
+        // BlockOpenEnd + BlockClose so it parses as an empty, self-closed block.
+        if !params_unclosed && name == "default never" && self.peek() == ';' {
+            let semi = self.index;
+            self.advance(); // consume ;
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockOpenEnd, semi, self.index));
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockClose, self.index, self.index));
+            return;
+        }
+
         // Expect { to end the block header
         if !params_unclosed && self.peek() == '{' {
             let brace_start = self.index;

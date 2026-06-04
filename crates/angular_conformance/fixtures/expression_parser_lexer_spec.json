@@ -1,6 +1,6 @@
 {
   "name": "lexer_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/lexer_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/lexer_spec.ts",
   "test_groups": [
     {
       "name": "lexer",

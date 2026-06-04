@@ -1235,6 +1235,10 @@ impl<'a> Parser<'a> {
             } else {
                 format!("{} at column {} in [{}]", message, column, self.source)
             }
+        } else if message.starts_with("Unexpected end of expression") {
+            // Angular renders this (always at EOF) as
+            // "{message} at the end of the expression [{source}]".
+            format!("{message} at the end of the expression [{}]", self.source)
         } else {
             let location = if at_end {
                 "at the end of the expression".to_string()
@@ -2501,29 +2505,13 @@ impl<'a> Parser<'a> {
                         ));
                     }
                     _ => {
-                        // Treat as identifier
-                        // ImplicitReceiver spans from previous token end to current token start
-                        // This covers any whitespace between tokens (Angular behavior)
-                        let prev_end = self.previous_end();
-                        let implicit_span = ParseSpan::new(prev_end, token.index);
-                        let implicit_source_span = implicit_span.to_absolute(self.absolute_offset);
-                        let implicit = ImplicitReceiver {
-                            span: implicit_span,
-                            source_span: implicit_source_span,
-                        };
-                        let receiver = AngularExpression::ImplicitReceiver(Box::new_in(
-                            implicit,
-                            self.allocator,
-                        ));
-                        let name_span = source_span;
-                        let read = PropertyRead {
-                            span,
-                            source_span,
-                            name_span,
-                            receiver,
-                            name: token.str_value.clone(),
-                        };
-                        return AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
+                        // Keywords such as `in`, `instanceof`, `as`, `if`, `else`,
+                        // `var`, and `let` are not valid primary expressions. Angular
+                        // treats only identifier tokens as reads here, so a bare
+                        // keyword reports "Unexpected token <kw>".
+                        self.error(&format!("Unexpected token {}", token.str_value));
+                        let empty = EmptyExpr { span, source_span };
+                        return AngularExpression::Empty(Box::new_in(empty, self.allocator));
                     }
                 }
             }
@@ -2565,6 +2553,14 @@ impl<'a> Parser<'a> {
                 };
                 return AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
             }
+        }
+
+        // Nothing matched a primary expression. If the input ran out partway
+        // through an expression (e.g. the right operand of `'foo' in`), Angular
+        // reports "Unexpected end of expression: {input}". Truly empty input has
+        // no tokens at all and must stay error-free (`checkAction('')`).
+        if self.peek().is_none() && !self.tokens.is_empty() {
+            self.error(&format!("Unexpected end of expression: {}", self.source));
         }
 
         // Empty expression - use make_span to handle the case where start > current_end_index

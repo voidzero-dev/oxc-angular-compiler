@@ -308,11 +308,15 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Check for special elements
-        if raw_name == "script" {
+        // Check for special elements. `<script>`/`<style>` are only treated
+        // specially in the HTML namespace: Angular classifies them by the
+        // lowercased element name, so a namespaced SVG `<style>` (`:svg:style`)
+        // is a normal element, not a stylesheet to extract (v22 conformance).
+        let in_html_namespace = self.current_namespace() == ElementNamespace::Html;
+        if in_html_namespace && raw_name == "script" {
             return None;
         }
-        if raw_name == "style" {
+        if in_html_namespace && raw_name == "style" {
             // Extract style content
             if let Some(content) = self.get_text_content(element) {
                 self.styles.push(content);
@@ -2363,7 +2367,7 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Consecutive cases without bodies are grouped together into a single `SwitchBlockCaseGroup`.
     fn visit_switch_block(&mut self, block: &HtmlBlock<'a>) -> Option<R3Node<'a>> {
         use crate::ast::html::{BlockType, HtmlNode};
-        use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup};
+        use crate::ast::r3::{R3SwitchBlockCase, R3SwitchBlockCaseGroup, R3SwitchExhaustiveCheck};
 
         // Validation: @switch must have exactly one parameter.
         // Match Angular's createSwitchBlock: always parse the first parameter when present
@@ -2385,6 +2389,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let mut collected_cases: std::vec::Vec<R3SwitchBlockCase<'a>> = std::vec::Vec::new();
         let mut first_case_start: Option<Span> = None;
         let mut has_default = false;
+        let mut exhaustive_check: Option<R3SwitchExhaustiveCheck<'a>> = None;
 
         for child in &block.children {
             // Skip comments and whitespace-only text nodes (same as Angular)
@@ -2404,6 +2409,37 @@ impl<'a> HtmlToR3Transform<'a> {
                 );
                 continue;
             };
+
+            // v22: `@default never;` is an exhaustive check, not a case. Its block
+            // name is the literal "default never". It carries an optional expression
+            // (`@default never(expr);`), no body, and produces no runtime output.
+            if child_block.name.as_str() == "default never" {
+                let check_expression = if child_block.parameters.is_empty() {
+                    None
+                } else {
+                    let expr_str = child_block.parameters[0].expression.as_str();
+                    Some(
+                        self.binding_parser
+                            .parse_binding(expr_str, child_block.parameters[0].span)
+                            .ast,
+                    )
+                };
+                if exhaustive_check.is_some() {
+                    self.report_error(
+                        "@default block with \"never\" parameter must be the last case in a switch",
+                        child_block.span,
+                    );
+                } else {
+                    exhaustive_check = Some(R3SwitchExhaustiveCheck {
+                        expression: check_expression,
+                        source_span: child_block.span,
+                        start_source_span: child_block.start_span,
+                        end_source_span: child_block.end_span,
+                        name_span: child_block.name_span,
+                    });
+                }
+                continue;
+            }
 
             // Validate: only @case and @default are allowed inside @switch
             if child_block.block_type != BlockType::Case
@@ -2456,6 +2492,19 @@ impl<'a> HtmlToR3Transform<'a> {
                 });
                 continue;
             }
+
+            // The `@default never;` exhaustive marker must be the last case in the
+            // switch. Any recognized @case/@default that follows it is an error
+            // (reference: r3_control_flow.ts reports this for every block once the
+            // exhaustive check has been seen). A second `@default never;` is rejected
+            // in its own branch above.
+            if exhaustive_check.is_some() {
+                self.report_error(
+                    "@default block with \"never\" parameter must be the last case in a switch",
+                    child_block.span,
+                );
+            }
+
             if is_case && child_block.parameters.len() > 1 {
                 self.report_error(
                     "@case block must have exactly one parameter",
@@ -2549,6 +2598,7 @@ impl<'a> HtmlToR3Transform<'a> {
             expression,
             groups,
             unknown_blocks,
+            exhaustive_check,
             source_span: block.span,
             start_source_span: block.start_span,
             end_source_span: block.end_span,
@@ -2890,9 +2940,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
         for attr in attrs {
             let raw_name = attr.name.as_str();
-            // Normalize name early (case-insensitive data- prefix stripping)
-            // This must happen before ANY binding syntax checks
-            let name = self.normalize_attribute_name(raw_name);
+            // Angular v22 removed the `data-` prefix normalization: binding syntax
+            // (`bind-`, `on-`, `bindon-`, `ref-`, `let-`, `*`, `@`) is matched against
+            // the raw attribute name, so e.g. `data-ref-a` is a plain text attribute.
+            let name = raw_name;
 
             // Skip i18n-* attributes early - they are metadata for other attributes, not bindings.
             // In Angular's TypeScript compiler, these are filtered out by I18nMetaVisitor before
@@ -3131,18 +3182,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Normalizes an attribute name by stripping the data- prefix (case-insensitive).
     /// This matches TypeScript's behavior: /^data-/i.test(attrName) ? attrName.substring(5) : attrName
-    fn normalize_attribute_name<'b>(&self, name: &'b str) -> &'b str {
-        // Case-insensitive data- prefix stripping
-        if name.len() > 5 && name[..5].eq_ignore_ascii_case("data-") { &name[5..] } else { name }
-    }
-
-    /// Parses a binding prefix from an attribute name.
-    /// Handles the data- prefix as per Angular's normalization:
-    /// `data-bind-*`, `data-on-*`, `data-ref-*`, `data-let-*`, `data-bindon-*`
+    /// Parses a binding prefix (`bind-`, `let-`, `ref-`, `on-`, `bindon-`) from an
+    /// attribute name. Angular v22 matches these against the raw name; a `data-`
+    /// prefix is no longer stripped, so `data-on-x` is not an event binding.
     fn parse_binding_prefix<'b>(&self, name: &'b str) -> Option<(BindingPrefix, &'b str)> {
-        // Strip data- prefix if present (case-insensitive)
-        let name = self.normalize_attribute_name(name);
-
         for (prefix, kind) in BIND_NAME_PREFIXES {
             if let Some(rest) = name.strip_prefix(prefix) {
                 return Some((*kind, rest));

@@ -14,6 +14,7 @@ function TestComponent_For_1_Template(rf,ctx) {
       return i0.ɵɵresetView($event);
     });
     i0.ɵɵelementEnd();
+    i0.ɵɵcontrolCreate();
     i0.ɵɵtext(2," ");
   }
   if ((rf & 2)) {
@@ -21,6 +22,7 @@ function TestComponent_For_1_Template(rf,ctx) {
     const ctx_r2 = i0.ɵɵnextContext();
     i0.ɵɵadvance();
     i0.ɵɵtwoWayProperty("ngModel",ctx_r2.items[$index_r2].value);
+    i0.ɵɵcontrol();
   }
 }
 function TestComponent_Template(rf,ctx) {

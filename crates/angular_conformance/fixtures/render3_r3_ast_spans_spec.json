@@ -1,6 +1,6 @@
 {
   "name": "r3_ast_spans_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_spans_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_spans_spec.ts",
   "test_groups": [
     {
       "name": "R3 AST source spans",
@@ -164,7 +164,7 @@
                       "<div data-prop=\"{{v}}\">",
                       "</div>"
                     ],
-                    ["BoundAttribute", "data-prop=\"{{v}}\"", "prop", "{{v}}"]
+                    ["BoundAttribute", "data-prop=\"{{v}}\"", "data-prop", "{{v}}"]
                   ],
                   "ignore_error": false
                 }
@@ -332,8 +332,8 @@
               ]
             },
             {
-              "name": "is correct for reference via data-ref-...",
-              "path": "R3 AST source spans/templates/is correct for reference via data-ref-...",
+              "name": "is correct for data-ref-... attribute",
+              "path": "R3 AST source spans/templates/is correct for data-ref-... attribute",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -345,7 +345,7 @@
                       "<ng-template data-ref-a>",
                       "</ng-template>"
                     ],
-                    ["Reference", "data-ref-a", "a", "<empty>"]
+                    ["TextAttribute", "data-ref-a", "data-ref-a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -372,8 +372,8 @@
               ]
             },
             {
-              "name": "is correct for variables via data-let-...",
-              "path": "R3 AST source spans/templates/is correct for variables via data-let-...",
+              "name": "is correct for data-let-... attribute",
+              "path": "R3 AST source spans/templates/is correct for data-let-... attribute",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -385,7 +385,7 @@
                       "<ng-template data-let-a=\"b\">",
                       "</ng-template>"
                     ],
-                    ["Variable", "data-let-a=\"b\"", "a", "b"]
+                    ["TextAttribute", "data-let-a=\"b\"", "data-let-a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -605,8 +605,8 @@
               ]
             },
             {
-              "name": "is correct for bound events via data-on-",
-              "path": "R3 AST source spans/events/is correct for bound events via data-on-",
+              "name": "is correct for text attribute via data-on-",
+              "path": "R3 AST source spans/events/is correct for text attribute via data-on-",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -618,7 +618,7 @@
                       "<div data-on-event=\"v\">",
                       "</div>"
                     ],
-                    ["BoundEvent", "data-on-event=\"v\"", "event", "v"]
+                    ["TextAttribute", "data-on-event=\"v\"", "data-on-event", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -662,8 +662,8 @@
               ]
             },
             {
-              "name": "is correct for bound events and properties via data-bindon-",
-              "path": "R3 AST source spans/events/is correct for bound events and properties via data-bindon-",
+              "name": "is correct for TextAttribute and properties via data-bindon-",
+              "path": "R3 AST source spans/events/is correct for TextAttribute and properties via data-bindon-",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -675,8 +675,7 @@
                       "<div data-bindon-prop=\"v\">",
                       "</div>"
                     ],
-                    ["BoundAttribute", "data-bindon-prop=\"v\"", "prop", "v"],
-                    ["BoundEvent", "data-bindon-prop=\"v\"", "prop", "v"]
+                    ["TextAttribute", "data-bindon-prop=\"v\"", "data-bindon-prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -741,21 +740,6 @@
             {
               "name": "is correct for references via ref-",
               "path": "R3 AST source spans/references/is correct for references via ref-",
-              "assertions": [
-                {
-                  "type": "ExpectFromHtml",
-                  "input": "<div ref-a></div>",
-                  "expected": [
-                    ["Element", "<div ref-a></div>", "<div ref-a>", "</div>"],
-                    ["Reference", "ref-a", "a", "<empty>"]
-                  ],
-                  "ignore_error": false
-                }
-              ]
-            },
-            {
-              "name": "is correct for references via data-ref-",
-              "path": "R3 AST source spans/references/is correct for references via data-ref-",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -949,6 +933,29 @@
                   "ignore_error": false
                 }
               ]
+            },
+            {
+              "name": "is correct for switch blocks with exhaustive checking",
+              "path": "R3 AST source spans/switch blocks/is correct for switch blocks with exhaustive checking",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "@switch (cond.kind) {@case (x()) {X case}@default never;}",
+                  "expected": [
+                    [
+                      "SwitchBlock",
+                      "@switch (cond.kind) {@case (x()) {X case}@default never;}",
+                      "@switch (cond.kind) {",
+                      "}"
+                    ],
+                    ["SwitchBlockCaseGroup", "@case (x()) {X case}", "@case (x()) {"],
+                    ["SwitchBlockCase", "@case (x()) {X case}", "@case (x()) {"],
+                    ["Text", "X case"],
+                    ["SwitchExhaustiveCheck", "@default never;", "@default never;"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
             }
           ]
         },
@@ -1041,7 +1048,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@let foo = 123;",
-                  "expected": [["LetDeclaration", "@let foo = 123", "foo", "123"]],
+                  "expected": [["LetDeclaration", "@let foo = 123;", "foo", "123"]],
                   "ignore_error": false
                 }
               ]

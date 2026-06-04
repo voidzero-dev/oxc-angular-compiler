@@ -1273,12 +1273,13 @@ impl<'a> HtmlParser<'a> {
             (String::new(), self.make_span(start_end, start_end))
         };
 
-        // Skip LetEnd or IncompleteLet token
-        // For sourceSpan, we want to end BEFORE the semicolon (at tok.start), not after it
+        // Skip LetEnd or IncompleteLet token.
+        // The sourceSpan ends at the end of the LetEnd token, i.e. *after* the
+        // terminating semicolon (Angular v22: `end = endToken.sourceSpan.end`).
         let end = if let Some(tok) = self.peek() {
             if tok.token_type == HtmlTokenType::LetEnd {
-                // LetEnd is the semicolon - span should end before it
-                let e = tok.start;
+                // LetEnd is the semicolon - span should include it
+                let e = tok.end;
                 self.advance();
                 e
             } else if tok.token_type == HtmlTokenType::IncompleteLet {

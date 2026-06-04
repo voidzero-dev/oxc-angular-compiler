@@ -1,6 +1,6 @@
 {
   "name": "extractor_merger_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/i18n/extractor_merger_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/i18n/extractor_merger_spec.ts",
   "test_groups": [
     {
       "name": "Extractor",
@@ -153,8 +153,8 @@
               "assertions": []
             },
             {
-              "name": "should ignore implicit elements in non translatable ICU messages",
-              "path": "Extractor/ICU messages/should ignore implicit elements in non translatable ICU messages",
+              "name": "should ignore implicit elements in non translatable ICU messages 2",
+              "path": "Extractor/ICU messages/should ignore implicit elements in non translatable ICU messages 2",
               "assertions": []
             }
           ]

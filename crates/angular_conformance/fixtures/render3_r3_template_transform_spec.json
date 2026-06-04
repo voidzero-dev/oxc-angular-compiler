@@ -1,6 +1,6 @@
 {
   "name": "r3_template_transform_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_template_transform_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_template_transform_spec.ts",
   "test_groups": [
     {
       "name": "R3 template transform",
@@ -943,12 +943,12 @@
           ]
         },
         {
-          "name": "Ignored elements",
+          "name": "<script> and <style> elements",
           "groups": [],
           "tests": [
             {
               "name": "should ignore <script> elements",
-              "path": "R3 template transform/Ignored elements/should ignore <script> elements",
+              "path": "R3 template transform/<script> and <style> elements/should ignore <script> elements",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -960,12 +960,28 @@
             },
             {
               "name": "should ignore <style> elements",
-              "path": "R3 template transform/Ignored elements/should ignore <style> elements",
+              "path": "R3 template transform/<script> and <style> elements/should ignore <style> elements",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
                   "input": "<style></style>a",
                   "expected": [["Text", "a"]],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should not ignore namespaced SVG <style> elements",
+              "path": "R3 template transform/<script> and <style> elements/should not ignore namespaced SVG <style> elements",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "<svg><style>.a { fill: none; }</style></svg>",
+                  "expected": [
+                    ["Element", ":svg:svg"],
+                    ["Element", ":svg:style"],
+                    ["Text", ".a { fill: none; }"]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -1251,8 +1267,29 @@
                   "assertions": []
                 },
                 {
-                  "name": "should report if parameters are passed to `idle` trigger",
-                  "path": "R3 template transform/deferred blocks/block validations/should report if parameters are passed to `idle` trigger",
+                  "name": "should allow optional parameter on `idle` trigger and parse timeout",
+                  "path": "R3 template transform/deferred blocks/block validations/should allow optional parameter on `idle` trigger and parse timeout",
+                  "assertions": [
+                    {
+                      "type": "ExpectFromHtml",
+                      "input": "@defer (on idle(1)) {hello}",
+                      "expected": [
+                        ["DeferredBlock"],
+                        ["IdleDeferredTrigger", 1.0],
+                        ["Text", "hello"]
+                      ],
+                      "ignore_error": false
+                    }
+                  ]
+                },
+                {
+                  "name": "should report if `idle` trigger value cannot be parsed",
+                  "path": "R3 template transform/deferred blocks/block validations/should report if `idle` trigger value cannot be parsed",
+                  "assertions": []
+                },
+                {
+                  "name": "should report if `idle` trigger has more than one parameter",
+                  "path": "R3 template transform/deferred blocks/block validations/should report if `idle` trigger has more than one parameter",
                   "assertions": []
                 },
                 {
@@ -1677,6 +1714,40 @@
               ]
             },
             {
+              "name": "should parse prefetch `on idle(100)` trigger and preserve timeout",
+              "path": "R3 template transform/deferred blocks/should parse prefetch `on idle(100)` trigger and preserve timeout",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "@defer (on idle; prefetch on idle(100)){hello}",
+                  "expected": [
+                    ["DeferredBlock"],
+                    ["IdleDeferredTrigger"],
+                    ["IdleDeferredTrigger", 100.0],
+                    ["Text", "hello"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should parse hydrate `on idle(100)` trigger and preserve timeout",
+              "path": "R3 template transform/deferred blocks/should parse hydrate `on idle(100)` trigger and preserve timeout",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "@defer (on idle; hydrate on idle(100)){hello}",
+                  "expected": [
+                    ["DeferredBlock"],
+                    ["IdleDeferredTrigger", 100.0],
+                    ["IdleDeferredTrigger"],
+                    ["Text", "hello"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
               "name": "should allow arbitrary number of spaces after the `prefetch` keyword",
               "path": "R3 template transform/deferred blocks/should allow arbitrary number of spaces after the `prefetch` keyword",
               "assertions": [
@@ -1942,6 +2013,26 @@
                   "name": "should report if a default block has parameters",
                   "path": "R3 template transform/switch blocks/validations/should report if a default block has parameters",
                   "assertions": []
+                },
+                {
+                  "name": "should report if in a @switch block a @default never block has a body",
+                  "path": "R3 template transform/switch blocks/validations/should report if in a @switch block a @default never block has a body",
+                  "assertions": []
+                },
+                {
+                  "name": "should report if a switch fallthrough case is followed by a @default never block",
+                  "path": "R3 template transform/switch blocks/validations/should report if a switch fallthrough case is followed by a @default never block",
+                  "assertions": []
+                },
+                {
+                  "name": "should throw if @default never is not the last case in a switch block",
+                  "path": "R3 template transform/switch blocks/validations/should throw if @default never is not the last case in a switch block",
+                  "assertions": []
+                },
+                {
+                  "name": "should throw if a semicolon is missing after @default never",
+                  "path": "R3 template transform/switch blocks/validations/should throw if a semicolon is missing after @default never",
+                  "assertions": []
                 }
               ]
             }
@@ -1970,6 +2061,18 @@
                     ["SwitchBlockCase", null],
                     ["Text", " No case matched "]
                   ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should parse a switch block with a default never case",
+              "path": "R3 template transform/switch blocks/should parse a switch block with a default never case",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n          @switch (cond.kind) {\n            @default never;\n          }\n        ",
+                  "expected": [["SwitchBlock", "cond.kind"], ["SwitchExhaustiveCheck"]],
                   "ignore_error": false
                 }
               ]
