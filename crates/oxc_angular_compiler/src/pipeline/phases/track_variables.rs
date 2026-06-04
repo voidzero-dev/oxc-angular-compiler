@@ -219,6 +219,7 @@ fn transform_angular_expression_for_track<'a>(
                     ResolvedPropertyReadExpr {
                         receiver: Box::new_in(transformed_receiver, allocator),
                         name: prop_read.name.clone(),
+                        optional: false,
                         source_span: None,
                     },
                     allocator,

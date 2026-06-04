@@ -273,6 +273,9 @@ fn visit_ir_expr_for_merge(expr: &mut IrExpression<'_>, merge_steps: u32) -> Mer
 /// Visit nested expressions in an IR expression.
 fn visit_nested_exprs_for_merge(expr: &mut IrExpression<'_>, merge_steps: u32) -> MergeResult {
     match expr {
+        IrExpression::SafeNavigationMigration(m) => {
+            visit_ir_expr_for_merge(&mut m.expr, merge_steps)
+        }
         // Safe navigation expressions
         IrExpression::SafeTernary(st) => {
             let result = visit_ir_expr_for_merge(&mut st.guard, merge_steps);

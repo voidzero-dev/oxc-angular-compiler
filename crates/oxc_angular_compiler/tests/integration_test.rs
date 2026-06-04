@@ -2038,6 +2038,99 @@ fn test_pipe_in_binary_with_safe_property_read() {
     insta::assert_snapshot!("pipe_in_binary_with_safe_property_read", js);
 }
 
+// ----------------------------------------------------------------------------
+// legacyOptionalChaining (Angular v22+): native `?.` vs legacy `== null ? null`
+// See issue #317 and angular/angular@2896c93cc1.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_safe_navigation_modern_interpolation_v22() {
+    // Angular v22+ emits native optional chaining, which yields `undefined`.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.name"), "expected native optional chaining, got:\n{js}");
+    assert!(!js.contains("== null"), "modern mode must not emit the legacy null ternary:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_chain_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.address?.city}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.address?.city"), "expected chained native `?.`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_mixed_chain_v22() {
+    // Only the safe steps become optional; the plain `.b` stays a normal read.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{a?.b.c?.d}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.a?.b.c?.d"), "expected mixed optional/plain chain, got:\n{js}");
+}
+
+#[test]
+fn test_safe_call_modern_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{getData?.()}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.getData?.()"), "expected native optional call, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_legacy_on_v21() {
+    // Pre-v22 keeps the legacy `== null ? null` expansion.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 0)),
+    );
+    assert!(js.contains("== null"), "v21 must use the legacy null ternary, got:\n{js}");
+    assert!(!js.contains("ctx.user?.name"), "v21 must not emit native optional chaining:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_migration_forces_legacy_on_v22() {
+    // The `$safeNavigationMigration(...)` magic function opts a subtree back into
+    // legacy null semantics even on a modern (v22) target, and is stripped from
+    // the output.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ $safeNavigationMigration(user?.name) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("== null"), "wrapped subtree must use the legacy null ternary, got:\n{js}");
+    assert!(
+        !js.contains("$safeNavigationMigration"),
+        "the migration wrapper must be stripped from the output:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_migration_ignores_qualified_call() {
+    // Only the *unqualified* `$safeNavigationMigration(...)` helper is magic. A
+    // method named `$safeNavigationMigration` on some object is a legitimate call
+    // and must be preserved (matching Angular, which keys on a bare lexical read).
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ svc.$safeNavigationMigration(user) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(
+        js.contains("$safeNavigationMigration"),
+        "a qualified `svc.$safeNavigationMigration(...)` call must not be stripped, got:\n{js}"
+    );
+}
+
 // ============================================================================
 // Event Modifier Tests
 // ============================================================================

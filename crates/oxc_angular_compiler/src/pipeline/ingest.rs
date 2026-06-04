@@ -122,6 +122,13 @@ pub struct IngestOptions<'a> {
     /// `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` for `@if`/`@switch` blocks.
     /// When `None`, assumes latest Angular version (v20+ behavior).
     pub angular_version: Option<crate::AngularVersion>,
+
+    /// Explicit override for the `legacyOptionalChaining` compiler option.
+    ///
+    /// When `None`, the safe-navigation default is derived from `angular_version`
+    /// (legacy `null` for < v22, native optional chaining for >= v22, legacy when
+    /// the version is unknown).
+    pub legacy_optional_chaining: Option<bool>,
 }
 
 impl Default for IngestOptions<'_> {
@@ -137,6 +144,7 @@ impl Default for IngestOptions<'_> {
             all_deferrable_deps_fn: None,
             pool_starting_index: 0,
             angular_version: None,
+            legacy_optional_chaining: None,
         }
     }
 }
@@ -432,6 +440,7 @@ fn convert_ast_to_ir<'a>(
                                 allocator,
                             ),
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -447,6 +456,7 @@ fn convert_ast_to_ir<'a>(
                         ResolvedPropertyReadExpr {
                             receiver,
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -467,6 +477,7 @@ fn convert_ast_to_ir<'a>(
                     ResolvedKeyedReadExpr {
                         receiver,
                         key,
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
                     allocator,
@@ -490,6 +501,7 @@ fn convert_ast_to_ir<'a>(
                     ResolvedCallExpr {
                         receiver,
                         args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
                     allocator,
@@ -793,6 +805,7 @@ pub fn ingest_component_with_options<'a>(
 
     // Set Angular version for feature-gated instruction selection
     job.angular_version = options.angular_version;
+    job.legacy_optional_chaining = options.legacy_optional_chaining;
 
     let root_xref = job.root.xref;
 
@@ -3819,6 +3832,7 @@ fn host_convert_ast_to_ir<'a>(
                         ResolvedPropertyReadExpr {
                             receiver,
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -3838,6 +3852,7 @@ fn host_convert_ast_to_ir<'a>(
                     ResolvedKeyedReadExpr {
                         receiver,
                         key,
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
                     allocator,
@@ -3860,6 +3875,7 @@ fn host_convert_ast_to_ir<'a>(
                     ResolvedCallExpr {
                         receiver,
                         args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
                     allocator,
@@ -3994,7 +4010,7 @@ pub fn ingest_host_binding<'a>(
     input: HostBindingInput<'a>,
     pool_starting_index: u32,
 ) -> HostBindingCompilationJob<'a> {
-    ingest_host_binding_with_version(allocator, input, pool_starting_index, None)
+    ingest_host_binding_with_version(allocator, input, pool_starting_index, None, None)
 }
 
 /// Ingest host bindings into a `HostBindingCompilationJob` with a specific Angular version.
@@ -4003,6 +4019,7 @@ pub fn ingest_host_binding_with_version<'a>(
     input: HostBindingInput<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> HostBindingCompilationJob<'a> {
     let mut job = HostBindingCompilationJob::with_pool_starting_index(
         allocator,
@@ -4011,6 +4028,7 @@ pub fn ingest_host_binding_with_version<'a>(
         pool_starting_index,
     );
     job.angular_version = angular_version;
+    job.legacy_optional_chaining = legacy_optional_chaining;
 
     // Ingest host properties
     for property in input.properties {

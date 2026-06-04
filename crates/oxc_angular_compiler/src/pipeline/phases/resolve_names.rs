@@ -428,6 +428,7 @@ fn resolve_expression<'a>(
                                 allocator,
                             ),
                             name: lexical.name.clone(),
+                            optional: false,
                             source_span: lexical.source_span,
                         },
                         allocator,
@@ -519,6 +520,7 @@ fn resolve_expression<'a>(
                                 allocator,
                             ),
                             name: name.clone(),
+                            optional: false,
                             source_span,
                         },
                         allocator,
@@ -937,6 +939,7 @@ fn resolve_angular_expression<'a>(
                             allocator,
                         ),
                         name: name.clone(),
+                        optional: false,
                         source_span,
                     },
                     allocator,
@@ -952,6 +955,7 @@ fn resolve_angular_expression<'a>(
                         ResolvedPropertyReadExpr {
                             receiver: Box::new_in(resolved_receiver, allocator),
                             name: prop_read.name.clone(),
+                            optional: false,
                             source_span: Some(prop_read.source_span.to_span()),
                         },
                         allocator,
@@ -1009,6 +1013,7 @@ fn resolve_angular_expression<'a>(
                     ResolvedCallExpr {
                         receiver: Box::new_in(receiver, allocator),
                         args: resolved_args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
                     allocator,
@@ -1044,6 +1049,7 @@ fn resolve_angular_expression<'a>(
                     ResolvedKeyedReadExpr {
                         receiver: Box::new_in(receiver, allocator),
                         key: Box::new_in(key, allocator),
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
                     allocator,

@@ -307,6 +307,8 @@ fn get_slot_dependency_from_ir_expr(expr: &IrExpression<'_>) -> Option<XrefId> {
         IrExpression::StoreLet(store_let) => Some(store_let.target),
         // SlotLiteral also depends on slot context (use target_xref if available)
         IrExpression::SlotLiteral(slot) => slot.target_xref,
+        // The $safeNavigationMigration wrapper just forwards to its inner expression.
+        IrExpression::SafeNavigationMigration(m) => get_slot_dependency_from_ir_expr(&m.expr),
         // Recursively check nested expressions
         IrExpression::PureFunction(pf) => {
             for arg in pf.args.iter() {

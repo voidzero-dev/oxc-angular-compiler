@@ -519,6 +519,9 @@ fn assign_var_offsets_in_expr(
                 assign_var_offsets_in_expr(inner, var_count, pure_functions_only);
             }
         }
+        IrExpression::SafeNavigationMigration(m) => {
+            assign_var_offsets_in_expr(&mut m.expr, var_count, pure_functions_only);
+        }
         IrExpression::SafePropertyRead(safe) => {
             assign_var_offsets_in_expr(&mut safe.receiver, var_count, pure_functions_only);
         }
