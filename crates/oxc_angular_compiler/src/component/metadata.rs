@@ -72,18 +72,6 @@ impl AngularVersion {
         self.major >= 22
     }
 
-    /// Check if this version emits control instructions for the extended set of
-    /// control properties (v22.0.0+).
-    ///
-    /// Angular v22 broadened `specializeControlProperties` beyond `formField`:
-    /// `formControl`, `formControlName`, and `ngModel` (including two-way
-    /// `[(ngModel)]`) now also emit the paired `ɵɵcontrolCreate()` /
-    /// `ɵɵcontrol()` instructions. Earlier versions only do this for `formField`,
-    /// so emitting the extra instructions against a < v22 runtime would diverge.
-    pub fn supports_extended_control_properties(&self) -> bool {
-        self.major >= 22
-    }
-
     /// Check if this version uses modern optional-chaining semantics (v22.0.0+).
     ///
     /// Angular v22 changed the safe-navigation operator (`?.`) in template

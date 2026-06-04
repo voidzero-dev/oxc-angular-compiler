@@ -16,7 +16,6 @@ function TodoListComponent_For_7_Template(rf,ctx) {
       return i0.ɵɵresetView($event);
     });
     i0.ɵɵelementEnd();
-    i0.ɵɵcontrolCreate();
     i0.ɵɵtext(4,"\n                ");
     i0.ɵɵelementStart(5,"span");
     i0.ɵɵtext(6);
@@ -40,7 +39,6 @@ function TodoListComponent_For_7_Template(rf,ctx) {
     i0.ɵɵclassProp("completed",todo_r2.done);
     i0.ɵɵadvance(2);
     i0.ɵɵtwoWayProperty("ngModel",todo_r2.done);
-    i0.ɵɵcontrol();
     i0.ɵɵadvance(3);
     i0.ɵɵtextInterpolate(todo_r2.text);
   }
@@ -70,7 +68,6 @@ function TodoListComponent_Template(rf,ctx) {
       return ctx.addTodo();
     });
     i0.ɵɵelementEnd();
-    i0.ɵɵcontrolCreate();
     i0.ɵɵtext(5,"\n        ");
     i0.ɵɵrepeaterCreate(6,TodoListComponent_For_7_Template,12,4,null,null,_forTrack0,
         false,TodoListComponent_ForEmpty_8_Template,4,0);
@@ -80,7 +77,6 @@ function TodoListComponent_Template(rf,ctx) {
     i0.ɵɵtextInterpolate(ctx.title);
     i0.ɵɵadvance(2);
     i0.ɵɵtwoWayProperty("ngModel",ctx.newTodo);
-    i0.ɵɵcontrol();
     i0.ɵɵadvance(2);
     i0.ɵɵrepeater(ctx.todos);
   }

@@ -88,10 +88,6 @@ fn split_ns_name(name: &str) -> (Option<&str>, &str) {
 pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
     let mode = job.mode;
-    // v22 broadened control-property specialization beyond `formField`. Default to
-    // the latest behaviour when the target version is unknown.
-    let extended_controls =
-        job.angular_version.map_or(true, |v| v.supports_extended_control_properties());
 
     // First pass: Build element map from create operations
     let mut elements: FxHashMap<XrefId, ElementInfo> = FxHashMap::default();
@@ -117,13 +113,13 @@ pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
 
     // Process root view
     let root_non_bindable =
-        specialize_in_view(&mut job.root.update, allocator, &elements, mode, extended_controls);
+        specialize_in_view(&mut job.root.update, allocator, &elements, mode);
     all_non_bindable.extend(root_non_bindable);
 
     // Process embedded views
     for view in job.views.values_mut() {
         let view_non_bindable =
-            specialize_in_view(&mut view.update, allocator, &elements, mode, extended_controls);
+            specialize_in_view(&mut view.update, allocator, &elements, mode);
         all_non_bindable.extend(view_non_bindable);
     }
 
@@ -191,7 +187,6 @@ fn specialize_in_view<'a>(
     allocator: &'a oxc_allocator::Allocator,
     _elements: &FxHashMap<XrefId, ElementInfo>,
     mode: TemplateCompilationMode,
-    extended_controls: bool,
 ) -> Vec<XrefId> {
     // Track ops to remove (ngNonBindable)
     let mut to_remove: Vec<std::ptr::NonNull<UpdateOp<'a>>> = Vec::new();
@@ -307,18 +302,11 @@ fn specialize_in_view<'a>(
                             });
                             cursor.replace_current(new_op);
                         }
-                    } else if name.as_str() == "formField"
-                        || (extended_controls
-                            && matches!(
-                                name.as_str(),
-                                "formControl" | "formControlName" | "ngModel"
-                            ))
-                    {
-                        // A control property (`[formField]`, `[formControl]`,
-                        // `[formControlName]`, `[ngModel]`) still binds as a regular property,
+                    } else if name.as_str() == "formField" {
+                        // A control property (`[formField]`) still binds as a regular property,
                         // but Angular also emits a separate control instruction
-                        // (`ɵɵcontrol()`) after the property update. `formField` is the v21
-                        // baseline; the rest were added in v22 (`extended_controls`).
+                        // (`ɵɵcontrol()`) after the property update. This is ONLY for
+                        // signal-based form directives, not legacy forms (ngModel, formControl, etc.).
                         if let Some(UpdateOp::Binding(binding)) = cursor.current_mut() {
                             let expression = std::mem::replace(
                                 &mut binding.expression,
@@ -390,20 +378,6 @@ fn specialize_in_view<'a>(
                             sanitizer: None,
                         });
                         cursor.replace_current(new_op);
-                        // Angular v22: a two-way `[(ngModel)]` is a control property, so it
-                        // also emits a control update instruction (`ɵɵcontrol()`) after the
-                        // two-way property update (paired with the `ɵɵcontrolCreate()` added
-                        // during ingest). Gated to v22+ via `extended_controls`.
-                        if extended_controls && name.as_str() == "ngModel" {
-                            let control_op = UpdateOp::Control(ControlOp {
-                                base: UpdateOpBase { source_span, ..Default::default() },
-                                target,
-                                name,
-                                expression: create_placeholder_expression(allocator),
-                                security_context,
-                            });
-                            cursor.insert_after(control_op);
-                        }
                     }
                 }
                 BindingKind::I18n | BindingKind::ClassName | BindingKind::StyleProperty => {
