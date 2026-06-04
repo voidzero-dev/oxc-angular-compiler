@@ -377,6 +377,7 @@ impl<'a> WhitespaceVisitor<'a> {
             end_span: el.end_span,
             is_self_closing: el.is_self_closing,
             is_void: el.is_void,
+            is_component: el.is_component,
         }
     }
 
@@ -570,6 +571,7 @@ impl<'a> WhitespaceVisitor<'a> {
                     end_span: element.end_span,
                     is_self_closing: element.is_self_closing,
                     is_void: element.is_void,
+                    is_component: element.is_component,
                 },
                 self.allocator,
             )));
@@ -591,6 +593,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 end_span: element.end_span,
                 is_self_closing: element.is_self_closing,
                 is_void: element.is_void,
+                is_component: element.is_component,
             },
             self.allocator,
         )))

@@ -675,6 +675,25 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for group in &block.groups {
             self.visit_switch_block_case_group(group);
         }
+        // Angular v21.2.7 exhaustive-switch feature: emit the `@default never;`
+        // marker after the case groups (matching upstream `block.exhaustiveCheck?.visit`).
+        if let Some(exhaustive_check) = &block.exhaustive_check {
+            self.visit_switch_exhaustive_check(exhaustive_check);
+        }
+    }
+
+    fn visit_switch_exhaustive_check(
+        &mut self,
+        check: &oxc_angular_compiler::ast::r3::R3SwitchExhaustiveCheck,
+    ) {
+        let row = if self.mode == HumanizeMode::SourceSpans {
+            let source_span = self.span_text(&check.source_span);
+            let start_span = self.span_text(&check.start_source_span);
+            vec!["SwitchExhaustiveCheck".to_string(), source_span, start_span]
+        } else {
+            vec!["SwitchExhaustiveCheck".to_string()]
+        };
+        self.result.push(row);
     }
 
     fn visit_switch_block_case_group(

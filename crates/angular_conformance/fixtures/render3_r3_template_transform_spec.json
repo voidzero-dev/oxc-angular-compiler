@@ -1,6 +1,6 @@
 {
   "name": "r3_template_transform_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_template_transform_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_template_transform_spec.ts",
   "test_groups": [
     {
       "name": "R3 template transform",
@@ -27,7 +27,12 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<a",
-                  "expected": [["Element", "a"]],
+                  "expected": [
+                    [
+                      "Element",
+                      "a"
+                    ]
+                  ],
                   "ignore_error": true
                 }
               ]
@@ -40,8 +45,14 @@
                   "type": "ExpectFromHtml",
                   "input": "<a <span></span>",
                   "expected": [
-                    ["Element", "a"],
-                    ["Element", "span"]
+                    [
+                      "Element",
+                      "a"
+                    ],
+                    [
+                      "Element",
+                      "span"
+                    ]
                   ],
                   "ignore_error": true
                 }
@@ -54,7 +65,12 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "a",
-                  "expected": [["Text", "a"]],
+                  "expected": [
+                    [
+                      "Text",
+                      "a"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -67,8 +83,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div a=b></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "a", "b"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "a",
+                      "b"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -87,8 +110,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<ng-content select=\"a\">    \n   </ng-content>",
                   "expected": [
-                    ["Content", "a"],
-                    ["TextAttribute", "select", "a"]
+                    [
+                      "Content",
+                      "a"
+                    ],
+                    [
+                      "TextAttribute",
+                      "select",
+                      "a"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -102,9 +132,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<svg><ng-content select=\"a\"></ng-content></svg>",
                   "expected": [
-                    ["Element", ":svg:svg"],
-                    ["Content", "a"],
-                    ["TextAttribute", "select", "a"]
+                    [
+                      "Element",
+                      ":svg:svg"
+                    ],
+                    [
+                      "Content",
+                      "a"
+                    ],
+                    [
+                      "TextAttribute",
+                      "select",
+                      "a"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -128,7 +168,12 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "{{a}}",
-                  "expected": [["BoundText", "{{ a }}"]],
+                  "expected": [
+                    [
+                      "BoundText",
+                      "{{ a }}"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -147,8 +192,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [someProp]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "someProp", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "someProp",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -162,8 +215,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div bind-prop=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "prop", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "prop",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -182,8 +243,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div prop=\"{{v}}\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "prop", "{{ v }}"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "prop",
+                      "{{ v }}"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -197,8 +266,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [some-prop]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "some-prop", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "some-prop",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -212,8 +289,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [d.ot]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "d.ot", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "d.ot",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -227,8 +312,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [mappedAttr]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 0, "mappedAttr", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "mappedAttr",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -242,8 +335,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [attr.someAttr]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 1, "someAttr", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      1,
+                      "someAttr",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -257,8 +358,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [class.some-class]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 2, "some-class", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      2,
+                      "some-class",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -272,8 +381,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [class.someClass]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 2, "someClass", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      2,
+                      "someClass",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -287,8 +404,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [style.someStyle]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 3, "someStyle", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      3,
+                      "someStyle",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -302,11 +427,34 @@
                   "type": "ExpectFromHtml",
                   "input": "<foo [class.text-primary/80]=\"expr\" [class.data-active:text-green-300/80]=\"expr2\" [class.data-[size='large']:p-8] = \"expr3\" some-attr/>",
                   "expected": [
-                    ["Element", "foo", "#selfClosing"],
-                    ["TextAttribute", "some-attr", ""],
-                    ["BoundAttribute", 2, "text-primary/80", "expr"],
-                    ["BoundAttribute", 2, "data-active:text-green-300/80", "expr2"],
-                    ["BoundAttribute", 2, "data-[size='large']:p-8", "expr3"]
+                    [
+                      "Element",
+                      "foo",
+                      "#selfClosing"
+                    ],
+                    [
+                      "TextAttribute",
+                      "some-attr",
+                      ""
+                    ],
+                    [
+                      "BoundAttribute",
+                      2,
+                      "text-primary/80",
+                      "expr"
+                    ],
+                    [
+                      "BoundAttribute",
+                      2,
+                      "data-active:text-green-300/80",
+                      "expr2"
+                    ],
+                    [
+                      "BoundAttribute",
+                      2,
+                      "data-[size='large']:p-8",
+                      "expr3"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -326,8 +474,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div animate.enter=\"foo\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "animate.enter", "foo"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "animate.enter",
+                      "foo"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -335,8 +490,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [animate.enter]=\"['foo', 'bar']\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 6.0, "animate.enter", "[\"foo\", \"bar\"]"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      6.0,
+                      "animate.enter",
+                      "[\"foo\", \"bar\"]"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -344,8 +507,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (animate.enter)=\"animateFn($event)\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 3.0, "animate.enter", null, "animateFn($event)"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      3.0,
+                      "animate.enter",
+                      null,
+                      "animateFn($event)"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -359,8 +531,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div animate.leave=\"foo\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "animate.leave", "foo"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "animate.leave",
+                      "foo"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -368,8 +547,16 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [animate.leave]=\"['foo', 'bar']\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 6.0, "animate.leave", "[\"foo\", \"bar\"]"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      6.0,
+                      "animate.leave",
+                      "[\"foo\", \"bar\"]"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -377,8 +564,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (animate.leave)=\"animateFn($event)\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 3.0, "animate.leave", null, "animateFn($event)"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      3.0,
+                      "animate.leave",
+                      null,
+                      "animateFn($event)"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -386,8 +582,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (animateXYZ)=\"animateFn()\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 0.0, "animateXYZ", null, "animateFn()"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      0.0,
+                      "animateXYZ",
+                      null,
+                      "animateFn()"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -406,7 +611,20 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<div *ngIf></div>",
-                  "expected": [["Template"], ["TextAttribute", "ngIf", ""], ["Element", "div"]],
+                  "expected": [
+                    [
+                      "Template"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngIf",
+                      ""
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -418,7 +636,11 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<ng-template></ng-template>",
-                  "expected": [["Template"]],
+                  "expected": [
+                    [
+                      "Template"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -430,7 +652,15 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<svg><ng-template></ng-template></svg>",
-                  "expected": [["Element", ":svg:svg"], ["Template"]],
+                  "expected": [
+                    [
+                      "Element",
+                      ":svg:svg"
+                    ],
+                    [
+                      "Template"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -442,7 +672,20 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<ng-template *ngIf=\"true\"></ng-template>",
-                  "expected": [["Template"], ["BoundAttribute", 0.0, "ngIf", "true"], ["Template"]],
+                  "expected": [
+                    [
+                      "Template"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "ngIf",
+                      "true"
+                    ],
+                    [
+                      "Template"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -454,7 +697,16 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<ng-template #a></ng-template>",
-                  "expected": [["Template"], ["Reference", "a", ""]],
+                  "expected": [
+                    [
+                      "Template"
+                    ],
+                    [
+                      "Reference",
+                      "a",
+                      ""
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -466,7 +718,16 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<ng-template ref-a></ng-template>",
-                  "expected": [["Template"], ["Reference", "a", ""]],
+                  "expected": [
+                    [
+                      "Template"
+                    ],
+                    [
+                      "Reference",
+                      "a",
+                      ""
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -483,7 +744,16 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<ng-template let-a=\"b\"></ng-template>",
-                  "expected": [["Template"], ["Variable", "a", "b"]],
+                  "expected": [
+                    [
+                      "Template"
+                    ],
+                    [
+                      "Variable",
+                      "a",
+                      "b"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -496,9 +766,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<ng-template k1=\"v1\" k2=\"v2\"></ng-template>",
                   "expected": [
-                    ["Template"],
-                    ["TextAttribute", "k1", "v1"],
-                    ["TextAttribute", "k2", "v2"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "TextAttribute",
+                      "k1",
+                      "v1"
+                    ],
+                    [
+                      "TextAttribute",
+                      "k2",
+                      "v2"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -512,9 +792,21 @@
                   "type": "ExpectFromHtml",
                   "input": "<ng-template [k1]=\"v1\" [k2]=\"v2\"></ng-template>",
                   "expected": [
-                    ["Template"],
-                    ["BoundAttribute", 0, "k1", "v1"],
-                    ["BoundAttribute", 0, "k2", "v2"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "k1",
+                      "v1"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "k2",
+                      "v2"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -534,11 +826,29 @@
                   "type": "ExpectFromHtml",
                   "input": "<div *ngFor=\"let item of items\"></div>",
                   "expected": [
-                    ["Template"],
-                    ["TextAttribute", "ngFor", ""],
-                    ["BoundAttribute", 0, "ngForOf", "items"],
-                    ["Variable", "item", "$implicit"],
-                    ["Element", "div"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngFor",
+                      ""
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "ngForOf",
+                      "items"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -546,10 +856,25 @@
                   "type": "ExpectFromHtml",
                   "input": "<div *ngFor=\"item of items\"></div>",
                   "expected": [
-                    ["Template"],
-                    ["BoundAttribute", 0, "ngFor", "item"],
-                    ["BoundAttribute", 0, "ngForOf", "items"],
-                    ["Element", "div"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "ngFor",
+                      "item"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "ngForOf",
+                      "items"
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -563,10 +888,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div *ngIf=\"let a=b\"></div>",
                   "expected": [
-                    ["Template"],
-                    ["TextAttribute", "ngIf", ""],
-                    ["Variable", "a", "b"],
-                    ["Element", "div"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngIf",
+                      ""
+                    ],
+                    [
+                      "Variable",
+                      "a",
+                      "b"
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -580,10 +918,24 @@
                   "type": "ExpectFromHtml",
                   "input": "<div *ngIf=\"expr as local\"></div>",
                   "expected": [
-                    ["Template"],
-                    ["BoundAttribute", 0, "ngIf", "expr"],
-                    ["Variable", "local", "ngIf"],
-                    ["Element", "div"]
+                    [
+                      "Template"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0,
+                      "ngIf",
+                      "expr"
+                    ],
+                    [
+                      "Variable",
+                      "local",
+                      "ngIf"
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -603,8 +955,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (window:event)=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 0, "event", "window", "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      0,
+                      "event",
+                      "window",
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -618,8 +979,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (some-event)=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 0, "some-event", null, "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      0,
+                      "some-event",
+                      null,
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -627,8 +997,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (someEvent)=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 0, "someEvent", null, "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      0,
+                      "someEvent",
+                      null,
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -642,8 +1021,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div on-event=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 0, "event", null, "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      0,
+                      "event",
+                      null,
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -662,9 +1050,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "v"],
-                    ["BoundEvent", 2, "propChange", null, "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "v"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -678,9 +1080,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"$any(v)\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "$any(v)"],
-                    ["BoundEvent", 2, "propChange", null, "$any(v)"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "$any(v)"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "$any(v)"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -694,9 +1110,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div bindon-prop=\"v\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "v"],
-                    ["BoundEvent", 2, "propChange", null, "v"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "v"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "v"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -710,9 +1140,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"v!\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "v!"],
-                    ["BoundEvent", 2, "propChange", null, "v!"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "v!"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "v!"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -726,9 +1170,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"a.b.c\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "a.b.c"],
-                    ["BoundEvent", 2, "propChange", null, "a.b.c"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "a.b.c"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "a.b.c"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -742,9 +1200,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div [(prop)]=\"a['b']['c']\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundAttribute", 5, "prop", "a[\"b\"][\"c\"]"],
-                    ["BoundEvent", 2, "propChange", null, "a[\"b\"][\"c\"]"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundAttribute",
+                      5,
+                      "prop",
+                      "a[\"b\"][\"c\"]"
+                    ],
+                    [
+                      "BoundEvent",
+                      2,
+                      "propChange",
+                      null,
+                      "a[\"b\"][\"c\"]"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -788,8 +1260,17 @@
                   "type": "ExpectFromHtml",
                   "input": "<div (@)=\"onAnimationEvent($event)\"></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["BoundEvent", 1, "", null, "onAnimationEvent($event)"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "BoundEvent",
+                      1,
+                      "",
+                      null,
+                      "onAnimationEvent($event)"
+                    ]
                   ],
                   "ignore_error": true
                 }
@@ -830,8 +1311,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div #a></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["Reference", "a", ""]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "Reference",
+                      "a",
+                      ""
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -845,8 +1333,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ref-a></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["Reference", "a", ""]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "Reference",
+                      "a",
+                      ""
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -860,8 +1355,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<div #someA></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["Reference", "someA", ""]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "Reference",
+                      "someA",
+                      ""
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -953,7 +1455,12 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<script></script>a",
-                  "expected": [["Text", "a"]],
+                  "expected": [
+                    [
+                      "Text",
+                      "a"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -965,7 +1472,12 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "<style></style>a",
-                  "expected": [["Text", "a"]],
+                  "expected": [
+                    [
+                      "Text",
+                      "a"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -984,9 +1496,20 @@
                   "type": "ExpectFromHtml",
                   "input": "<link rel=\"stylesheet\" href=\"http://someurl\">",
                   "expected": [
-                    ["Element", "link"],
-                    ["TextAttribute", "rel", "stylesheet"],
-                    ["TextAttribute", "href", "http://someurl"]
+                    [
+                      "Element",
+                      "link"
+                    ],
+                    [
+                      "TextAttribute",
+                      "rel",
+                      "stylesheet"
+                    ],
+                    [
+                      "TextAttribute",
+                      "href",
+                      "http://someurl"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -994,9 +1517,20 @@
                   "type": "ExpectFromHtml",
                   "input": "<link REL=\"stylesheet\" href=\"http://someurl\">",
                   "expected": [
-                    ["Element", "link"],
-                    ["TextAttribute", "REL", "stylesheet"],
-                    ["TextAttribute", "href", "http://someurl"]
+                    [
+                      "Element",
+                      "link"
+                    ],
+                    [
+                      "TextAttribute",
+                      "REL",
+                      "stylesheet"
+                    ],
+                    [
+                      "TextAttribute",
+                      "href",
+                      "http://someurl"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1010,8 +1544,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<link rel=\"stylesheet\">",
                   "expected": [
-                    ["Element", "link"],
-                    ["TextAttribute", "rel", "stylesheet"]
+                    [
+                      "Element",
+                      "link"
+                    ],
+                    [
+                      "TextAttribute",
+                      "rel",
+                      "stylesheet"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -1019,8 +1560,15 @@
                   "type": "ExpectFromHtml",
                   "input": "<link REL=\"stylesheet\">",
                   "expected": [
-                    ["Element", "link"],
-                    ["TextAttribute", "REL", "stylesheet"]
+                    [
+                      "Element",
+                      "link"
+                    ],
+                    [
+                      "TextAttribute",
+                      "REL",
+                      "stylesheet"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1058,9 +1606,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable>{{b}}</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Text", "{{b}}"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Text",
+                      "{{b}}"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1074,10 +1632,23 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable><span>{{b}}</span></div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Element", "span"],
-                    ["Text", "{{b}}"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Element",
+                      "span"
+                    ],
+                    [
+                      "Text",
+                      "{{b}}"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1091,9 +1662,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable><script></script>a</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Text", "a"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Text",
+                      "a"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1107,9 +1688,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable><style></style>a</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Text", "a"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Text",
+                      "a"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1123,9 +1714,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable><link rel=\"stylesheet\">a</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Text", "a"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Text",
+                      "a"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1386,7 +1987,15 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@defer{hello}",
-                  "expected": [["DeferredBlock"], ["Text", "hello"]],
+                  "expected": [
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -1399,9 +2008,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (when isVisible() && loaded){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["BoundDeferredTrigger", "isVisible() && loaded"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "isVisible() && loaded"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1414,7 +2031,18 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle){hello}",
-                  "expected": [["DeferredBlock"], ["IdleDeferredTrigger"], ["Text", "hello"]],
+                  "expected": [
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -1427,10 +2055,20 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle, viewport(button)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1444,11 +2082,23 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle, viewport(button), immediate){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["ImmediateDeferredTrigger"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "ImmediateDeferredTrigger"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1462,12 +2112,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (when isVisible(); on timer(100ms), idle, viewport(button)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["BoundDeferredTrigger", "isVisible()"],
-                    ["TimerDeferredTrigger", 100.0],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "isVisible()"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      100.0
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1481,12 +2147,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer(\nwhen\nisVisible(); on\ntimer(100ms),\nidle, viewport(button)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["BoundDeferredTrigger", "isVisible()"],
-                    ["TimerDeferredTrigger", 100.0],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "isVisible()"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      100.0
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1500,9 +2182,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on timer(10s)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["TimerDeferredTrigger", 10000.0],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      10000.0
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1516,9 +2206,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on timer(1.5s)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["TimerDeferredTrigger", 1500.0],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      1500.0
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1532,9 +2230,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on timer(100)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["TimerDeferredTrigger", 100.0],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      100.0
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1548,9 +2254,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on hover(button)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["HoverDeferredTrigger", "button"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1564,9 +2278,17 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on interaction(button)){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["InteractionDeferredTrigger", "button"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "InteractionDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1580,15 +2302,41 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer {<calendar-cmp [date]=\"current\"/>}@loading {Loading...}@placeholder {Placeholder content!}@error {Loading failed :(}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["BoundAttribute", 0.0, "date", "current"],
-                    ["DeferredBlockPlaceholder"],
-                    ["Text", "Placeholder content!"],
-                    ["DeferredBlockLoading"],
-                    ["Text", "Loading..."],
-                    ["DeferredBlockError"],
-                    ["Text", "Loading failed :("]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "date",
+                      "current"
+                    ],
+                    [
+                      "DeferredBlockPlaceholder"
+                    ],
+                    [
+                      "Text",
+                      "Placeholder content!"
+                    ],
+                    [
+                      "DeferredBlockLoading"
+                    ],
+                    [
+                      "Text",
+                      "Loading..."
+                    ],
+                    [
+                      "DeferredBlockError"
+                    ],
+                    [
+                      "Text",
+                      "Loading failed :("
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1602,15 +2350,41 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer {<calendar-cmp [date]=\"current\"/>}<!-- Show this while loading --> @loading {Loading...}<!-- Show this on the server --> @placeholder {Placeholder content!}<!-- Show this on error --> @error {Loading failed :(}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["BoundAttribute", 0.0, "date", "current"],
-                    ["DeferredBlockPlaceholder"],
-                    ["Text", "Placeholder content!"],
-                    ["DeferredBlockLoading"],
-                    ["Text", "Loading..."],
-                    ["DeferredBlockError"],
-                    ["Text", "Loading failed :("]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "date",
+                      "current"
+                    ],
+                    [
+                      "DeferredBlockPlaceholder"
+                    ],
+                    [
+                      "Text",
+                      "Placeholder content!"
+                    ],
+                    [
+                      "DeferredBlockLoading"
+                    ],
+                    [
+                      "Text",
+                      "Loading..."
+                    ],
+                    [
+                      "DeferredBlockError"
+                    ],
+                    [
+                      "Text",
+                      "Loading failed :("
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1629,11 +2403,29 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer{<calendar-cmp [date]=\"current\"/>}@loading (after 100ms; minimum 1.5s){Loading...}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["BoundAttribute", 0.0, "date", "current"],
-                    ["DeferredBlockLoading", "after 100ms", "minimum 1500ms"],
-                    ["Text", "Loading..."]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "date",
+                      "current"
+                    ],
+                    [
+                      "DeferredBlockLoading",
+                      "after 100ms",
+                      "minimum 1500ms"
+                    ],
+                    [
+                      "Text",
+                      "Loading..."
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1647,11 +2439,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer {<calendar-cmp [date]=\"current\"/>}@placeholder (minimum 1.5s){Placeholder...}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["BoundAttribute", 0.0, "date", "current"],
-                    ["DeferredBlockPlaceholder", "minimum 1500ms"],
-                    ["Text", "Placeholder..."]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "date",
+                      "current"
+                    ],
+                    [
+                      "DeferredBlockPlaceholder",
+                      "minimum 1500ms"
+                    ],
+                    [
+                      "Text",
+                      "Placeholder..."
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1665,12 +2474,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle; prefetch on viewport(button), hover(button); prefetch when shouldPrefetch()){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["HoverDeferredTrigger", "button"],
-                    ["BoundDeferredTrigger", "shouldPrefetch()"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "shouldPrefetch()"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1684,12 +2509,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle; prefetch         on viewport(button), hover(button); prefetch    when shouldPrefetch()){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["IdleDeferredTrigger"],
-                    ["ViewportDeferredTrigger", "button"],
-                    ["HoverDeferredTrigger", "button"],
-                    ["BoundDeferredTrigger", "shouldPrefetch()"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "shouldPrefetch()"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1703,10 +2544,19 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle; hydrate never){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["NeverDeferredTrigger"],
-                    ["IdleDeferredTrigger"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "NeverDeferredTrigger"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1720,13 +2570,32 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle; hydrate on viewport, hover, timer(500); hydrate when shouldHydrate()){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["ViewportDeferredTrigger", null],
-                    ["HoverDeferredTrigger", null],
-                    ["TimerDeferredTrigger", 500.0],
-                    ["BoundDeferredTrigger", "shouldHydrate()"],
-                    ["IdleDeferredTrigger"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      500.0
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "shouldHydrate()"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1740,12 +2609,28 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on idle; hydrate         on viewport, hover; hydrate    when shouldHydrate()){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["ViewportDeferredTrigger", null],
-                    ["HoverDeferredTrigger", null],
-                    ["BoundDeferredTrigger", "shouldHydrate()"],
-                    ["IdleDeferredTrigger"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "shouldHydrate()"
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1759,26 +2644,85 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (when isVisible() && foo; on hover(button), timer(10s), idle, immediate, interaction(button), viewport(container); prefetch on immediate; prefetch when isDataLoaded(); hydrate when shouldHydrate(); hydrate on viewport){<calendar-cmp [date]=\"current\"/>}@loading (minimum 1s; after 100ms){Loading...}@placeholder (minimum 500){Placeholder content!}@error {Loading failed :(}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["BoundDeferredTrigger", "shouldHydrate()"],
-                    ["ViewportDeferredTrigger", null],
-                    ["BoundDeferredTrigger", "isVisible() && foo"],
-                    ["HoverDeferredTrigger", "button"],
-                    ["TimerDeferredTrigger", 10000.0],
-                    ["IdleDeferredTrigger"],
-                    ["ImmediateDeferredTrigger"],
-                    ["InteractionDeferredTrigger", "button"],
-                    ["ViewportDeferredTrigger", "container"],
-                    ["ImmediateDeferredTrigger"],
-                    ["BoundDeferredTrigger", "isDataLoaded()"],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["BoundAttribute", 0.0, "date", "current"],
-                    ["DeferredBlockPlaceholder", "minimum 500ms"],
-                    ["Text", "Placeholder content!"],
-                    ["DeferredBlockLoading", "after 100ms", "minimum 1000ms"],
-                    ["Text", "Loading..."],
-                    ["DeferredBlockError"],
-                    ["Text", "Loading failed :("]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "shouldHydrate()"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "isVisible() && foo"
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "TimerDeferredTrigger",
+                      10000.0
+                    ],
+                    [
+                      "IdleDeferredTrigger"
+                    ],
+                    [
+                      "ImmediateDeferredTrigger"
+                    ],
+                    [
+                      "InteractionDeferredTrigger",
+                      "button"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      "container"
+                    ],
+                    [
+                      "ImmediateDeferredTrigger"
+                    ],
+                    [
+                      "BoundDeferredTrigger",
+                      "isDataLoaded()"
+                    ],
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "BoundAttribute",
+                      0.0,
+                      "date",
+                      "current"
+                    ],
+                    [
+                      "DeferredBlockPlaceholder",
+                      "minimum 500ms"
+                    ],
+                    [
+                      "Text",
+                      "Placeholder content!"
+                    ],
+                    [
+                      "DeferredBlockLoading",
+                      "after 100ms",
+                      "minimum 1000ms"
+                    ],
+                    [
+                      "Text",
+                      "Loading..."
+                    ],
+                    [
+                      "DeferredBlockError"
+                    ],
+                    [
+                      "Text",
+                      "Loading failed :("
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1792,24 +2736,69 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable>@defer (when isVisible() && foo; on hover(button), timer(10s), idle, immediate, interaction(button), viewport(container); prefetch on immediate; prefetch when isDataLoaded(); hydrate when shouldHydrate(); hydrate on viewport){<calendar-cmp [date]=\"current\"/>}@loading (minimum 1s; after 100ms){Loading...}@placeholder (minimum 500){Placeholder content!}@error {Loading failed :(}</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
                     [
                       "Text",
                       "@defer (when isVisible() && foo; on hover(button), timer(10s), idle, immediate, interaction(button), viewport(container); prefetch on immediate; prefetch when isDataLoaded(); hydrate when shouldHydrate(); hydrate on viewport){"
                     ],
-                    ["Element", "calendar-cmp", "#selfClosing"],
-                    ["TextAttribute", "[date]", "current"],
-                    ["Text", "}"],
-                    ["Text", "@loading (minimum 1s; after 100ms){"],
-                    ["Text", "Loading..."],
-                    ["Text", "}"],
-                    ["Text", "@placeholder (minimum 500){"],
-                    ["Text", "Placeholder content!"],
-                    ["Text", "}"],
-                    ["Text", "@error {"],
-                    ["Text", "Loading failed :("],
-                    ["Text", "}"]
+                    [
+                      "Element",
+                      "calendar-cmp",
+                      "#selfClosing"
+                    ],
+                    [
+                      "TextAttribute",
+                      "[date]",
+                      "current"
+                    ],
+                    [
+                      "Text",
+                      "}"
+                    ],
+                    [
+                      "Text",
+                      "@loading (minimum 1s; after 100ms){"
+                    ],
+                    [
+                      "Text",
+                      "Loading..."
+                    ],
+                    [
+                      "Text",
+                      "}"
+                    ],
+                    [
+                      "Text",
+                      "@placeholder (minimum 500){"
+                    ],
+                    [
+                      "Text",
+                      "Placeholder content!"
+                    ],
+                    [
+                      "Text",
+                      "}"
+                    ],
+                    [
+                      "Text",
+                      "@error {"
+                    ],
+                    [
+                      "Text",
+                      "Loading failed :("
+                    ],
+                    [
+                      "Text",
+                      "}"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1823,16 +2812,45 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on hover, interaction, viewport; prefetch on hover, interaction, viewport) {hello}@placeholder {<implied-trigger/>}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["HoverDeferredTrigger", null],
-                    ["InteractionDeferredTrigger", null],
-                    ["ViewportDeferredTrigger", null],
-                    ["HoverDeferredTrigger", null],
-                    ["InteractionDeferredTrigger", null],
-                    ["ViewportDeferredTrigger", null],
-                    ["Text", "hello"],
-                    ["DeferredBlockPlaceholder"],
-                    ["Element", "implied-trigger", "#selfClosing"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "InteractionDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "HoverDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "InteractionDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ],
+                    [
+                      "DeferredBlockPlaceholder"
+                    ],
+                    [
+                      "Element",
+                      "implied-trigger",
+                      "#selfClosing"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1846,13 +2864,18 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on viewport({trigger: foo, rootMargin: \"123px\", threshold: [1, 2, 3]})){hello}",
                   "expected": [
-                    ["DeferredBlock"],
+                    [
+                      "DeferredBlock"
+                    ],
                     [
                       "ViewportDeferredTrigger",
                       "foo",
                       "{rootMargin: \"123px\", threshold: [1, 2, 3]}"
                     ],
-                    ["Text", "hello"]
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1866,9 +2889,18 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on viewport({rootMargin: \"123px\"})){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["ViewportDeferredTrigger", null, "{rootMargin: \"123px\"}"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null,
+                      "{rootMargin: \"123px\"}"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -1876,9 +2908,18 @@
                   "type": "ExpectFromHtml",
                   "input": "@defer (on viewport({rootMargin: \"123px\"})){hello}",
                   "expected": [
-                    ["DeferredBlock"],
-                    ["ViewportDeferredTrigger", null, "{rootMargin: \"123px\"}"],
-                    ["Text", "hello"]
+                    [
+                      "DeferredBlock"
+                    ],
+                    [
+                      "ViewportDeferredTrigger",
+                      null,
+                      "{rootMargin: \"123px\"}"
+                    ],
+                    [
+                      "Text",
+                      "hello"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1942,6 +2983,26 @@
                   "name": "should report if a default block has parameters",
                   "path": "R3 template transform/switch blocks/validations/should report if a default block has parameters",
                   "assertions": []
+                },
+                {
+                  "name": "should report if in a @switch block a @default never block has a body",
+                  "path": "R3 template transform/switch blocks/validations/should report if in a @switch block a @default never block has a body",
+                  "assertions": []
+                },
+                {
+                  "name": "should report if a switch fallthrough case is followed by a @default never block",
+                  "path": "R3 template transform/switch blocks/validations/should report if a switch fallthrough case is followed by a @default never block",
+                  "assertions": []
+                },
+                {
+                  "name": "should throw if @default never is not the last case in a switch block",
+                  "path": "R3 template transform/switch blocks/validations/should throw if @default never is not the last case in a switch block",
+                  "assertions": []
+                },
+                {
+                  "name": "should throw if a semicolon is missing after @default never",
+                  "path": "R3 template transform/switch blocks/validations/should throw if a semicolon is missing after @default never",
+                  "assertions": []
                 }
               ]
             }
@@ -1955,20 +3016,78 @@
                   "type": "ExpectFromHtml",
                   "input": "\n          @switch (cond.kind) {\n            @case (x()) { X case }\n            @case ('hello') {<button>Y case</button>}\n            @case (42) { Z case }\n            @default { No case matched }\n          }\n        ",
                   "expected": [
-                    ["SwitchBlock", "cond.kind"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "x()"],
-                    ["Text", " X case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"hello\""],
-                    ["Element", "button"],
-                    ["Text", "Y case"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "42"],
-                    ["Text", " Z case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["Text", " No case matched "]
+                    [
+                      "SwitchBlock",
+                      "cond.kind"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "x()"
+                    ],
+                    [
+                      "Text",
+                      " X case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"hello\""
+                    ],
+                    [
+                      "Element",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "Y case"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "42"
+                    ],
+                    [
+                      "Text",
+                      " Z case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " No case matched "
+                    ]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "should parse a switch block with a default never case",
+              "path": "R3 template transform/switch blocks/should parse a switch block with a default never case",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n          @switch (cond.kind) {\n            @default never;\n          }\n        ",
+                  "expected": [
+                    [
+                      "SwitchBlock",
+                      "cond.kind"
+                    ],
+                    [
+                      "SwitchExhaustiveCheck"
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -1987,20 +3106,58 @@
                   "type": "ExpectFromHtml",
                   "input": "\n          @switch ((cond.kind)) {\n            @case ((x())) { X case }\n            @case (('hello')) {<button>Y case</button>}\n            @case ((42)) { Z case }\n            @default { No case matched }\n          }\n        ",
                   "expected": [
-                    ["SwitchBlock", "(cond.kind)"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "(x())"],
-                    ["Text", " X case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "(\"hello\")"],
-                    ["Element", "button"],
-                    ["Text", "Y case"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "(42)"],
-                    ["Text", " Z case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["Text", " No case matched "]
+                    [
+                      "SwitchBlock",
+                      "(cond.kind)"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "(x())"
+                    ],
+                    [
+                      "Text",
+                      " X case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "(\"hello\")"
+                    ],
+                    [
+                      "Element",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "Y case"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "(42)"
+                    ],
+                    [
+                      "Text",
+                      " Z case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " No case matched "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2014,41 +3171,135 @@
                   "type": "ExpectFromHtml",
                   "input": "\n          @switch (cond) {\n            @case ('a') {\n              @switch (innerCond) {\n                @case ('innerA') { Inner A }\n                @case ('innerB') { Inner B }\n              }\n            }\n            @case ('b') {<button>Y case</button>}\n            @case ('c') { Z case }\n            @default {\n              @switch (innerCond) {\n                @case ('innerC') { Inner C }\n                @case ('innerD') { Inner D }\n                @default {\n                  @switch (innerInnerCond) {\n                    @case ('innerInnerA') { Inner inner A }\n                    @case ('innerInnerA') { Inner inner B }\n                  }\n                }\n              }\n            }\n          }\n        ",
                   "expected": [
-                    ["SwitchBlock", "cond"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"a\""],
-                    ["SwitchBlock", "innerCond"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerA\""],
-                    ["Text", " Inner A "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerB\""],
-                    ["Text", " Inner B "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"b\""],
-                    ["Element", "button"],
-                    ["Text", "Y case"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"c\""],
-                    ["Text", " Z case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["SwitchBlock", "innerCond"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerC\""],
-                    ["Text", " Inner C "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerD\""],
-                    ["Text", " Inner D "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["SwitchBlock", "innerInnerCond"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerInnerA\""],
-                    ["Text", " Inner inner A "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"innerInnerA\""],
-                    ["Text", " Inner inner B "]
+                    [
+                      "SwitchBlock",
+                      "cond"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"a\""
+                    ],
+                    [
+                      "SwitchBlock",
+                      "innerCond"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerA\""
+                    ],
+                    [
+                      "Text",
+                      " Inner A "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerB\""
+                    ],
+                    [
+                      "Text",
+                      " Inner B "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"b\""
+                    ],
+                    [
+                      "Element",
+                      "button"
+                    ],
+                    [
+                      "Text",
+                      "Y case"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"c\""
+                    ],
+                    [
+                      "Text",
+                      " Z case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "SwitchBlock",
+                      "innerCond"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerC\""
+                    ],
+                    [
+                      "Text",
+                      " Inner C "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerD\""
+                    ],
+                    [
+                      "Text",
+                      " Inner D "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "SwitchBlock",
+                      "innerInnerCond"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerInnerA\""
+                    ],
+                    [
+                      "Text",
+                      " Inner inner A "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"innerInnerA\""
+                    ],
+                    [
+                      "Text",
+                      " Inner inner B "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2062,13 +3313,32 @@
                   "type": "ExpectFromHtml",
                   "input": "\n          @switch (cond.kind) {\n            <!-- X case -->\n            @case (x) { X case }\n\n            <!-- default case -->\n            @default { No case matched }\n          }\n        ",
                   "expected": [
-                    ["SwitchBlock", "cond.kind"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "x"],
-                    ["Text", " X case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["Text", " No case matched "]
+                    [
+                      "SwitchBlock",
+                      "cond.kind"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "x"
+                    ],
+                    [
+                      "Text",
+                      " X case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " No case matched "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2082,19 +3352,55 @@
                   "type": "ExpectFromHtml",
                   "input": "\n          @switch (cond) {\n            @case ('a') @case('b') @case('c') @case('d') { ABCD case }\n            @case ('z') { Z case }\n            @default { No case matched }\n          }\n        ",
                   "expected": [
-                    ["SwitchBlock", "cond"],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"a\""],
-                    ["SwitchBlockCase", "\"b\""],
-                    ["SwitchBlockCase", "\"c\""],
-                    ["SwitchBlockCase", "\"d\""],
-                    ["Text", " ABCD case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", "\"z\""],
-                    ["Text", " Z case "],
-                    ["SwitchBlockCaseGroup"],
-                    ["SwitchBlockCase", null],
-                    ["Text", " No case matched "]
+                    [
+                      "SwitchBlock",
+                      "cond"
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"a\""
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"b\""
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"c\""
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"d\""
+                    ],
+                    [
+                      "Text",
+                      " ABCD case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      "\"z\""
+                    ],
+                    [
+                      "Text",
+                      " Z case "
+                    ],
+                    [
+                      "SwitchBlockCaseGroup"
+                    ],
+                    [
+                      "SwitchBlockCase",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " No case matched "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2211,17 +3517,57 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of items.foo.bar; track item.id) {\n          {{ item }}\n        } @empty {\n          There were no items in the list.\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "],
-                    ["ForLoopBlockEmpty"],
-                    ["Text", " There were no items in the list. "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ],
+                    [
+                      "ForLoopBlockEmpty"
+                    ],
+                    [
+                      "Text",
+                      " There were no items in the list. "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2235,15 +3581,50 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for ((item of items.foo.bar); track item.id){\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -2251,15 +3632,50 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for ((item of items.foo.bar()); track item.id) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar()", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar()",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 },
@@ -2267,15 +3683,50 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for ((   ( (item of items.foo.bar()) )   ); track item.id) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar()", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar()",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2289,21 +3740,80 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of items.foo.bar; track item.id; let idx = $index, f = $first, c = $count; let l = $last, ev = $even, od = $odd) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["Variable", "idx", "$index"],
-                    ["Variable", "f", "$first"],
-                    ["Variable", "c", "$count"],
-                    ["Variable", "l", "$last"],
-                    ["Variable", "ev", "$even"],
-                    ["Variable", "od", "$odd"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "Variable",
+                      "idx",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "f",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "c",
+                      "$count"
+                    ],
+                    [
+                      "Variable",
+                      "l",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "ev",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "od",
+                      "$odd"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2317,21 +3827,80 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of items.foo.bar; track item.id; let\nidx = $index,\nf = $first,\nc = $count,\nl = $last,\nev = $even,\nod = $odd) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["Variable", "idx", "$index"],
-                    ["Variable", "f", "$first"],
-                    ["Variable", "c", "$count"],
-                    ["Variable", "l", "$last"],
-                    ["Variable", "ev", "$even"],
-                    ["Variable", "od", "$odd"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "Variable",
+                      "idx",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "f",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "c",
+                      "$count"
+                    ],
+                    [
+                      "Variable",
+                      "l",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "ev",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "od",
+                      "$odd"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2345,28 +3914,109 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of items.foo.bar; track item.id) {\n          {{ item }}\n\n          <div>\n            @for (subitem of item.items; track subitem.id) {<h1>{{subitem}}</h1>}\n          </div>\n        } @empty {\n          There were no items in the list.\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "],
-                    ["Element", "div"],
-                    ["ForLoopBlock", "item.items", "subitem.id"],
-                    ["Variable", "subitem", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["Element", "h1"],
-                    ["BoundText", "{{ subitem }}"],
-                    ["ForLoopBlockEmpty"],
-                    ["Text", " There were no items in the list. "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ],
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "ForLoopBlock",
+                      "item.items",
+                      "subitem.id"
+                    ],
+                    [
+                      "Variable",
+                      "subitem",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "Element",
+                      "h1"
+                    ],
+                    [
+                      "BoundText",
+                      "{{ subitem }}"
+                    ],
+                    [
+                      "ForLoopBlockEmpty"
+                    ],
+                    [
+                      "Text",
+                      " There were no items in the list. "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2380,15 +4030,50 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of items.foo.bar; track trackBy(item.id, 123)) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "items.foo.bar", "trackBy(item.id, 123)"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "items.foo.bar",
+                      "trackBy(item.id, 123)"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2420,15 +4105,50 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @for (item of [\n          { id: 1 },\n          { id: 2 }\n        ]; track item.id) {\n          {{ item }}\n        }\n      ",
                   "expected": [
-                    ["ForLoopBlock", "[{id: 1}, {id: 2}]", "item.id"],
-                    ["Variable", "item", "$implicit"],
-                    ["Variable", "$index", "$index"],
-                    ["Variable", "$first", "$first"],
-                    ["Variable", "$last", "$last"],
-                    ["Variable", "$even", "$even"],
-                    ["Variable", "$odd", "$odd"],
-                    ["Variable", "$count", "$count"],
-                    ["BoundText", " {{ item }} "]
+                    [
+                      "ForLoopBlock",
+                      "[{id: 1}, {id: 2}]",
+                      "item.id"
+                    ],
+                    [
+                      "Variable",
+                      "item",
+                      "$implicit"
+                    ],
+                    [
+                      "Variable",
+                      "$index",
+                      "$index"
+                    ],
+                    [
+                      "Variable",
+                      "$first",
+                      "$first"
+                    ],
+                    [
+                      "Variable",
+                      "$last",
+                      "$last"
+                    ],
+                    [
+                      "Variable",
+                      "$even",
+                      "$even"
+                    ],
+                    [
+                      "Variable",
+                      "$odd",
+                      "$odd"
+                    ],
+                    [
+                      "Variable",
+                      "$count",
+                      "$count"
+                    ],
+                    [
+                      "BoundText",
+                      " {{ item }} "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2525,14 +4245,38 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (cond.expr; as foo) {\n          Main case was true!\n        } @else if (other.expr) {\n          Extra case was true!\n        } @else {\n          False case!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "cond.expr"],
-                    ["Variable", "foo", "foo"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "other.expr"],
-                    ["Text", " Extra case was true! "],
-                    ["IfBlockBranch", null],
-                    ["Text", " False case! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "cond.expr"
+                    ],
+                    [
+                      "Variable",
+                      "foo",
+                      "foo"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "other.expr"
+                    ],
+                    [
+                      "Text",
+                      " Extra case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " False case! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2546,13 +4290,33 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if ((cond.expr)) {\n          Main case was true!\n        } @else if ((other.expr)) {\n          Extra case was true!\n        } @else {\n          False case!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "(cond.expr)"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "(other.expr)"],
-                    ["Text", " Extra case was true! "],
-                    ["IfBlockBranch", null],
-                    ["Text", " False case! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "(cond.expr)"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "(other.expr)"
+                    ],
+                    [
+                      "Text",
+                      " Extra case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " False case! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2566,23 +4330,71 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (a) {\n          @if (a1) {\n            a1\n          } @else {\n            b1\n          }\n        }\n        @else if (b) {\n          b\n        } @else {\n          @if (c1) {\n            c1\n          } @else if (c2) {\n            c2\n          } @else {\n            c3\n          }\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "a"],
-                    ["IfBlock"],
-                    ["IfBlockBranch", "a1"],
-                    ["Text", " a1 "],
-                    ["IfBlockBranch", null],
-                    ["Text", " b1 "],
-                    ["IfBlockBranch", "b"],
-                    ["Text", " b "],
-                    ["IfBlockBranch", null],
-                    ["IfBlock"],
-                    ["IfBlockBranch", "c1"],
-                    ["Text", " c1 "],
-                    ["IfBlockBranch", "c2"],
-                    ["Text", " c2 "],
-                    ["IfBlockBranch", null],
-                    ["Text", " c3 "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "a"
+                    ],
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "a1"
+                    ],
+                    [
+                      "Text",
+                      " a1 "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " b1 "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "b"
+                    ],
+                    [
+                      "Text",
+                      " b "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "c1"
+                    ],
+                    [
+                      "Text",
+                      " c1 "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "c2"
+                    ],
+                    [
+                      "Text",
+                      " c2 "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " c3 "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2596,12 +4408,30 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (cond.expr; as foo) {\n          Main case was true!\n        } @else        if (other.expr) {\n          Other case was true!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "cond.expr"],
-                    ["Variable", "foo", "foo"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "other.expr"],
-                    ["Text", " Other case was true! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "cond.expr"
+                    ],
+                    [
+                      "Variable",
+                      "foo",
+                      "foo"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "other.expr"
+                    ],
+                    [
+                      "Text",
+                      " Other case was true! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2615,12 +4445,30 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (cond.expr; as foo) {\n          Main case was true!\n        } @else\tif (other.expr) {\n          Other case was true!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "cond.expr"],
-                    ["Variable", "foo", "foo"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "other.expr"],
-                    ["Text", " Other case was true! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "cond.expr"
+                    ],
+                    [
+                      "Variable",
+                      "foo",
+                      "foo"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "other.expr"
+                    ],
+                    [
+                      "Text",
+                      " Other case was true! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2634,14 +4482,38 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (cond.expr; as foo) {\n          Main case was true!\n        }\n        <!-- Extra case -->\n        @else if (other.expr) {\n          Extra case was true!\n        }\n        <!-- False case -->\n        @else {\n          False case!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "cond.expr"],
-                    ["Variable", "foo", "foo"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "other.expr"],
-                    ["Text", " Extra case was true! "],
-                    ["IfBlockBranch", null],
-                    ["Text", " False case! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "cond.expr"
+                    ],
+                    [
+                      "Variable",
+                      "foo",
+                      "foo"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "other.expr"
+                    ],
+                    [
+                      "Text",
+                      " Extra case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      null
+                    ],
+                    [
+                      "Text",
+                      " False case! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2655,13 +4527,35 @@
                   "type": "ExpectFromHtml",
                   "input": "\n        @if (cond.expr; as foo) {\n          Main case was true!\n        } @else if (other.expr; as bar) {\n          Other case was true!\n        }\n        ",
                   "expected": [
-                    ["IfBlock"],
-                    ["IfBlockBranch", "cond.expr"],
-                    ["Variable", "foo", "foo"],
-                    ["Text", " Main case was true! "],
-                    ["IfBlockBranch", "other.expr"],
-                    ["Variable", "bar", "bar"],
-                    ["Text", " Other case was true! "]
+                    [
+                      "IfBlock"
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "cond.expr"
+                    ],
+                    [
+                      "Variable",
+                      "foo",
+                      "foo"
+                    ],
+                    [
+                      "Text",
+                      " Main case was true! "
+                    ],
+                    [
+                      "IfBlockBranch",
+                      "other.expr"
+                    ],
+                    [
+                      "Variable",
+                      "bar",
+                      "bar"
+                    ],
+                    [
+                      "Text",
+                      " Other case was true! "
+                    ]
                   ],
                   "ignore_error": false
                 }
@@ -2680,7 +4574,13 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@let foo = 123 + 456;",
-                  "expected": [["LetDeclaration", "foo", "123 + 456"]],
+                  "expected": [
+                    [
+                      "LetDeclaration",
+                      "foo",
+                      "123 + 456"
+                    ]
+                  ],
                   "ignore_error": false
                 }
               ]
@@ -2703,9 +4603,19 @@
                   "type": "ExpectFromHtml",
                   "input": "<div ngNonBindable>@let foo = 123;</div>",
                   "expected": [
-                    ["Element", "div"],
-                    ["TextAttribute", "ngNonBindable", ""],
-                    ["Text", "@let foo = 123;"]
+                    [
+                      "Element",
+                      "div"
+                    ],
+                    [
+                      "TextAttribute",
+                      "ngNonBindable",
+                      ""
+                    ],
+                    [
+                      "Text",
+                      "@let foo = 123;"
+                    ]
                   ],
                   "ignore_error": false
                 }

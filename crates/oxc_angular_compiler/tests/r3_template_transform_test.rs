@@ -765,6 +765,45 @@ fn get_transform_errors(html: &str) -> Vec<String> {
     r3_result.errors.iter().map(|e| e.msg.clone()).collect()
 }
 
+/// Helper that transforms an HTML template and returns, for the first element's
+/// first bound-attribute input, a `(name, binding_type, security_context)`
+/// tuple as strings. Used by the SVG/security tests to assert the resolved
+/// `SecurityContext` (which the standard humanizer does not expose).
+fn first_input_security(html: &str) -> (String, BindingType, String) {
+    use oxc_angular_compiler::ast::r3::{R3Node, SecurityContext};
+
+    let allocator = Box::new(Allocator::default());
+    let allocator_ref: &'static Allocator =
+        unsafe { &*std::ptr::from_ref::<Allocator>(allocator.as_ref()) };
+
+    let parser = HtmlParser::new(allocator_ref, html, "test.html");
+    let html_result = parser.parse();
+
+    let options = TransformOptions { collect_comment_nodes: false };
+    let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
+    let r3_result = transformer.transform(&html_result.nodes);
+
+    let element = r3_result
+        .nodes
+        .iter()
+        .find_map(|n| if let R3Node::Element(e) = n { Some(e) } else { None })
+        .expect("expected at least one element");
+    let input = element.inputs.first().expect("expected at least one bound-attribute input");
+
+    let sc = match input.security_context {
+        SecurityContext::None => "None",
+        SecurityContext::Html => "Html",
+        SecurityContext::Style => "Style",
+        SecurityContext::Script => "Script",
+        SecurityContext::Url => "Url",
+        SecurityContext::ResourceUrl => "ResourceUrl",
+        SecurityContext::AttributeNoBinding => "AttributeNoBinding",
+        SecurityContext::UrlOrResourceUrl => "UrlOrResourceUrl",
+    };
+
+    (input.name.to_string(), input.binding_type, sc.to_string())
+}
+
 // ============================================================================
 // Tests: Nodes without binding
 // ============================================================================
@@ -1353,6 +1392,163 @@ mod ignored_elements {
     }
 
     #[test]
+    fn should_keep_namespaced_svg_script_elements() {
+        // v21.2.7 template_preparser.ts compares the FULL lower-cased node name
+        // against `SCRIPT_ELEMENT = 'script'` (a singular string, lines 18,45,51).
+        // An explicitly namespaced `:svg:script` is NOT equal to 'script', so it
+        // stays `PreparsedElementType.OTHER` and is KEPT as an element (only plain
+        // `<script>` is dropped). This is the genuine SVGScriptElement XSS sink,
+        // whose href is sanitized as a RESOURCE_URL by dom_security_schema.
+        // (angular/angular MAIN later widened SCRIPT_ELEMENT to a Set including
+        // ':svg:script' via commit 90494cd909, but that post-dates v21.2.7.)
+        //
+        // v21.2.7-faithful note: a namespaced raw-text element closes on its LOCAL name
+        // only (case-insensitive); `</svg:script>` would NOT close it (the boundary is bare
+        // `script`) and the scan would run to EOF. We therefore close with a BARE `</script>`
+        // so the `:svg:script` element closes cleanly and the `<div>` survives as a sibling —
+        // which keeps this test focused on G4's actual point (the `:svg:script` element is
+        // KEPT, not stripped).
+        let result = humanize("<svg:script>x</script><div>after</div>");
+        assert_eq!(result[0], h!["Element", ":svg:script"]);
+        // The script's raw-text content survives because the element is kept,
+        // and the following <div> sibling is unaffected.
+        assert!(result.iter().any(|r| r[0] == HumanValue::from("Text") && r[1] == "x".into()));
+        assert!(result.iter().any(|r| r[0] == HumanValue::from("Element") && r[1] == "div".into()));
+    }
+
+    // -----------------------------------------------------------------------
+    // SVG <script> href / xlink:href security-context faithfulness to v21.2.7.
+    //
+    // Ground truth derived by reading vendored v21.2.7 (commit 50761c8be4):
+    //
+    // - `_consumeAttr` (ml_parser/parser.ts:624) stores a namespaced attribute
+    //   `xlink:href` in MERGED colon form `:xlink:href` via `mergeNsAndName`.
+    // - `<svg:script>` element name is the merged `:svg:script`.
+    // - `createBoundElementProperty` (binding_parser.ts:543-632):
+    //     * `[attr.xlink:href]` -> `parts[0]=="attr"`, security lookup propName =
+    //       `xlink:href` (PLAIN colon, isAttribute=true), THEN the stored
+    //       BoundAttribute name is merged to `:xlink:href` via `mergeNsAndName`
+    //       (binding_parser.ts:582-587). (Finding 2.)
+    //     * `[xlink:href]`       -> property binding; the `[...]` lexer path keeps
+    //       the bare name `xlink:href` (PLAIN colon), isAttribute=false.
+    //     * `xlink:href="{{u}}"` (interpolated STATIC attr) -> property binding
+    //       with the FULL merged name `:xlink:href` (LEADING colon retained,
+    //       no `.`-split happens), isAttribute=false.
+    // - `CssSelector.parse(":svg:script")` (directive_matching.ts:9-20 regexp)
+    //   drops the leading `:` and namespace, leaving element = `script` (local).
+    // - `securityContext("script", propName, isAttribute)`
+    //   (dom_element_schema_registry.ts:437-457) lowercases and looks up
+    //   `script|propName`, falling back to `*|propName`, else NONE. The schema
+    //   keys are `script|href` and `script|xlink:href` -> RESOURCE_URL
+    //   (dom_security_schema.ts:124-125).
+    //
+    // Therefore upstream v21.2.7 sanitizes:
+    //   `[attr.xlink:href]`, `[xlink:href]`, `[(xlink:href)]`,
+    //   `href="{{u}}"`, `[attr.href]`, `[href]`
+    // as RESOURCE_URL, but does NOT sanitize the INTERPOLATED static
+    //   `xlink:href="{{u}}"` (its lookup key is `script|:xlink:href`, a MISS,
+    //   because the merged colon form is passed verbatim as a property name).
+    //
+    // These tests assert OXC matches that exact behavior. The values were
+    // observed empirically (see PR notes) — they are NOT assumptions.
+
+    #[test]
+    fn svg_script_bracketed_xlink_href_is_resource_url() {
+        // `[xlink:href]` property binding -> name kept `xlink:href`, key
+        // `script|xlink:href` -> RESOURCE_URL (matches v21.2.7).
+        assert_eq!(
+            first_input_security(r#"<svg:script [xlink:href]="u"></svg:script>"#),
+            ("xlink:href".to_string(), BindingType::Property, "ResourceUrl".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_attr_xlink_href_is_resource_url() {
+        // `[attr.xlink:href]` attribute binding -> `attr.` stripped, security
+        // computed with the PLAIN `xlink:href` (key `script|xlink:href` ->
+        // RESOURCE_URL), THEN the stored binding name is the namespace-bearing
+        // merged form `:xlink:href` (upstream `createBoundElementProperty`
+        // `mergeNsAndName`, binding_parser.ts:582-587). Confirmed against
+        // @angular/compiler@21.2.7: `parseTemplate('<svg><script
+        // [attr.xlink:href]="u">')` yields BoundAttribute name `:xlink:href`,
+        // securityContext RESOURCE_URL (Finding 2 fix).
+        assert_eq!(
+            first_input_security(r#"<svg:script [attr.xlink:href]="u"></svg:script>"#),
+            (":xlink:href".to_string(), BindingType::Attribute, "ResourceUrl".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_bracketed_href_is_resource_url() {
+        // Non-xlink control proving G2 still works through the lookup:
+        // `[href]` -> key `script|href` -> RESOURCE_URL.
+        assert_eq!(
+            first_input_security(r#"<svg:script [href]="u"></svg:script>"#),
+            ("href".to_string(), BindingType::Property, "ResourceUrl".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_attr_href_is_resource_url() {
+        // `[attr.href]` -> key `script|href` -> RESOURCE_URL.
+        assert_eq!(
+            first_input_security(r#"<svg:script [attr.href]="u"></svg:script>"#),
+            ("href".to_string(), BindingType::Attribute, "ResourceUrl".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_interpolated_href_is_resource_url() {
+        // Interpolated static `href="{{u}}"` -> property binding with name
+        // `href` (no namespace), key `script|href` -> RESOURCE_URL. This proves
+        // the non-namespaced interpolated case IS sanitized (matches v21.2.7).
+        assert_eq!(
+            first_input_security(r#"<svg:script href="{{u}}"></svg:script>"#),
+            ("href".to_string(), BindingType::Property, "ResourceUrl".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_interpolated_xlink_href_is_none_matching_upstream() {
+        // CRITICAL faithfulness case: interpolated static `xlink:href="{{u}}"`
+        // is stored as the merged `:xlink:href` and treated as a PROPERTY
+        // binding with that full name. Upstream's lookup key is
+        // `script|:xlink:href` (leading colon retained) -> MISS -> NONE. OXC
+        // must NOT sanitize this either (no over-sanitization). The emitted
+        // binding name is the merged `:xlink:href`, unchanged.
+        assert_eq!(
+            first_input_security(r#"<svg:script xlink:href="{{u}}"></svg:script>"#),
+            (":xlink:href".to_string(), BindingType::Property, "None".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_image_interpolated_xlink_href_is_none_matching_upstream() {
+        // `<svg:image>` is NOT in the RESOURCE_URL/URL schema for `xlink:href`
+        // (only the MathML elements + `a` are URL; `image` is not listed). An
+        // interpolated static `xlink:href="{{u}}"` resolves to NONE both because
+        // the merged-name property lookup misses and because `image|xlink:href`
+        // is not a schema key. Control case proving no over-sanitization.
+        assert_eq!(
+            first_input_security(r#"<svg:image xlink:href="{{u}}"></svg:image>"#),
+            (":xlink:href".to_string(), BindingType::Property, "None".to_string()),
+        );
+    }
+
+    #[test]
+    fn svg_script_non_sensitive_namespaced_attr_stays_none() {
+        // Control: a non-sensitive namespaced attribute binding on `<svg:script>`
+        // must remain NONE (no over-sanitization from any normalization). The
+        // stored name is the merged `:xlink:title` form (Finding 2). Confirmed
+        // against @angular/compiler@21.2.7: BoundAttribute name `:xlink:title`,
+        // securityContext NONE.
+        assert_eq!(
+            first_input_security(r#"<svg:script [attr.xlink:title]="u"></svg:script>"#),
+            (":xlink:title".to_string(), BindingType::Attribute, "None".to_string()),
+        );
+    }
+
+    #[test]
     fn should_ignore_style_elements() {
         // TS: expectFromHtml('<style></style>a')
         let result = humanize("<style></style>a");
@@ -1835,6 +2031,60 @@ mod svg_elements {
                 .iter()
                 .any(|r| r[0] == HumanValue::from("Element")
                     && r[1] == HumanValue::from(":svg:rect"))
+        );
+    }
+
+    #[test]
+    fn foreign_object_children_reset_to_html_namespace() {
+        // Upstream html_tags.ts declares `foreignObject` with
+        // `implicitNamespacePrefix:'svg'` AND `preventNamespaceInheritance:true`
+        // (v21.2.7 html_tags.ts:132-142): the element itself is SVG (stored
+        // `:svg:foreignObject`), but its CHILDREN do NOT inherit the svg namespace —
+        // they reset to HTML. So `<div>` inside foreignObject is plain `div`, NOT
+        // `:svg:div`.
+        let result = humanize("<svg><foreignObject><div></div></foreignObject></svg>");
+        assert_eq!(result[0], h!["Element", ":svg:svg"]);
+        // foreignObject element itself stays namespaced.
+        assert!(result.iter().any(|r| r[0] == HumanValue::from("Element")
+            && r[1] == HumanValue::from(":svg:foreignObject")));
+        // Its child div is HTML, not :svg:div.
+        assert!(
+            result
+                .iter()
+                .any(|r| r[0] == HumanValue::from("Element") && r[1] == HumanValue::from("div"))
+        );
+        assert!(
+            !result.iter().any(
+                |r| r[0] == HumanValue::from("Element") && r[1] == HumanValue::from(":svg:div")
+            ),
+            "foreignObject child must not be emitted in the svg namespace: {result:?}"
+        );
+    }
+
+    #[test]
+    fn svg_sibling_after_foreign_object_stays_svg() {
+        // Sanity: resetting foreignObject's children to HTML must not leak into
+        // svg siblings. A `<rect>` sibling (back under `<svg>`) is still `:svg:rect`,
+        // and grandchildren of foreignObject (`<span>`) remain HTML.
+        let result = humanize(
+            "<svg><foreignObject><div><span></span></div></foreignObject><rect></rect></svg>",
+        );
+        assert!(
+            result
+                .iter()
+                .any(|r| r[0] == HumanValue::from("Element") && r[1] == HumanValue::from("div"))
+        );
+        assert!(
+            result
+                .iter()
+                .any(|r| r[0] == HumanValue::from("Element") && r[1] == HumanValue::from("span"))
+        );
+        assert!(
+            result
+                .iter()
+                .any(|r| r[0] == HumanValue::from("Element")
+                    && r[1] == HumanValue::from(":svg:rect")),
+            "svg sibling after foreignObject must stay in svg namespace: {result:?}"
         );
     }
 }
@@ -2322,6 +2572,63 @@ mod switch_validation {
             "Expected error about @default with parameters, got: {errors:?}"
         );
     }
+
+    // Upstream v21.2.7 only recognizes the EXACT `default never` (single internal
+    // space) as the exhaustive marker; `_getBlockName` trims but does NOT collapse
+    // internal whitespace (ml_parser/lexer.ts:294, render3/r3_control_flow.ts:620).
+    // So `@default   never;` (multiple spaces) is an incomplete block named
+    // "default   never" inside the switch, which `validateSwitchBlock` rejects with
+    // "@switch block can only contain @case and @default blocks" and createSwitchBlock
+    // turns into an UnknownBlock — it does NOT become a SwitchExhaustiveCheck node.
+    // Verified by executing @angular/compiler@21.2.7 parseTemplate:
+    //   "@switch (x) { @case (1) { a } @default   never; }"
+    //   -> errors: ['Incomplete block "default   never". ...'], switch=0 exhaustive=0
+    #[test]
+    fn multi_space_default_never_is_not_exhaustive_marker() {
+        let errors = get_transform_errors("@switch (expr) { @case (1) { a } @default   never; }");
+        // Not accepted as the exhaustive marker -> rejected as invalid switch content.
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("@switch block can only contain @case and @default blocks")),
+            "Multi-space @default   never; must be rejected as invalid switch content, \
+             got: {errors:?}"
+        );
+        // And it must NOT silently pass as a valid exhaustive marker.
+        assert!(
+            !errors.is_empty(),
+            "Multi-space @default   never; must NOT be silently accepted, got: {errors:?}"
+        );
+    }
+
+    // Same for a TAB separator: not the canonical marker, rejected as switch content.
+    // Verified by executing @angular/compiler@21.2.7:
+    //   "@switch (x) { @case (1) { a } @default\tnever; }"
+    //   -> errors: ['Incomplete block "default\tnever". ...'], switch=0 exhaustive=0
+    #[test]
+    fn tab_default_never_is_not_exhaustive_marker() {
+        let errors = get_transform_errors("@switch (expr) { @case (1) { a } @default\tnever; }");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("@switch block can only contain @case and @default blocks")),
+            "Tab @default\\tnever; must be rejected as invalid switch content, got: {errors:?}"
+        );
+    }
+
+    // CONTROL: the canonical single-space `@default never;` STILL produces a valid
+    // exhaustive marker with no errors (no regression).
+    // Verified by executing @angular/compiler@21.2.7:
+    //   "@switch (x) { @case (1) { a } @default never; }" -> errors: [], exhaustive=1
+    #[test]
+    fn single_space_default_never_is_valid_exhaustive_marker() {
+        let errors = get_transform_errors("@switch (expr) { @case (1) { a } @default never; }");
+        assert!(
+            errors.is_empty(),
+            "Canonical @default never; must remain a valid exhaustive marker with no errors, \
+             got: {errors:?}"
+        );
+    }
 }
 
 // ============================================================================
@@ -2638,5 +2945,842 @@ mod for_track_expression_parsing {
             errors.iter().any(|e| e.contains("\"track\" expression")),
             "Expected missing track expression error, got: {errors:?}"
         );
+    }
+}
+
+// ============================================================================
+// Selectorless component namespace inheritance (R3 transform end-to-end)
+//
+// Verifies that a selectorless component's `R3Component.tag_name` / `full_name`
+// inherit the parent implicit namespace, matching upstream
+// `_getComponentTagName` / `_getComponentFullName` (ml_parser/parser.ts).
+// Uses the real `HtmlParser::with_selectorless` + `HtmlToR3Transform` pipeline
+// (the shared `parse()` helper above keeps selectorless OFF).
+// ============================================================================
+mod selectorless_component_namespace_r3 {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::ast::r3::R3Node;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+    use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+
+    /// Parses `html` with selectorless mode, transforms to R3, and returns the
+    /// first `R3Component`'s `(component_name, tag_name, full_name)`.
+    fn first_r3_component(html: &str) -> (String, Option<String>, String) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        assert!(
+            html_result.errors.is_empty(),
+            "HTML parse errors for '{html}': {:?}",
+            html_result.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+        assert!(
+            r3.errors.is_empty(),
+            "Transform errors for '{html}': {:?}",
+            r3.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+
+        fn find<'a>(nodes: &[R3Node<'a>]) -> Option<(String, Option<String>, String)> {
+            for node in nodes {
+                if let R3Node::Component(c) = node {
+                    return Some((
+                        c.component_name.to_string(),
+                        c.tag_name.as_ref().map(|t| t.to_string()),
+                        c.full_name.to_string(),
+                    ));
+                }
+                let children: &[R3Node<'a>] = match node {
+                    R3Node::Element(e) => &e.children,
+                    R3Node::Template(t) => &t.children,
+                    _ => continue,
+                };
+                if let Some(found) = find(children) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        find(&r3.nodes).unwrap_or_else(|| panic!("no R3 component found in '{html}'"))
+    }
+
+    #[test]
+    fn inferred_svg_namespace_with_tag_name() {
+        // THE divergence case: <svg><MyComp:button> -> ":svg:button" / "MyComp:svg:button".
+        let (name, tag, full) = first_r3_component("<svg><MyComp:button>Hi</MyComp:button></svg>");
+        assert_eq!(name, "MyComp");
+        assert_eq!(tag.as_deref(), Some(":svg:button"));
+        assert_eq!(full, "MyComp:svg:button");
+    }
+
+    #[test]
+    fn inferred_svg_namespace_no_tag_name() {
+        // <svg><MyComp> -> ":svg:ng-component" / "MyComp:svg:ng-component".
+        let (name, tag, full) = first_r3_component("<svg><MyComp>Hi</MyComp></svg>");
+        assert_eq!(name, "MyComp");
+        assert_eq!(tag.as_deref(), Some(":svg:ng-component"));
+        assert_eq!(full, "MyComp:svg:ng-component");
+    }
+
+    #[test]
+    fn explicit_namespace_wins_over_inheritance() {
+        // <math><MyComp:svg:title> -> explicit svg beats math: ":svg:title".
+        let (name, tag, full) =
+            first_r3_component("<math><MyComp:svg:title>Hi</MyComp:svg:title></math>");
+        assert_eq!(name, "MyComp");
+        assert_eq!(tag.as_deref(), Some(":svg:title"));
+        assert_eq!(full, "MyComp:svg:title");
+    }
+
+    #[test]
+    fn non_svg_control_stays_unnamespaced() {
+        // Control: <div><MyComp:button> -> "button" / "MyComp:button".
+        let (name, tag, full) = first_r3_component("<div><MyComp:button>Hi</MyComp:button></div>");
+        assert_eq!(name, "MyComp");
+        assert_eq!(tag.as_deref(), Some("button"));
+        assert_eq!(full, "MyComp:button");
+    }
+
+    #[test]
+    fn bare_component_stays_unnamespaced() {
+        // Control: top-level <MyComp> -> tag_name None, full_name "MyComp".
+        let (name, tag, full) = first_r3_component("<MyComp>Hi</MyComp>");
+        assert_eq!(name, "MyComp");
+        assert_eq!(tag, None);
+        assert_eq!(full, "MyComp");
+    }
+}
+
+// ============================================================================
+// R3-level: CHILDREN of a namespaced selectorless component inherit `:svg:`
+// (the iteration-11 finding). Upstream `_getPrefix` derives a child's namespace
+// from the closest element-like parent's name, which for an `html.Component`
+// parent is `parent.tagName` (the resolved `:svg:button`), NOT the class name
+// (ml_parser/parser.ts:991). So children inherit `:svg:`, and crucially a child
+// `<script>`/`<style>` resolves to `:svg:script`/`:svg:style`, which the R3
+// template_preparser KEEPS namespaced (G4) instead of dropping/extracting the
+// plain-html `script`/`style`. This is the security-relevant divergence.
+// ============================================================================
+mod selectorless_component_child_namespace_r3 {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::ast::r3::R3Node;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+    use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+
+    /// Parses `html` selectorless, transforms to R3, finds the first `R3Component`,
+    /// and returns the list of its DIRECT child ELEMENT names (in order). Style/script
+    /// that the preparser drops/extracts will simply be absent from this list, so an
+    /// expected `:svg:script` present here proves it was KEPT as a namespaced element.
+    fn component_child_element_names(html: &str) -> Vec<String> {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        assert!(
+            html_result.errors.is_empty(),
+            "HTML parse errors for '{html}': {:?}",
+            html_result.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+        assert!(
+            r3.errors.is_empty(),
+            "Transform errors for '{html}': {:?}",
+            r3.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+
+        fn find_component<'a, 'b>(nodes: &'b [R3Node<'a>]) -> Option<&'b [R3Node<'a>]> {
+            for node in nodes {
+                if let R3Node::Component(c) = node {
+                    return Some(&c.children);
+                }
+                let children: &[R3Node<'a>] = match node {
+                    R3Node::Element(e) => &e.children,
+                    R3Node::Template(t) => &t.children,
+                    _ => continue,
+                };
+                if let Some(found) = find_component(children) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let children =
+            find_component(&r3.nodes).unwrap_or_else(|| panic!("no R3 component in '{html}'"));
+        children
+            .iter()
+            .filter_map(|n| match n {
+                R3Node::Element(e) => Some(e.name.to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn child_div_inherits_svg() {
+        // <svg><MyComp:button><div></div></MyComp:button></svg> -> child `:svg:div`.
+        let names =
+            component_child_element_names("<svg><MyComp:button><div></div></MyComp:button></svg>");
+        assert_eq!(names, vec![":svg:div".to_string()]);
+    }
+
+    #[test]
+    fn child_script_inherits_svg_and_is_kept() {
+        // THE security-relevant case: a plain `<script>` child under a namespaced
+        // component resolves to `:svg:script`, which is KEPT (G4) — NOT dropped as a
+        // plain-html `<script>`. (A plain `<script>` would be absent from the list.)
+        let names = component_child_element_names(
+            "<svg><MyComp:button><script>x</script></MyComp:button></svg>",
+        );
+        assert_eq!(names, vec![":svg:script".to_string()]);
+    }
+
+    #[test]
+    fn child_style_inherits_svg_and_is_kept() {
+        // A plain `<style>` child resolves to `:svg:style`, KEPT as a namespaced
+        // element — NOT extracted as a stylesheet (plain `<style>` is removed).
+        let names = component_child_element_names(
+            "<svg><MyComp:button><style>x</style></MyComp:button></svg>",
+        );
+        assert_eq!(names, vec![":svg:style".to_string()]);
+    }
+
+    #[test]
+    fn child_inherits_svg_through_explicit_namespace_component() {
+        // Explicit `<MyComp:svg:rect>` (no enclosing <svg>): child `<circle>` -> `:svg:circle`.
+        let names =
+            component_child_element_names("<MyComp:svg:rect><circle></circle></MyComp:svg:rect>");
+        assert_eq!(names, vec![":svg:circle".to_string()]);
+    }
+
+    #[test]
+    fn child_inherits_svg_through_component_without_tag_part() {
+        // <svg><MyComp><div></div></MyComp></svg>: tagName `:svg:ng-component` -> child `:svg:div`.
+        let names = component_child_element_names("<svg><MyComp><div></div></MyComp></svg>");
+        assert_eq!(names, vec![":svg:div".to_string()]);
+    }
+
+    #[test]
+    fn control_non_svg_component_child_stays_html_and_script_is_dropped() {
+        // CONTROL: <MyComp:button><div></div><script></script></MyComp:button> outside svg.
+        // child `<div>` stays plain `div`; the plain `<script>` is DROPPED (absent).
+        let names = component_child_element_names(
+            "<MyComp:button><div></div><script>x</script></MyComp:button>",
+        );
+        assert_eq!(names, vec!["div".to_string()]);
+    }
+
+    #[test]
+    fn control_bare_component_child_stays_html() {
+        // CONTROL: bare <MyComp><div></div></MyComp> outside svg -> child stays plain `div`.
+        let names = component_child_element_names("<MyComp><div></div></MyComp>");
+        assert_eq!(names, vec!["div".to_string()]);
+    }
+}
+
+// ============================================================================
+// FINDING 1: UNSUPPORTED_SELECTORLESS_TAGS must be tested against the RESOLVED
+// selectorless TAG name (`component.tagName`), NOT the component CLASS name.
+//
+// Upstream v21.2.7 `HtmlAstToIvyAst.visitComponent`
+// (render3/r3_template_transform.ts:378-384):
+//   if (component.tagName !== null && UNSUPPORTED_SELECTORLESS_TAGS.has(component.tagName)) {
+//     this.reportError(`Tag name "${component.tagName}" cannot be used as a component tag`, ...);
+//     return null;
+//   }
+// where the set (lines 64-71) is {link, style, script, ng-template, ng-container,
+// ng-content} and `component.tagName` is the output of `_getComponentTagName`
+// (ml_parser/parser.ts:946-961): null when no prefix and no tag part; the bare tag
+// when no prefix; `mergeNsAndName(prefix, tag)` (`:prefix:tag`) when a prefix is
+// present. The membership test runs against that resolved name WITHOUT stripping the
+// namespace, so a namespaced `:svg:script` is NOT a member and is ACCEPTED, while a
+// bare `script` (no prefix) IS rejected. The error message quotes the RESOLVED
+// tagName, not the class name.
+// ============================================================================
+mod selectorless_unsupported_tag_r3 {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+    use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+
+    /// Parses `html` selectorless and transforms to R3, returning the combined
+    /// parse + transform error messages.
+    fn selectorless_transform_errors(html: &str) -> Vec<String> {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+
+        html_result
+            .errors
+            .iter()
+            .map(|e| e.msg.clone())
+            .chain(r3.errors.iter().map(|e| e.msg.clone()))
+            .collect()
+    }
+
+    fn has_unsupported_error(errors: &[String], expected_tag: &str) -> bool {
+        let needle = format!("Tag name \"{expected_tag}\" cannot be used as a component tag");
+        errors.iter().any(|e| e == &needle)
+    }
+
+    fn any_unsupported_error(errors: &[String]) -> bool {
+        errors.iter().any(|e| e.contains("cannot be used as a component tag"))
+    }
+
+    #[test]
+    fn comp_script_tag_is_rejected() {
+        // <MyComp:script> -> tagName "script" (no prefix) -> in set -> rejected,
+        // message quotes the RESOLVED tag name "script".
+        let errors = selectorless_transform_errors("<MyComp:script>x</MyComp:script>");
+        assert!(
+            has_unsupported_error(&errors, "script"),
+            "expected unsupported-tag error for \"script\", got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comp_style_tag_is_rejected() {
+        let errors = selectorless_transform_errors("<MyComp:style>x</MyComp:style>");
+        assert!(
+            has_unsupported_error(&errors, "style"),
+            "expected unsupported-tag error for \"style\", got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comp_link_tag_is_rejected() {
+        let errors = selectorless_transform_errors("<MyComp:link>x</MyComp:link>");
+        assert!(
+            has_unsupported_error(&errors, "link"),
+            "expected unsupported-tag error for \"link\", got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn class_named_script_without_tag_is_accepted() {
+        // <Script> -> class named "Script", NO tag part -> tagName null -> NOT in set.
+        let errors = selectorless_transform_errors("<Script>x</Script>");
+        assert!(
+            !any_unsupported_error(&errors),
+            "expected NO unsupported-tag error for class <Script>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn class_named_script_with_safe_tag_is_accepted() {
+        // <Script:div> -> tagName "div" -> NOT in set.
+        let errors = selectorless_transform_errors("<Script:div>x</Script:div>");
+        assert!(
+            !any_unsupported_error(&errors),
+            "expected NO unsupported-tag error for <Script:div>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_namespaced_script_tag_is_accepted() {
+        // <MyComp:svg:script> -> tagName ":svg:script" (prefix present) -> NOT a member
+        // of the bare-name set -> ACCEPTED. Upstream does NOT strip the namespace before
+        // the membership test.
+        let errors = selectorless_transform_errors("<MyComp:svg:script>x</MyComp:svg:script>");
+        assert!(
+            !any_unsupported_error(&errors),
+            "expected NO unsupported-tag error for explicit :svg:script, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn inherited_svg_namespaced_script_tag_is_accepted() {
+        // <svg><MyComp:script> -> prefix inherited "svg" -> tagName ":svg:script" -> NOT
+        // a member -> ACCEPTED (subtle inheritance case).
+        let errors = selectorless_transform_errors("<svg><MyComp:script>x</MyComp:script></svg>");
+        assert!(
+            !any_unsupported_error(&errors),
+            "expected NO unsupported-tag error for inherited :svg:script, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn bare_component_is_accepted() {
+        // CONTROL: bare <MyComp> -> tagName null -> NOT rejected.
+        let errors = selectorless_transform_errors("<MyComp>x</MyComp>");
+        assert!(
+            !any_unsupported_error(&errors),
+            "expected NO unsupported-tag error for bare <MyComp>, got: {errors:?}"
+        );
+    }
+}
+
+// ============================================================================
+// FINDING 1 [HIGH, SECURITY]: selectorless-component HOST TAG is threaded into
+// the bound-attribute security-context lookup AND the i18n trusted-types sink
+// check, matching upstream v21.2.7.
+//
+// In v21.2.7 a selectorless component's security context is computed from
+// `component.tagName` (the RESOLVED host tag), NOT the component class name:
+//   * `categorizePropertyAttributes(component.tagName, ...)` ->
+//     `createBoundElementProperty(elementName = component.tagName, ...)`
+//     (render3/r3_template_transform.ts:411-415, binding_parser.ts:594-615), and
+//   * the i18n trusted-types guard uses
+//     `node instanceof html.Component ? node.tagName : node.name`, with
+//     `tagName === null ? false : isTrustedTypesSink(node.tagName, name)`
+//     (render3/view/i18n/meta.ts:205-208).
+//
+// Ground truth below was settled by EXECUTING @angular/compiler@21.2.7
+// (VERSION.full == 21.2.7) `parseTemplate(html, 'test.html', {enableSelectorless:
+// true})` and reading the resulting `BoundAttribute.securityContext` / errors:
+//   <MyCmp:iframe [src]>       -> RESOURCE_URL
+//   <MyCmp:iframe [attr.src]>  -> RESOURCE_URL
+//   <MyCmp:object [data]>      -> RESOURCE_URL
+//   <MyCmp:iframe [srcdoc]>    -> HTML
+//   <MyCmp:img [src]>          -> URL
+//   <svg><MyCmp:image [xlink:href]> -> NONE (no `image|xlink:href` schema entry)
+//   bare <MyCmp [src]>         -> NONE   (tagName null; NONE sorts first in union)
+//   bare <MyCmp [innerHTML]>   -> HTML   (wildcard `*|innerHTML` applies)
+//   bare <Object [data]>       -> NONE   (tagName null, NOT looked up as `object`)
+//   <MyCmp:iframe i18n-src>    -> error "Translating attribute 'src' is disallowed..."
+//   bare <MyCmp i18n-src>      -> NO error (tagName null -> false)
+//   <Object i18n-data> (bare)  -> NO error (tagName null -> false)
+//   CONTROL <iframe [src]>     -> RESOURCE_URL ; <iframe i18n-src> -> error
+// ============================================================================
+mod selectorless_component_security_r3 {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::ast::r3::{R3Node, SecurityContext};
+    use oxc_angular_compiler::parser::html::HtmlParser;
+    use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+
+    fn sc_str(sc: SecurityContext) -> &'static str {
+        match sc {
+            SecurityContext::None => "None",
+            SecurityContext::Html => "Html",
+            SecurityContext::Style => "Style",
+            SecurityContext::Script => "Script",
+            SecurityContext::Url => "Url",
+            SecurityContext::ResourceUrl => "ResourceUrl",
+            SecurityContext::AttributeNoBinding => "AttributeNoBinding",
+            SecurityContext::UrlOrResourceUrl => "UrlOrResourceUrl",
+        }
+    }
+
+    /// Parses `html` in selectorless mode, transforms to R3, finds the first
+    /// `R3Component` (selectorless components are stored as components), and
+    /// returns its first bound-attribute input as `(name, security_context)`.
+    fn first_component_input_security(html: &str) -> (String, String) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+
+        fn find<'a>(
+            nodes: &'a [R3Node<'a>],
+        ) -> Option<&'a oxc_angular_compiler::ast::r3::R3Component<'a>> {
+            for n in nodes {
+                match n {
+                    R3Node::Component(c) => return Some(c),
+                    R3Node::Element(e) => {
+                        if let Some(c) = find(&e.children) {
+                            return Some(c);
+                        }
+                    }
+                    R3Node::Template(t) => {
+                        if let Some(c) = find(&t.children) {
+                            return Some(c);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+
+        let component = find(&r3.nodes).expect("expected at least one R3Component");
+        let input = component.inputs.first().expect("expected at least one bound-attribute input");
+        (input.name.to_string(), sc_str(input.security_context).to_string())
+    }
+
+    /// Like above but for a NORMAL element (control).
+    fn first_element_input_security(html: &str) -> (String, String) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+
+        fn find<'a>(
+            nodes: &'a [R3Node<'a>],
+        ) -> Option<&'a oxc_angular_compiler::ast::r3::R3Element<'a>> {
+            for n in nodes {
+                match n {
+                    R3Node::Element(e) => {
+                        if !e.inputs.is_empty() {
+                            return Some(e);
+                        }
+                        if let Some(c) = find(&e.children) {
+                            return Some(c);
+                        }
+                    }
+                    R3Node::Template(t) => {
+                        if let Some(c) = find(&t.children) {
+                            return Some(c);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        let element = find(&r3.nodes).expect("expected at least one element with inputs");
+        let input = element.inputs.first().expect("expected at least one bound-attribute input");
+        (input.name.to_string(), sc_str(input.security_context).to_string())
+    }
+
+    fn transform_errors(html: &str) -> Vec<String> {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+        html_result
+            .errors
+            .iter()
+            .map(|e| e.msg.clone())
+            .chain(r3.errors.iter().map(|e| e.msg.clone()))
+            .collect()
+    }
+
+    fn has_disallowed_error(errors: &[String], attr: &str) -> bool {
+        let needle = format!("Translating attribute '{attr}' is disallowed for security reasons.");
+        errors.iter().any(|e| e == &needle)
+    }
+
+    // ---- Security context (bound attributes) ----
+
+    #[test]
+    fn comp_iframe_src_is_resource_url() {
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp:iframe [src]="u" />"#),
+            ("src".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    #[test]
+    fn comp_iframe_attr_src_is_resource_url() {
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp:iframe [attr.src]="u" />"#),
+            ("src".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    #[test]
+    fn comp_object_data_is_resource_url() {
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp:object [data]="u" />"#),
+            ("data".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    #[test]
+    fn comp_iframe_srcdoc_is_html() {
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp:iframe [srcdoc]="u" />"#),
+            ("srcdoc".to_string(), "Html".to_string())
+        );
+    }
+
+    #[test]
+    fn comp_img_src_is_url_not_resource_url() {
+        // `img|src` is a navigable URL (not a Trusted Types / RESOURCE_URL sink).
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp:img [src]="u" />"#),
+            ("src".to_string(), "Url".to_string())
+        );
+    }
+
+    #[test]
+    fn svg_comp_image_xlink_href_is_none() {
+        // <svg><MyCmp:image [xlink:href]> -> resolved tag ":svg:image" -> ns-stripped
+        // "image" -> no `image|xlink:href` schema entry -> NONE (no over-sanitization).
+        assert_eq!(
+            first_component_input_security(r#"<svg><MyCmp:image [xlink:href]="u" /></svg>"#),
+            ("xlink:href".to_string(), "None".to_string())
+        );
+    }
+
+    // ---- CONTROL: bare component (tagName null) ----
+
+    #[test]
+    fn bare_comp_src_is_none() {
+        // tagName null -> security NONE (matches upstream null-selector union).
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp [src]="u" />"#),
+            ("src".to_string(), "None".to_string())
+        );
+    }
+
+    #[test]
+    fn bare_comp_inner_html_is_html_via_wildcard() {
+        // tagName null but `*|innerHTML` is a wildcard sink -> HTML.
+        assert_eq!(
+            first_component_input_security(r#"<MyCmp [innerHTML]="u" />"#),
+            ("innerHTML".to_string(), "Html".to_string())
+        );
+    }
+
+    #[test]
+    fn bare_comp_class_named_object_data_is_none() {
+        // REGRESSION GUARD: a class name that collides with a real element name
+        // (`Object`) with NO tag part must NOT be looked up as the `object` element.
+        // tagName null -> NONE (matches upstream; pre-fix this leaked RESOURCE_URL).
+        assert_eq!(
+            first_component_input_security(r#"<Object [data]="u" />"#),
+            ("data".to_string(), "None".to_string())
+        );
+    }
+
+    // ---- CONTROL: normal element (non-component) unchanged ----
+
+    #[test]
+    fn control_normal_iframe_src_is_resource_url() {
+        assert_eq!(
+            first_element_input_security(r#"<iframe [src]="u"></iframe>"#),
+            ("src".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    // ---- i18n trusted-types sink ----
+
+    #[test]
+    fn comp_iframe_i18n_src_is_disallowed() {
+        let errors = transform_errors(r#"<MyCmp:iframe i18n-src src="x">hi</MyCmp:iframe>"#);
+        assert!(
+            has_disallowed_error(&errors, "src"),
+            "expected i18n disallowed error for iframe|src, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn control_bare_comp_i18n_src_is_allowed() {
+        // tagName null -> isTrustedType false -> NO error (matches upstream).
+        let errors = transform_errors(r#"<MyCmp i18n-src src="x">hi</MyCmp>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for bare <MyCmp>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn control_bare_comp_class_named_object_i18n_data_is_allowed() {
+        // REGRESSION GUARD: class `Object`, NO tag part -> tagName null -> NO error
+        // (pre-fix the class name leaked into `object|data` and spuriously errored).
+        let errors = transform_errors(r#"<Object i18n-data data="x">hi</Object>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for bare <Object>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn control_normal_iframe_i18n_src_is_disallowed() {
+        let errors = transform_errors(r#"<iframe i18n-src src="x"></iframe>"#);
+        assert!(
+            has_disallowed_error(&errors, "src"),
+            "expected i18n disallowed error for normal iframe|src, got: {errors:?}"
+        );
+    }
+
+    // ---- i18n trusted-types sink: namespace must NOT be stripped, bare component skips ----
+    //
+    // These assert faithfulness to v21.2.7 `render3/view/i18n/meta.ts` (~210-214):
+    //   isTrustedType = node instanceof html.Component
+    //     ? (node.tagName === null ? false : isTrustedTypesSink(node.tagName, name))
+    //     : isTrustedTypesSink(node.name, name);
+    // For a NORMAL element it passes the FULL `node.name` (un-stripped, e.g.
+    // `:svg:iframe`); for a COMPONENT it passes the resolved `node.tagName`
+    // (un-stripped, e.g. `:svg:iframe`); for a BARE component (tagName null) it
+    // SHORT-CIRCUITS to false. `isTrustedTypesSink` only lowercases (NO ns-strip),
+    // so `:svg:iframe|src` is NOT a member of TRUSTED_TYPES_SINKS -> ALLOWED.
+    // All expected outcomes were verified by executing
+    // `parseTemplate(tpl, 'test.html', {enableSelectorless:true})` against
+    // @angular/compiler@21.2.7.
+
+    #[test]
+    fn normal_svg_iframe_i18n_src_is_allowed() {
+        // Normal namespaced element, full name `:svg:iframe`; upstream passes
+        // `node.name` un-stripped -> `:svg:iframe|src` is NOT a sink -> ALLOWED.
+        // (Pre-fix OXC ns-stripped to `iframe|src` and wrongly BLOCKED.)
+        let errors = transform_errors(r#"<svg:iframe i18n-src src="x"></svg:iframe>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for <svg:iframe i18n-src>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn comp_svg_iframe_i18n_src_is_allowed() {
+        // Selectorless component resolved to `:svg:iframe` (inside <svg>); upstream
+        // passes `node.tagName` un-stripped -> `:svg:iframe|src` NOT a sink -> ALLOWED.
+        // (Pre-fix OXC ns-stripped to `iframe|src` and wrongly BLOCKED.)
+        let errors =
+            transform_errors(r#"<svg><MyCmp:iframe i18n-src src="x">hi</MyCmp:iframe></svg>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for <svg><MyCmp:iframe i18n-src>, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn bare_comp_i18n_inner_html_is_allowed() {
+        // Bare component (tagName null) -> upstream short-circuits isTrustedType to
+        // false -> ALLOWED, even though `*|innerhtml` IS a wildcard sink. (Pre-fix
+        // OXC passed an EMPTY STRING which matched `*|innerhtml` and wrongly BLOCKED.)
+        let errors = transform_errors(r#"<MyCmp i18n-innerHTML innerHTML="x">hi</MyCmp>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for bare <MyCmp i18n-innerHTML>, got: {errors:?}"
+        );
+    }
+}
+
+// ============================================================================
+// DEFAULT (non-selectorless) parse mode: an UPPERCASE-leading HTML tag like
+// `<IFRAME>` / `<OBJECT>` is a NORMAL element, NOT a selectorless component.
+//
+// This is the path the real compiler uses: every parse site in
+// `component/transform.rs` builds `ParseTemplateOptions { ..Default::default() }`
+// and `enable_selectorless` defaults to `false`, so the lexer never tokenizes a
+// `ComponentOpenStart` and never produces an `HtmlComponent` / component-marked
+// `HtmlElement`. An `<IFRAME>` is therefore an ordinary `HtmlElement` whose name
+// is preserved as-is.
+//
+// Ground truth settled by EXECUTING @angular/compiler@21.2.7
+// `parseTemplate(html, 'test.html', {})` (NO enableSelectorless ->
+// `selectorlessEnabled = options.enableSelectorless ?? false` is false):
+//   <IFRAME [src]>     -> NODE Element name=IFRAME, src securityContext 5 (RESOURCE_URL)
+//   <OBJECT [data]>    -> NODE Element name=OBJECT, data securityContext 5 (RESOURCE_URL)
+//   <IFRAME i18n-src>  -> error "Translating attribute 'src' is disallowed for security reasons."
+//   <MyCmp [src]>      -> NODE Element name=MyCmp, src securityContext 0 (NONE), NO i18n error
+//
+// The security lookup (`get_security_context`) and the i18n sink check
+// (`is_trusted_types_sink`) both lowercase internally, so routing the uppercase
+// element through its own `raw_name` yields the correct `iframe|src` /
+// `object|data` lookups automatically. Before the fix, `html_to_r3`'s casing
+// heuristic (`first_char.is_ascii_uppercase()`) mis-flagged `<IFRAME>` as a bare
+// selectorless component (tagName null) -> `SecurityContext::None` and SKIPPED
+// the i18n guard, dropping the sanitizer.
+// ============================================================================
+mod default_mode_uppercase_element_security {
+    use super::*;
+
+    /// Parses `html` in DEFAULT mode (selectorless OFF, exactly like the real
+    /// pipeline) and returns the first element's first bound-attribute input as
+    /// `(name, security_context)`.
+    fn first_element_input_security(html: &str) -> (String, String) {
+        let (name, _ty, sc) = first_input_security(html);
+        (name, sc)
+    }
+
+    /// Parses `html` in DEFAULT mode and returns the combined parse + transform
+    /// error messages.
+    fn transform_errors(html: &str) -> Vec<String> {
+        let allocator = Box::new(Allocator::default());
+        let allocator_ref: &'static Allocator =
+            unsafe { &*std::ptr::from_ref::<Allocator>(allocator.as_ref()) };
+        let parser = HtmlParser::new(allocator_ref, html, "test.html");
+        let html_result = parser.parse();
+        let options = TransformOptions { collect_comment_nodes: false };
+        let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
+        let r3_result = transformer.transform(&html_result.nodes);
+        html_result
+            .errors
+            .iter()
+            .map(|e| e.msg.clone())
+            .chain(r3_result.errors.iter().map(|e| e.msg.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn uppercase_iframe_src_is_resource_url() {
+        // Upstream (default mode): `<IFRAME [src]>` is an Element; `iframe|src`
+        // (lowercased) -> RESOURCE_URL. (Pre-fix OXC mis-flagged as a bare
+        // component -> NONE, dropping the sanitizer — a security regression.)
+        assert_eq!(
+            first_element_input_security(r#"<IFRAME [src]="u"></IFRAME>"#),
+            ("src".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    #[test]
+    fn uppercase_object_data_is_resource_url() {
+        // `<OBJECT [data]>` -> `object|data` -> RESOURCE_URL.
+        assert_eq!(
+            first_element_input_security(r#"<OBJECT [data]="u"></OBJECT>"#),
+            ("data".to_string(), "ResourceUrl".to_string())
+        );
+    }
+
+    #[test]
+    fn uppercase_iframe_i18n_src_is_disallowed() {
+        // `<IFRAME i18n-src>` -> isTrustedTypesSink("IFRAME","src") lowercases to
+        // `iframe|src` (a sink) -> ERROR. (Pre-fix OXC treated it as a bare
+        // component with tagName null and SKIPPED the guard, allowing translation.)
+        let errors = transform_errors(r#"<IFRAME i18n-src="x" src="y">hi</IFRAME>"#);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e == "Translating attribute 'src' is disallowed for security reasons."),
+            "expected i18n disallowed error for IFRAME|src in default mode, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn control_unknown_uppercase_element_src_is_none() {
+        // CONTROL: in default mode `<MyCmp>` is an unknown NORMAL element (NOT a
+        // component); `mycmp|src` is not a schema key -> NONE, and NO i18n error.
+        assert_eq!(
+            first_element_input_security(r#"<MyCmp [src]="u"></MyCmp>"#),
+            ("src".to_string(), "None".to_string())
+        );
+        let errors = transform_errors(r#"<MyCmp i18n-src="x" src="y">hi</MyCmp>"#);
+        assert!(
+            !errors.iter().any(|e| e.contains("disallowed for security reasons")),
+            "expected NO i18n disallowed error for unknown <MyCmp> in default mode, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn uppercase_iframe_is_element_node_not_component() {
+        // Upstream produces a t.Element (not t.Component) for `<IFRAME>` in
+        // default mode. Assert the R3 node is an Element with name "IFRAME".
+        assert_eq!(humanize_ignore_errors("<IFRAME></IFRAME>"), vec![h!["Element", "IFRAME"]]);
     }
 }

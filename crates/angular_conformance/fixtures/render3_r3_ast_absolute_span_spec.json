@@ -1,6 +1,6 @@
 {
   "name": "r3_ast_absolute_span_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_absolute_span_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_absolute_span_spec.ts",
   "test_groups": [
     {
       "name": "expression AST absolute source spans",
@@ -16,7 +16,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{1 + 2}}<div>",
-                  "expected": [["1 + 2"]],
+                  "expected": [
+                    [
+                      "1 + 2"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -33,7 +37,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{1 + 2}}<div>",
-                  "expected": [["1"], ["2"]],
+                  "expected": [
+                    [
+                      "1"
+                    ],
+                    [
+                      "2"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -56,7 +67,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{bool ? 1 : 0}}<div>",
-                  "expected": [["bool ? 1 : 0"]],
+                  "expected": [
+                    [
+                      "bool ? 1 : 0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -73,7 +88,17 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{bool ? 1 : 0}}<div>",
-                  "expected": [["bool"], ["1"], ["0"]],
+                  "expected": [
+                    [
+                      "bool"
+                    ],
+                    [
+                      "1"
+                    ],
+                    [
+                      "0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -96,7 +121,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div (click)=\"a(); b();\"><div>",
-                  "expected": [["a(); b();"]],
+                  "expected": [
+                    [
+                      "a(); b();"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -113,7 +142,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div (click)=\"a(); b();\"><div>",
-                  "expected": [["a()"], ["b()"]],
+                  "expected": [
+                    [
+                      "a()"
+                    ],
+                    [
+                      "b()"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -136,7 +172,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{fn()()}}<div>",
-                  "expected": [["fn()()"]],
+                  "expected": [
+                    [
+                      "fn()()"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -153,7 +193,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{fn()(param)}}<div>",
-                  "expected": [["param"]],
+                  "expected": [
+                    [
+                      "param"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -176,7 +220,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{1 + foo.length}}<div>",
-                  "expected": [["{{ 1 + foo.length }}"]],
+                  "expected": [
+                    [
+                      "{{ 1 + foo.length }}"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -193,7 +241,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{1 + 2}}<div>",
-                  "expected": [["1"], ["2"]],
+                  "expected": [
+                    [
+                      "1"
+                    ],
+                    [
+                      "2"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -210,7 +265,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "&nbsp;{{abc}}",
-                  "expected": [["abc"]],
+                  "expected": [
+                    [
+                      "abc"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -227,7 +286,17 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "&quot;{{abc}}&quot;{{def}}&nbsp;{{ghi}}",
-                  "expected": [["abc"], ["def"], ["ghi"]],
+                  "expected": [
+                    [
+                      "abc"
+                    ],
+                    [
+                      "def"
+                    ],
+                    [
+                      "ghi"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -244,7 +313,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div class=\"{{abc}}\"><div>",
-                  "expected": [["abc"]],
+                  "expected": [
+                    [
+                      "abc"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -261,7 +334,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div class=\"&nbsp;{{abc}}\"><div>",
-                  "expected": [["abc"]],
+                  "expected": [
+                    [
+                      "abc"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -278,7 +355,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div class=\"&quot;{{abc}}&quot;&nbsp;{{def}}\"><div>",
-                  "expected": [["abc"], ["def"]],
+                  "expected": [
+                    [
+                      "abc"
+                    ],
+                    [
+                      "def"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -301,7 +385,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{obj[key]}}<div>",
-                  "expected": [["obj[key]"]],
+                  "expected": [
+                    [
+                      "obj[key]"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -318,7 +406,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{obj[key]}}<div>",
-                  "expected": [["key"]],
+                  "expected": [
+                    [
+                      "key"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -341,7 +433,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{obj[key] = 0}}<div>",
-                  "expected": [["obj[key] = 0"]],
+                  "expected": [
+                    [
+                      "obj[key] = 0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -358,7 +454,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{obj[key] = 0}}<div>",
-                  "expected": [["key"], ["0"]],
+                  "expected": [
+                    [
+                      "key"
+                    ],
+                    [
+                      "0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -381,7 +484,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{[0, 1, 2]}}<div>",
-                  "expected": [["[0, 1, 2]"]],
+                  "expected": [
+                    [
+                      "[0, 1, 2]"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -398,7 +505,17 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{[0, 1, 2]}}<div>",
-                  "expected": [["0"], ["1"], ["2"]],
+                  "expected": [
+                    [
+                      "0"
+                    ],
+                    [
+                      "1"
+                    ],
+                    [
+                      "2"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -421,7 +538,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{ {a: 0} }}<div>",
-                  "expected": [["{a: 0}"]],
+                  "expected": [
+                    [
+                      "{a: 0}"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -438,7 +559,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{ {a: 0} }}<div>",
-                  "expected": [["0"]],
+                  "expected": [
+                    [
+                      "0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -461,7 +586,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{method()}}</div>",
-                  "expected": [["method()"]],
+                  "expected": [
+                    [
+                      "method()"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -478,7 +607,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{method(param)}}<div>",
-                  "expected": [["param"]],
+                  "expected": [
+                    [
+                      "param"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -501,7 +634,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop!}}</div>",
-                  "expected": [["prop!"]],
+                  "expected": [
+                    [
+                      "prop!"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -518,7 +655,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop!}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -541,7 +682,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop | pipe}}<div>",
-                  "expected": [["(prop | pipe)"]],
+                  "expected": [
+                    [
+                      "(prop | pipe)"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -558,7 +703,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop | pipe}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -581,7 +730,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop.obj}}<div>",
-                  "expected": [["prop.obj"]],
+                  "expected": [
+                    [
+                      "prop.obj"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -598,7 +751,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop.obj}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -621,7 +778,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div (click)=\"prop = 0\"></div>",
-                  "expected": [["prop = 0"]],
+                  "expected": [
+                    [
+                      "prop = 0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -638,7 +799,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div (click)=\"prop.inner = 0\"></div>",
-                  "expected": [["prop.inner = 0"]],
+                  "expected": [
+                    [
+                      "prop.inner = 0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -655,7 +820,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div (click)=\"prop = 0\"></div>",
-                  "expected": [["0"]],
+                  "expected": [
+                    [
+                      "0"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -678,7 +847,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{!prop}}</div>",
-                  "expected": [["!prop"]],
+                  "expected": [
+                    [
+                      "!prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -695,7 +868,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{!prop}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -718,7 +895,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop?.safe()}}<div>",
-                  "expected": [["prop?.safe()"]],
+                  "expected": [
+                    [
+                      "prop?.safe()"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -735,7 +916,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop?.safe()}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -758,7 +943,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop?.safe}}<div>",
-                  "expected": [["prop?.safe"]],
+                  "expected": [
+                    [
+                      "prop?.safe"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -775,7 +964,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div>{{prop?.safe}}<div>",
-                  "expected": [["prop"]],
+                  "expected": [
+                    [
+                      "prop"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": true,
                   "find_implicit_receiver": false,
@@ -798,7 +991,11 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div *ngFor=\"let item of items\">{{item}}</div>",
-                  "expected": [["items"]],
+                  "expected": [
+                    [
+                      "items"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -815,7 +1012,14 @@
                 {
                   "type": "HumanizeExpressionSource",
                   "input": "<div *ngFor=\"let a of As; let b of Bs\"></div>",
-                  "expected": [["As"], ["Bs"]],
+                  "expected": [
+                    [
+                      "As"
+                    ],
+                    [
+                      "Bs"
+                    ]
+                  ],
                   "options": null,
                   "extract_sub_expressions": false,
                   "find_implicit_receiver": false,
@@ -837,8 +1041,8 @@
               "assertions": []
             },
             {
-              "name": "is correct for variables and placeholders",
-              "path": "expression AST absolute source spans/ICU expressions/is correct for variables and placeholders",
+              "name": "is correct for variables and placeholders in nested ICUs",
+              "path": "expression AST absolute source spans/ICU expressions/is correct for variables and placeholders in nested ICUs",
               "assertions": []
             }
           ]
@@ -863,7 +1067,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "{{foo // comment}}",
-              "expected": [["foo"]],
+              "expected": [
+                [
+                  "foo"
+                ]
+              ],
               "options": {
                 "preserve_whitespaces": true
               },
@@ -882,7 +1090,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "{{  foo  }}",
-              "expected": [["foo"]],
+              "expected": [
+                [
+                  "foo"
+                ]
+              ],
               "options": {
                 "preserve_whitespaces": true
               },
@@ -901,7 +1113,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "{{  foo // comment  }}",
-              "expected": [["foo"]],
+              "expected": [
+                [
+                  "foo"
+                ]
+              ],
               "options": {
                 "preserve_whitespaces": true
               },
@@ -920,7 +1136,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<button (click)=\"foo = true // comment\">Save</button>",
-              "expected": [["foo = true"]],
+              "expected": [
+                [
+                  "foo = true"
+                ]
+              ],
               "options": {
                 "preserve_whitespaces": true
               },
@@ -939,7 +1159,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div>\n  \n{{foo}}</div>",
-              "expected": [["\n  \n{{ foo }}"]],
+              "expected": [
+                [
+                  "\n  \n{{ foo }}"
+                ]
+              ],
               "options": {
                 "preserve_whitespaces": true
               },
@@ -958,7 +1182,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div>{{foo}}</div>",
-              "expected": [["{{ foo }}"]],
+              "expected": [
+                [
+                  "{{ foo }}"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -975,7 +1203,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div (click)=\"foo();bar();\"></div>",
-              "expected": [["foo(); bar();"]],
+              "expected": [
+                [
+                  "foo(); bar();"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -986,7 +1218,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div on-click=\"foo();bar();\"></div>",
-              "expected": [["foo(); bar();"]],
+              "expected": [
+                [
+                  "foo(); bar();"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -1003,7 +1239,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<input [disabled]=\"condition ? true : false\" />",
-              "expected": [["condition ? true : false"]],
+              "expected": [
+                [
+                  "condition ? true : false"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -1014,7 +1254,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<input bind-disabled=\"condition ? true : false\" />",
-              "expected": [["condition ? true : false"]],
+              "expected": [
+                [
+                  "condition ? true : false"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -1031,7 +1275,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div *ngIf=\"value | async\"></div>",
-              "expected": [["(value | async)"]],
+              "expected": [
+                [
+                  "(value | async)"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,
@@ -1048,7 +1296,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div>{{a.b}}<div>",
-              "expected": [[""]],
+              "expected": [
+                [
+                  ""
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": true,
               "find_implicit_receiver": true,
@@ -1065,7 +1317,11 @@
             {
               "type": "HumanizeExpressionSource",
               "input": "<div>{{100}}<div>",
-              "expected": [["100"]],
+              "expected": [
+                [
+                  "100"
+                ]
+              ],
               "options": null,
               "extract_sub_expressions": false,
               "find_implicit_receiver": false,

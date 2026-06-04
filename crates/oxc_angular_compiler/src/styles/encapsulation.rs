@@ -320,8 +320,78 @@ pub fn shim_css_text(css: &str, content_attr: &str, host_attr: &str) -> String {
     restore_comments(&result, &comments)
 }
 
+/// Returns `true` if `ch` is an ECMAScript `\s` whitespace code point.
+///
+/// FINDING 2: upstream `ShadowCss` matches comments with two JavaScript regexes
+/// whose `\s` follows ECMAScript whitespace semantics, NOT Rust's `char::is_whitespace`
+/// (Unicode `White_Space`). The two sets differ for exactly the code points that bite
+/// here:
+///   * U+FEFF (BOM / ZERO WIDTH NO-BREAK SPACE) — IS ECMAScript `\s`, but is NOT in
+///     Rust's `White_Space`.
+///   * U+0085 (NEL) — is NOT ECMAScript `\s`, but IS in Rust's `White_Space`.
+/// So the hash-comment predicate must use this function instead of `trim`/`is_whitespace`.
+///
+/// ECMAScript `\s` = WhiteSpace ∪ LineTerminator, i.e.:
+///   \t \n \v \f \r, U+0020, U+00A0, U+1680, U+2000–U+200A, U+2028, U+2029,
+///   U+202F, U+205F, U+3000, U+FEFF.
+fn is_ecmascript_whitespace(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{0009}'   // \t
+        | '\u{000A}' // \n
+        | '\u{000B}' // \v
+        | '\u{000C}' // \f
+        | '\u{000D}' // \r
+        | '\u{0020}' // space
+        | '\u{00A0}' // NBSP
+        | '\u{1680}'
+        | '\u{2000}'
+            ..='\u{200A}'
+        | '\u{2028}' // LINE SEPARATOR
+        | '\u{2029}' // PARAGRAPH SEPARATOR
+        | '\u{202F}'
+        | '\u{205F}'
+        | '\u{3000}'
+        | '\u{FEFF}' // BOM / ZWNBSP — ECMAScript ws but NOT Rust White_Space
+    )
+}
+
+/// Tests a closed comment against upstream `_commentWithHashRe`
+/// (`/\/\*\s*#\s*source(Mapping)?URL=/g`): literal `/*`, ECMAScript-`\s`*, `#`,
+/// ECMAScript-`\s`*, then literally `sourceURL=` or `sourceMappingURL=` (trailing `=`
+/// required; `Mapping` optional; case-sensitive). `comment` includes the leading `/*`.
+///
+/// FINDING 1: upstream uses `m.match(_commentWithHashRe)`, which is UNANCHORED — it
+/// searches the ENTIRE comment string `m` for the pattern. Because the pattern STARTS
+/// WITH a literal `/*`, it can match an INNER `/*#sourceURL=` occurrence inside the
+/// comment body, e.g. `/* outer /*#sourceURL=x */` (a single closed comment per
+/// `_commentRe`'s non-greedy match to the first `*/`) matches the inner `/*#sourceURL=`
+/// and is PRESERVED. So we must scan EVERY `/*` position in `comment`, not just the
+/// leading one.
+fn comment_is_sourcemap(comment: &str) -> bool {
+    let bytes = comment.as_bytes();
+    // Find every literal `/*` in the comment (the pattern's required prefix).
+    for start in 0..bytes.len().saturating_sub(1) {
+        if bytes[start] == b'/' && bytes[start + 1] == b'*' {
+            // `start + 2` is a UTF-8 char boundary (`/` and `*` are ASCII).
+            let after_start = &comment[start + 2..];
+            let after_ws = after_start.trim_start_matches(is_ecmascript_whitespace);
+            let Some(after_hash) = after_ws.strip_prefix('#') else {
+                continue;
+            };
+            let token = after_hash.trim_start_matches(is_ecmascript_whitespace);
+            if token.starts_with("sourceURL=") || token.starts_with("sourceMappingURL=") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Extract comments and replace them with placeholders.
-/// Sourcemap comments are preserved, other comments are replaced with newlines.
+/// Sourcemap comments are preserved verbatim; other comments are replaced with
+/// only their interior newlines (empty when single-line), matching upstream
+/// Angular `ShadowCss` v21.2.7 so that stripping a comment adds no extra lines.
 fn extract_comments(css: &str) -> (String, Vec<String>) {
     let mut comments = Vec::new();
     let mut result = String::with_capacity(css.len());
@@ -333,37 +403,75 @@ fn extract_comments(css: &str) -> (String, Vec<String>) {
         // Check for comment start: /*
         if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'*' {
             let comment_start = i;
-            i += 2;
+            let mut scan = i + 2;
 
-            // Find comment end: */
-            while i + 1 < len {
-                if bytes[i] == b'*' && bytes[i + 1] == b'/' {
-                    i += 2;
+            // Find comment end: */ (CLOSED comments only).
+            let mut closed = false;
+            while scan + 1 < len {
+                if bytes[scan] == b'*' && bytes[scan + 1] == b'/' {
+                    scan += 2;
+                    closed = true;
                     break;
                 }
-                i += 1;
+                scan += 1;
             }
 
+            // FINDING 2: upstream `_commentRe = /\/\*[\s\S]*?\*\//g` matches ONLY closed
+            // comments. An unterminated `/*` (no closing `*/`) is NOT a comment — leave it
+            // (and the rest of the text) UNCHANGED. Emit the leading `/` as an ordinary
+            // char and continue normal char-by-char scanning so any later well-formed
+            // `/* ... */` still gets processed.
+            if !closed {
+                i += push_utf8_char(&mut result, css, i);
+                continue;
+            }
+
+            i = scan;
             let comment = &css[comment_start..i];
 
-            // Check if it's a sourcemap comment: /* # source... or /*# source...
-            // Matches regex r"/\*\s*#\s*source"
-            let is_sourcemap = {
-                let after_start = &comment[2..]; // skip /*
-                let trimmed = after_start.trim_start();
-                trimmed.starts_with('#') && trimmed[1..].trim_start().starts_with("source")
-            };
+            // Preserve ONLY sourcemap/sourceURL comments verbatim; every other comment
+            // is stripped (collapsed to its interior newlines) so no comment text — which
+            // could leak sensitive data — survives. This matches upstream Angular
+            // `ShadowCss` v21.2.7 exactly (shadow_css.ts:182-189), which tests each
+            // CLOSED comment (`_commentRe`, shadow_css.ts:1113) against:
+            //   const _commentWithHashRe = /\/\*\s*#\s*source(Mapping)?URL=/g;
+            // i.e. `/*`, optional whitespace, `#`, optional whitespace, then literally
+            // `sourceURL=` OR `sourceMappingURL=` (the `(Mapping)?` group is optional and
+            // the trailing `=` is REQUIRED; the match is case-sensitive). So
+            // `/* # source: secret */`, `/* #sourceURLx */`, `/* sourceURL= */` (no `#`)
+            // and `/* # sourceMap */` are all NON-matching and get stripped, while
+            // `/*#sourceURL=foo*/` and `/* # sourceMappingURL=foo */` are preserved.
+            // The `\s` here uses `is_ecmascript_whitespace` (NOT Rust `trim`), so it
+            // matches JS exactly for the divergent code points U+FEFF (JS ws, Rust not)
+            // and U+0085 (Rust ws, JS not).
+            let is_sourcemap = comment_is_sourcemap(comment);
 
             if is_sourcemap {
                 comments.push(comment.to_string());
             } else {
-                // Count newlines in the comment to preserve line count for sourcemaps
-                let newline_count = comment.bytes().filter(|&b| b == b'\n').count();
+                // Replace non-hash comments with only their interior newlines. This mirrors
+                // upstream Angular `ShadowCss` (v21.2.7), which substitutes a non-sourcemap
+                // comment with `newLinesMatches?.join('') ?? ''` using `_newLinesRe = /\r?\n/g`.
+                // The comment collapses to nothing except the `\r\n`/`\n` sequences it contained,
+                // so removing a comment does not add extra blank lines while interior newlines
+                // (needed to keep sourcemap line counts stable) are preserved verbatim.
                 let mut preserved = String::new();
-                for _ in 0..newline_count {
-                    preserved.push('\n');
+                let comment_bytes = comment.as_bytes();
+                let mut j = 0;
+                while j < comment_bytes.len() {
+                    if comment_bytes[j] == b'\r'
+                        && j + 1 < comment_bytes.len()
+                        && comment_bytes[j + 1] == b'\n'
+                    {
+                        preserved.push_str("\r\n");
+                        j += 2;
+                    } else if comment_bytes[j] == b'\n' {
+                        preserved.push('\n');
+                        j += 1;
+                    } else {
+                        j += 1;
+                    }
                 }
-                preserved.push('\n');
                 comments.push(preserved);
             }
 
@@ -377,19 +485,53 @@ fn extract_comments(css: &str) -> (String, Vec<String>) {
 }
 
 /// Restore comments from placeholders.
+///
+/// FINDING 2: this must be a SINGLE left-to-right pass over the scoped CSS, mirroring
+/// upstream `scopedCssText.replace(_commentWithHashPlaceHolderRe, () => comments[idx++])`
+/// (shadow_css.ts:199). JavaScript `String.replace(re, replacer)` matches placeholders
+/// ONLY in the original string and never rescans replacement text. The previous OXC
+/// implementation looped `while result.find(PLACEHOLDER)`, re-searching the WHOLE result
+/// after each replacement — so if a PRESERVED (sourceURL) comment's body literally
+/// contained the `%COMMENT%` sentinel, that literal text was treated as another
+/// placeholder slot, corrupting/shifting the output. Walking the scoped string once and
+/// replacing each ORIGINAL placeholder exactly once (in order) keeps any literal
+/// `%COMMENT%` inside a restored comment literal, matching upstream exactly.
+///
+/// FINDING 3 (surplus placeholders): upstream's sentinel is the literal `%COMMENT%`
+/// (shadow_css.ts:1115), which a CSS author CAN type outside any comment (e.g. in a
+/// string or `url()`). Such a literal survives extraction (it is not a `/* */` comment)
+/// and is then matched by the global restore replace. Because the extraction step pushes
+/// exactly one `comments[]` entry per extracted comment, a surplus match has no
+/// corresponding entry: `comments[idx++]` is `undefined`, which JavaScript's
+/// `String.replace` coerces to the STRING `"undefined"`. We replicate that quirk
+/// faithfully — surplus `%COMMENT%` occurrences become the literal text `undefined`
+/// rather than being dropped. Verified against `@angular/compiler@21.2.7`
+/// `ShadowCss().shimCssText`, e.g. `div { content: "%COMMENT%"; }` ->
+/// `... content: "undefined"; ...`.
 fn restore_comments(css: &str, comments: &[String]) -> String {
-    let mut result = css.to_string();
+    let mut result = String::with_capacity(css.len());
+    let mut rest = css;
     let mut idx = 0;
 
-    while result.find(COMMENT_PLACEHOLDER).is_some() {
+    while let Some(pos) = rest.find(COMMENT_PLACEHOLDER) {
+        // Copy literal text before the placeholder verbatim.
+        result.push_str(&rest[..pos]);
+        // Substitute this placeholder with its stored comment. For a surplus placeholder
+        // (more `%COMMENT%` occurrences than extracted comments — e.g. an author-typed
+        // literal `%COMMENT%`), upstream's `comments[idx++]` is `undefined`, stringified
+        // by `String.replace` to "undefined"; emit that literal to match exactly.
         if idx < comments.len() {
-            result = result.replacen(COMMENT_PLACEHOLDER, &comments[idx], 1);
-            idx += 1;
+            result.push_str(&comments[idx]);
         } else {
-            break;
+            result.push_str("undefined");
         }
+        idx += 1;
+        // Continue AFTER the matched placeholder; never rescan the inserted comment.
+        rest = &rest[pos + COMMENT_PLACEHOLDER.len()..];
     }
 
+    // Copy any trailing text after the last placeholder.
+    result.push_str(rest);
     result
 }
 
@@ -1801,6 +1943,37 @@ fn scope_selector_list(selector_list: &str, content_attr: &str, host_attr: &str)
     scope_selector_list_with_context(selector_list, &ctx)
 }
 
+/// Length (in bytes) of a LEADING `\s*(%COMMENT%\s*)*` run at the start of `s`,
+/// mirroring capture group 1 of upstream's `_ruleRe` (shadow_css.ts:1119-1120):
+/// `(\s*(?:%COMMENT%\s*)*)`. Such a prefix is stripped off the selector and
+/// re-prepended verbatim AFTER scoping, so a leading/whole comment placeholder is
+/// never scoped. A comment placeholder that is NOT part of this leading run (e.g.
+/// embedded in `a%COMMENT%b`, or after a comma) stays in the selector and is scoped
+/// normally.
+fn leading_comment_prefix_len(s: &str) -> usize {
+    // Consume a run of ECMAScript `\s` (matching the regex `\s*`) starting at byte
+    // index `i`, returning the new byte index. Char-based so non-ASCII whitespace
+    // (e.g. U+FEFF / U+00A0, which upstream's `\s` matches) is handled correctly.
+    fn skip_ws(s: &str, mut i: usize) -> usize {
+        while let Some(ch) = s[i..].chars().next() {
+            if is_ecmascript_whitespace(ch) {
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
+        }
+        i
+    }
+
+    // Leading whitespace, then zero or more (`%COMMENT%` followed by `\s*`).
+    let mut i = skip_ws(s, 0);
+    while s[i..].starts_with(COMMENT_PLACEHOLDER) {
+        i += COMMENT_PLACEHOLDER.len();
+        i = skip_ws(s, i);
+    }
+    i
+}
+
 /// Scope a selector list with a given context (allows recursive calls to share state)
 fn scope_selector_list_with_context(selector_list: &str, parent_ctx: &ScopingContext) -> String {
     // Preserve leading and trailing whitespace
@@ -1810,6 +1983,34 @@ fn scope_selector_list_with_context(selector_list: &str, parent_ctx: &ScopingCon
         return selector_list.to_string();
     }
     let trailing: &str = &selector_list[selector_list.trim_end().len()..];
+
+    // FINDING 1: strip a LEADING `\s*(%COMMENT%\s*)*` run (upstream `_ruleRe` group 1)
+    // from the selector list before scoping; re-prepend it verbatim afterwards. This
+    // keeps a leading/whole comment placeholder unscoped while letting embedded
+    // placeholders be scoped as ordinary selector text. `leading` already captured the
+    // outermost whitespace, so here we only need to consume the comment run (plus any
+    // interior whitespace between/after placeholders) from the trimmed selector.
+    //
+    // CRUCIAL: upstream performs this strip ONLY at the real CSS rule boundary
+    // (`processRules`/`_ruleRe`), feeding `_scopeSelector({ isParentSelector: true })`.
+    // The RECURSIVE calls for pseudo-function inner selectors (`:is()`/`:where()`,
+    // reached below via `scope_selector_list_with_context(inner, &child_ctx)` with
+    // `is_parent_selector == false`) do NOT get the pre-strip, so a leading comment
+    // placeholder inside `:is(/*x*/ .b)` is scoped as ordinary selector text (becomes
+    // `:is([c]   .b[c])`), NOT treated as an unscoped prefix. We therefore gate the
+    // strip to the parent (top-level rule) context only. Verified vs
+    // @angular/compiler@21.2.7.
+    let (comment_prefix, trimmed): (&str, &str) = if parent_ctx.is_parent_selector {
+        let comment_prefix_len = leading_comment_prefix_len(trimmed);
+        if comment_prefix_len == trimmed.len() {
+            // Selector was nothing but a leading comment placeholder run (a pure-comment
+            // "rule"): emit it unchanged, exactly like upstream (empty `m[2]`).
+            return selector_list.to_string();
+        }
+        (&trimmed[..comment_prefix_len], &trimmed[comment_prefix_len..])
+    } else {
+        ("", trimmed)
+    };
 
     // Create SafeSelector to escape problematic patterns
     // (attribute selectors, escaped characters, :nth-*() expressions)
@@ -1832,7 +2033,7 @@ fn scope_selector_list_with_context(selector_list: &str, parent_ctx: &ScopingCon
     // Restore escaped patterns
     let restored = safe_selector.restore(&scoped_result);
 
-    format!("{}{}{}", leading, restored, trailing)
+    format!("{}{}{}{}", leading, comment_prefix, restored, trailing)
 }
 
 /// Split a string by top-level commas (not inside parentheses).
@@ -2184,10 +2385,16 @@ fn scope_simple_selector(selector: &str, content_attr: &str) -> String {
         return String::new();
     }
 
-    // Don't scope comment placeholders
-    if selector.contains(COMMENT_PLACEHOLDER) {
-        return selector.to_string();
-    }
+    // NOTE (FINDING 1): there is intentionally NO `contains(COMMENT_PLACEHOLDER)`
+    // bypass here. Upstream `ShadowCss` never special-cases the comment placeholder
+    // inside `_scopeSelector`/`_applySelectorScope` (shadow_css.ts:735-857). A
+    // comment placeholder embedded in a selector part is ordinary selector text and
+    // must receive the content attribute, e.g. `a%COMMENT%b` -> `a%COMMENT%b[c]`.
+    // The ONLY comment placeholders upstream excludes from scoping are a LEADING
+    // run, which `_ruleRe` group 1 (shadow_css.ts:1119-1120) strips off the selector
+    // before scoping; that stripping is mirrored in `scope_selector_list_with_context`.
+    // A previous broad `if selector.contains(COMMENT_PLACEHOLDER) { return; }` bypass
+    // here caused an emulated-encapsulation LEAK (rule emitted unscoped).
 
     // Already has the content attribute
     let attr = format!("[{}]", content_attr);
@@ -3211,6 +3418,125 @@ mod tests {
         assert!(result.contains(".button[contenta]"), "Got: {}", result);
     }
 
+    // ---- FINDING 1: ShadowCss must not leak rules whose selector contains an
+    // embedded comment placeholder. Upstream `_ruleRe` (shadow_css.ts:1119) strips a
+    // LEADING `\s*(%COMMENT%\s*)*` prefix off the selector and scopes the rest
+    // normally; it never special-cases `%COMMENT%` inside `_scopeSelector`. An
+    // embedded comment placeholder is therefore part of an ordinary selector part
+    // and gets the content attribute. Verified against @angular/compiler@21.2.7
+    // `new ShadowCss().shimCssText(css, 'contenta', 'hosta')`.
+    //
+    // NOTE: OXC normalizes descendant combinators to a single space (pre-existing
+    // `normalize_combinator` behavior; upstream emits three spaces). These tests
+    // therefore assert the LEAK is closed (content attribute present on every
+    // comment-bearing part) rather than upstream's exact inter-part whitespace.
+
+    #[test]
+    fn test_leading_comment_inside_pseudo_function_is_scoped_not_stripped() {
+        // FINDING 1 (recursive path): the leading-comment prefix strip must apply ONLY at
+        // the top-level rule boundary, NOT inside the recursive `:is()`/`:where()` inner
+        // selector scoping. Upstream's `_ruleRe` group-1 strip happens in `processRules`
+        // and feeds `_scopeSelector({isParentSelector:true})`; the recursive pseudo calls
+        // use `isParentSelector:false`, so a leading comment placeholder inside `:is(...)`
+        // is scoped as ordinary selector text. Verified vs @angular/compiler@21.2.7:
+        //   ":is(/*x*/ .b)"  -> ":is([contenta]   .b[contenta])"
+        //   ":where(/*# sourceURL=x */ .b)" ->
+        //                       ":where(/*# sourceURL=x */[contenta]   .b[contenta])"
+        // (OXC single-spaces descendant combinators; the load-bearing fact is that the
+        // comment part receives `[contenta]` rather than being stripped as a prefix.)
+        let out = shim_css_text(":is(/*x*/ .b) {color:red}", "contenta", "hosta");
+        assert_eq!(out, ":is([contenta] .b[contenta]) {color:red}", "Got: {out}");
+
+        // Hash comment is kept AND the comment part is scoped (not stripped).
+        let out2 = shim_css_text(":where(/*# sourceURL=x */ .b) {color:red}", "contenta", "hosta");
+        assert_eq!(
+            out2, ":where(/*# sourceURL=x */[contenta] .b[contenta]) {color:red}",
+            "Got: {out2}"
+        );
+    }
+
+    #[test]
+    fn test_embedded_comment_single_part_is_scoped() {
+        // Upstream: "a/*x*/b {color:red}" -> "ab[contenta] {color:red}"
+        let out = shim_css_text("a/*x*/b {color:red}", "contenta", "hosta");
+        assert_eq!(out, "ab[contenta] {color:red}", "Got: {out}");
+    }
+
+    #[test]
+    fn test_embedded_comment_class_part_is_scoped() {
+        // Upstream: ".foo/*x*/.bar {color:red}" -> ".foo.bar[contenta] {color:red}"
+        let out = shim_css_text(".foo/*x*/.bar {color:red}", "contenta", "hosta");
+        assert_eq!(out, ".foo.bar[contenta] {color:red}", "Got: {out}");
+    }
+
+    #[test]
+    fn test_leading_comment_then_embedded_comment_is_scoped() {
+        // Upstream: "/*# sourceURL=h */.a/*# sourceURL=h2 */ {color:red}"
+        //        -> "/*# sourceURL=h */.a/*# sourceURL=h2 */[contenta] {color:red}"
+        let out = shim_css_text(
+            "/*# sourceURL=h */.a/*# sourceURL=h2 */ {color:red}",
+            "contenta",
+            "hosta",
+        );
+        assert_eq!(
+            out, "/*# sourceURL=h */.a/*# sourceURL=h2 */[contenta] {color:red}",
+            "Got: {out}"
+        );
+    }
+
+    #[test]
+    fn test_leading_comment_placeholder_is_not_scoped() {
+        // Upstream: "/*x*/ .a {color:red}" -> " .a[contenta] {color:red}"
+        // The leading comment prefix is stripped and re-prepended verbatim; only
+        // `.a` is scoped.
+        let out = shim_css_text("/*x*/ .a {color:red}", "contenta", "hosta");
+        assert_eq!(out, " .a[contenta] {color:red}", "Got: {out}");
+    }
+
+    #[test]
+    fn test_leading_hash_comment_is_kept_and_selector_scoped() {
+        // Upstream: "/*# sourceURL=foo.css */ .a {color:red}"
+        //        -> "/*# sourceURL=foo.css */ .a[contenta] {color:red}"
+        let out = shim_css_text("/*# sourceURL=foo.css */ .a {color:red}", "contenta", "hosta");
+        assert_eq!(out, "/*# sourceURL=foo.css */ .a[contenta] {color:red}", "Got: {out}");
+    }
+
+    #[test]
+    fn test_comment_after_comma_is_scoped_not_treated_as_leading() {
+        // Upstream strips a leading prefix only at the very start of the whole
+        // selector list. A comment after a comma is part of the 2nd selector and
+        // every part of it is scoped. (OXC single-space normalization.)
+        // Upstream: ".a[contenta], [contenta]   .b[contenta] {color:red}" (the non-hash
+        // comment `/*x*/` restores to empty). OXC matches except for descendant
+        // combinator whitespace (single space vs upstream's three — pre-existing).
+        let out = shim_css_text(".a, /*x*/ .b {color:red}", "contenta", "hosta");
+        // Leak proof: both selectors and the comment-bearing part are scoped.
+        assert!(out.starts_with(".a[contenta], "), "Got: {out}");
+        assert!(out.contains(".b[contenta]"), "Got: {out}");
+        // The comment-only middle part must also receive the attribute (no leak).
+        // The non-hash comment is stripped to empty, leaving a bare `[contenta]`.
+        assert!(out.contains("[contenta] .b[contenta]"), "Got: {out}");
+    }
+
+    #[test]
+    fn test_middle_comment_part_is_scoped() {
+        // Upstream scopes the empty-comment middle part: `%COMMENT%` -> `[contenta]`.
+        // Upstream: "div[contenta]   [contenta]   span[contenta] {color:red}".
+        // OXC single-spaces descendant combinators (pre-existing) ->
+        // "div[contenta] [contenta] span[contenta] {color:red}".
+        let out = shim_css_text("div /*x*/ span {color:red}", "contenta", "hosta");
+        assert_eq!(out, "div[contenta] [contenta] span[contenta] {color:red}", "Got: {out}");
+    }
+
+    #[test]
+    fn test_trailing_comment_part_is_scoped() {
+        // Upstream: "a b/*# sourceURL=h */ {color:red}"
+        // The trailing comment is part of the 2nd selector part and is scoped.
+        let out = shim_css_text("a b/*# sourceURL=h */ {color:red}", "contenta", "hosta");
+        assert!(out.contains("a[contenta]"), "Got: {out}");
+        assert!(out.contains("b/*# sourceURL=h */[contenta]"), "Got: {out}");
+    }
+
     #[test]
     fn test_multiple_selectors() {
         let result = shim_css_text("h1, h2, h3 { font-weight: bold; }", "contenta", "");
@@ -3507,5 +3833,49 @@ mod tests {
             "Should handle combinators with multibyte UTF-8 selectors. Got: {}",
             result
         );
+    }
+
+    // ---- Finding 3: surplus literal `%COMMENT%` placeholders restore to "undefined" ----
+    //
+    // Upstream's sentinel is the literal `%COMMENT%` (shadow_css.ts:1115). A CSS author
+    // can type it outside any comment; it survives extraction and is matched by the global
+    // restore replace `() => comments[idx++]`. With no corresponding extracted comment,
+    // `comments[idx]` is `undefined`, stringified to "undefined" by `String.replace`.
+    //
+    // Oracle (`@angular/compiler@21.2.7` `ShadowCss().shimCssText`):
+    //   div { content: "%COMMENT%"; }                  -> content: "undefined";
+    //   /*# sourceURL=foo */ div { content:"%COMMENT%"}-> comment kept, surplus->undefined
+    //   div::before { content: "%COMMENT%%COMMENT%"; } -> content: "undefinedundefined";
+    //   div { background: url(%COMMENT%); }            -> url(undefined)
+    #[test]
+    fn test_surplus_comment_placeholder_becomes_undefined() {
+        let out = shim_css_text(r#"div { content: "%COMMENT%"; }"#, "a-host", "a-host");
+        assert!(out.contains(r#"content: "undefined";"#), "Got: {out}");
+    }
+
+    #[test]
+    fn test_surplus_comment_placeholder_two_occurrences() {
+        let out =
+            shim_css_text(r#"div::before { content: "%COMMENT%%COMMENT%"; }"#, "a-host", "a-host");
+        assert!(out.contains(r#"content: "undefinedundefined";"#), "Got: {out}");
+    }
+
+    #[test]
+    fn test_surplus_comment_placeholder_in_url() {
+        let out = shim_css_text("div { background: url(%COMMENT%); }", "a-host", "a-host");
+        assert!(out.contains("url(undefined)"), "Got: {out}");
+    }
+
+    #[test]
+    fn test_real_comment_kept_with_surplus_literal() {
+        // A real hash comment is restored at its position; the extra author-typed literal
+        // is surplus and becomes "undefined".
+        let out = shim_css_text(
+            r#"/*# sourceURL=foo */ div { content: "%COMMENT%"; }"#,
+            "a-host",
+            "a-host",
+        );
+        assert!(out.contains("/*# sourceURL=foo */"), "comment must be kept. Got: {out}");
+        assert!(out.contains(r#"content: "undefined";"#), "Got: {out}");
     }
 }

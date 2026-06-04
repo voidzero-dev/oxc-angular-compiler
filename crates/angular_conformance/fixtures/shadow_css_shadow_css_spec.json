@@ -1,6 +1,6 @@
 {
   "name": "shadow_css_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/shadow_css_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/shadow_css_spec.ts",
   "test_groups": [
     {
       "name": "ShadowCss",
@@ -10,12 +10,26 @@
           "groups": [],
           "tests": [
             {
-              "name": "should replace multiline comments with newline",
-              "path": "ShadowCss/comments/should replace multiline comments with newline",
+              "name": "should remove inline comments without adding extra lines",
+              "path": "ShadowCss/comments/should remove inline comments without adding extra lines",
               "assertions": [
                 {
                   "type": "ShimCss",
                   "input": "/* b {c} */ b {c}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": " b[contenta] {c}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should preserve internal newlines from multiline comments",
+              "path": "ShadowCss/comments/should preserve internal newlines from multiline comments",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": "/* b {c}\n */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": "\n b[contenta] {c}",
@@ -24,29 +38,15 @@
               ]
             },
             {
-              "name": "should replace multiline comments with newline in the original position",
-              "path": "ShadowCss/comments/should replace multiline comments with newline in the original position",
-              "assertions": [
-                {
-                  "type": "ShimCss",
-                  "input": "/* b {c}\n */ b {c}",
-                  "content_attr": "contenta",
-                  "host_attr": null,
-                  "expected": "\n\n b[contenta] {c}",
-                  "normalized": false
-                }
-              ]
-            },
-            {
-              "name": "should replace comments with newline in the original position",
-              "path": "ShadowCss/comments/should replace comments with newline in the original position",
+              "name": "should remove multiple inline comments without adding extra lines",
+              "path": "ShadowCss/comments/should remove multiple inline comments without adding extra lines",
               "assertions": [
                 {
                   "type": "ShimCss",
                   "input": "/* b {c} */ b {c} /* a {c} */ a {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": "\n b[contenta] {c} \n a[contenta] {c}",
+                  "expected": " b[contenta] {c}  a[contenta] {c}",
                   "normalized": false
                 }
               ]
@@ -82,7 +82,7 @@
                   "input": "/* comment 1 */ /* comment 2 */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": "\n \n b[contenta] {c}",
+                  "expected": "  b[contenta] {c}",
                   "normalized": false
                 }
               ]

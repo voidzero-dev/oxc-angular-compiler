@@ -1,9 +1,9 @@
 {
   "name": "abstract_emitter_node_only_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/output/abstract_emitter_node_only_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/output/abstract_emitter_node_only_spec.ts",
   "test_groups": [
     {
-      "name": "AbstractEmitter",
+      "name": "AbstractEmitter (node only)",
       "groups": [
         {
           "name": "EmitterVisitorContext",
@@ -11,42 +11,42 @@
           "tests": [
             {
               "name": "should add source files to the source map",
-              "path": "AbstractEmitter/EmitterVisitorContext/should add source files to the source map",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should add source files to the source map",
               "assertions": []
             },
             {
               "name": "should generate a valid mapping",
-              "path": "AbstractEmitter/EmitterVisitorContext/should generate a valid mapping",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should generate a valid mapping",
               "assertions": []
             },
             {
               "name": "should be able to shift the content",
-              "path": "AbstractEmitter/EmitterVisitorContext/should be able to shift the content",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should be able to shift the content",
               "assertions": []
             },
             {
               "name": "should use the default source file for the first character",
-              "path": "AbstractEmitter/EmitterVisitorContext/should use the default source file for the first character",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should use the default source file for the first character",
               "assertions": []
             },
             {
               "name": "should use an explicit mapping for the first character",
-              "path": "AbstractEmitter/EmitterVisitorContext/should use an explicit mapping for the first character",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should use an explicit mapping for the first character",
               "assertions": []
             },
             {
               "name": "should map leading segment without span",
-              "path": "AbstractEmitter/EmitterVisitorContext/should map leading segment without span",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should map leading segment without span",
               "assertions": []
             },
             {
               "name": "should handle indent",
-              "path": "AbstractEmitter/EmitterVisitorContext/should handle indent",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should handle indent",
               "assertions": []
             },
             {
               "name": "should coalesce identical span",
-              "path": "AbstractEmitter/EmitterVisitorContext/should coalesce identical span",
+              "path": "AbstractEmitter (node only)/EmitterVisitorContext/should coalesce identical span",
               "assertions": []
             }
           ]

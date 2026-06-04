@@ -40,7 +40,7 @@ pub enum HtmlTokenType {
     IncompleteTagOpen,
     /// Text content
     Text,
-    /// Escapable raw text (inside script/style)
+    /// Escapable raw text (inside `title`/`textarea`; `svg:title` is parsable, not escapable)
     EscapableRawText,
     /// Raw text
     RawText,
@@ -112,6 +112,28 @@ pub enum HtmlTokenType {
     DirectiveClose,
     /// End of file
     Eof,
+}
+
+/// Describes how to emit the synthetic close token at the end of a raw-text /
+/// escapable-raw-text region, once the close boundary has been matched.
+///
+/// This is the ONLY thing that differs between the regular raw-text path and the
+/// selectorless-component raw-text path in upstream v21.2.7
+/// `_consumeRawTextWithTagClose` (ml_parser/lexer.ts:891-912): the close token kind
+/// (`TAG_CLOSE` vs `COMPONENT_CLOSE`, chosen by `openToken.type` on lines 904-908) and
+/// the original-case parts emitted via `_endToken(openToken.parts)` (line 911). The
+/// scanning loop itself (`_consumeRawText`, lines 737-757: cursor snapshot/restore on a
+/// failed close candidate + entity decoding when escapable) is shared by both paths.
+enum RawTextClose<'p> {
+    /// Regular element close: emits a `TagClose` token with `[prefix, name]`
+    /// (original case), matching upstream `_endToken(openToken.parts)` where
+    /// `openToken.parts` are the `TAG_OPEN_START` parts `[prefix, tagName]`.
+    Tag { prefix: &'p str, name: &'p str },
+    /// Selectorless-component close: emits a `ComponentClose` token with
+    /// `[component_name, prefix, tag_name]` (original case), matching upstream
+    /// `_endToken(openToken.parts)` where `openToken.parts` are the
+    /// `COMPONENT_OPEN_START` parts.
+    Component { component_name: &'p str, prefix: &'p str, tag_name: &'p str },
 }
 
 /// A token in an HTML template.
@@ -681,6 +703,42 @@ impl<'a> HtmlLexer<'a> {
         ch == '_' || ch.is_ascii_uppercase()
     }
 
+    /// Whether `<` followed by `next` should begin a tag-open (vs being plain text).
+    ///
+    /// Faithful to upstream v21.2.7 `_consumeTagOpen` (ml_parser/lexer.ts:819-835): a
+    /// regular tag-open requires an ASCII LETTER after `<`; `/` (close) and `!`
+    /// (comment/doctype/cdata) are also tag-opens. A selectorless component name
+    /// additionally starts with `_` (`isSelectorlessNameStart` = `_`|A-Z), but ONLY when
+    /// selectorless mode is enabled. Uppercase letters are already ASCII letters, so the
+    /// only selectorless-specific addition is `_`. Hence in DEFAULT mode `<_foo>` is NOT a
+    /// tag-open and becomes text, while `<MyCmp>` (ASCII-letter start) stays a normal tag.
+    fn is_tag_open_start(next: char, selectorless_enabled: bool) -> bool {
+        next == '/'
+            || next == '!'
+            || next.is_ascii_alphabetic()
+            || (selectorless_enabled && next == '_')
+    }
+
+    /// Whether `<` followed by `next` ends a TEXT run (i.e. is the start of a tag for
+    /// the purposes of TEXT accumulation / interpolation termination).
+    ///
+    /// This is the exact twin of upstream `_isTagStart` (ml_parser/lexer.ts:1348-1364):
+    /// `<` is a text-end tag start only when the next char is an ASCII LETTER (a-z|A-Z),
+    /// `/`, or `!`. Crucially it has NO `_` and NO selectorless gating — in BOTH modes.
+    ///
+    /// This differs from `is_tag_open_start` (the token-DISPATCH predicate, which adds
+    /// selectorless `_`). The split matters for selectorless components mid-text: upstream's
+    /// main `tokenize` loop dispatches a `<` to `_consumeTagOpen` only when the cursor is AT
+    /// `<` at the start of an iteration; during TEXT accumulation it stops at the next
+    /// `_isTagStart`, which is false for `<_`. So mid-text `x<_foo>` is absorbed into the
+    /// text run (until the next real tag like `</…`), while a TOP-LEVEL `<_foo>` (cursor at
+    /// `<` when a token scan begins) still dispatches to the component path. Mirrored here:
+    /// `scan_token` uses `is_tag_open_start` (top-level dispatch, keeps `_`); `scan_text`
+    /// uses `is_text_tag_start` (text-end, no `_`).
+    fn is_text_tag_start(next: char) -> bool {
+        next == '/' || next == '!' || next.is_ascii_alphabetic()
+    }
+
     /// Checks if a character can be part of a selectorless name.
     fn is_selectorless_name_char(ch: char) -> bool {
         ch.is_ascii_alphanumeric() || ch == '_'
@@ -1065,8 +1123,15 @@ impl<'a> HtmlLexer<'a> {
         // A `<` followed by whitespace or other non-tag characters is just text
         if self.peek() == '<' {
             let next = self.peek_at(1);
-            // Valid tag start: `/` (close tag), `!` (comment/doctype/cdata), or letter/underscore
-            if next == '/' || next == '!' || next.is_ascii_alphabetic() || next == '_' {
+            // Valid tag start: `/` (close tag), `!` (comment/doctype/cdata), or a tag-name
+            // start. Upstream v21.2.7 `_consumeTagOpen` (ml_parser/lexer.ts:819-835) accepts
+            // a regular tag only when the next char is an ASCII LETTER; a selectorless
+            // component name additionally starts with `_` (`isSelectorlessNameStart` =
+            // `_`|A-Z), but ONLY when selectorless is enabled. A non-letter like `_` in
+            // DEFAULT mode is not a valid tag-open (upstream throws and emits `<` as text),
+            // so `<_foo>` must be treated as text. Uppercase letters are covered by
+            // `is_ascii_alphabetic`, so the only selectorless-specific addition is `_`.
+            if Self::is_tag_open_start(next, self.selectorless_enabled) {
                 self.scan_tag(start);
                 return;
             }
@@ -1106,22 +1171,16 @@ impl<'a> HtmlLexer<'a> {
             }
         }
 
-        // Normalize whitespace: collapse multiple spaces/tabs into single space
-        let raw = self.input[name_start as usize..self.index as usize].trim();
-        let mut result = String::with_capacity(raw.len());
-        let mut prev_was_whitespace = false;
-        for ch in raw.chars() {
-            if ch.is_whitespace() {
-                if !prev_was_whitespace {
-                    result.push(' ');
-                    prev_was_whitespace = true;
-                }
-            } else {
-                result.push(ch);
-                prev_was_whitespace = false;
-            }
-        }
-        result
+        // Mirror upstream `_getBlockName` (ml_parser/lexer.ts:294):
+        // `return this._cursor.getChars(nameCursor).trim();`
+        // Only leading/trailing whitespace is trimmed; internal whitespace is
+        // PRESERVED verbatim. This matters for the exhaustive marker, which is
+        // recognized by an EXACT equality `parts[0] === 'default never'` (single
+        // space, lexer.ts:302). Collapsing internal runs here would over-accept
+        // malformed forms like `@default   never;` / `@default<TAB>never;`, which
+        // upstream rejects as INCOMPLETE_BLOCK_OPEN (verified vs
+        // @angular/compiler@21.2.7). The diagnostic also preserves the raw spelling.
+        self.input[name_start as usize..self.index as usize].trim().to_string()
     }
 
     /// Scans a block (@if, @for, etc.).
@@ -1139,6 +1198,19 @@ impl<'a> HtmlLexer<'a> {
             start,
             self.index,
         ));
+
+        // Angular v21.2.7 exhaustive-switch feature: `@default never;` is a
+        // self-terminating block (no `{ }` body, terminated by `;`). Mirror the
+        // upstream lexer (`_consumeBlockStart` in ml_parser/lexer.ts) which, right
+        // after reading the block name, treats a `default never` name followed by a
+        // semicolon as a complete block: emit BLOCK_OPEN_END + BLOCK_CLOSE.
+        if name == "default never" && self.peek() == ';' {
+            self.advance(); // consume ;
+            let pos = self.index;
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockOpenEnd, pos, pos));
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockClose, pos, pos));
+            return;
+        }
 
         // Skip whitespace
         self.skip_whitespace();
@@ -1694,12 +1766,42 @@ impl<'a> HtmlLexer<'a> {
             let lower_name = name.to_lowercase();
             let ns_prefix = if prefix.is_empty() { None } else { Some(prefix.as_str()) };
             let content_type = get_html_tag_definition(&lower_name).get_content_type(ns_prefix);
+            // Faithful to upstream v21.2.7 `_consumeTagOpen` (ml_parser/lexer.ts:837-839):
+            // for a REGULAR tag, `tagName = closingTagName = openToken.parts[1]`, i.e. the
+            // LOCAL name ONLY (e.g. `script`/`style`), WITHOUT any namespace prefix. The
+            // raw-text close boundary is therefore matched against the local name alone.
+            // Only the selectorless-COMPONENT path (lines 821-827) appends `:prefix:tagName`
+            // to `closingTagName`; that path lives in `scan_component_raw_text` and is left
+            // untouched here. Consequently, for `<svg:script>x</svg:script><div>` the boundary
+            // is `script`, the source close tag `</svg:script>` does NOT match it (it reads
+            // `svg:script`), and the raw-text scan runs to EOF — exactly as v21.2.7 does. A
+            // BARE `</script>` (case-insensitive) is what closes it. The match is
+            // case-insensitive, mirroring `_attemptStrCaseInsensitive(tagName)` (line 900),
+            // so `close_match_name` is the lowercased local name.
+            let close_match_name = lower_name.clone();
+            // The EMITTED synthetic TAG_CLOSE token must carry the ORIGINAL-case
+            // prefix/name (matching the TAG_OPEN_START), so the parser pairs them by
+            // exact name. Upstream v21.2.7 `_consumeRawTextWithTagClose`
+            // (ml_parser/lexer.ts:911) emits the close token with `openToken.parts`
+            // (the original-case open-tag parts), while the boundary itself is matched
+            // case-insensitively via `_attemptStrCaseInsensitive(tagName)` (line 900).
+            // Hence `close_match_name` stays the lowercased LOCAL name for boundary
+            // detection, but the token prefix/name passed below are the original-case
+            // `prefix`/`name` (not lowercased).
             match content_type {
                 TagContentType::RawText => {
-                    self.scan_raw_text_with_tag_close(&lower_name, false);
+                    self.scan_raw_text_with_tag_close(
+                        &close_match_name,
+                        RawTextClose::Tag { prefix: &prefix, name: &name },
+                        false,
+                    );
                 }
                 TagContentType::EscapableRawText => {
-                    self.scan_raw_text_with_tag_close(&lower_name, true);
+                    self.scan_raw_text_with_tag_close(
+                        &close_match_name,
+                        RawTextClose::Tag { prefix: &prefix, name: &name },
+                        true,
+                    );
                 }
                 TagContentType::Parsable => {
                     // Normal parsable content, no special handling needed
@@ -1732,10 +1834,41 @@ impl<'a> HtmlLexer<'a> {
         }
     }
 
-    /// Scans raw text content until the closing tag.
+    /// Scans raw text content until the closing tag — the SHARED scanning core used by
+    /// BOTH the regular raw-text path and the selectorless-component raw-text path.
+    ///
     /// For RAW_TEXT (script/style): entities are NOT decoded.
     /// For ESCAPABLE_RAW_TEXT (title/textarea): entities ARE decoded.
-    fn scan_raw_text_with_tag_close(&mut self, tag_name: &str, consume_entities: bool) {
+    ///
+    /// Faithful to upstream v21.2.7 `_consumeRawText` + `_consumeRawTextWithTagClose`
+    /// (ml_parser/lexer.ts:737-757, 891-912): there is exactly ONE raw-text scanner; the
+    /// regular path and the component path differ ONLY in the close-boundary NAME (local
+    /// name for regular tags, full prefixed name for components — see `_consumeTagOpen`
+    /// lines 837-839 vs 821-827) and in the emitted close TOKEN (TAG_CLOSE vs
+    /// COMPONENT_CLOSE — see lines 904-911). The loop body (cursor snapshot/restore on a
+    /// failed close candidate + entity decoding when escapable + original-case emit) is
+    /// identical, so both callers funnel through this one function exactly as upstream
+    /// funnels both through `_consumeRawTextWithTagClose`.
+    fn scan_raw_text_with_tag_close(
+        &mut self,
+        // The lowercased name used to detect the raw-text close boundary. For a REGULAR
+        // tag this is the LOCAL (prefix-stripped) name, e.g. `script` for `<svg:script>`,
+        // faithful to upstream `_consumeTagOpen` (ml_parser/lexer.ts:837-839) where
+        // `closingTagName = openToken.parts[1]`. For a selectorless COMPONENT this is the
+        // FULL prefixed close name, e.g. `comp:script`, faithful to lines 821-827. Matching
+        // is case-insensitive, mirroring upstream `_attemptStrCaseInsensitive(tagName)`
+        // (line 900); the caller passes an already-lowercased name and the scanned source
+        // close name is lowercased here before comparison.
+        close_match_name: &str,
+        // Describes the synthetic close token to emit once the boundary is matched: the
+        // token KIND (TAG_CLOSE vs COMPONENT_CLOSE) and the ORIGINAL-case parts. Upstream
+        // v21.2.7 `_consumeRawTextWithTagClose` chooses the kind by `openToken.type`
+        // (ml_parser/lexer.ts:904-908) and emits `_endToken(openToken.parts)`
+        // (line 911) — the original-case open-tag parts — so the parser pairs open/close by
+        // exact name.
+        close: RawTextClose<'_>,
+        consume_entities: bool,
+    ) {
         let token_type =
             if consume_entities { HtmlTokenType::EscapableRawText } else { HtmlTokenType::RawText };
 
@@ -1766,7 +1899,7 @@ impl<'a> HtmlLexer<'a> {
 
                 self.skip_whitespace();
 
-                if close_tag_name == tag_name && self.peek() == '>' {
+                if close_tag_name == close_match_name && self.peek() == '>' {
                     // Found the closing tag - emit any accumulated content
                     if consume_entities {
                         // For escapable raw text, Angular ALWAYS emits a text token, even if empty.
@@ -1793,15 +1926,33 @@ impl<'a> HtmlLexer<'a> {
                         }
                     }
 
-                    // Emit the closing tag
+                    // Emit the closing tag. Upstream v21.2.7 emits TAG_CLOSE or
+                    // COMPONENT_CLOSE (chosen by `openToken.type`, ml_parser/lexer.ts:904-908)
+                    // with the original-case `openToken.parts` (line 911).
                     self.advance(); // consume >
-                    self.tokens.push(HtmlToken::with_prefix_name(
-                        HtmlTokenType::TagClose,
-                        "",
-                        tag_name,
-                        saved_index,
-                        self.index,
-                    ));
+                    match close {
+                        RawTextClose::Tag { prefix, name } => {
+                            self.tokens.push(HtmlToken::with_prefix_name(
+                                HtmlTokenType::TagClose,
+                                prefix,
+                                name,
+                                saved_index,
+                                self.index,
+                            ));
+                        }
+                        RawTextClose::Component { component_name, prefix, tag_name } => {
+                            self.tokens.push(HtmlToken::new(
+                                HtmlTokenType::ComponentClose,
+                                vec![
+                                    component_name.to_string(),
+                                    prefix.to_string(),
+                                    tag_name.to_string(),
+                                ],
+                                saved_index,
+                                self.index,
+                            ));
+                        }
+                    }
                     return;
                 } else {
                     // Not the matching closing tag - revert and include in content
@@ -1947,7 +2098,20 @@ impl<'a> HtmlLexer<'a> {
         }
     }
 
-    /// Scans raw text content for a component until its closing tag.
+    /// Scans raw text content for a selectorless component until its closing tag.
+    ///
+    /// This is a THIN wrapper over the shared raw-text scanning core
+    /// `scan_raw_text_with_tag_close`. Faithful to upstream v21.2.7 (ml_parser/lexer.ts):
+    /// the component path and the regular path differ ONLY in (a) the close-boundary NAME
+    /// and (b) the emitted close TOKEN, and BOTH funnel through the SAME
+    /// `_consumeRawTextWithTagClose(openToken, closingTagName, ...)` (lines 884-887). The
+    /// scanning LOOP — cursor snapshot/restore on a failed `</...>` close candidate
+    /// (`_consumeRawText`, lines 741-746) plus entity decoding when escapable (lines
+    /// 747-751) — is therefore IDENTICAL to the regular path. Previously this function
+    /// reimplemented the loop and drifted: it (1) failed to restore the cursor after a
+    /// non-matching close candidate (so a valid later `</Comp:script>` could be skipped and
+    /// following siblings swallowed to EOF) and (2) never decoded entities for escapable
+    /// component raw text. Delegating to the shared core fixes both and prevents recurrence.
     fn scan_component_raw_text(
         &mut self,
         component_name: &str,
@@ -1955,79 +2119,27 @@ impl<'a> HtmlLexer<'a> {
         tag_name: &str,
         consume_entities: bool,
     ) {
-        let token_type =
-            if consume_entities { HtmlTokenType::EscapableRawText } else { HtmlTokenType::RawText };
-
-        let content_start = self.index;
-
-        loop {
-            // Check if we're at the closing tag
-            if self.peek() == '<' && self.peek_at(1) == '/' {
-                let saved_index = self.index;
-
-                self.advance(); // <
-                self.advance(); // /
-                self.skip_whitespace();
-
-                // Check if closing tag matches: </ComponentName:prefix:tag> or </ComponentName:tag>
-                let close_name_start = self.index;
-                while !chars::is_whitespace(self.peek())
-                    && self.peek() != '>'
-                    && self.peek() != chars::EOF
-                {
-                    self.advance();
-                }
-                let close_name = &self.input[close_name_start as usize..self.index as usize];
-
-                // Build the expected closing tag name
-                let expected_close = if prefix.is_empty() {
-                    format!("{}:{}", component_name, tag_name)
-                } else {
-                    format!("{}:{}:{}", component_name, prefix, tag_name)
-                };
-
-                self.skip_whitespace();
-
-                if close_name == expected_close && self.peek() == '>' {
-                    // Found the closing tag - emit content
-                    let content = &self.input[content_start as usize..saved_index as usize];
-                    let normalized = normalize_line_endings(content);
-                    self.tokens.push(HtmlToken::with_part(
-                        token_type,
-                        &normalized,
-                        content_start,
-                        saved_index,
-                    ));
-
-                    // Emit the closing component tag
-                    self.advance(); // consume >
-                    self.tokens.push(HtmlToken::new(
-                        HtmlTokenType::ComponentClose,
-                        vec![component_name.to_string(), prefix.to_string(), tag_name.to_string()],
-                        saved_index,
-                        self.index,
-                    ));
-                    return;
-                }
-
-                // Not our closing tag - continue scanning
-            }
-
-            if self.peek() == chars::EOF {
-                // EOF reached - emit whatever content we have
-                let content = &self.input[content_start as usize..self.index as usize];
-                let normalized = normalize_line_endings(content);
-                self.tokens.push(HtmlToken::with_part(
-                    token_type,
-                    &normalized,
-                    content_start,
-                    self.index,
-                ));
-                return;
-            }
-
-            self.advance();
+        // Build the close-boundary NAME. Faithful to upstream v21.2.7 `_consumeTagOpen`
+        // (ml_parser/lexer.ts:821-827): for a selectorless COMPONENT,
+        // `[closingTagName, prefix, tagName] = openToken.parts` and the prefix/tagName are
+        // appended so `closingTagName` is the FULL prefixed component close name
+        // (e.g. `Comp:script` or `Comp:svg:script`). Lowercased here because the shared
+        // core matches the (also-lowercased) scanned close name case-insensitively,
+        // mirroring `_attemptStrCaseInsensitive(tagName)` (line 900). The emitted
+        // ComponentClose token still carries the ORIGINAL-case parts (see the descriptor
+        // below), matching `_endToken(openToken.parts)` (line 911).
+        let close_match_name = if prefix.is_empty() {
+            format!("{component_name}:{tag_name}")
+        } else {
+            format!("{component_name}:{prefix}:{tag_name}")
         }
+        .to_lowercase();
+
+        self.scan_raw_text_with_tag_close(
+            &close_match_name,
+            RawTextClose::Component { component_name, prefix, tag_name },
+            consume_entities,
+        );
     }
 
     /// Scans a component name with optional namespace and tag name.
@@ -3051,11 +3163,18 @@ impl<'a> HtmlLexer<'a> {
                 break;
             }
 
-            // Handle `<` - only stop if it's a valid tag start
+            // Handle `<` - end the TEXT run only at an upstream `_isTagStart`: `<` + (ASCII
+            // letter | `/` | `!`). NO `_`, NO selectorless gating, in BOTH modes (this is the
+            // text-END check, the twin of upstream `_isTagStart`, ml_parser/lexer.ts:1348).
+            // It must NOT use the token-dispatch predicate `is_tag_open_start` (which adds
+            // selectorless `_`): mid-text selectorless `x<_foo>` is absorbed into the text run
+            // (upstream's TEXT scanner doesn't stop at `<_`), only the TOP-LEVEL `<_foo>`
+            // dispatch in `scan_token` treats `_` as a component start. Using the dispatch
+            // predicate here broke mid-text `<_foo>` by turning it into a component (the I16
+            // regression this restores).
             if ch == '<' {
                 let next = self.peek_at(1);
-                // Valid tag start: `/` (close tag), `!` (comment/doctype/cdata), or letter/underscore
-                if next == '/' || next == '!' || next.is_ascii_alphabetic() || next == '_' {
+                if Self::is_text_tag_start(next) {
                     break;
                 }
                 // Otherwise, `<` is just text, continue
@@ -3348,5 +3467,146 @@ mod tests {
         let quotes: Vec<_> =
             tokens.iter().filter(|t| t.token_type == HtmlTokenType::AttrQuote).collect();
         assert_eq!(quotes.len(), 2);
+    }
+
+    // ---- Finding 2: default-mode `<_foo>` is NOT a valid normal element ----
+    //
+    // Upstream v21.2.7 `ml_parser/lexer.ts` `_consumeTagOpen` (~829-835): when
+    // selectorless is OFF (or the char is not a selectorless name start), a regular tag
+    // MUST start with an ASCII letter; otherwise it throws `_unexpectedCharacterErrorMsg`.
+    // Since `openToken` is still undefined at that point, the catch block (~870-874)
+    // emits `<` as a TEXT token (the error is swallowed, not recorded). `_foo>` is then
+    // consumed as text. `<MyCmp>` starts with an ASCII letter, so it stays a normal
+    // element in default mode. With selectorless ON, `<_foo>` is a Component
+    // (`isSelectorlessNameStart` includes `_`).
+    //
+    // Oracle (`@angular/compiler@21.2.7`):
+    //   default `<_foo></_foo>`        -> Text "<_foo>" (open) + "Unexpected closing tag
+    //                                     \"_foo\"" error from the parser on `</_foo>`.
+    //   selectorless `<_foo></_foo>`   -> Component fullName "_foo".
+    //   default `<MyCmp></MyCmp>`      -> Element name "MyCmp" (control).
+
+    fn tokenize_selectorless(input: &str) -> Vec<HtmlToken> {
+        HtmlLexer::new(input).with_selectorless(true).tokenize().tokens
+    }
+
+    #[test]
+    fn test_default_mode_underscore_tag_is_text_not_element() {
+        // Default mode: `<_foo>` must NOT scan as a normal element. The `<` becomes text.
+        let tokens = tokenize("<_foo>");
+        assert!(
+            !tokens.iter().any(|t| t.token_type == HtmlTokenType::TagOpenStart),
+            "default-mode `<_foo>` must not produce a TagOpenStart, got: {:?}",
+            tokens.iter().map(|t| t.token_type).collect::<Vec<_>>()
+        );
+        assert!(
+            !tokens.iter().any(|t| t.token_type == HtmlTokenType::ComponentOpenStart),
+            "default-mode `<_foo>` must not produce a ComponentOpenStart"
+        );
+        // The whole `<_foo>` is emitted as text (OXC merges the leading `<` with the
+        // following `_foo>` text, matching upstream's final Text "<_foo>" result).
+        assert!(
+            tokens.iter().any(|t| t.token_type == HtmlTokenType::Text
+                && t.parts.first().map(String::as_str) == Some("<_foo>")),
+            "expected a Text token with `<_foo>`, got: {:?}",
+            tokens.iter().map(|t| (t.token_type, t.parts.clone())).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_selectorless_mode_underscore_tag_is_component() {
+        // Selectorless mode: `<_foo>` IS a component (isSelectorlessNameStart includes `_`).
+        let tokens = tokenize_selectorless("<_foo>");
+        let comp = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::ComponentOpenStart)
+            .expect("selectorless `<_foo>` must produce a ComponentOpenStart");
+        // parts[0] = component_name.
+        assert_eq!(comp.parts.first().map(String::as_str), Some("_foo"));
+    }
+
+    // ---- Finding 2: mid-text selectorless `<_foo>` must be absorbed into TEXT ----
+    //
+    // Upstream `_isTagStart` (ml_parser/lexer.ts:1348-1364), the TEXT-end check, returns
+    // true only for `<` + (ASCII letter | `/` | `!`) — NO `_`, NO selectorless gating, in
+    // both modes. The main `tokenize` loop dispatches a `<` to `_consumeTagOpen` (which
+    // handles selectorless `_`) only when the cursor is AT `<` at the start of a token
+    // scan; during text accumulation it stops at `_isTagStart`. So a selectorless `<_foo>`
+    // is a component only at top level; mid-text it is plain text up to the next real tag.
+    //
+    // Oracle (`@angular/compiler@21.2.7`, `{selectorlessEnabled:true}`):
+    //   `<_foo></_foo>`            -> Component "_foo" [0-13], 0 errors.
+    //   `x<_foo></_foo>`           -> Text "x<_foo>" [0-7] + ComponentClose [7-14].
+    //   `<div>x<_Foo></_Foo></div>`-> div > Text "x<_Foo>" [5-12] + ComponentClose [12-19].
+    //   `x<Foo></Foo>` (control)   -> Text "x" [0-1] + Component "Foo" [1-12].
+
+    #[test]
+    fn test_selectorless_midtext_underscore_is_text() {
+        // Mid-text `<_foo>` is absorbed into the text run; only the close is a token.
+        let tokens = tokenize_selectorless("x<_foo></_foo>");
+        // No ComponentOpenStart: `<_foo>` did NOT begin a component mid-text.
+        assert!(
+            !tokens.iter().any(|t| t.token_type == HtmlTokenType::ComponentOpenStart),
+            "mid-text `<_foo>` must not open a component, got: {:?}",
+            tokens.iter().map(|t| (t.token_type, t.parts.clone())).collect::<Vec<_>>()
+        );
+        // The text run is `x<_foo>` (offsets 0-7).
+        let text = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::Text)
+            .expect("expected a Text token");
+        assert_eq!(text.parts.first().map(String::as_str), Some("x<_foo>"));
+        assert_eq!((text.start, text.end), (0, 7));
+        // The dangling close `</_foo>` IS still a ComponentClose token at [7-14].
+        let close = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::ComponentClose)
+            .expect("expected a ComponentClose token");
+        assert_eq!((close.start, close.end), (7, 14));
+    }
+
+    #[test]
+    fn test_selectorless_toplevel_underscore_still_component() {
+        // Top-level `<_foo>` (cursor at `<` when a token scan begins) still dispatches to
+        // the component path — only the TEXT scanner ignores `<_`.
+        let tokens = tokenize_selectorless("<_foo></_foo>");
+        let comp = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::ComponentOpenStart)
+            .expect("top-level selectorless `<_foo>` must open a component");
+        assert_eq!(comp.parts.first().map(String::as_str), Some("_foo"));
+    }
+
+    #[test]
+    fn test_selectorless_midtext_uppercase_is_component() {
+        // Control: uppercase `<Foo>` mid-text IS a tag start (`<F` matches `_isTagStart`),
+        // so it opens a component and the preceding `x` is its own text run.
+        let tokens = tokenize_selectorless("x<Foo></Foo>");
+        let text = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::Text)
+            .expect("expected a Text token");
+        assert_eq!(text.parts.first().map(String::as_str), Some("x"));
+        assert_eq!((text.start, text.end), (0, 1));
+        assert!(
+            tokens.iter().any(|t| t.token_type == HtmlTokenType::ComponentOpenStart),
+            "mid-text `<Foo>` must open a component"
+        );
+    }
+
+    #[test]
+    fn test_default_mode_uppercase_tag_is_normal_element() {
+        // Control: `<MyCmp>` starts with an ASCII letter, so it is a normal element
+        // even in default mode.
+        let tokens = tokenize("<MyCmp>");
+        let tag = tokens
+            .iter()
+            .find(|t| t.token_type == HtmlTokenType::TagOpenStart)
+            .expect("default-mode `<MyCmp>` must be a normal TagOpenStart");
+        assert_eq!(tag.name(), "MyCmp");
+        assert!(
+            !tokens.iter().any(|t| t.token_type == HtmlTokenType::ComponentOpenStart),
+            "default-mode `<MyCmp>` must not be a component"
+        );
     }
 }

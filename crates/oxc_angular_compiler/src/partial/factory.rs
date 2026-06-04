@@ -175,7 +175,10 @@ fn factory_target_expr<'a>(
         FactoryTarget::Directive => "Directive",
         FactoryTarget::Pipe => "Pipe",
         FactoryTarget::NgModule => "NgModule",
-        FactoryTarget::Injectable | FactoryTarget::Service => "Injectable",
+        FactoryTarget::Injectable => "Injectable",
+        // `@Service` (Angular v22+) uses the same `ɵɵinject` token resolution as
+        // `Injectable`, so its partial-declaration factory target is `Injectable`.
+        FactoryTarget::Service => "Injectable",
     };
 
     let factory_target_ref = OutputExpression::ReadProp(Box::new_in(

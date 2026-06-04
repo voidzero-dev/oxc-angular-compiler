@@ -1,6 +1,6 @@
 {
   "name": "parser_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc/crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/parser_spec.ts",
+  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/expression_parser/parser_spec.ts",
   "test_groups": [
     {
       "name": "parser",
@@ -2071,17 +2071,6 @@
                           "type": "ExpectBindingError",
                           "input": "a) => a + 1",
                           "error_contains": "Unexpected token ')'"
-                        }
-                      ]
-                    },
-                    {
-                      "name": "should report missing comma between arrow function parameters",
-                      "path": "parser/parseBinding/arrow functions/arrow function validations/should report missing comma between arrow function parameters",
-                      "assertions": [
-                        {
-                          "type": "ExpectBindingError",
-                          "input": "(a b) => a + b",
-                          "error_contains": "Missing expected ,"
                         }
                       ]
                     },

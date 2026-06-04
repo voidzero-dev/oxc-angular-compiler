@@ -125,6 +125,18 @@ pub struct HtmlElement<'a> {
     /// Whether this is a void element (area, base, br, col, embed, hr, img, input, link, meta, param, source, track, wbr).
     /// Void elements cannot have content and do not have end tags.
     pub is_void: bool,
+    /// True only when the parser tokenized this as a selectorless COMPONENT
+    /// (which requires selectorless mode to be enabled). This distinguishes a
+    /// bare component `<MyCmp>` from an uppercase NORMAL element `<IFRAME>`,
+    /// which are otherwise identical at this node (`component_prefix` /
+    /// `component_tag_name` are both `None` for a bare component too). The R3
+    /// transform uses this marker — NOT a leading-character casing heuristic —
+    /// to decide whether to build a component node and route the
+    /// security-context / i18n trusted-types lookups through `component.tagName`.
+    /// Because a component is only ever produced when `selectorless_enabled` is
+    /// true, this is automatically `false` for the default (selectorless-off)
+    /// pipeline the real compiler uses.
+    pub is_component: bool,
 }
 
 /// A selectorless component in the HTML AST.
@@ -253,6 +265,8 @@ pub enum BlockType {
     Case,
     /// A @default block.
     Default,
+    /// A `@default never;` exhaustive-switch marker (Angular v21.2.7).
+    DefaultNever,
     /// A @defer block.
     Defer,
     /// A @placeholder block.
@@ -518,6 +532,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let child2 = HtmlElement {
@@ -532,6 +547,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let mut children = Vec::new_in(&allocator);
@@ -550,6 +566,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let mut nodes = Vec::new_in(&allocator);
