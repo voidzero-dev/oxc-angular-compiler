@@ -3276,7 +3276,12 @@ export class MatMiniFabButton {
     let mut templates = std::collections::HashMap::new();
     templates.insert("button.html".to_string(), button_template.to_string());
 
-    let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
+    // Both components also declare `styleUrl: 'fab.css'`; provide it so the
+    // fixture stays fully resolved now that missing resources are hard errors.
+    let mut styles = std::collections::HashMap::new();
+    styles.insert("fab.css".to_string(), vec![".fab {}".to_string()]);
+
+    let resources = ResolvedResources { templates, styles };
 
     let result = transform_angular_file(&allocator, "fab.ts", source, None, Some(&resources));
 
