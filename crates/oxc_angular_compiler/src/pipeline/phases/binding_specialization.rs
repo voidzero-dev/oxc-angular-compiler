@@ -112,14 +112,12 @@ pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
     let mut all_non_bindable: Vec<XrefId> = Vec::new();
 
     // Process root view
-    let root_non_bindable =
-        specialize_in_view(&mut job.root.update, allocator, &elements, mode);
+    let root_non_bindable = specialize_in_view(&mut job.root.update, allocator, &elements, mode);
     all_non_bindable.extend(root_non_bindable);
 
     // Process embedded views
     for view in job.views.values_mut() {
-        let view_non_bindable =
-            specialize_in_view(&mut view.update, allocator, &elements, mode);
+        let view_non_bindable = specialize_in_view(&mut view.update, allocator, &elements, mode);
         all_non_bindable.extend(view_non_bindable);
     }
 

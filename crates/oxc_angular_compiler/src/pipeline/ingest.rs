@@ -1113,14 +1113,11 @@ fn ingest_element<'a>(
     // The eligible property binding:
     //   - formField: `[formField]` property binding
     use crate::ast::expression::BindingType;
-    let field_input_span = element
-        .inputs
-        .iter()
-        .find_map(|input| {
-            let eligible = matches!(input.name.as_str(), "formField")
-                && input.binding_type == BindingType::Property;
-            eligible.then_some(input.source_span)
-        });
+    let field_input_span = element.inputs.iter().find_map(|input| {
+        let eligible = matches!(input.name.as_str(), "formField")
+            && input.binding_type == BindingType::Property;
+        eligible.then_some(input.source_span)
+    });
 
     // Always create ElementStart/ElementEnd pairs, even for void/self-closing elements.
     // The empty_elements phase will collapse them to Element when appropriate.
