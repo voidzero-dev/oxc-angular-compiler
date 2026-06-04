@@ -425,6 +425,9 @@ fn assign_temp_names<'a>(
             }
         }
         // Recursively process nested expressions
+        IrExpression::SafeNavigationMigration(m) => {
+            assign_temp_names(&mut m.expr, tracker, allocator);
+        }
         IrExpression::SafeTernary(st) => {
             assign_temp_names(&mut st.guard, tracker, allocator);
             assign_temp_names(&mut st.expr, tracker, allocator);
