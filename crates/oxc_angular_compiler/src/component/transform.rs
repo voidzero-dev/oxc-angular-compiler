@@ -2582,7 +2582,8 @@ pub fn transform_angular_file(
                     resolve_styles(allocator, &mut metadata, resolved_resources);
 
                 // 4. Resolve template from inline or external source
-                let template_source = resolve_template(&metadata, resolved_resources);
+                let (template_source, missing_template_url) =
+                    resolve_template(&metadata, resolved_resources);
                 let class_name = metadata.class_name.to_string();
 
                 // Resources were provided but a styleUrl was not among them:
@@ -2593,6 +2594,13 @@ pub fn transform_angular_file(
                         "Component '{}': style URL '{}' could not be resolved \
                          (COMPONENT_RESOURCE_NOT_FOUND)",
                         class_name, style_url
+                    )));
+                }
+                if let Some(template_url) = &missing_template_url {
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': template URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND)",
+                        class_name, template_url
                     )));
                 }
 
@@ -2860,7 +2868,9 @@ pub fn transform_angular_file(
                             result.diagnostics.extend(diags);
                         }
                     }
-                } else if let Some(template_url) = &metadata.template_url {
+                } else if missing_template_url.is_none()
+                    && let Some(template_url) = &metadata.template_url
+                {
                     // External template not resolved: the class is emitted
                     // without its compiled definition, so fail loudly like
                     // ngc's COMPONENT_RESOURCE_NOT_FOUND instead of letting
@@ -4024,22 +4034,23 @@ fn compile_component_full<'a>(
 fn resolve_template(
     metadata: &ComponentMetadata<'_>,
     resources: Option<&ResolvedResources>,
-) -> Option<String> {
-    // ngc AOT precedence: templateUrl first, falling through to inline only when
-    // no resolved content is available.
+) -> (Option<String>, Option<String>) {
+    // ngc AOT precedence: templateUrl first. When resources were supplied, a
+    // missing entry is reported to the caller instead of falling back to inline.
     if let Some(template_url) = &metadata.template_url {
         if let Some(resources) = resources {
             if let Some(template) = resources.templates.get(template_url.as_str()) {
-                return Some(template.clone());
+                return (Some(template.clone()), None);
             }
+            return (None, Some(template_url.to_string()));
         }
     }
 
     if let Some(template) = &metadata.template {
-        return Some(template.to_string());
+        return (Some(template.to_string()), None);
     }
 
-    None
+    (None, None)
 }
 
 /// Resolve external styles and merge into component metadata.
