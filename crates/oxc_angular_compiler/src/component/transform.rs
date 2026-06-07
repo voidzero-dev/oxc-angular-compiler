@@ -2578,11 +2578,31 @@ pub fn transform_angular_file(
                 }
 
                 // 3. Resolve external styles and merge into metadata
-                resolve_styles(allocator, &mut metadata, resolved_resources);
+                let missing_style_urls =
+                    resolve_styles(allocator, &mut metadata, resolved_resources);
 
                 // 4. Resolve template from inline or external source
-                let template_source = resolve_template(&metadata, resolved_resources);
+                let (template_source, missing_template_url) =
+                    resolve_template(&metadata, resolved_resources);
                 let class_name = metadata.class_name.to_string();
+
+                // Resources were provided but a styleUrl was not among them:
+                // fail loudly like ngc (COMPONENT_RESOURCE_NOT_FOUND) instead
+                // of silently dropping the styles (#314).
+                for style_url in &missing_style_urls {
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': style URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND)",
+                        class_name, style_url
+                    )));
+                }
+                if let Some(template_url) = &missing_template_url {
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': template URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND)",
+                        class_name, template_url
+                    )));
+                }
 
                 if let Some(template_string) = template_source {
                     // Allocate template in arena so it has the allocator's lifetime.
@@ -2848,11 +2868,18 @@ pub fn transform_angular_file(
                             result.diagnostics.extend(diags);
                         }
                     }
-                } else if let Some(template_url) = &metadata.template_url {
-                    // External template not resolved - add warning
-                    result.diagnostics.push(OxcDiagnostic::warn(format!(
-                        "Template URL '{}' not found in resolved resources",
-                        template_url
+                } else if missing_template_url.is_none()
+                    && let Some(template_url) = &metadata.template_url
+                {
+                    // External template not resolved: the class is emitted
+                    // without its compiled definition, so fail loudly like
+                    // ngc's COMPONENT_RESOURCE_NOT_FOUND instead of letting
+                    // the build ship a broken component (#314).
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': template URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND); the component was emitted \
+                         without its compiled definition",
+                        class_name, template_url
                     )));
                 }
             } else {
@@ -4007,31 +4034,38 @@ fn compile_component_full<'a>(
 fn resolve_template(
     metadata: &ComponentMetadata<'_>,
     resources: Option<&ResolvedResources>,
-) -> Option<String> {
-    // ngc AOT precedence: templateUrl first, falling through to inline only when
-    // no resolved content is available.
+) -> (Option<String>, Option<String>) {
+    // ngc AOT precedence: templateUrl first. When resources were supplied, a
+    // missing entry is reported to the caller instead of falling back to inline.
     if let Some(template_url) = &metadata.template_url {
         if let Some(resources) = resources {
             if let Some(template) = resources.templates.get(template_url.as_str()) {
-                return Some(template.clone());
+                return (Some(template.clone()), None);
             }
+            return (None, Some(template_url.to_string()));
         }
     }
 
     if let Some(template) = &metadata.template {
-        return Some(template.to_string());
+        return (Some(template.to_string()), None);
     }
 
-    None
+    (None, None)
 }
 
 /// Resolve external styles and merge into component metadata.
+///
+/// Returns the styleUrls that were NOT found in `resources` (only when
+/// resources were provided), so the caller can surface a
+/// COMPONENT_RESOURCE_NOT_FOUND diagnostic per missing resource.
 fn resolve_styles<'a>(
     allocator: &'a Allocator,
     metadata: &mut ComponentMetadata<'a>,
     resources: Option<&ResolvedResources>,
-) {
+) -> Vec<String> {
     use oxc_allocator::FromIn;
+
+    let mut missing = Vec::new();
 
     if let Some(resources) = resources {
         // Resolve each styleUrl from the resources
@@ -4041,9 +4075,13 @@ fn resolve_styles<'a>(
                 for style in style_contents {
                     metadata.styles.push(Ident::from_in(style.as_str(), allocator));
                 }
+            } else {
+                missing.push(style_url.to_string());
             }
         }
     }
+
+    missing
 }
 
 /// Compile a component template to JavaScript.

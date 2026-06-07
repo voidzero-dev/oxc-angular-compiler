@@ -759,3 +759,125 @@ export class SpreadComponent {}
         "Resolved template content must be present. Got:\n{metadata}"
     );
 }
+
+/// An unresolved `templateUrl` must produce a hard error (ngc parity:
+/// COMPONENT_RESOURCE_NOT_FOUND), not a silent passthrough that ships a
+/// component without its compiled definition. Regression test for #314.
+#[test]
+fn unresolved_templateurl_is_a_hard_error() {
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-external',
+    templateUrl: './missing.component.html',
+})
+export class ExternalComponent {}
+"#;
+
+    // Resources provided, but the templateUrl is not among them.
+    let resources = ResolvedResources { templates: HashMap::new(), styles: HashMap::new() };
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        Some(&TransformOptions::default()),
+        Some(&resources),
+    );
+
+    assert!(
+        result.has_errors(),
+        "Unresolved templateUrl must error. Got: {:?}",
+        result.diagnostics
+    );
+    let rendered = format!("{:?}", result.diagnostics);
+    assert!(
+        rendered.contains("COMPONENT_RESOURCE_NOT_FOUND"),
+        "Error should carry the ngc-style code. Got: {rendered}"
+    );
+    assert!(
+        rendered.contains("ExternalComponent") && rendered.contains("./missing.component.html"),
+        "Error should name the component and the resource. Got: {rendered}"
+    );
+}
+
+/// If both `templateUrl` and inline `template` are present, a missing resolved
+/// templateUrl must still be an error. AOT semantics give `templateUrl`
+/// precedence, so the inline template cannot be used as a fallback.
+#[test]
+fn unresolved_templateurl_with_inline_template_is_a_hard_error() {
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-external',
+    templateUrl: './missing.component.html',
+    template: '<p>inline fallback must not compile</p>',
+})
+export class ExternalComponent {}
+"#;
+
+    let resources = ResolvedResources { templates: HashMap::new(), styles: HashMap::new() };
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        Some(&TransformOptions::default()),
+        Some(&resources),
+    );
+
+    assert!(
+        result.has_errors(),
+        "Unresolved templateUrl must error even with an inline template. Got: {:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        result.component_count, 0,
+        "Inline template must not be used to compile the component"
+    );
+    let rendered = format!("{:?}", result.diagnostics);
+    assert!(
+        rendered.contains("COMPONENT_RESOURCE_NOT_FOUND"),
+        "Error should carry the ngc-style code. Got: {rendered}"
+    );
+    assert!(
+        rendered.contains("ExternalComponent") && rendered.contains("./missing.component.html"),
+        "Error should name the component and the resource. Got: {rendered}"
+    );
+}
+
+/// An unresolved `styleUrl` (resources provided, key missing) must also
+/// surface a COMPONENT_RESOURCE_NOT_FOUND error rather than silently
+/// dropping the styles. Regression test for #314.
+#[test]
+fn unresolved_styleurl_is_a_hard_error() {
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({
+    selector: 'app-styled',
+    template: '<div></div>',
+    styleUrls: ['./missing.css'],
+})
+export class StyledComponent {}
+"#;
+
+    let resources = ResolvedResources { templates: HashMap::new(), styles: HashMap::new() };
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "test.component.ts",
+        source,
+        Some(&TransformOptions::default()),
+        Some(&resources),
+    );
+
+    assert!(result.has_errors(), "Unresolved styleUrl must error. Got: {:?}", result.diagnostics);
+    let rendered = format!("{:?}", result.diagnostics);
+    assert!(
+        rendered.contains("COMPONENT_RESOURCE_NOT_FOUND") && rendered.contains("./missing.css"),
+        "Error should carry the code and the resource. Got: {rendered}"
+    );
+}
