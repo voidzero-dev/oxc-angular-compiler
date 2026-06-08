@@ -768,7 +768,15 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
                 if let Some(attrs) = all_element_attrs.get(xref) {
                     if !attrs.is_empty() {
                         let attr_array = serialize_attributes_to_array_expr(allocator, attrs);
-                        projection_attrs.insert(*xref, attr_array);
+                        // Angular v22 (rc.3+) pools projection attributes into the
+                        // shared const pool (`_cN`) instead of emitting them inline,
+                        // matching `getConstLiteral(attrArray, true)` in Angular's
+                        // const_collection.ts (angular/angular@2891f7e). This phase
+                        // runs after `generate_projection_def`, so the projectionDef
+                        // and ngContentSelectors consts are pooled first and the
+                        // projection attrs land at the next `_cN`, as in the goldens.
+                        let pooled = job.pool.get_const_literal(attr_array, true);
+                        projection_attrs.insert(*xref, pooled);
                     }
                 }
             }
