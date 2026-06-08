@@ -43,6 +43,7 @@ import {
   locateTemplateInArgs,
   locateTemplateStringFor,
 } from './utils/decorator-fields.js'
+import { injectDtsDeclarations } from './utils/dts.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -260,6 +261,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // before and after a save, we know only the template / styles changed and
   // can dispatch an HMR update instead of a full reload.
   const componentMetadataCache = new Map<string, string>()
+
+  // Angular Ivy `.d.ts` static member declarations collected across the build,
+  // keyed by module id. Populated during `transform` in `compilationMode:
+  // 'partial'` (library) builds and consumed by `dtsPlugin`'s `generateBundle`
+  // to augment the declaration files a separate dts generator emits.
+  //
+  // Keyed by module (not class name) so `vite build --watch` rebuilds can evict
+  // a module's prior declarations before re-transforming it. Otherwise removing
+  // a decorator — which makes the quick decorator check early-return, skipping
+  // the transform entirely — would leave the old `ɵfac`/`ɵcmp` entries in place
+  // and `generateBundle` would re-inject Ivy metadata into a now-plain class.
+  const collectedDtsDeclarations = new Map<string, Array<{ className: string; members: string }>>()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -601,6 +614,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             return
           }
 
+          // Library builds: evict any declarations this module contributed on a
+          // previous (watch) pass before re-deriving them below. Done ahead of
+          // the decorator early-return so a class that just lost its decorator
+          // doesn't keep stale Ivy metadata in the regenerated `.d.ts`.
+          if (pluginOptions.compilationMode === 'partial') {
+            collectedDtsDeclarations.delete(id)
+          }
+
           // Quick check for Angular decorators - avoids parsing files without them
           // OXC handles @Component, @Directive, @NgModule, @Injectable, and @Pipe
           const hasAngularDecorator =
@@ -670,6 +691,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
           for (const warning of result.warnings) {
             this.warn(warning.message)
+          }
+
+          // Library builds: stash the Ivy `.d.ts` member declarations for this
+          // file so `dtsPlugin` can splice them into the emitted declarations.
+          if (pluginOptions.compilationMode === 'partial' && result.dtsDeclarations.length > 0) {
+            collectedDtsDeclarations.set(
+              id,
+              result.dtsDeclarations.map((decl) => ({
+                className: decl.className,
+                members: decl.members,
+              })),
+            )
           }
 
           // Track component IDs for HMR — one entry per @Component class.
@@ -933,6 +966,58 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   /**
    * Plugin to encapsulate component styles.
    */
+  /**
+   * Augment library `.d.ts` files with Angular's Ivy type declarations.
+   *
+   * Vite/Rolldown don't emit declarations themselves — a separate dts
+   * generator (rolldown-plugin-dts, vite-plugin-dts, tsdown, `tsc`) produces
+   * the base `.d.ts`. This plugin runs after them (`enforce: 'post'`) and
+   * splices the static `ɵfac`/`ɵcmp`/… members collected during `transform`
+   * into the matching classes so consumers get full template type-checking.
+   *
+   * Only active in `compilationMode: 'partial'` (library) builds; app builds
+   * collect nothing, so this is a no-op there.
+   */
+  function dtsPlugin(): Plugin {
+    return {
+      name: '@oxc-angular/vite-dts',
+      enforce: 'post',
+      generateBundle(_outputOptions, bundle) {
+        if (pluginOptions.compilationMode !== 'partial') return
+        if (collectedDtsDeclarations.size === 0) return
+
+        // Flatten every module's declarations into a class-name-keyed list.
+        // A library publishes one class per name; if names ever collide the
+        // last module wins, matching the previous (class-name-keyed) behavior.
+        const byClassName = new Map<string, string>()
+        for (const moduleDecls of collectedDtsDeclarations.values()) {
+          for (const decl of moduleDecls) {
+            byClassName.set(decl.className, decl.members)
+          }
+        }
+        const declarations = Array.from(byClassName, ([className, members]) => ({
+          className,
+          members,
+        }))
+
+        for (const file of Object.values(bundle)) {
+          if (file.type !== 'asset') continue
+          if (!file.fileName.endsWith('.d.ts')) continue
+
+          const source =
+            typeof file.source === 'string'
+              ? file.source
+              : Buffer.from(file.source).toString('utf-8')
+
+          const augmented = injectDtsDeclarations(source, declarations)
+          if (augmented !== source) {
+            file.source = augmented
+          }
+        }
+      },
+    }
+  }
+
   function stylesPlugin(): Plugin {
     return {
       name: '@oxc-angular/vite-styles',
@@ -965,6 +1050,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   return [
     angularPlugin(),
     stylesPlugin(),
+    dtsPlugin(),
     angularLinkerPlugin(),
     pluginOptions.jit &&
       jitPlugin({

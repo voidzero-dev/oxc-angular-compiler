@@ -218,13 +218,41 @@ interface AngularPluginOptions {
 
 For `"auto"`, the plugin uses `build.cssMinify` when it is set, otherwise it falls back to `build.minify`. In dev, `"auto"` defaults to `false`.
 
+### Library builds (`.d.ts`)
+
+For publishing an Angular library (the ng-packagr-style workflow, e.g. with
+Rolldown/tsdown), set `compilationMode: 'partial'`. This emits partial
+declarations (`ɵɵngDeclareComponent`, …) in the JavaScript output, and the
+plugin also augments the emitted `.d.ts` with Angular's Ivy type declarations
+(`static ɵfac`, `static ɵcmp`, …) so downstream consumers get full template
+type-checking against your library.
+
+```typescript
+// vite.config.ts — Angular library build
+import { angular } from '@oxc-angular/vite'
+import dts from 'rolldown-plugin-dts' // or vite-plugin-dts / tsdown
+
+export default defineConfig({
+  plugins: [angular({ compilationMode: 'partial' }), dts()],
+  build: { lib: { entry: 'src/public-api.ts', formats: ['es'] } },
+})
+```
+
+The plugin does **not** generate the base `.d.ts` itself — a declaration
+generator (`rolldown-plugin-dts`, `vite-plugin-dts`, `tsdown`, or `tsc`) must
+produce them. The Angular members are then spliced into those files during
+`generateBundle`. The injected members reference `i0` (the `@angular/core`
+namespace), and the plugin adds `import * as i0 from "@angular/core";` to any
+`.d.ts` it augments.
+
 ## Vite Plugin Architecture
 
-The Vite plugin consists of three sub-plugins:
+The Vite plugin consists of these sub-plugins:
 
 1. **Transform Plugin** - Transforms Angular TypeScript files
 2. **HMR Plugin** - Handles hot module replacement for templates and styles
 3. **Styles Plugin** - Processes and encapsulates component styles
+4. **Dts Plugin** - Augments library `.d.ts` with Ivy type declarations (partial mode)
 
 ### HMR Routes
 
