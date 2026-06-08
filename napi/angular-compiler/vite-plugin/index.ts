@@ -263,11 +263,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   const componentMetadataCache = new Map<string, string>()
 
   // Angular Ivy `.d.ts` static member declarations collected across the build,
-  // keyed by class name. Populated during `transform` in `compilationMode:
+  // keyed by module id. Populated during `transform` in `compilationMode:
   // 'partial'` (library) builds and consumed by `dtsPlugin`'s `generateBundle`
-  // to augment the declaration files a separate dts generator emits. Keyed by
-  // class name (last write wins) since a library publishes one class per name.
-  const collectedDtsDeclarations = new Map<string, string>()
+  // to augment the declaration files a separate dts generator emits.
+  //
+  // Keyed by module (not class name) so `vite build --watch` rebuilds can evict
+  // a module's prior declarations before re-transforming it. Otherwise removing
+  // a decorator — which makes the quick decorator check early-return, skipping
+  // the transform entirely — would leave the old `ɵfac`/`ɵcmp` entries in place
+  // and `generateBundle` would re-inject Ivy metadata into a now-plain class.
+  const collectedDtsDeclarations = new Map<string, Array<{ className: string; members: string }>>()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -609,6 +614,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             return
           }
 
+          // Library builds: evict any declarations this module contributed on a
+          // previous (watch) pass before re-deriving them below. Done ahead of
+          // the decorator early-return so a class that just lost its decorator
+          // doesn't keep stale Ivy metadata in the regenerated `.d.ts`.
+          if (pluginOptions.compilationMode === 'partial') {
+            collectedDtsDeclarations.delete(id)
+          }
+
           // Quick check for Angular decorators - avoids parsing files without them
           // OXC handles @Component, @Directive, @NgModule, @Injectable, and @Pipe
           const hasAngularDecorator =
@@ -682,10 +695,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Library builds: stash the Ivy `.d.ts` member declarations for this
           // file so `dtsPlugin` can splice them into the emitted declarations.
-          if (pluginOptions.compilationMode === 'partial') {
-            for (const decl of result.dtsDeclarations) {
-              collectedDtsDeclarations.set(decl.className, decl.members)
-            }
+          if (pluginOptions.compilationMode === 'partial' && result.dtsDeclarations.length > 0) {
+            collectedDtsDeclarations.set(
+              id,
+              result.dtsDeclarations.map((decl) => ({
+                className: decl.className,
+                members: decl.members,
+              })),
+            )
           }
 
           // Track component IDs for HMR — one entry per @Component class.
@@ -969,7 +986,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         if (pluginOptions.compilationMode !== 'partial') return
         if (collectedDtsDeclarations.size === 0) return
 
-        const declarations = Array.from(collectedDtsDeclarations, ([className, members]) => ({
+        // Flatten every module's declarations into a class-name-keyed list.
+        // A library publishes one class per name; if names ever collide the
+        // last module wins, matching the previous (class-name-keyed) behavior.
+        const byClassName = new Map<string, string>()
+        for (const moduleDecls of collectedDtsDeclarations.values()) {
+          for (const decl of moduleDecls) {
+            byClassName.set(decl.className, decl.members)
+          }
+        }
+        const declarations = Array.from(byClassName, ([className, members]) => ({
           className,
           members,
         }))
