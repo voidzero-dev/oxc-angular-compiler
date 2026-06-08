@@ -3,9 +3,10 @@ source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: js
 ---
 const _c0 = ["*"];
+const _c1 = ["ngProjectAs","bit-label",5,["bit-label"]];
 function TestComponent_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵprojectionDef();
-    i0.ɵɵprojection(0,0,["ngProjectAs","bit-label",5,["bit-label"]]);
+    i0.ɵɵprojection(0,0,_c1);
   }
 }

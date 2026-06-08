@@ -760,7 +760,7 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
     // Second pass (2b): Assign const indices in collected order
     // This is where we actually call add_const, matching Angular's getConstIndex call order
     let mut element_const_indices: FxHashMap<XrefId, u32> = FxHashMap::default();
-    let mut projection_attrs: FxHashMap<XrefId, OutputExpression<'_>> = FxHashMap::default();
+    let mut projection_attrs: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
     for xref_item in &xrefs_to_assign {
         match xref_item {
@@ -768,7 +768,21 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
                 if let Some(attrs) = all_element_attrs.get(xref) {
                     if !attrs.is_empty() {
                         let attr_array = serialize_attributes_to_array_expr(allocator, attrs);
-                        projection_attrs.insert(*xref, attr_array);
+                        // Angular v22 (rc.3+) pools projection attributes into the
+                        // shared const pool (`_cN`) instead of emitting them inline,
+                        // matching `getConstLiteral(attrArray, true)` in Angular's
+                        // const_collection.ts (angular/angular@2891f7e). This phase
+                        // runs after `generate_projection_def`, so the projectionDef
+                        // and ngContentSelectors consts are pooled first and the
+                        // projection attrs land at the next `_cN`, as in the goldens.
+                        let pooled = job.pool.get_const_literal(attr_array, true);
+                        let pooled_name = match pooled {
+                            OutputExpression::ReadVar(rv) => rv.name.clone(),
+                            _ => unreachable!(
+                                "ConstantPool::get_const_literal must return OutputExpression::ReadVar"
+                            ),
+                        };
+                        projection_attrs.insert(*xref, pooled_name);
                     }
                 }
             }
@@ -794,8 +808,17 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
             for op in view.create.iter_mut() {
                 match op {
                     CreateOp::Projection(proj) => {
-                        if let Some(attrs) = projection_attrs.remove(&proj.xref) {
-                            proj.attributes = Some(attrs);
+                        // It's possible for multiple projection ops to reference the same xref
+                        // (e.g. across conditional branches). Avoid consuming the pooled attrs so
+                        // every matching projection op receives the same const reference.
+                        if let Some(pooled_name) = projection_attrs.get(&proj.xref) {
+                            proj.attributes = Some(OutputExpression::ReadVar(Box::new_in(
+                                crate::output::ast::ReadVarExpr {
+                                    name: pooled_name.clone(),
+                                    source_span: None,
+                                },
+                                allocator,
+                            )));
                         }
                     }
                     CreateOp::ElementStart(elem) => {
