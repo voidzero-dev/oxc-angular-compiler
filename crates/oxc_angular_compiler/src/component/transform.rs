@@ -32,7 +32,7 @@ use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
 use crate::ast::expression::{BindingType, ParsedEventType};
-use crate::ast::r3::{R3BoundAttribute, R3BoundEvent};
+use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
     build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
@@ -109,6 +109,17 @@ pub struct TransformOptions {
     ///
     /// When `None`, assumes latest Angular version (v19+ behavior).
     pub angular_version: Option<AngularVersion>,
+
+    /// Override for the `legacyOptionalChaining` Angular compiler option.
+    ///
+    /// Controls how the safe-navigation operator (`?.`) in template expressions is
+    /// emitted. When `Some(true)`, always uses the legacy `== null ? null` ternary;
+    /// when `Some(false)`, always emits native optional chaining (yielding
+    /// `undefined`). When `None`, the default is derived from `angular_version`
+    /// (legacy for < v22, modern for >= v22, legacy when the version is unknown).
+    ///
+    /// See `angular/angular@2896c93cc1`.
+    pub legacy_optional_chaining: Option<bool>,
 
     // Component metadata overrides for template-only compilation.
     // These allow the build tool to pass component metadata when compiling
@@ -227,8 +238,9 @@ impl Default for TransformOptions {
             jit: false,
             hmr: false,
             advanced_optimizations: false,
-            i18n_use_external_ids: true, // Angular's JIT default
-            angular_version: None,       // None means assume latest (v19+ behavior)
+            i18n_use_external_ids: true,    // Angular's JIT default
+            angular_version: None,          // None means assume latest (v19+ behavior)
+            legacy_optional_chaining: None, // None: derive default from angular_version
             // Metadata overrides default to None (use extracted/default values)
             selector: None,
             standalone: None,
@@ -2566,11 +2578,31 @@ pub fn transform_angular_file(
                 }
 
                 // 3. Resolve external styles and merge into metadata
-                resolve_styles(allocator, &mut metadata, resolved_resources);
+                let missing_style_urls =
+                    resolve_styles(allocator, &mut metadata, resolved_resources);
 
                 // 4. Resolve template from inline or external source
-                let template_source = resolve_template(&metadata, resolved_resources);
+                let (template_source, missing_template_url) =
+                    resolve_template(&metadata, resolved_resources);
                 let class_name = metadata.class_name.to_string();
+
+                // Resources were provided but a styleUrl was not among them:
+                // fail loudly like ngc (COMPONENT_RESOURCE_NOT_FOUND) instead
+                // of silently dropping the styles (#314).
+                for style_url in &missing_style_urls {
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': style URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND)",
+                        class_name, style_url
+                    )));
+                }
+                if let Some(template_url) = &missing_template_url {
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': template URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND)",
+                        class_name, template_url
+                    )));
+                }
 
                 if let Some(template_string) = template_source {
                     // Allocate template in arena so it has the allocator's lifetime.
@@ -2836,11 +2868,18 @@ pub fn transform_angular_file(
                             result.diagnostics.extend(diags);
                         }
                     }
-                } else if let Some(template_url) = &metadata.template_url {
-                    // External template not resolved - add warning
-                    result.diagnostics.push(OxcDiagnostic::warn(format!(
-                        "Template URL '{}' not found in resolved resources",
-                        template_url
+                } else if missing_template_url.is_none()
+                    && let Some(template_url) = &metadata.template_url
+                {
+                    // External template not resolved: the class is emitted
+                    // without its compiled definition, so fail loudly like
+                    // ngc's COMPONENT_RESOURCE_NOT_FOUND instead of letting
+                    // the build ship a broken component (#314).
+                    result.diagnostics.push(OxcDiagnostic::error(format!(
+                        "Component '{}': template URL '{}' could not be resolved \
+                         (COMPONENT_RESOURCE_NOT_FOUND); the component was emitted \
+                         without its compiled definition",
+                        class_name, template_url
                     )));
                 }
             } else {
@@ -3764,6 +3803,7 @@ fn compile_component_full<'a>(
         pool_starting_index,
         // Pass Angular version for feature-gated instruction selection
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     let mut job = ingest_component_with_options(
@@ -3827,6 +3867,7 @@ fn compile_component_full<'a>(
         metadata,
         template_pool_index,
         options.angular_version,
+        options.legacy_optional_chaining,
     );
 
     // Extract the result and update pool index if host bindings were compiled
@@ -3993,31 +4034,38 @@ fn compile_component_full<'a>(
 fn resolve_template(
     metadata: &ComponentMetadata<'_>,
     resources: Option<&ResolvedResources>,
-) -> Option<String> {
-    // ngc AOT precedence: templateUrl first, falling through to inline only when
-    // no resolved content is available.
+) -> (Option<String>, Option<String>) {
+    // ngc AOT precedence: templateUrl first. When resources were supplied, a
+    // missing entry is reported to the caller instead of falling back to inline.
     if let Some(template_url) = &metadata.template_url {
         if let Some(resources) = resources {
             if let Some(template) = resources.templates.get(template_url.as_str()) {
-                return Some(template.clone());
+                return (Some(template.clone()), None);
             }
+            return (None, Some(template_url.to_string()));
         }
     }
 
     if let Some(template) = &metadata.template {
-        return Some(template.to_string());
+        return (Some(template.to_string()), None);
     }
 
-    None
+    (None, None)
 }
 
 /// Resolve external styles and merge into component metadata.
+///
+/// Returns the styleUrls that were NOT found in `resources` (only when
+/// resources were provided), so the caller can surface a
+/// COMPONENT_RESOURCE_NOT_FOUND diagnostic per missing resource.
 fn resolve_styles<'a>(
     allocator: &'a Allocator,
     metadata: &mut ComponentMetadata<'a>,
     resources: Option<&ResolvedResources>,
-) {
+) -> Vec<String> {
     use oxc_allocator::FromIn;
+
+    let mut missing = Vec::new();
 
     if let Some(resources) = resources {
         // Resolve each styleUrl from the resources
@@ -4027,9 +4075,13 @@ fn resolve_styles<'a>(
                 for style in style_contents {
                     metadata.styles.push(Ident::from_in(style.as_str(), allocator));
                 }
+            } else {
+                missing.push(style_url.to_string());
             }
         }
     }
+
+    missing
 }
 
 /// Compile a component template to JavaScript.
@@ -4217,6 +4269,7 @@ pub fn compile_template_to_js_with_options<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // Standalone template compilation starts from 0
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     // Stage 3-5: Ingest and compile
@@ -4271,6 +4324,7 @@ pub fn compile_template_to_js_with_options<'a>(
             options.selector.as_deref(),
             host_pool_starting_index,
             options.angular_version,
+            options.legacy_optional_chaining,
         ) {
             // Add host binding pool declarations (pure functions, etc.)
             for decl in host_result.declarations {
@@ -4390,6 +4444,7 @@ pub fn compile_template_for_hmr<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0, // HMR template compilation starts from 0
         angular_version: options.angular_version,
+        legacy_optional_chaining: options.legacy_optional_chaining,
     };
 
     // Stage 3-5: Ingest and compile
@@ -4535,6 +4590,7 @@ fn compile_component_host_bindings<'a>(
     metadata: &ComponentMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> Option<HostBindingCompilationOutput<'a>> {
     let host = metadata.host.as_ref()?;
 
@@ -4558,8 +4614,13 @@ fn compile_component_host_bindings<'a>(
 
     // Ingest and compile the host bindings with the pool starting index
     // This ensures constant names continue from where template compilation left off
-    let mut job =
-        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
+    let mut job = ingest_host_binding_with_version(
+        allocator,
+        input,
+        pool_starting_index,
+        angular_version,
+        legacy_optional_chaining,
+    );
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation
@@ -4598,17 +4659,6 @@ fn convert_host_metadata_to_input<'a>(
         // Determine binding type based on property name prefix
         let (binding_type, final_name, unit) = parse_host_property_name(prop_name);
 
-        // Compute the security context for the host binding using the component
-        // selector as the element context, mirroring upstream Angular's
-        // `createHostBindingsFunction` → `calcPossibleSecurityContexts`. Attribute
-        // and property bindings get a real context (and thus a sanitizer/validator
-        // downstream); class/style/animation bindings keep their fixed contexts.
-        let security_context = crate::schema::host_binding_security_context(
-            binding_type,
-            final_name,
-            component_selector.as_str(),
-        );
-
         // Parse the value expression
         let value_str = allocator.alloc_str(value.as_str());
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
@@ -4616,7 +4666,7 @@ fn convert_host_metadata_to_input<'a>(
         properties.push(R3BoundAttribute {
             name: Ident::from_in(final_name, allocator),
             binding_type,
-            security_context,
+            security_context: SecurityContext::None,
             value: parse_result.ast,
             unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,
@@ -4894,6 +4944,7 @@ fn compile_host_bindings_from_input<'a>(
     selector: Option<&str>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> Option<HostBindingCompilationResult<'a>> {
     use oxc_allocator::FromIn;
 
@@ -4919,8 +4970,13 @@ fn compile_host_bindings_from_input<'a>(
     // Convert to HostBindingInput and compile
     let input =
         convert_host_metadata_to_input(allocator, &host, component_name_atom, component_selector);
-    let mut job =
-        ingest_host_binding_with_version(allocator, input, pool_starting_index, angular_version);
+    let mut job = ingest_host_binding_with_version(
+        allocator,
+        input,
+        pool_starting_index,
+        angular_version,
+        legacy_optional_chaining,
+    );
     let result = compile_host_bindings(&mut job);
 
     Some(result)
@@ -4956,6 +5012,7 @@ pub fn compile_host_bindings_for_linker(
         selector,
         pool_starting_index,
         None, // Linker always targets latest Angular version
+        None, // legacyOptionalChaining: derive from (absent) version
     )?;
 
     let emitter = JsEmitter::new();
@@ -5075,6 +5132,7 @@ pub fn compile_template_for_linker<'a>(
         all_deferrable_deps_fn: None,
         pool_starting_index: 0,
         angular_version: None,
+        legacy_optional_chaining: None,
     };
 
     let component_name_atom = Ident::from_in(component_name, allocator);

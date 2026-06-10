@@ -191,6 +191,14 @@ pub struct ComponentCompilationJob<'a> {
     /// `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` for `@if`/`@switch` blocks.
     /// When `None`, assumes latest Angular version (v20+ behavior).
     pub angular_version: Option<AngularVersion>,
+    /// Explicit override for the `legacyOptionalChaining` compiler option.
+    ///
+    /// When `Some(true)`, safe navigation (`?.`) always expands to the legacy
+    /// `== null ? null` ternary. When `Some(false)`, it always emits native
+    /// optional chaining (`?.`, yielding `undefined`). When `None`, the default
+    /// is derived from `angular_version` (legacy for < v22, modern for >= v22,
+    /// legacy when the version is unknown). See `legacy_optional_chaining()`.
+    pub legacy_optional_chaining: Option<bool>,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
 }
@@ -241,6 +249,7 @@ impl<'a> ComponentCompilationJob<'a> {
             all_deferrable_deps_fn: None,
             content_selectors: None,
             angular_version: None,
+            legacy_optional_chaining: None,
             diagnostics: std::vec::Vec::new(),
         }
     }
@@ -277,6 +286,21 @@ impl<'a> ComponentCompilationJob<'a> {
     /// Returns `false` for Angular 19 and earlier, which use `ɵɵhostProperty` instead.
     pub fn supports_dom_property(&self) -> bool {
         self.angular_version.map_or(true, |v: AngularVersion| v.supports_dom_property())
+    }
+
+    /// Resolve whether safe navigation (`?.`) should use legacy null semantics.
+    ///
+    /// Returns `true` when `?.` must expand to the legacy `== null ? null` ternary,
+    /// `false` when it should emit native optional chaining (yielding `undefined`).
+    ///
+    /// An explicit `legacy_optional_chaining` override wins. Otherwise the default
+    /// follows the Angular version: legacy for < v22, modern for >= v22, and legacy
+    /// when the version is unknown (the safe, conservative fallback Angular itself
+    /// uses for partial-compiled libraries targeting older runtimes).
+    pub fn legacy_optional_chaining(&self) -> bool {
+        self.legacy_optional_chaining.unwrap_or_else(|| {
+            self.angular_version.map_or(true, |v| !v.supports_modern_optional_chaining())
+        })
     }
 
     /// Allocates a new cross-reference ID.
@@ -621,6 +645,11 @@ pub struct HostBindingCompilationJob<'a> {
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
     /// Angular version for version-gated instruction emission.
     pub angular_version: Option<AngularVersion>,
+    /// Explicit override for the `legacyOptionalChaining` compiler option.
+    ///
+    /// See [`ComponentCompilationJob::legacy_optional_chaining`] for the resolution
+    /// rules; `None` derives the default from `angular_version`.
+    pub legacy_optional_chaining: Option<bool>,
 }
 
 impl<'a> HostBindingCompilationJob<'a> {
@@ -667,6 +696,7 @@ impl<'a> HostBindingCompilationJob<'a> {
             fn_suffix: Ident::from("HostBindings"),
             diagnostics: std::vec::Vec::new(),
             angular_version: None,
+            legacy_optional_chaining: None,
         }
     }
 
@@ -683,6 +713,15 @@ impl<'a> HostBindingCompilationJob<'a> {
     /// Check if `ɵɵdomProperty` is supported (Angular 20+).
     pub fn supports_dom_property(&self) -> bool {
         self.angular_version.map_or(true, |v| v.supports_dom_property())
+    }
+
+    /// Resolve whether safe navigation (`?.`) should use legacy null semantics.
+    ///
+    /// See [`ComponentCompilationJob::legacy_optional_chaining`] for the rules.
+    pub fn legacy_optional_chaining(&self) -> bool {
+        self.legacy_optional_chaining.unwrap_or_else(|| {
+            self.angular_version.map_or(true, |v| !v.supports_modern_optional_chaining())
+        })
     }
 
     /// Allocates a new cross-reference ID.

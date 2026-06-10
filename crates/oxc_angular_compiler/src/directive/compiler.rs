@@ -23,7 +23,7 @@ use super::metadata::{
     R3DirectiveMetadata, R3HostDirectiveMetadata, R3HostMetadata, R3InputMetadata,
 };
 use crate::ast::expression::{BindingType, ParsedEventType};
-use crate::ast::r3::{R3BoundAttribute, R3BoundEvent};
+use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::output::ast::{
     FunctionExpr, InvokeFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
     LiteralMapExpr, LiteralValue, OutputExpression, OutputStatement, ReadPropExpr, ReadVarExpr,
@@ -624,17 +624,6 @@ fn convert_r3_host_metadata_to_input<'a>(
         // Determine binding type based on property name prefix
         let (binding_type, final_name, unit) = parse_host_property_name(prop_name);
 
-        // Compute the security context for the host binding using the directive
-        // selector as the element context, mirroring upstream Angular's
-        // `createHostBindingsFunction` → `calcPossibleSecurityContexts`. Attribute
-        // and property bindings get a real context (and thus a sanitizer/validator
-        // downstream); class/style/animation bindings keep their fixed contexts.
-        let security_context = crate::schema::host_binding_security_context(
-            binding_type,
-            final_name,
-            directive_selector.as_str(),
-        );
-
         // Parse the value expression
         let value_str = allocator.alloc_str(value.as_str());
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
@@ -642,7 +631,7 @@ fn convert_r3_host_metadata_to_input<'a>(
         properties.push(R3BoundAttribute {
             name: Ident::from_in(final_name, allocator),
             binding_type,
-            security_context,
+            security_context: SecurityContext::None,
             value: parse_result.ast,
             unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,

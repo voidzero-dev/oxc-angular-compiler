@@ -493,7 +493,7 @@ pub fn convert_ir_expression<'a>(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, allocator),
                     name: resolved.name.clone(),
-                    optional: false,
+                    optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
                 allocator,
@@ -571,7 +571,7 @@ pub fn convert_ir_expression<'a>(
                     fn_expr: Box::new_in(receiver, allocator),
                     args,
                     pure: false,
-                    optional: false,
+                    optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
                 allocator,
@@ -589,7 +589,7 @@ pub fn convert_ir_expression<'a>(
                 ReadKeyExpr {
                     receiver: Box::new_in(receiver, allocator),
                     index: Box::new_in(index, allocator),
-                    optional: false,
+                    optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
                 allocator,

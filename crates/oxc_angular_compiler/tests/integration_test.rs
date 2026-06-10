@@ -865,6 +865,53 @@ export class Parent {}
     );
 }
 
+/// The `@default never;` exhaustive marker must be the last case in a `@switch`
+/// (Angular v22). A `@case`/`@default` that appears after it is a diagnostic.
+#[test]
+fn test_switch_default_never_must_be_last() {
+    let allocator = Allocator::default();
+    let ordering_msg = "must be the last case in a switch";
+
+    // Exhaustive check followed by a @case -> diagnostic.
+    let bad = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @default never; @case (1) {} }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", bad, None, None);
+    assert!(
+        result.has_errors(),
+        "A @case after `@default never;` must be a diagnostic. Output:\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "Expected a 'must be the last case' diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+
+    // Exhaustive check as the last case (after a case with a body) -> no ordering error.
+    let good = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @case (1) {x} @default never; }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", good, None, None);
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "`@default never;` as the last case should not report the ordering diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+}
+
 #[test]
 #[should_panic(
     expected = "Cannot specify additional `hydrate` triggers if `hydrate never` is present"
@@ -2038,6 +2085,99 @@ fn test_pipe_in_binary_with_safe_property_read() {
     insta::assert_snapshot!("pipe_in_binary_with_safe_property_read", js);
 }
 
+// ----------------------------------------------------------------------------
+// legacyOptionalChaining (Angular v22+): native `?.` vs legacy `== null ? null`
+// See issue #317 and angular/angular@2896c93cc1.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_safe_navigation_modern_interpolation_v22() {
+    // Angular v22+ emits native optional chaining, which yields `undefined`.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.name"), "expected native optional chaining, got:\n{js}");
+    assert!(!js.contains("== null"), "modern mode must not emit the legacy null ternary:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_chain_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.address?.city}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.address?.city"), "expected chained native `?.`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_mixed_chain_v22() {
+    // Only the safe steps become optional; the plain `.b` stays a normal read.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{a?.b.c?.d}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.a?.b.c?.d"), "expected mixed optional/plain chain, got:\n{js}");
+}
+
+#[test]
+fn test_safe_call_modern_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{getData?.()}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.getData?.()"), "expected native optional call, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_legacy_on_v21() {
+    // Pre-v22 keeps the legacy `== null ? null` expansion.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 0)),
+    );
+    assert!(js.contains("== null"), "v21 must use the legacy null ternary, got:\n{js}");
+    assert!(!js.contains("ctx.user?.name"), "v21 must not emit native optional chaining:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_migration_forces_legacy_on_v22() {
+    // The `$safeNavigationMigration(...)` magic function opts a subtree back into
+    // legacy null semantics even on a modern (v22) target, and is stripped from
+    // the output.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ $safeNavigationMigration(user?.name) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("== null"), "wrapped subtree must use the legacy null ternary, got:\n{js}");
+    assert!(
+        !js.contains("$safeNavigationMigration"),
+        "the migration wrapper must be stripped from the output:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_migration_ignores_qualified_call() {
+    // Only the *unqualified* `$safeNavigationMigration(...)` helper is magic. A
+    // method named `$safeNavigationMigration` on some object is a legitimate call
+    // and must be preserved (matching Angular, which keys on a bare lexical read).
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ svc.$safeNavigationMigration(user) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(
+        js.contains("$safeNavigationMigration"),
+        "a qualified `svc.$safeNavigationMigration(...)` call must not be stripped, got:\n{js}"
+    );
+}
+
 // ============================================================================
 // Event Modifier Tests
 // ============================================================================
@@ -3136,7 +3276,12 @@ export class MatMiniFabButton {
     let mut templates = std::collections::HashMap::new();
     templates.insert("button.html".to_string(), button_template.to_string());
 
-    let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
+    // Both components also declare `styleUrl: 'fab.css'`; provide it so the
+    // fixture stays fully resolved now that missing resources are hard errors.
+    let mut styles = std::collections::HashMap::new();
+    styles.insert("fab.css".to_string(), vec![".fab {}".to_string()]);
+
+    let resources = ResolvedResources { templates, styles };
 
     let result = transform_angular_file(&allocator, "fab.ts", source, None, Some(&resources));
 
@@ -6081,6 +6226,48 @@ export class LoginFormComponent {
             "v{version:?}: should chain — `None` defaults to assume-latest, \
              v21.0.4+ has `typeof <fn>` return. Output:\n{code}"
         );
+    }
+}
+
+/// The control instructions (`ɵɵcontrolCreate()` / `ɵɵcontrol()`) for a
+/// two-way `[(ngModel)]` were added in Angular v22
+/// (`supports_extended_control_properties`); v21 only emitted control
+/// instructions for `[formField]`. Pre-v22 targets must therefore emit only the
+/// `ɵɵtwoWayProperty` for `[(ngModel)]`, while v22+ — and `None`, which assumes
+/// latest — also emit the paired control instructions.
+#[test]
+fn test_ng_model_control_instructions_obey_angular_version_gate() {
+    let template = r#"<input [(ngModel)]="name">"#;
+
+    // Pre-v22: no control instructions, just the two-way property.
+    for version in [
+        AngularVersion::new(19, 0, 0),
+        AngularVersion::new(20, 0, 0),
+        AngularVersion::new(21, 2, 0),
+    ] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", Some(version));
+        assert!(
+            code.contains("ɵɵtwoWayProperty("),
+            "v{version:?}: expected ɵɵtwoWayProperty. Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: must NOT emit ɵɵcontrolCreate (v22+ only). Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrol("),
+            "v{version:?}: must NOT emit ɵɵcontrol (v22+ only). Output:\n{code}"
+        );
+    }
+
+    // v22+ and `None` (assume latest): emit the paired control instructions.
+    for version in [Some(AngularVersion::new(22, 0, 0)), None] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", version);
+        assert!(
+            code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: expected ɵɵcontrolCreate. Output:\n{code}"
+        );
+        assert!(code.contains("ɵɵcontrol("), "v{version:?}: expected ɵɵcontrol. Output:\n{code}");
     }
 }
 

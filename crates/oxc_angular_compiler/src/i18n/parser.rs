@@ -545,34 +545,8 @@ impl I18nMessageFactory {
         context: &mut I18nVisitorContext,
         visit_fn: VisitNodeFn,
     ) -> Option<Node> {
-        // Compute the placeholder tag NAME and voidness. For a selectorless COMPONENT
-        // (parsed as an `HtmlElement` with `is_component == true`; the parser never
-        // produces `HtmlNode::Component`), upstream v21.2.7 `i18n/i18n_parser.ts`
-        // `_visitElementLike` uses `node.fullName` for the placeholder name and derives
-        // voidness from `getHtmlTagDefinition(node.tagName).isVoid` (null tagName -> false):
-        //   ```
-        //   if (node instanceof html.Element) {
-        //     nodeName = node.name;
-        //     isVoid = getHtmlTagDefinition(node.name).isVoid;
-        //   } else {
-        //     nodeName = node.fullName;
-        //     isVoid = node.tagName ? getHtmlTagDefinition(node.tagName).isVoid : false;
-        //   }
-        //   ```
-        // `getHtmlTagDefinition` does NOT strip the namespace (only lowercases), so a
-        // resolved `:svg:image` host misses the void set (-> false) while a bare `img`
-        // host hits it (-> true) — matching `is_void_element` here. For a normal element,
-        // the name and voidness come from `element.name` unchanged.
-        let component_tag = element.is_component.then(|| component_tag_name(element)).flatten();
-        let component_full_name =
-            element.is_component.then(|| component_full_name(element, component_tag.as_deref()));
-        let tag_name: &str =
-            component_full_name.as_deref().unwrap_or_else(|| element.name.as_str());
-        let is_void = if element.is_component {
-            component_tag.as_deref().is_some_and(is_void_element)
-        } else {
-            is_void_element(tag_name)
-        };
+        let tag_name = element.name.as_str();
+        let is_void = is_void_element(tag_name);
 
         // Convert element attributes to an IndexMap for placeholder registry (ordered for consistent serialization)
         let mut attrs: IndexMap<String, String> = element
@@ -820,37 +794,6 @@ pub fn create_i18n_message_factory(
     I18nMessageFactory::new(retain_empty_tokens, preserve_expression_whitespace)
 }
 
-/// Resolves a selectorless component's HOST tag name (upstream `_getComponentTagName` /
-/// `component.tagName`) from the parser-resolved `component_prefix`/`component_tag_name`.
-/// Mirrors `transform/html_to_r3.rs` exactly:
-///   * (None, None)            -> None (bare `<MyCmp>`, tagName null)
-///   * (None, Some(tag))       -> the bare tag (e.g. "button")
-///   * (Some(prefix), None)    -> `:prefix:ng-component`
-///   * (Some(prefix), Some(t)) -> `:prefix:t` (e.g. ":svg:rect")
-fn component_tag_name(element: &HtmlElement<'_>) -> Option<String> {
-    match (&element.component_prefix, &element.component_tag_name) {
-        (None, None) => None,
-        (None, Some(tag)) => Some(tag.to_string()),
-        (Some(prefix), None) => Some(format!(":{prefix}:ng-component")),
-        (Some(prefix), Some(tag)) => Some(format!(":{prefix}:{tag}")),
-    }
-}
-
-/// Composes a selectorless component's FULL NAME (upstream `_getComponentFullName` /
-/// `component.fullName`), used as the i18n placeholder tag name. Mirrors
-/// `transform/html_to_r3.rs`:
-///   * resolved tag starts with ':' -> `ComponentName` + tag (e.g. "MyCmp:svg:rect")
-///   * other resolved tag           -> `ComponentName:tag`   (e.g. "MyCmp:button")
-///   * no resolved tag (bare)       -> `ComponentName`       (e.g. "MyCmp")
-/// `element.name` is the component class name for a selectorless component.
-fn component_full_name(element: &HtmlElement<'_>, resolved_tag: Option<&str>) -> String {
-    match resolved_tag {
-        Some(tag) if tag.starts_with(':') => format!("{}{}", element.name, tag),
-        Some(tag) => format!("{}:{}", element.name, tag),
-        None => element.name.to_string(),
-    }
-}
-
 /// Extracts a custom placeholder name from an expression if present.
 /// Looks for comments like `// i18n(ph="CUSTOM_NAME")` in the expression.
 ///
@@ -989,112 +932,5 @@ mod tests {
         } else {
             panic!("Expected Container node");
         }
-    }
-
-    // ---- Finding 1: selectorless component placeholders (fullName + resolved-tag voidness) ----
-    //
-    // Selectorless components are parsed as `HtmlNode::Element` with `is_component == true`
-    // (the parser never produces `HtmlNode::Component`). The i18n message factory therefore
-    // routes them through `visit_element`. Upstream v21.2.7 `i18n/i18n_parser.ts`
-    // `_visitElementLike` uses `node.fullName` for the placeholder NAME and
-    // `getHtmlTagDefinition(node.tagName).isVoid` (null tagName -> false) for voidness.
-    //
-    // Oracle (`@angular/compiler@21.2.7` `parseTemplate(html, url, {enableSelectorless:true})`):
-    //   <MyCmp:button>x</MyCmp:button> -> fullName "MyCmp:button", isVoid=false,
-    //                                     START_TAG_MYCMP:BUTTON / CLOSE_TAG_MYCMP:BUTTON
-    //   <MyCmp:img />                  -> fullName "MyCmp:img", isVoid=true (host "img"),
-    //                                     TAG_MYCMP:IMG / "" (no close)
-    //   <MyCmp>x</MyCmp>               -> fullName "MyCmp", isVoid=false (tagName null),
-    //                                     START_TAG_MYCMP / CLOSE_TAG_MYCMP
-    //   <MyCmp:svg:rect>y</...>        -> fullName "MyCmp:svg:rect", isVoid=false
-    //   <svg><MyCmp:image></svg>       -> fullName "MyCmp:svg:image", isVoid=false
-    //                                     (getHtmlTagDefinition(":svg:image") -> default, NOT void)
-
-    /// Parses `inner_html` wrapped in `<div i18n>...</div>` with selectorless enabled and
-    /// returns the i18n Message extracted from the div's children (mirrors the AOT path in
-    /// `transform/html_to_r3.rs`, which calls `create_message(&element.children, ..)`).
-    fn extract_component_message(inner_html: &str) -> Message {
-        use crate::parser::html::HtmlParser;
-        let html = format!("<div i18n>{inner_html}</div>");
-        let allocator = oxc_allocator::Allocator::default();
-        // Leak the source so it outlives the parse result borrow within this helper.
-        let src: &str = allocator.alloc_str(&html);
-        let parser = HtmlParser::with_selectorless(&allocator, src, "<test>");
-        let result = parser.parse();
-        assert!(result.errors.is_empty(), "parse errors: {:?}", result.errors);
-        // The single root is the <div i18n>; extract the message from its children.
-        let HtmlNode::Element(div) = &result.nodes[0] else {
-            panic!("expected <div> root, got {:?}", result.nodes[0]);
-        };
-        let factory = I18nMessageFactory::new(false, true);
-        let source_file = Arc::new(ParseSourceFile::new(html.clone(), "<test>"));
-        factory.create_message(&div.children, None, None, None, None, source_file)
-    }
-
-    fn first_tag_placeholder(message: &Message) -> &TagPlaceholder {
-        match &message.nodes[0] {
-            Node::TagPlaceholder(tp) => tp,
-            other => panic!("expected TagPlaceholder, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_component_placeholder_with_host_tag() {
-        let message = extract_component_message("<MyCmp:button>x</MyCmp:button>");
-        let tp = first_tag_placeholder(&message);
-        assert_eq!(tp.tag, "MyCmp:button");
-        assert!(!tp.is_void);
-        assert_eq!(tp.start_name, "START_TAG_MYCMP:BUTTON");
-        assert_eq!(tp.close_name, "CLOSE_TAG_MYCMP:BUTTON");
-        assert!(message.placeholders.contains_key("START_TAG_MYCMP:BUTTON"));
-        assert!(message.placeholders.contains_key("CLOSE_TAG_MYCMP:BUTTON"));
-    }
-
-    #[test]
-    fn test_component_placeholder_void_host() {
-        let message = extract_component_message("<MyCmp:img />");
-        let tp = first_tag_placeholder(&message);
-        assert_eq!(tp.tag, "MyCmp:img");
-        assert!(tp.is_void, "img host tag must be void");
-        assert_eq!(tp.start_name, "TAG_MYCMP:IMG");
-        assert_eq!(tp.close_name, "");
-        assert!(message.placeholders.contains_key("TAG_MYCMP:IMG"));
-    }
-
-    #[test]
-    fn test_component_placeholder_bare() {
-        let message = extract_component_message("<MyCmp>x</MyCmp>");
-        let tp = first_tag_placeholder(&message);
-        assert_eq!(tp.tag, "MyCmp");
-        assert!(!tp.is_void, "bare component (null tagName) is not void");
-        assert_eq!(tp.start_name, "START_TAG_MYCMP");
-        assert_eq!(tp.close_name, "CLOSE_TAG_MYCMP");
-    }
-
-    #[test]
-    fn test_component_placeholder_namespaced_host() {
-        let message = extract_component_message("<MyCmp:svg:rect>y</MyCmp:svg:rect>");
-        let tp = first_tag_placeholder(&message);
-        assert_eq!(tp.tag, "MyCmp:svg:rect");
-        assert!(!tp.is_void);
-        assert_eq!(tp.start_name, "START_TAG_MYCMP:SVG:RECT");
-        assert_eq!(tp.close_name, "CLOSE_TAG_MYCMP:SVG:RECT");
-    }
-
-    #[test]
-    fn test_component_placeholder_svg_inherited_ns() {
-        // Host tag "image" inherits svg ns -> tagName ":svg:image"; getHtmlTagDefinition
-        // does not ns-strip, so the lookup misses and isVoid stays false.
-        let message = extract_component_message("<svg><MyCmp:image></MyCmp:image></svg>");
-        // Outer placeholder is the <svg> element; its child is the component.
-        let svg = first_tag_placeholder(&message);
-        assert_eq!(svg.tag, ":svg:svg");
-        let Node::TagPlaceholder(cmp) = &svg.children[0] else {
-            panic!("expected component TagPlaceholder child, got {:?}", svg.children[0]);
-        };
-        assert_eq!(cmp.tag, "MyCmp:svg:image");
-        assert!(!cmp.is_void);
-        assert_eq!(cmp.start_name, "START_TAG_MYCMP:SVG:IMAGE");
-        assert_eq!(cmp.close_name, "CLOSE_TAG_MYCMP:SVG:IMAGE");
     }
 }

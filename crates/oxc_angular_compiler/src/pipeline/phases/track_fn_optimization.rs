@@ -318,6 +318,7 @@ mod tests {
             ResolvedPropertyReadExpr {
                 receiver: oxc_allocator::Box::new_in(ctx, alloc),
                 name: Ident::from(method_name),
+                optional: false,
                 source_span: None,
             },
             alloc,
@@ -335,6 +336,7 @@ mod tests {
             ResolvedCallExpr {
                 receiver: oxc_allocator::Box::new_in(prop_read, alloc),
                 args,
+                optional: false,
                 source_span: None,
             },
             alloc,

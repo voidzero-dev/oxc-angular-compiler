@@ -345,6 +345,7 @@ pub fn convert_ast<'a>(
                             allocator,
                         ),
                         name: pr.name.clone(),
+                        optional: false,
                         source_span: convert_source_span(pr.source_span),
                     },
                     allocator,

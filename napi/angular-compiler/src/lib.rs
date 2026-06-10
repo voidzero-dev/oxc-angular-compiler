@@ -138,6 +138,16 @@ pub struct TransformOptions {
     /// When not set, assumes latest Angular version (v19+ behavior).
     pub angular_version: Option<AngularVersion>,
 
+    /// Override for the `legacyOptionalChaining` Angular compiler option
+    /// (`angularCompilerOptions.legacyOptionalChaining` in `tsconfig.json`).
+    ///
+    /// Controls the safe-navigation operator (`?.`) in template expressions.
+    /// When `true`, always emits the legacy `== null ? null` form; when `false`,
+    /// emits native optional chaining (yielding `undefined`). When unset, the
+    /// default is derived from `angularVersion` (legacy for < v22, modern for
+    /// >= v22, legacy when the version is unknown).
+    pub legacy_optional_chaining: Option<bool>,
+
     // Component metadata fields for full compilation testing
     // These mirror Angular's @Component decorator options.
     /// The CSS selector that identifies this component in a template.
@@ -229,6 +239,7 @@ impl From<TransformOptions> for RustTransformOptions {
             advanced_optimizations: options.advanced_optimizations.unwrap_or(false),
             i18n_use_external_ids: options.i18n_use_external_ids.unwrap_or(true),
             angular_version: options.angular_version.map(Into::into),
+            legacy_optional_chaining: options.legacy_optional_chaining,
             // Component metadata overrides
             selector: options.selector,
             standalone: options.standalone,

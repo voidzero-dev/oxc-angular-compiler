@@ -1,6 +1,6 @@
 {
   "name": "keyframes_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/keyframes_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/keyframes_spec.ts",
   "test_groups": [
     {
       "name": "ShadowCss, keyframes and animations",
@@ -49,11 +49,6 @@
         {
           "name": "should handle (scope or not) animation definition containing some names which do not have a preceding space",
           "path": "ShadowCss, keyframes and animations/should handle (scope or not) animation definition containing some names which do not have a preceding space",
-          "assertions": []
-        },
-        {
-          "name": "should handle (scope or not) animation definitions preceded by an erroneous comma",
-          "path": "ShadowCss, keyframes and animations/should handle (scope or not) animation definitions preceded by an erroneous comma",
           "assertions": []
         },
         {

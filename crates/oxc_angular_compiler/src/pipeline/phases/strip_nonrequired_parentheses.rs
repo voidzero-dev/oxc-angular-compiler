@@ -233,6 +233,9 @@ fn check_ir_expression_for_required_parens(
         IrExpression::Ast(ast_expr) => {
             check_ast_expression_for_required_parens(ast_expr, required);
         }
+        IrExpression::SafeNavigationMigration(m) => {
+            check_ir_expression_for_required_parens(&m.expr, required);
+        }
         IrExpression::SafeTernary(st) => {
             check_ir_expression_for_required_parens(&st.guard, required);
             check_ir_expression_for_required_parens(&st.expr, required);

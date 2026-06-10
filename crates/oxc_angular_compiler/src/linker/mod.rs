@@ -13,6 +13,7 @@
 //! |--------------------|-|
 //! | `ɵɵngDeclareFactory` | Factory function |
 //! | `ɵɵngDeclareInjectable` | `ɵɵdefineInjectable(...)` |
+//! | `ɵɵngDeclareService` | `ɵɵdefineService(...)` |
 //! | `ɵɵngDeclareInjector` | `ɵɵdefineInjector(...)` |
 //! | `ɵɵngDeclareNgModule` | `ɵɵdefineNgModule(...)` |
 //! | `ɵɵngDeclarePipe` | `ɵɵdefinePipe(...)` |
@@ -58,6 +59,7 @@ fn quote_key(key: &str) -> String {
 /// Partial declaration function names to link.
 const DECLARE_FACTORY: &str = "\u{0275}\u{0275}ngDeclareFactory";
 const DECLARE_INJECTABLE: &str = "\u{0275}\u{0275}ngDeclareInjectable";
+const DECLARE_SERVICE: &str = "\u{0275}\u{0275}ngDeclareService";
 const DECLARE_INJECTOR: &str = "\u{0275}\u{0275}ngDeclareInjector";
 const DECLARE_NG_MODULE: &str = "\u{0275}\u{0275}ngDeclareNgModule";
 const DECLARE_PIPE: &str = "\u{0275}\u{0275}ngDeclarePipe";
@@ -350,6 +352,7 @@ fn get_declare_name<'a>(call: &'a CallExpression<'a>) -> Option<&'a str> {
     match name {
         DECLARE_FACTORY
         | DECLARE_INJECTABLE
+        | DECLARE_SERVICE
         | DECLARE_INJECTOR
         | DECLARE_NG_MODULE
         | DECLARE_PIPE
@@ -361,8 +364,24 @@ fn get_declare_name<'a>(call: &'a CallExpression<'a>) -> Option<&'a str> {
     }
 }
 
-/// Get the Angular import namespace (e.g., "i0") from the callee.
+/// Get the Angular import namespace (e.g., "i0") used to reference core symbols
+/// in the linked output.
+///
+/// Prefers the declaration's own `ngImport` property, which is what the upstream
+/// TS linker uses (it emits `importExpr(R3.core)`, resolved via the file's import
+/// manager). This is important for bundles where a tool (e.g. esbuild's dep
+/// optimizer) has rewritten the `i0.ɵɵngDeclare*(...)` member call into a bare
+/// `ɵɵngDeclare*(...)` call while renaming the namespace import (e.g. to
+/// `core_exports`): the callee no longer carries the namespace, but `ngImport`
+/// still points at the correct alias. Falls back to the callee's object, then
+/// `i0`.
 fn get_ng_import_namespace<'a>(call: &'a CallExpression<'a>) -> &'a str {
+    if let Some(meta) = get_metadata_object(call)
+        && let Some(ns) = get_identifier_property(meta, "ngImport")
+    {
+        return ns;
+    }
+
     match &call.callee {
         Expression::StaticMemberExpression(member) => {
             if let Expression::Identifier(ident) = &member.object {
@@ -372,6 +391,21 @@ fn get_ng_import_namespace<'a>(call: &'a CallExpression<'a>) -> &'a str {
         }
         _ => "i0",
     }
+}
+
+/// Read an identifier-valued property (e.g. `ngImport: i0`) from an object.
+fn get_identifier_property<'a>(obj: &'a ObjectExpression<'a>, name: &str) -> Option<&'a str> {
+    obj.properties.iter().find_map(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(p)
+            if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name) =>
+        {
+            match &p.value {
+                Expression::Identifier(ident) => Some(ident.name.as_str()),
+                _ => None,
+            }
+        }
+        _ => None,
+    })
 }
 
 /// Get the metadata object from a ɵɵngDeclare* call's first argument.
@@ -573,6 +607,17 @@ fn is_property_null(obj: &ObjectExpression<'_>, name: &str) -> bool {
             ObjectPropertyKind::ObjectProperty(p)
             if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
                 && matches!(&p.value, Expression::NullLiteral(_))
+        )
+    })
+}
+
+/// Check if a property exists and its value is the boolean literal `false`.
+fn is_property_false(obj: &ObjectExpression<'_>, name: &str) -> bool {
+    obj.properties.iter().any(|prop| {
+        matches!(prop,
+            ObjectPropertyKind::ObjectProperty(p)
+            if matches!(&p.key, PropertyKey::StaticIdentifier(ident) if ident.name == name)
+                && matches!(&p.value, Expression::BooleanLiteral(b) if !b.value)
         )
     })
 }
@@ -852,6 +897,7 @@ fn link_declaration(
     let replacement = match name {
         DECLARE_FACTORY => link_factory(meta, source, ns, type_name),
         DECLARE_INJECTABLE => link_injectable(meta, source, ns, type_name),
+        DECLARE_SERVICE => link_service(meta, source, ns, type_name),
         DECLARE_INJECTOR => link_injector(meta, source, ns, type_name),
         DECLARE_NG_MODULE => link_ng_module(meta, source, ns, type_name),
         DECLARE_PIPE => link_pipe(meta, source, ns, type_name),
@@ -1015,6 +1061,38 @@ fn link_injectable(
     // Default: use the class factory
     Some(format!(
         "{ns}.\u{0275}\u{0275}defineInjectable({{ token: {type_name}, factory: {type_name}.\u{0275}fac{provided_in_suffix} }})"
+    ))
+}
+
+/// Link ɵɵngDeclareService → ɵɵdefineService.
+///
+/// `@Service` (Angular v22+) ships partial `ɵɵngDeclareService` declarations in
+/// precompiled libraries (e.g. `@angular/common`'s `NgLocalization`). Mirrors the
+/// TS linker's `PartialServiceLinkerVersion1` + `compileService`:
+///
+/// - No `factory` field → delegate to the class factory: `{Type}.ɵfac`.
+/// - `factory` field → wrap in an arrow that calls it: `() => (factory)()`.
+/// - `autoProvided: false` is the only `autoProvided` value ever emitted (the
+///   partial compiler omits it otherwise).
+fn link_service(
+    meta: &ObjectExpression<'_>,
+    source: &str,
+    ns: &str,
+    type_name: &str,
+) -> Option<String> {
+    let factory = match get_property_source(meta, "factory", source) {
+        // `factory: () => (userFactory)()` — wrap the supplied factory.
+        Some(user_factory) => format!("() => ({user_factory})()"),
+        // No factory supplied — delegate to the class's own ɵfac.
+        None => format!("{type_name}.\u{0275}fac"),
+    };
+
+    // Only `autoProvided: false` is ever present in the declaration.
+    let auto_provided_suffix =
+        if is_property_false(meta, "autoProvided") { ", autoProvided: false" } else { "" };
+
+    Some(format!(
+        "{ns}.\u{0275}\u{0275}defineService({{ token: {type_name}, factory: {factory}{auto_provided_suffix} }})"
     ))
 }
 
@@ -2264,6 +2342,47 @@ MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "
         assert!(result.code.contains("defineInjectable"));
         assert!(result.code.contains("providedIn: 'root'"));
         assert!(!result.code.contains("ɵɵngDeclareInjectable"));
+    }
+
+    #[test]
+    fn test_link_service_delegates_to_fac() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {
+}
+MyService.ɵprov = i0.ɵɵngDeclareService({ minVersion: "22.0.0", version: "22.0.0", ngImport: i0, type: MyService });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result
+                .code
+                .contains("i0.ɵɵdefineService({ token: MyService, factory: MyService.ɵfac })")
+        );
+        assert!(!result.code.contains("ɵɵngDeclareService"));
+    }
+
+    #[test]
+    fn test_link_service_custom_factory_and_auto_provided() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class NgLocalization {
+}
+NgLocalization.ɵprov = i0.ɵɵngDeclareService({ minVersion: "22.0.0", version: "22.0.0", ngImport: i0, type: NgLocalization, autoProvided: false, factory: () => new NgLocaleLocalization(inject(LOCALE_ID)) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        // Custom factory is wrapped in an arrow that invokes it.
+        assert!(
+            result
+                .code
+                .contains("factory: () => (() => new NgLocaleLocalization(inject(LOCALE_ID)))()")
+        );
+        // autoProvided: false is preserved.
+        assert!(result.code.contains("autoProvided: false"));
+        assert!(!result.code.contains("ɵɵngDeclareService"));
     }
 
     #[test]

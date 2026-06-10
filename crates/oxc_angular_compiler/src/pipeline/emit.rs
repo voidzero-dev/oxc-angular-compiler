@@ -1331,6 +1331,11 @@ fn convert_pure_function_body<'a>(
                 allocator,
             ))
         }
+        // The `$safeNavigationMigration` wrapper is removed by expandSafeReads long
+        // before emit; treat it as transparent and convert the wrapped expression.
+        IrExpression::SafeNavigationMigration(m) => {
+            convert_pure_function_body(allocator, &m.expr, params)
+        }
     }
 }
 

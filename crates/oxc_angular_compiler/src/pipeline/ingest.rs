@@ -122,6 +122,13 @@ pub struct IngestOptions<'a> {
     /// `ɵɵconditionalCreate`/`ɵɵconditionalBranchCreate` for `@if`/`@switch` blocks.
     /// When `None`, assumes latest Angular version (v20+ behavior).
     pub angular_version: Option<crate::AngularVersion>,
+
+    /// Explicit override for the `legacyOptionalChaining` compiler option.
+    ///
+    /// When `None`, the safe-navigation default is derived from `angular_version`
+    /// (legacy `null` for < v22, native optional chaining for >= v22, legacy when
+    /// the version is unknown).
+    pub legacy_optional_chaining: Option<bool>,
 }
 
 impl Default for IngestOptions<'_> {
@@ -137,6 +144,7 @@ impl Default for IngestOptions<'_> {
             all_deferrable_deps_fn: None,
             pool_starting_index: 0,
             angular_version: None,
+            legacy_optional_chaining: None,
         }
     }
 }
@@ -432,6 +440,7 @@ fn convert_ast_to_ir<'a>(
                                 allocator,
                             ),
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -447,6 +456,7 @@ fn convert_ast_to_ir<'a>(
                         ResolvedPropertyReadExpr {
                             receiver,
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -467,6 +477,7 @@ fn convert_ast_to_ir<'a>(
                     ResolvedKeyedReadExpr {
                         receiver,
                         key,
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
                     allocator,
@@ -490,6 +501,7 @@ fn convert_ast_to_ir<'a>(
                     ResolvedCallExpr {
                         receiver,
                         args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
                     allocator,
@@ -793,6 +805,7 @@ pub fn ingest_component_with_options<'a>(
 
     // Set Angular version for feature-gated instruction selection
     job.angular_version = options.angular_version;
+    job.legacy_optional_chaining = options.legacy_optional_chaining;
 
     let root_xref = job.root.xref;
 
@@ -1093,19 +1106,46 @@ fn ingest_element<'a>(
     // Process local references
     let local_refs = ingest_references_owned(allocator, element.references);
 
-    // Check for formField property binding to create ControlCreateOp.
-    // This matches TypeScript's ingest.ts which checks:
-    // const fieldInput = element.inputs.find(
-    //   (input) => input.name === 'formField' && input.type === e.BindingType.Property
-    // );
+    // Check for a control property binding to create a ControlCreateOp, matching
+    // Angular v22's `specializeControlProperties`. The eligible properties and the
+    // binding kinds they accept are:
+    //   - formField / formControl: `[..]` property binding
+    //   - formControlName:          property binding or static attribute
+    //   - ngModel:                  property, two-way `[(ngModel)]`, or static attribute
+    // (v21 only emitted this for `formField`; v22 broadened it, notably to
+    // two-way `[(ngModel)]`, which now also emits `ɵɵcontrolCreate()`.)
     use crate::ast::expression::BindingType;
-    let field_input_span = element.inputs.iter().find_map(|input| {
-        if input.name.as_str() == "formField" && input.binding_type == BindingType::Property {
-            Some(input.source_span)
-        } else {
-            None
-        }
-    });
+    // `formField` is the v21 baseline; the extended set (formControl/
+    // formControlName/ngModel) was added in v22. Default to latest when unknown.
+    let extended_controls =
+        job.angular_version.map_or(true, |v| v.supports_extended_control_properties());
+    let field_input_span = element
+        .inputs
+        .iter()
+        .find_map(|input| {
+            let eligible = match input.name.as_str() {
+                "formField" => input.binding_type == BindingType::Property,
+                "formControl" if extended_controls => input.binding_type == BindingType::Property,
+                "formControlName" if extended_controls => {
+                    input.binding_type == BindingType::Property
+                }
+                "ngModel" if extended_controls => {
+                    matches!(input.binding_type, BindingType::Property | BindingType::TwoWay)
+                }
+                _ => false,
+            };
+            eligible.then_some(input.source_span)
+        })
+        .or_else(|| {
+            // Static attributes (`formControlName="name"`, `ngModel`) -> Attribute op (v22+).
+            if !extended_controls {
+                return None;
+            }
+            element.attributes.iter().find_map(|attr| {
+                matches!(attr.name.as_str(), "formControlName" | "ngModel")
+                    .then_some(attr.source_span)
+            })
+        });
 
     // Always create ElementStart/ElementEnd pairs, even for void/self-closing elements.
     // The empty_elements phase will collapse them to Element when appropriate.
@@ -3819,6 +3859,7 @@ fn host_convert_ast_to_ir<'a>(
                         ResolvedPropertyReadExpr {
                             receiver,
                             name: prop.name,
+                            optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
                         allocator,
@@ -3838,6 +3879,7 @@ fn host_convert_ast_to_ir<'a>(
                     ResolvedKeyedReadExpr {
                         receiver,
                         key,
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
                     allocator,
@@ -3860,6 +3902,7 @@ fn host_convert_ast_to_ir<'a>(
                     ResolvedCallExpr {
                         receiver,
                         args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
                     allocator,
@@ -3994,7 +4037,7 @@ pub fn ingest_host_binding<'a>(
     input: HostBindingInput<'a>,
     pool_starting_index: u32,
 ) -> HostBindingCompilationJob<'a> {
-    ingest_host_binding_with_version(allocator, input, pool_starting_index, None)
+    ingest_host_binding_with_version(allocator, input, pool_starting_index, None, None)
 }
 
 /// Ingest host bindings into a `HostBindingCompilationJob` with a specific Angular version.
@@ -4003,6 +4046,7 @@ pub fn ingest_host_binding_with_version<'a>(
     input: HostBindingInput<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
+    legacy_optional_chaining: Option<bool>,
 ) -> HostBindingCompilationJob<'a> {
     let mut job = HostBindingCompilationJob::with_pool_starting_index(
         allocator,
@@ -4011,6 +4055,7 @@ pub fn ingest_host_binding_with_version<'a>(
         pool_starting_index,
     );
     job.angular_version = angular_version;
+    job.legacy_optional_chaining = legacy_optional_chaining;
 
     // Ingest host properties
     for property in input.properties {
@@ -4085,6 +4130,60 @@ fn ingest_host_dom_property<'a>(
     job.root.update.push(op);
 }
 
+/// Computes the security context for an attribute binding.
+///
+/// This is a simplified implementation of Angular's `calcPossibleSecurityContexts`
+/// that handles the most common cases based on element and property names.
+///
+/// Ported from Angular's `binding_parser.ts` and `dom_security_schema.ts`.
+fn compute_security_context(selector: &str, attr_name: &str) -> SecurityContext {
+    use crate::schema::{calc_security_context_for_unknown_element, get_security_context};
+
+    // Extract element name from selector if present (e.g., "a[myDirective]" → "a")
+    let element = extract_element_from_selector(selector);
+
+    match element {
+        Some(element_name) => {
+            // Element is known - use the specific lookup
+            get_security_context(&element_name, attr_name)
+        }
+        None => {
+            // Element is unknown (e.g., attribute-only directive like [myDirective])
+            // Use the ambiguous lookup that checks all possible elements
+            calc_security_context_for_unknown_element(attr_name)
+        }
+    }
+}
+
+/// Extracts the element name from a CSS selector.
+///
+/// Examples:
+/// - "a[myDirective]" → Some("a")
+/// - "div.my-class" → Some("div")
+/// - "[myDirective]" → None
+/// - ".my-class" → None
+fn extract_element_from_selector(selector: &str) -> Option<String> {
+    // Skip leading whitespace
+    let s = selector.trim();
+
+    // If starts with [, ., or :, there's no element
+    if s.starts_with('[') || s.starts_with('.') || s.starts_with(':') || s.starts_with('#') {
+        return None;
+    }
+
+    // Find the element name (alphanumeric and hyphens until a special char)
+    let mut element_end = 0;
+    for (i, c) in s.char_indices() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            element_end = i + c.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    if element_end > 0 { Some(s[..element_end].to_lowercase()) } else { None }
+}
+
 /// Ingests a static host attribute.
 ///
 /// Host attributes are static attributes that should be extracted to `hostAttrs`
@@ -4099,7 +4198,6 @@ fn ingest_host_attribute<'a>(
 ) {
     use crate::ir::expression::IrExpression;
     use crate::ir::ops::{BindingOp, UpdateOp, UpdateOpBase};
-    use crate::schema::compute_security_context;
 
     let allocator = job.allocator;
 

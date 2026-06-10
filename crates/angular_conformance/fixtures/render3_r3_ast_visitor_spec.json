@@ -1,6 +1,6 @@
 {
   "name": "r3_ast_visitor_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_visitor_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/r3_ast_visitor_spec.ts",
   "test_groups": [
     {
       "name": "RecursiveVisitor",

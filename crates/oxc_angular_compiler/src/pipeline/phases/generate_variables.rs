@@ -717,6 +717,7 @@ fn create_context_read_variable<'a>(
             ResolvedPropertyReadExpr {
                 receiver: Box::new_in(context_expr, allocator),
                 name: context_value,
+                optional: false,
                 source_span: None,
             },
             allocator,

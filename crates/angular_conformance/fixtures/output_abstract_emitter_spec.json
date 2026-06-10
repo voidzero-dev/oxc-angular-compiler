@@ -1,6 +1,6 @@
 {
   "name": "abstract_emitter_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/output/abstract_emitter_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/output/abstract_emitter_spec.ts",
   "test_groups": [
     {
       "name": "AbstractEmitter",
@@ -27,16 +27,6 @@
             {
               "name": "should escape carriage returns",
               "path": "AbstractEmitter/escapeIdentifier/should escape carriage returns",
-              "assertions": []
-            },
-            {
-              "name": "should escape $",
-              "path": "AbstractEmitter/escapeIdentifier/should escape $",
-              "assertions": []
-            },
-            {
-              "name": "should not escape $",
-              "path": "AbstractEmitter/escapeIdentifier/should not escape $",
               "assertions": []
             },
             {

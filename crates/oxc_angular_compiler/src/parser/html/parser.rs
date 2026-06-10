@@ -21,9 +21,7 @@ use crate::util::{ParseError, ParseLocation, ParseSourceFile, ParseSourceSpan};
 
 use super::entities::decode_entities_in_string;
 use super::lexer::{HtmlLexer, HtmlToken, HtmlTokenType};
-use super::tags::{
-    get_html_tag_definition, get_ns_prefix, is_void_element, merge_ns_and_name, split_ns_name,
-};
+use super::tags::{get_html_tag_definition, is_void_element};
 
 /// Result of parsing an HTML template.
 pub struct HtmlParseResult<'a> {
@@ -180,17 +178,6 @@ impl<'a> HtmlParser<'a> {
         ParseError::new(span, msg)
     }
 
-    /// Build a parse error whose span covers `[start, end)`. Used for diagnostics that
-    /// upstream attaches to the full source span of a token (e.g. the unexpected
-    /// closing-tag errors, which use `endToken.sourceSpan`), rather than a zero-length
-    /// caret at the token start. Uses `from_offsets` so the start/end `ParseLocation`s
-    /// carry correct line/column (computed via `location_at`), matching Angular's
-    /// `endToken.sourceSpan` on multiline templates — not fabricated `(0, 0)` line/col.
-    fn make_error_span(&self, start: u32, end: u32, msg: impl Into<String>) -> ParseError {
-        let span = ParseSourceSpan::from_offsets(&self.source_file, start, end, None, None);
-        ParseError::new(span, msg)
-    }
-
     /// Parses the template.
     pub fn parse(mut self) -> HtmlParseResult<'a> {
         // Parse all nodes using container stack
@@ -248,7 +235,6 @@ impl<'a> HtmlParser<'a> {
                             end_span: None,
                             is_self_closing: false,
                             is_void: false,
-                            is_component: false,
                         },
                     );
                     let node = HtmlNode::Element(Box::new_in(element, self.allocator));
@@ -302,131 +288,6 @@ impl<'a> HtmlParser<'a> {
         idx
     }
 
-    /// Returns the namespace-relevant *name* of the closest element-like parent on
-    /// the container stack, skipping non-element containers (e.g. blocks).
-    ///
-    /// Mirrors upstream `Parser._getClosestElementLikeParent` (ml_parser/parser.ts:903-912)
-    /// combined with the per-node-kind name selection in `_getPrefix`
-    /// (ml_parser/parser.ts:991):
-    ///   `const parentName = parent instanceof html.Element ? parent.name : parent.tagName;`
-    /// i.e. for an `html.Element` parent it is `parent.name`, but for an
-    /// `html.Component` parent it is the RESOLVED component `tagName` (e.g.
-    /// `:svg:button`), NOT the component class name (`MyComp`). `getNsPrefix` is then
-    /// applied to this string, so children of a namespaced selectorless component
-    /// inherit `:svg:`/`:math:` just like children of a real namespaced element.
-    /// Block containers do not affect namespace inheritance, so SVG children inside
-    /// `@if {...}` still inherit `:svg:`.
-    ///
-    /// In OXC a selectorless component is stored as an `HtmlElement` whose `name` is
-    /// the component class name (always starting uppercase or `_`, since only such
-    /// tags produce a `ComponentOpenStart` token) and whose `component_prefix` /
-    /// `component_tag_name` hold the resolved prefix and raw tag-name part. For those
-    /// we compose the resolved `tagName` exactly as `_getComponentTagName`
-    /// (ml_parser/parser.ts:946-961) / the R3 transform (`html_to_r3.rs`) do.
-    fn closest_element_like_parent_name(&self) -> Option<String> {
-        for &container in self.container_stack.iter().rev() {
-            if let ContainerIndex::Element(idx) = container {
-                let element = &self.elements[idx];
-                return Some(Self::namespace_parent_name(element));
-            }
-        }
-        None
-    }
-
-    /// Computes the namespace-inheritance parent name for an element-like parent,
-    /// mirroring upstream `_getPrefix`'s `parent instanceof html.Element ? parent.name
-    /// : parent.tagName` (ml_parser/parser.ts:991).
-    ///
-    /// For a normal element this is just `element.name`. For a selectorless component
-    /// (detected by an uppercase/`_` leading char, matching the lexer's
-    /// `ComponentOpenStart` rule and the R3 transform's component check) it is the
-    /// RESOLVED component tag name composed from `component_prefix` /
-    /// `component_tag_name`, exactly as `_getComponentTagName`
-    /// (ml_parser/parser.ts:946-961):
-    ///   - prefix=Some, tag=Some -> `:{prefix}:{tag}`
-    ///   - prefix=Some, tag=None -> `:{prefix}:ng-component`
-    ///   - prefix=None, tag=Some -> `{tag}`
-    ///   - prefix=None, tag=None -> the bare component name (upstream returns `null`,
-    ///     i.e. no namespace; `getNsPrefix` on a plain name yields `None`, so children
-    ///     stay HTML — the bare component name has the same effect).
-    fn namespace_parent_name(element: &HtmlElement<'a>) -> String {
-        let name = element.name.as_str();
-        let is_component = name.chars().next().is_some_and(|c| c.is_ascii_uppercase() || c == '_');
-        if !is_component {
-            return name.to_string();
-        }
-        match (element.component_prefix.as_ref(), element.component_tag_name.as_ref()) {
-            (Some(prefix), Some(tag)) => format!(":{prefix}:{tag}"),
-            (Some(prefix), None) => format!(":{prefix}:ng-component"),
-            (None, Some(tag)) => tag.to_string(),
-            (None, None) => name.to_string(),
-        }
-    }
-
-    /// Returns the name used to MATCH a close tag against this open element on the
-    /// container stack, mirroring upstream `_popContainer`'s
-    /// `node instanceof html.Component ? node.fullName : node.name`
-    /// (ml_parser/parser.ts:600).
-    ///
-    /// For a normal element this is `element.name`. For a selectorless component the
-    /// stored `name` is only the class name, so we compose the RESOLVED full name
-    /// exactly as `_getComponentFullName` (ml_parser/parser.ts:932-944) /
-    /// the R3 transform do, from `component_prefix` / `component_tag_name`:
-    ///   - tagName null (no prefix, no tag part) -> the bare component name
-    ///   - tagName `:prefix:tag` (a prefix is present) -> `componentName:prefix:tag`
-    ///   - tagName `tag` (no prefix) -> `componentName:tag`
-    fn element_match_name(element: &HtmlElement<'a>) -> String {
-        let name = element.name.as_str();
-        let is_component = name.chars().next().is_some_and(|c| c.is_ascii_uppercase() || c == '_');
-        if !is_component {
-            return name.to_string();
-        }
-        match (element.component_prefix.as_ref(), element.component_tag_name.as_ref()) {
-            // Prefix present -> tagName is `:prefix:tag` (or `:prefix:ng-component`);
-            // full name is `componentName` + `:prefix:tag` (tagName already starts ':').
-            (Some(prefix), Some(tag)) => format!("{name}:{prefix}:{tag}"),
-            (Some(prefix), None) => format!("{name}:{prefix}:ng-component"),
-            // No prefix, a tag part -> full name is `componentName:tag`.
-            (None, Some(tag)) => format!("{name}:{tag}"),
-            // No prefix, no tag part -> tagName null -> full name is the bare class name.
-            (None, None) => name.to_string(),
-        }
-    }
-
-    /// Resolves the namespace prefix for an element, mirroring upstream
-    /// `Parser._getPrefix` (ml_parser/parser.ts ~973-1001).
-    ///
-    /// Order of precedence:
-    ///   1. An explicit prefix from the source (`<svg:rect>`).
-    ///   2. The tag's own `implicit_namespace_prefix` (e.g. `<svg>` -> `svg`).
-    ///   3. The parent element's namespace prefix, inherited unless the parent's
-    ///      tag definition sets `prevent_namespace_inheritance` (e.g. `foreignObject`).
-    ///
-    /// `explicit_prefix` is the prefix lexed from the source (empty when absent).
-    /// `local_name` is the prefix-stripped tag name.
-    fn resolve_element_prefix(&self, explicit_prefix: &str, local_name: &str) -> Option<String> {
-        // 1 & 2: explicit prefix, falling back to the tag's implicit namespace prefix.
-        let mut prefix: Option<String> = if explicit_prefix.is_empty() {
-            get_html_tag_definition(local_name).implicit_namespace_prefix.map(str::to_string)
-        } else {
-            Some(explicit_prefix.to_string())
-        };
-
-        // 3: inherit the parent element's prefix when the child has none and the
-        // parent does not prevent namespace inheritance.
-        if prefix.is_none()
-            && let Some(parent_name) = self.closest_element_like_parent_name()
-        {
-            let (_, parent_local) = split_ns_name(&parent_name);
-            let parent_def = get_html_tag_definition(parent_local);
-            if !parent_def.prevent_namespace_inheritance {
-                prefix = get_ns_prefix(&parent_name).map(str::to_string);
-            }
-        }
-
-        prefix
-    }
-
     /// Pops a block from the container stack and returns it as an HtmlNode.
     fn pop_block_container(&mut self, end_span: Option<Span>) -> Option<HtmlNode<'a>> {
         // Find the topmost block in the stack
@@ -476,10 +337,7 @@ impl<'a> HtmlParser<'a> {
         let mut match_elem_idx = None;
         for i in (0..self.container_stack.len()).rev() {
             if let ContainerIndex::Element(idx) = self.container_stack[i] {
-                // Match by the element's full name. For a selectorless component this
-                // is the composed `componentName(:prefix):tag` (upstream `_popContainer`
-                // compares `node.fullName` for components), NOT the bare class name.
-                if Self::element_match_name(&self.elements[idx]) == tag_name {
+                if self.elements[idx].name.as_str() == tag_name {
                     match_stack_idx = Some(i);
                     match_elem_idx = Some(idx);
                     break;
@@ -526,7 +384,6 @@ impl<'a> HtmlParser<'a> {
                             end_span: None,
                             is_self_closing: false,
                             is_void: false,
-                            is_component: false,
                         },
                     );
                     // Add to the next parent on the stack (which is now the matching element)
@@ -572,7 +429,6 @@ impl<'a> HtmlParser<'a> {
                 end_span: None,
                 is_self_closing: false,
                 is_void: false,
-                is_component: false,
             },
         );
         if let Some(es) = end_span {
@@ -683,12 +539,6 @@ impl<'a> HtmlParser<'a> {
             HtmlTokenType::BlockClose => {
                 self.consume_block_close();
             }
-            HtmlTokenType::IncompleteBlockOpen => {
-                // Upstream v21.2.7 routes INCOMPLETE_BLOCK_OPEN to `_consumeIncompleteBlock`
-                // (ml_parser/parser.ts:132-134); without this arm the token would hit the
-                // default `_ => advance()` below and be silently dropped.
-                self.consume_incomplete_block();
-            }
             HtmlTokenType::LetStart => {
                 if let Some(node) = self.parse_let_declaration() {
                     self.add_to_parent(node);
@@ -718,67 +568,31 @@ impl<'a> HtmlParser<'a> {
             return; // No token to consume
         };
         let start = start_token.start;
-        // A `ComponentOpenStart` is only ever emitted by the lexer when
-        // selectorless mode is enabled (`lexer.rs` gates `scan_component_open` on
-        // `self.selectorless_enabled`). This is the AUTHORITATIVE marker that the
-        // element is a selectorless component, carried on the AST so the R3
-        // transform never has to fall back to a leading-character casing heuristic
-        // (which wrongly classified uppercase normal elements like `<IFRAME>`).
-        let is_component = start_token.token_type == HtmlTokenType::ComponentOpenStart;
         // TagOpenStart has parts [prefix, name]
         // ComponentOpenStart has parts [component_name, prefix, tag_name]
-        let (tag_name, local_name, _has_ns_prefix, component_prefix, component_tag_name) =
+        let (tag_name, local_name, has_ns_prefix, component_prefix, component_tag_name) =
             if start_token.token_type == HtmlTokenType::ComponentOpenStart {
                 // For components, extract all three parts:
                 // parts[0] = component_name, parts[1] = prefix, parts[2] = tag_name
                 let component_name = start_token.parts.first().cloned().unwrap_or_default();
-                let explicit_prefix = start_token.parts.get(1).cloned().unwrap_or_default();
+                let prefix = start_token.parts.get(1).cloned().unwrap_or_default();
                 let raw_tag_name = start_token.parts.get(2).cloned().unwrap_or_default();
 
-                // Resolve the namespace prefix EXACTLY like upstream `_getPrefix`
-                // (ml_parser/parser.ts ~963-1002), which is shared between normal
-                // elements and components: an explicit prefix (`<MyComp:svg:title>`),
-                // else the tag's own `implicit_namespace_prefix`, else the closest
-                // element-like parent's prefix (so `<svg><MyComp:button>` resolves to
-                // prefix `svg`, yielding tagName `:svg:button` /
-                // fullName `MyComp:svg:button`), unless the parent prevents inheritance
-                // (e.g. `foreignObject`). This mirrors `_getComponentTagName` /
-                // `_getComponentFullName`, which route the component tag name through the
-                // same prefix/namespace logic as normal elements. We pass the component's
-                // *tag-name* part (`parts[2]`) as the local name so an empty tag name still
-                // inherits the parent namespace (upstream then falls back to `ng-component`,
-                // done in the R3 transform). Resolve BEFORE `auto_close_element_if_needed`
-                // pops the parent, matching upstream which computes the name from the
-                // closest element-like parent before `_pushContainer`. The local-name copy
-                // releases the `start_token` borrow (which aliases `&self`) before calling
-                // `resolve_element_prefix(&self, ..)`.
-                let resolved_prefix = self.resolve_element_prefix(&explicit_prefix, &raw_tag_name);
-
-                // Store the RESOLVED prefix and the raw tag_name for HtmlElement; the R3
-                // transform composes them into `:prefix:tag` and `ComponentName:prefix:tag`.
+                // Store prefix and tag_name for HtmlElement
+                let prefix_opt = if prefix.is_empty() { None } else { Some(prefix.clone()) };
                 let tag_opt =
                     if raw_tag_name.is_empty() { None } else { Some(raw_tag_name.clone()) };
 
-                (component_name.clone(), component_name, false, resolved_prefix, tag_opt)
+                (component_name.clone(), component_name, false, prefix_opt, tag_opt)
             } else {
-                // For regular tags, resolve the namespace prefix the way upstream
-                // `Parser._getElementFullName` / `_getPrefix` do: an explicit prefix
-                // (`<svg:rect>`), else the tag's own `implicit_namespace_prefix`
-                // (`<svg>` -> `svg`), else the closest element-like parent's prefix
-                // (so an implicit `<style>`/`<rect>` inside `<svg>` becomes
-                // `:svg:style` / `:svg:rect`), unless the parent prevents inheritance
-                // (e.g. `foreignObject`). This must run before `auto_close_element_if_needed`
-                // pops the parent, matching upstream which computes `fullName` from the
-                // closest element-like parent before `_pushContainer` performs auto-close.
-                // Copy the prefix/name to owned strings to release the borrow of
-                // `start_token` (which aliases `&self`) before calling
-                // `resolve_element_prefix(&self, ..)`.
-                let explicit_prefix = start_token.prefix().to_string();
-                let name = start_token.name().to_string();
-                let has_prefix = !explicit_prefix.is_empty();
-                let resolved_prefix = self.resolve_element_prefix(&explicit_prefix, &name);
-                let full_name = merge_ns_and_name(resolved_prefix.as_deref(), &name);
-                (full_name, name.clone(), has_prefix, None, None)
+                // For regular tags, include the namespace prefix if present
+                // Angular uses :prefix:name format for namespaced elements
+                let prefix = start_token.prefix();
+                let name = start_token.name();
+                let has_prefix = !prefix.is_empty();
+                let full_name =
+                    if has_prefix { format!(":{}:{}", prefix, name) } else { name.to_string() };
+                (full_name, name.to_string(), has_prefix, None, None)
             };
 
         // Check if we need to auto-close the current element (HTML5 optional end tags)
@@ -796,17 +610,11 @@ impl<'a> HtmlParser<'a> {
                 let end_pos = token.end;
                 self.advance();
 
-                // Validate self-closing: only void, custom, and foreign elements can be self-closed.
-                // Upstream `Parser._consumeElementStartTag` (ml_parser/parser.ts:405) uses
-                //   `!(tagDef?.canSelfClose || getNsPrefix(fullName) !== null || tagDef?.isVoid)`
-                // — the "foreign" test is `getNsPrefix(fullName) !== null` on the *resolved* full
-                // name, NOT on whether the SOURCE tag had an explicit prefix. This matters for
-                // namespace inheritance (F5): `<svg><p/></svg>` resolves the implicit child to
-                // `:svg:p`, whose `getNsPrefix` is `svg` (non-null), so it is foreign and may
-                // self-close even though `<p>` carried no explicit prefix (`_has_ns_prefix == false`).
-                // We therefore key the foreign decision off the resolved `tag_name`'s namespace.
+                // Validate self-closing: only void, custom, and foreign elements can be self-closed
+                // Foreign elements include those with explicit namespace prefix (e.g., svg:rect)
+                // or those with implicit namespace prefix (e.g., <svg> has implicitNamespacePrefix='svg')
                 let tag_def = get_html_tag_definition(&local_name);
-                let is_foreign = get_ns_prefix(&tag_name).is_some();
+                let is_foreign = has_ns_prefix || tag_def.implicit_namespace_prefix.is_some();
                 if !(tag_def.can_self_close || is_foreign || tag_def.is_void) {
                     let err = self.make_error(
                         start,
@@ -856,7 +664,6 @@ impl<'a> HtmlParser<'a> {
             end_span,
             is_self_closing,
             is_void,
-            is_component,
         };
 
         if is_self_closing || is_void {
@@ -877,156 +684,52 @@ impl<'a> HtmlParser<'a> {
         let end = token.end;
         // TagClose has parts [prefix, name]
         // ComponentClose has parts [component_name, prefix, tag_name]
-        let is_component_close = token.token_type == HtmlTokenType::ComponentClose;
-        // For a component close, the bare class name (parts[0]); used to decide the
-        // "did you mean" vs generic suffix, matching upstream
-        // `container.componentName === endToken.parts[0]` (ml_parser/parser.ts:537).
-        let close_component_name: String = if is_component_close {
-            token.parts.first().cloned().unwrap_or_default()
+        let (tag_name, local_name) = if token.token_type == HtmlTokenType::ComponentClose {
+            let name = token.value().to_string();
+            (name.clone(), name)
         } else {
-            String::new()
-        };
-        let (tag_name, local_name) = if is_component_close {
-            // Resolve the close's FULL name with the SAME logic as the open
-            // (`_getComponentFullName` -> `_getComponentTagName` -> `_getPrefix`):
-            // an explicit prefix (parts[1]), else the tag's implicit namespace, else
-            // inherited from the closest element-like parent — which at close time is
-            // the still-open component itself (carrying its resolved tagName, e.g.
-            // `:svg:button`), so `</MyComp:button>` under `<svg>` inherits `:svg:` and
-            // matches the open `MyComp:svg:button`. Copy parts to owned strings to
-            // release the `token` borrow (which aliases `&self`) before calling
-            // `resolve_element_prefix(&self, ..)`.
-            let component_name = close_component_name.clone();
-            let explicit_prefix = token.parts.get(1).cloned().unwrap_or_default();
-            let raw_tag_name = token.parts.get(2).cloned().unwrap_or_default();
-            let resolved_prefix = self.resolve_element_prefix(&explicit_prefix, &raw_tag_name);
-            // Compose tagName (None when no prefix and no tag part) then full name,
-            // mirroring `_getComponentTagName` / `_getComponentFullName`.
-            let tag_name_opt: Option<String> = match (&resolved_prefix, raw_tag_name.is_empty()) {
-                (Some(prefix), false) => Some(format!(":{prefix}:{raw_tag_name}")),
-                (Some(prefix), true) => Some(format!(":{prefix}:ng-component")),
-                (None, false) => Some(raw_tag_name.clone()),
-                (None, true) => None,
-            };
-            let full_name = match &tag_name_opt {
-                Some(tag) if tag.starts_with(':') => format!("{component_name}{tag}"),
-                Some(tag) => format!("{component_name}:{tag}"),
-                None => component_name.clone(),
-            };
-            // `local_name` (void-element/tag-definition lookups) uses the local tag
-            // part; for a bare component close there is none, so fall back to the
-            // component name (never a void element).
-            let local = if raw_tag_name.is_empty() { component_name } else { raw_tag_name };
-            (full_name, local)
-        } else {
-            // For regular tags, resolve the namespace prefix exactly like the start
-            // tag (upstream `_consumeEndTag` -> `_getElementFullName`). When closing a
-            // tag, the closest element-like parent is the matching open element itself
-            // (still on the container stack), so an implicit `</style>` inside `<svg>`
-            // inherits `:svg:` from its own `:svg:style` open tag and matches it.
-            // Copy the prefix/name to owned strings to release the borrow of `token`
-            // (which aliases `&self`) before calling `resolve_element_prefix(&self, ..)`.
-            let explicit_prefix = token.prefix().to_string();
-            let name = token.name().to_string();
-            let resolved_prefix = self.resolve_element_prefix(&explicit_prefix, &name);
-            let full_name = merge_ns_and_name(resolved_prefix.as_deref(), &name);
-            (full_name, name)
+            // For regular tags, include the namespace prefix if present
+            // Angular uses :prefix:name format for namespaced elements
+            let prefix = token.prefix();
+            let name = token.name();
+            let full_name =
+                if prefix.is_empty() { name.to_string() } else { format!(":{}:{}", prefix, name) };
+            (full_name, name.to_string())
         };
         let end_span = self.make_span(start, end);
 
-        // Void-element end tags are only diagnosed for NORMAL elements (upstream's
-        // void check lives in `_consumeElementEndTag`, ml_parser/parser.ts:572-579,
-        // NOT in `_consumeComponentEndTag`). A component close whose tag part happens
-        // to be a void HTML name (e.g. `</MyComp:input>`) must NOT trigger it.
-        if !is_component_close {
-            // Voidness is checked on the RESOLVED FULL name (`fullName`), exactly
-            // like upstream `_consumeElementEndTag` -> `_getTagDefinition(fullName)`
-            // (ml_parser/parser.ts:572). A namespaced close such as `</svg:input>`
-            // or an implicit-namespace `<svg><input></input></svg>` resolves to
-            // `:svg:input`, and `getHtmlTagDefinition(':svg:input')` falls back to
-            // the DEFAULT (non-void) definition (html_tags.ts:192 -> no lowercase
-            // match -> DEFAULT_TAG_DEFINITION), so upstream ACCEPTS the close and
-            // pops the element with NO error. Using the NS-stripped `local_name`
-            // here ("input") would wrongly diagnose the void error and bail before
-            // popping. Plain `<input></input>` (no namespace) has `tag_name ==
-            // local_name == "input"` -> void -> error retained, matching upstream.
-            let tag_def = get_html_tag_definition(&tag_name);
-            if tag_def.is_void {
-                // Span is the FULL close-token source span (`endTagToken.sourceSpan`,
-                // ml_parser/parser.ts:573-579), not a zero-length caret at the start.
-                // Matches the I17 unexpected-close path below. The error message
-                // quotes the LOCAL name (`endTagToken.parts[1]`, ml_parser/parser.ts:
-                // 577), not the full name — for void elements `tag_name` is never
-                // namespaced anyway, so `local_name == tag_name` in this branch.
-                let err = self.make_error_span(
-                    start,
-                    end,
-                    format!("Void elements do not have end tags \"{}\"", local_name),
-                );
-                self.errors.push(err);
-                return;
-            }
+        // Check if this is a void element - void elements don't have end tags
+        let tag_def = get_html_tag_definition(&local_name);
+        if tag_def.is_void {
+            let err = self.make_error(
+                start,
+                format!("Void elements do not have end tags \"{}\"", local_name),
+            );
+            self.errors.push(err);
+            return;
         }
 
         // Pop the matching element from the stack
         let (node, unexpected_close) = self.pop_element_container(&tag_name, Some(end_span));
-
-        if is_component_close {
-            // Component close: upstream `_consumeComponentEndTag` (ml_parser/parser.ts:
-            // 530-545) reports an error whenever `_popContainer` returns false, i.e. on
-            // NO match OR a match that required implicitly closing a still-open container
-            // above it. The suffix is `, did you mean "<fullName>"?` when the CURRENT
-            // topmost container is a component with the same `componentName` as the close
-            // (parts[0]), else the generic ". It may happen ..." (NO trailing URL).
-            if node.is_none() || unexpected_close {
-                let suffix = match self.container_stack.last() {
-                    Some(&ContainerIndex::Element(idx))
-                        if self.elements[idx].name.as_str() == close_component_name
-                            && self.elements[idx]
-                                .name
-                                .as_str()
-                                .chars()
-                                .next()
-                                .is_some_and(|c| c.is_ascii_uppercase() || c == '_') =>
-                    {
-                        let open_full = Self::element_match_name(&self.elements[idx]);
-                        format!(", did you mean \"{open_full}\"?")
-                    }
-                    _ => ". It may happen when the tag has already been closed by another tag."
-                        .to_string(),
-                };
-                // Span is the FULL close-token source span (`endToken.sourceSpan`,
-                // ml_parser/parser.ts:544), not a zero-length caret at the start.
-                let err = self.make_error_span(
+        if let Some(node) = node {
+            if unexpected_close {
+                // Matching open tag exists, but at least one still-open container above it
+                // had to be implicitly closed. Mirrors Angular's reference parser, which
+                // attaches the diagnostic to the closing tag itself.
+                let err = self.make_error(
                     start,
-                    end,
-                    format!("Unexpected closing tag \"{tag_name}\"{suffix}"),
+                    format!("Unexpected closing tag \"{}\". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags", tag_name),
                 );
                 self.errors.push(err);
             }
-            if let Some(node) = node {
-                self.add_to_parent(node);
-            }
-            return;
-        }
-
-        // Element close: upstream `_consumeElementEndTag` (ml_parser/parser.ts:580-583)
-        // reports a SINGLE error message whenever `_popContainer` returns false — i.e. on
-        // NO match (stray close) OR a match that required implicitly closing a still-open
-        // container above it (`unexpected_close`). Both use the IDENTICAL message INCLUDING
-        // the trailing W3C help URL, and the span is the FULL close-token source span
-        // (`endTagToken.sourceSpan`), not a zero-length caret at the start. (The component
-        // close path above intentionally omits the URL, mirroring `_consumeComponentEndTag`.)
-        if node.is_none() || unexpected_close {
-            let err = self.make_error_span(
+            self.add_to_parent(node);
+        } else {
+            // No matching element - report error for stray closing tag
+            let err = self.make_error(
                 start,
-                end,
-                format!("Unexpected closing tag \"{}\". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags", tag_name),
+                format!("Unexpected closing tag \"{}\". It may happen when the tag has already been closed by another tag.", tag_name),
             );
             self.errors.push(err);
-        }
-        if let Some(node) = node {
-            self.add_to_parent(node);
         }
     }
 
@@ -1453,9 +1156,6 @@ impl<'a> HtmlParser<'a> {
             end_span: None,
             is_self_closing: false,
             is_void: is_void_element(&tag_name),
-            // An incomplete tag (`IncompleteTagOpen`) is never a selectorless
-            // component: the lexer only emits `ComponentOpenStart` for components.
-            is_component: false,
         };
         Some(HtmlNode::Element(Box::new_in(element, self.allocator)))
     }
@@ -1573,12 +1273,13 @@ impl<'a> HtmlParser<'a> {
             (String::new(), self.make_span(start_end, start_end))
         };
 
-        // Skip LetEnd or IncompleteLet token
-        // For sourceSpan, we want to end BEFORE the semicolon (at tok.start), not after it
+        // Skip LetEnd or IncompleteLet token.
+        // The sourceSpan ends at the end of the LetEnd token, i.e. *after* the
+        // terminating semicolon (Angular v22: `end = endToken.sourceSpan.end`).
         let end = if let Some(tok) = self.peek() {
             if tok.token_type == HtmlTokenType::LetEnd {
-                // LetEnd is the semicolon - span should end before it
-                let e = tok.start;
+                // LetEnd is the semicolon - span should include it
+                let e = tok.end;
                 self.advance();
                 e
             } else if tok.token_type == HtmlTokenType::IncompleteLet {
@@ -1768,7 +1469,6 @@ impl<'a> HtmlParser<'a> {
                             end_span: None,
                             is_self_closing: false,
                             is_void: false,
-                            is_component: false,
                         },
                     );
                     self.add_to_parent(HtmlNode::Element(Box::new_in(element, self.allocator)));
@@ -1838,7 +1538,25 @@ impl<'a> HtmlParser<'a> {
         let start = token.start;
         let name_end = token.end;
 
-        let block_type = classify_block_type(&name);
+        let block_type = match name.as_str() {
+            "if" => BlockType::If,
+            "else" => BlockType::Else,
+            // Match Angular's ELSE_IF_PATTERN: /^else[^\S\r\n]+if/
+            // Any block name starting with "else " followed by "if" (e.g. "else if",
+            // "else ifx") is classified as ElseIf, matching Angular's regex-based
+            // connected-block detection.
+            _ if is_else_if_pattern(&name) => BlockType::ElseIf,
+            "for" => BlockType::For,
+            "empty" => BlockType::Empty,
+            "switch" => BlockType::Switch,
+            "case" => BlockType::Case,
+            "default" => BlockType::Default,
+            "defer" => BlockType::Defer,
+            "placeholder" => BlockType::Placeholder,
+            "loading" => BlockType::Loading,
+            "error" => BlockType::Error,
+            _ => BlockType::If, // Default
+        };
 
         // Collect block parameters
         let mut parameters = Vec::new_in(self.allocator);
@@ -1886,78 +1604,6 @@ impl<'a> HtmlParser<'a> {
 
         // Push block onto container stack - children will be added as we parse
         self.push_block_container(block);
-    }
-
-    /// Consumes an `IncompleteBlockOpen` token (e.g. `@default never` WITHOUT a trailing
-    /// `;`, or any `@name` that never opened a `{ }` body). Mirrors upstream v21.2.7
-    /// `Parser._consumeIncompleteBlock` (ml_parser/parser.ts:786-812): it collects any
-    /// trailing `BlockParameter` tokens, builds the Block node (using the token's part as
-    /// the name, so the block is NOT silently dropped), pushes it and immediately closes it
-    /// (incomplete blocks have no children), then reports the exact "Incomplete block ..."
-    /// diagnostic. Without this, `parse_and_add_node`'s default arm would just `advance()`
-    /// past the token and the `@default never` would vanish with zero errors.
-    fn consume_incomplete_block(&mut self) {
-        let Some(token) = self.advance() else {
-            return; // No token to consume
-        };
-        // `token.parts[0]` is the block name, e.g. `default never` (upstream `token.parts[0]`).
-        let name = token.value().to_string();
-        let start = token.start;
-        let name_end = token.end;
-        let block_type = classify_block_type(&name);
-
-        // Collect any trailing block parameters (matches upstream's `while BLOCK_PARAMETER`).
-        let mut parameters = Vec::new_in(self.allocator);
-        while let Some(tok) = self.peek() {
-            if tok.token_type == HtmlTokenType::BlockParameter {
-                let Some(param_token) = self.advance() else {
-                    break; // Should not happen after peek, but handle gracefully
-                };
-                let param_text = param_token.value().to_string();
-                let param_start = param_token.start;
-                let param_end = param_token.end;
-                let param_span = self.make_span(param_start, param_end);
-                parameters.push(HtmlBlockParameter {
-                    expression: Ident::from_in(&param_text, self.allocator),
-                    span: param_span,
-                });
-            } else {
-                break;
-            }
-        }
-
-        let end = self.peek().map(|t| t.start).unwrap_or(start);
-        let span = self.make_span(start, end);
-        let name_span = self.make_span(start, name_end);
-        let start_span = self.make_span(start, end);
-
-        let block = HtmlBlock {
-            block_type,
-            name: Ident::from_in(name.clone(), self.allocator),
-            parameters,
-            children: Vec::new_in(self.allocator),
-            span,
-            name_span,
-            start_span,
-            end_span: None,
-        };
-
-        // Incomplete blocks have no children: push then immediately close (pop) so the node
-        // is preserved in the tree, mirroring upstream `_pushContainer` + `_popContainer`.
-        self.push_block_container(block);
-        if let Some(node) = self.pop_block_container(None) {
-            self.add_to_parent(node);
-        }
-
-        // Report the upstream-exact diagnostic (ml_parser/parser.ts:804-811).
-        let err = self.make_error(
-            start,
-            format!(
-                "Incomplete block \"{name}\". If you meant to write the @ character, \
-                 you should use the \"&#64;\" HTML entity instead."
-            ),
-        );
-        self.errors.push(err);
     }
 
     /// Parses a directive token sequence: DirectiveName → DirectiveOpen? → attrs → DirectiveClose?
@@ -2114,33 +1760,6 @@ impl<'a> HtmlParser<'a> {
     }
 }
 
-/// Classifies a block name (the lexer's `BlockOpenStart`/`IncompleteBlockOpen` part) into
-/// a `BlockType`. Used by both `consume_block_open` and `consume_incomplete_block` so an
-/// incomplete `@default never` carries the same `BlockType::DefaultNever` it would when valid.
-fn classify_block_type(name: &str) -> BlockType {
-    match name {
-        "if" => BlockType::If,
-        "else" => BlockType::Else,
-        // Match Angular's ELSE_IF_PATTERN: /^else[^\S\r\n]+if/
-        // Any block name starting with "else " followed by "if" (e.g. "else if",
-        // "else ifx") is classified as ElseIf, matching Angular's regex-based
-        // connected-block detection.
-        _ if is_else_if_pattern(name) => BlockType::ElseIf,
-        "for" => BlockType::For,
-        "empty" => BlockType::Empty,
-        "switch" => BlockType::Switch,
-        "case" => BlockType::Case,
-        "default" => BlockType::Default,
-        // Angular v21.2.7 exhaustive-switch feature: `@default never;`.
-        "default never" => BlockType::DefaultNever,
-        "defer" => BlockType::Defer,
-        "placeholder" => BlockType::Placeholder,
-        "loading" => BlockType::Loading,
-        "error" => BlockType::Error,
-        _ => BlockType::If, // Default
-    }
-}
-
 /// Checks if the current element should be auto-closed when a new element is opened.
 /// Uses the tag definitions from tags.rs to match Angular's behavior exactly.
 fn should_auto_close(current_tag: &str, new_tag: &str) -> bool {
@@ -2176,169 +1795,6 @@ mod tests {
         let result = parser.parse();
         assert_eq!(result.nodes.len(), 1);
         assert!(matches!(&result.nodes[0], HtmlNode::Text(_)));
-    }
-
-    // ---- Finding 2: default-mode `<_foo>` is text, not an element ----
-    //
-    // Oracle (`@angular/compiler@21.2.7` `HtmlParser.parse(..)`):
-    //   default `<_foo></_foo>`      -> ONE root Text node "<_foo>" + a single
-    //                                   "Unexpected closing tag \"_foo\"" parse error.
-    //   selectorless `<_foo></_foo>` -> a Component node (`is_component == true`).
-    //   default `<MyCmp></MyCmp>`    -> a normal Element named "MyCmp" (control).
-    #[test]
-    fn test_unexpected_close_error_span_has_correct_line_col_multiline() {
-        // FINDING 3 (span fidelity): the unexpected-closing-tag error span must carry the
-        // correct LINE/COLUMN (not fabricated 0/0) on multiline templates, matching
-        // Angular's `endToken.sourceSpan`. For "<div>\n  text\n</span>" the stray
-        // `</span>` close spans offset 13..20, line 2 col 0..7 (0-based line/col).
-        // Verified vs @angular/compiler@21.2.7.
-        let allocator = Allocator::default();
-        let result = HtmlParser::new(&allocator, "<div>\n  text\n</span>", "test.html").parse();
-        assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
-        let span = &result.errors[0].span;
-        assert_eq!((span.start.offset, span.start.line, span.start.col), (13, 2, 0), "start loc");
-        assert_eq!((span.end.offset, span.end.line, span.end.col), (20, 2, 7), "end loc");
-        assert!(
-            result.errors[0].msg.ends_with("implied-end-tags"),
-            "msg: {:?}",
-            result.errors[0].msg
-        );
-    }
-
-    #[test]
-    fn test_parse_default_mode_underscore_tag_is_text() {
-        let allocator = Allocator::default();
-        let parser = HtmlParser::new(&allocator, "<_foo></_foo>", "test.html");
-        let result = parser.parse();
-        // Open tag becomes a Text node "<_foo>".
-        assert_eq!(result.nodes.len(), 1, "expected a single Text node, got {:?}", result.nodes);
-        match &result.nodes[0] {
-            HtmlNode::Text(t) => assert_eq!(t.value.as_str(), "<_foo>"),
-            other => panic!("expected Text node, got {other:?}"),
-        }
-        // The only error is the unexpected-closing-tag error for `</_foo>`; the lexer's
-        // unexpected-character error for the open tag is swallowed (upstream parity).
-        assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
-        // FINDING 3: in DEFAULT mode `</_foo>` is an ELEMENT close, so the message
-        // includes the W3C help URL and the span is the FULL close-token span [6-13].
-        // Verified vs @angular/compiler@21.2.7 (`_consumeElementEndTag`, parser.ts:581).
-        assert_eq!(
-            result.errors[0].msg,
-            "Unexpected closing tag \"_foo\". It may happen when the tag has already been closed by another tag. For more info see https://www.w3.org/TR/html5/syntax.html#closing-elements-that-have-implied-end-tags",
-            "unexpected error message: {:?}",
-            result.errors[0].msg
-        );
-        assert_eq!(
-            (result.errors[0].span.start.offset, result.errors[0].span.end.offset),
-            (6, 13),
-            "error span must be the full close-token span"
-        );
-    }
-
-    // ---- Finding 2 (parser): mid-text selectorless `<_foo>` is TEXT + dangling close ----
-    //
-    // Oracle (`@angular/compiler@21.2.7`, `{selectorlessEnabled:true}`):
-    //   `x<_foo></_foo>`            -> Text "x<_foo>" [0-7] + a COMPONENT-close error
-    //                                  (NO URL) at span [7-14].
-    //   `<div>x<_Foo></_Foo></div>`-> div with child Text "x<_Foo>" [5-12] + a
-    //                                  component-close error at [12-19].
-    #[test]
-    fn test_parse_selectorless_midtext_underscore_is_text() {
-        let allocator = Allocator::default();
-        let result =
-            HtmlParser::with_selectorless(&allocator, "x<_foo></_foo>", "test.html").parse();
-        // Single root Text node "x<_foo>" — the `<_foo>` open is NOT a component mid-text.
-        assert_eq!(result.nodes.len(), 1, "nodes: {:?}", result.nodes);
-        match &result.nodes[0] {
-            HtmlNode::Text(t) => assert_eq!(t.value.as_str(), "x<_foo>"),
-            other => panic!("expected Text node, got {other:?}"),
-        }
-        // The dangling `</_foo>` is a COMPONENT close: error has NO W3C URL, span [7-14].
-        assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
-        assert_eq!(
-            result.errors[0].msg,
-            "Unexpected closing tag \"_foo\". It may happen when the tag has already been closed by another tag.",
-            "msg: {:?}",
-            result.errors[0].msg
-        );
-        assert_eq!((result.errors[0].span.start.offset, result.errors[0].span.end.offset), (7, 14));
-    }
-
-    #[test]
-    fn test_parse_selectorless_midtext_underscore_inside_element() {
-        let allocator = Allocator::default();
-        let result =
-            HtmlParser::with_selectorless(&allocator, "<div>x<_Foo></_Foo></div>", "test.html")
-                .parse();
-        // One root `div` containing a single Text child "x<_Foo>".
-        assert_eq!(result.nodes.len(), 1, "nodes: {:?}", result.nodes);
-        match &result.nodes[0] {
-            HtmlNode::Element(el) => {
-                assert_eq!(el.name.as_str(), "div");
-                assert_eq!(el.children.len(), 1, "children: {:?}", el.children);
-                match &el.children[0] {
-                    HtmlNode::Text(t) => assert_eq!(t.value.as_str(), "x<_Foo>"),
-                    other => panic!("expected Text child, got {other:?}"),
-                }
-            }
-            other => panic!("expected div Element, got {other:?}"),
-        }
-        // The dangling `</_Foo>` component close error at [12-19].
-        assert_eq!(result.errors.len(), 1, "errors: {:?}", result.errors);
-        assert_eq!(
-            (result.errors[0].span.start.offset, result.errors[0].span.end.offset),
-            (12, 19)
-        );
-    }
-
-    #[test]
-    fn test_parse_selectorless_midtext_uppercase_is_component() {
-        // Control: mid-text uppercase `<Foo>` IS a tag start and opens a component.
-        let allocator = Allocator::default();
-        let result = HtmlParser::with_selectorless(&allocator, "x<Foo></Foo>", "test.html").parse();
-        assert_eq!(result.errors.len(), 0, "errors: {:?}", result.errors);
-        assert_eq!(result.nodes.len(), 2, "nodes: {:?}", result.nodes);
-        match &result.nodes[0] {
-            HtmlNode::Text(t) => assert_eq!(t.value.as_str(), "x"),
-            other => panic!("expected Text node, got {other:?}"),
-        }
-        match &result.nodes[1] {
-            HtmlNode::Element(el) => {
-                assert!(el.is_component, "mid-text `<Foo>` must be a component");
-                assert_eq!(el.name.as_str(), "Foo");
-            }
-            other => panic!("expected component Element, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_selectorless_mode_underscore_tag_is_component() {
-        let allocator = Allocator::default();
-        let parser = HtmlParser::with_selectorless(&allocator, "<_foo></_foo>", "test.html");
-        let result = parser.parse();
-        assert_eq!(result.nodes.len(), 1, "nodes: {:?}", result.nodes);
-        match &result.nodes[0] {
-            HtmlNode::Element(el) => {
-                assert!(el.is_component, "selectorless `<_foo>` must be a component");
-                assert_eq!(el.name.as_str(), "_foo");
-            }
-            other => panic!("expected component Element, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn test_parse_default_mode_uppercase_tag_is_normal_element() {
-        let allocator = Allocator::default();
-        let parser = HtmlParser::new(&allocator, "<MyCmp></MyCmp>", "test.html");
-        let result = parser.parse();
-        assert_eq!(result.nodes.len(), 1);
-        match &result.nodes[0] {
-            HtmlNode::Element(el) => {
-                assert!(!el.is_component, "default-mode `<MyCmp>` must be a normal element");
-                assert_eq!(el.name.as_str(), "MyCmp");
-            }
-            other => panic!("expected Element, got {other:?}"),
-        }
     }
 
     #[test]
