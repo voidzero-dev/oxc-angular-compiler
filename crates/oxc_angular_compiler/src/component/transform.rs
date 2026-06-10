@@ -32,7 +32,7 @@ use super::import_elision::{ImportElisionAnalyzer, import_elision_edits};
 use super::metadata::{AngularVersion, ComponentMetadata, HostMetadata};
 use super::namespace_registry::NamespaceRegistry;
 use crate::ast::expression::{BindingType, ParsedEventType};
-use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
+use crate::ast::r3::{R3BoundAttribute, R3BoundEvent};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
     build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
@@ -4659,6 +4659,17 @@ fn convert_host_metadata_to_input<'a>(
         // Determine binding type based on property name prefix
         let (binding_type, final_name, unit) = parse_host_property_name(prop_name);
 
+        // Compute the security context for the host binding using the component
+        // selector as the element context, mirroring upstream Angular's
+        // `createHostBindingsFunction` → `calcPossibleSecurityContexts`. Attribute
+        // and property bindings get a real context (and thus a sanitizer/validator
+        // downstream); class/style/animation bindings keep their fixed contexts.
+        let security_context = crate::schema::host_binding_security_context(
+            binding_type,
+            final_name,
+            component_selector.as_str(),
+        );
+
         // Parse the value expression
         let value_str = allocator.alloc_str(value.as_str());
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
@@ -4666,7 +4677,7 @@ fn convert_host_metadata_to_input<'a>(
         properties.push(R3BoundAttribute {
             name: Ident::from_in(final_name, allocator),
             binding_type,
-            security_context: SecurityContext::None,
+            security_context,
             value: parse_result.ast,
             unit: unit.map(|u| Ident::from_in(u, allocator)),
             source_span: empty_span,
