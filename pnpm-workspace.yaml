@@ -15,7 +15,7 @@ allowBuilds:
   protobufjs: true
 
 catalog:
-  '@napi-rs/cli': 3.7.0
+  '@napi-rs/cli': 3.7.1
   '@oxc-node/cli': 0.1.0
   '@oxc-node/core': 0.1.0
   '@tailwindcss/vite': 4.3.0
