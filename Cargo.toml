@@ -118,7 +118,7 @@ serde_json = "1"
 # Other dependencies
 insta = "1.43.2"
 lazy-regex = "3.5.1"
-miette = { package = "oxc-miette", version = "2.7.0", features = ["fancy-no-syscall"] }
+miette = { package = "oxc-miette", version = "3.0.0", features = ["fancy-no-syscall"] }
 mimalloc-safe = "0.1.56"
 pico-args = "0.5.0"
 project-root = "0.2.2"
