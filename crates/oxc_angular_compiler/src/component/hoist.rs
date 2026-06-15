@@ -898,7 +898,10 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
             Expression::StaticMemberExpression(member) => member.property.name.as_str(),
             _ => return false,
         };
-        matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable")
+        matches!(
+            name,
+            "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable" | "Service"
+        )
     })
 }
 
@@ -907,7 +910,7 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
 ///
 /// Used by the AOT transform pipeline to skip the `Semantic` build and the
 /// full hoist scan for files with no decorated classes (plain TS helpers,
-/// type-only modules, services without `@Injectable`, …). This walks
+/// type-only modules, classes with no Angular decorator, …). This walks
 /// `program.body` only and never descends into class bodies or expressions,
 /// so it's O(top-level statements) with a tiny per-statement cost.
 pub(crate) fn program_has_angular_decorated_class(program: &Program<'_>) -> bool {
