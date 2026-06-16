@@ -72,6 +72,19 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Whether the default component change-detection strategy is `OnPush`
+    /// (v22.0.0+).
+    ///
+    /// Angular v22 made `OnPush` (0) the default strategy and added `Eager` (1).
+    /// The runtime computes `onPush = changeDetection !== Eager`, so the full
+    /// definition omits `changeDetection` for `OnPush` and emits `1` for `Eager`.
+    /// Before v22 the default was `Default`/`Eager` (1) and the runtime computed
+    /// `onPush = changeDetection === OnPush`, so the definition instead omits the
+    /// default and emits `0` for an explicit `OnPush`.
+    pub fn change_detection_default_is_on_push(&self) -> bool {
+        self.major >= 22
+    }
+
     /// Check if this version emits control instructions for the extended set of
     /// control properties (v22.0.0+).
     ///
@@ -163,11 +176,13 @@ pub enum ViewEncapsulation {
 /// Matches Angular's `ChangeDetectionStrategy` enum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ChangeDetectionStrategy {
-    /// Check the component on every change detection cycle.
+    /// Only check when inputs change or events are triggered. Angular v22's
+    /// default strategy (`OnPush = 0`).
     #[default]
-    Default,
-    /// Only check when inputs change or events are triggered.
     OnPush,
+    /// Check the component on every change detection cycle (`Eager = 1`). Also
+    /// spelled `Default` in `@angular/core` — a deprecated alias for `Eager`.
+    Eager,
 }
 
 /// Metadata extracted from an `@Component` decorator.
@@ -203,8 +218,9 @@ pub struct ComponentMetadata<'a> {
     /// View encapsulation mode.
     pub encapsulation: ViewEncapsulation,
 
-    /// Change detection strategy.
-    pub change_detection: ChangeDetectionStrategy,
+    /// Change detection strategy, or `None` when the decorator does not specify
+    /// one (so the runtime's version-dependent default applies).
+    pub change_detection: Option<ChangeDetectionStrategy>,
 
     /// Host bindings and listeners.
     pub host: Option<HostMetadata<'a>>,
@@ -614,7 +630,7 @@ impl<'a> ComponentMetadata<'a> {
             style_urls: Vec::new_in(allocator),
             standalone: implicit_standalone,
             encapsulation: ViewEncapsulation::default(),
-            change_detection: ChangeDetectionStrategy::default(),
+            change_detection: None,
             host: None,
             imports: Vec::new_in(allocator),
             export_as: Vec::new_in(allocator),

@@ -25,9 +25,9 @@ fn links_default_service_to_define_service() {
     let allocator = Allocator::default();
     let result = link(&allocator, &declare_service(""), "test.mjs");
     assert!(
-        result
-            .code
-            .contains("i0.\u{0275}\u{0275}defineService({ token: MyService, factory: MyService.\u{0275}fac })"),
+        result.code.contains(
+            "i0.\u{0275}\u{0275}defineService({ token: MyService, factory: MyService.\u{0275}fac })"
+        ),
         "expected default defineService delegating to ɵfac, got: {}",
         result.code
     );
@@ -42,11 +42,7 @@ fn links_default_service_to_define_service() {
 #[test]
 fn links_service_with_explicit_factory() {
     let allocator = Allocator::default();
-    let result = link(
-        &allocator,
-        &declare_service(", factory: () => new Alternate()"),
-        "test.mjs",
-    );
+    let result = link(&allocator, &declare_service(", factory: () => new Alternate()"), "test.mjs");
     assert!(
         result.code.contains("factory: () => (() => new Alternate())()"),
         "expected the declared factory wrapped in an invoking arrow, got: {}",
@@ -58,11 +54,7 @@ fn links_service_with_explicit_factory() {
 #[test]
 fn links_service_with_auto_provided_false() {
     let allocator = Allocator::default();
-    let result = link(
-        &allocator,
-        &declare_service(", autoProvided: false"),
-        "test.mjs",
-    );
+    let result = link(&allocator, &declare_service(", autoProvided: false"), "test.mjs");
     assert!(
         result.code.contains(
             "i0.\u{0275}\u{0275}defineService({ token: MyService, factory: MyService.\u{0275}fac, autoProvided: false })"

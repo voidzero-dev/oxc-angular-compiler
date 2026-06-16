@@ -898,10 +898,7 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
             Expression::StaticMemberExpression(member) => member.property.name.as_str(),
             _ => return false,
         };
-        matches!(
-            name,
-            "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable" | "Service"
-        )
+        matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable" | "Service")
     })
 }
 

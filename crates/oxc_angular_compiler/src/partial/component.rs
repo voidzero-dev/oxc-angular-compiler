@@ -267,12 +267,15 @@ pub fn compile_declare_component_from_metadata<'a>(
         ));
     }
 
-    // changeDetection: emit only when != Default (Default is the runtime
-    // default and matches upstream's "null" handling).
-    if meta.change_detection != ChangeDetectionStrategy::default() {
-        let variant = match meta.change_detection {
-            ChangeDetectionStrategy::Default => "Default",
+    // changeDetection: emit the symbolic enum member whenever the decorator
+    // specifies one (matching Angular's partial compiler, which emits it when
+    // `changeDetection !== null`). The version-dependent "omit the default" rule
+    // is applied later, when the linker fully compiles the declaration against
+    // the consuming app's Angular version.
+    if let Some(strategy) = meta.change_detection {
+        let variant = match strategy {
             ChangeDetectionStrategy::OnPush => "OnPush",
+            ChangeDetectionStrategy::Eager => "Eager",
         };
         entries.push(LiteralMapEntry::new(
             Ident::from("changeDetection"),

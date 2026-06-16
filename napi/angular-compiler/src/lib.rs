@@ -295,11 +295,12 @@ fn parse_view_encapsulation(s: &str) -> Option<RustViewEncapsulation> {
 
 /// Parse a ChangeDetectionStrategy string to the Rust enum.
 ///
-/// Valid values: "Default", "OnPush"
+/// Valid values: "OnPush", "Eager" (and "Default", a deprecated alias for
+/// "Eager" in Angular v22).
 fn parse_change_detection_strategy(s: &str) -> Option<RustChangeDetectionStrategy> {
     match s {
-        "Default" => Some(RustChangeDetectionStrategy::Default),
         "OnPush" => Some(RustChangeDetectionStrategy::OnPush),
+        "Eager" | "Default" => Some(RustChangeDetectionStrategy::Eager),
         _ => None,
     }
 }
@@ -1592,10 +1593,13 @@ pub fn extract_component_metadata_sync(
                 }
                 .to_string();
 
-                // Convert change detection to string
+                // Convert change detection to string. `None` (unspecified) maps
+                // to "" so it round-trips back to `None` via
+                // `parse_change_detection_strategy` on the HMR re-compile.
                 let change_detection = match metadata.change_detection {
-                    RustChangeDetection::Default => "Default",
-                    RustChangeDetection::OnPush => "OnPush",
+                    Some(RustChangeDetection::OnPush) => "OnPush",
+                    Some(RustChangeDetection::Eager) => "Eager",
+                    None => "",
                 }
                 .to_string();
 

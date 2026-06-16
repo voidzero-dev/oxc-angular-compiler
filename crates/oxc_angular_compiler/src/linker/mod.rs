@@ -2059,13 +2059,16 @@ fn link_component(
         parts.push(format!("data: {{ animation: {animations} }}"));
     }
 
-    // 22. changeDetection
-    if let Some(cd) = get_property_source(meta, "changeDetection", source)
-        && cd.contains("OnPush")
-    {
-        parts.push("changeDetection: 0".to_string());
+    // 22. changeDetection — resolve the enum member to its numeric value.
+    // Angular v22: OnPush = 0, Eager = 1 (Default is a deprecated alias for
+    // Eager). The runtime computes `onPush = changeDetection !== Eager`.
+    if let Some(cd) = get_property_source(meta, "changeDetection", source) {
+        if cd.contains("Eager") || cd.contains("Default") {
+            parts.push("changeDetection: 1".to_string());
+        } else if cd.contains("OnPush") {
+            parts.push("changeDetection: 0".to_string());
+        }
     }
-    // Default (1) is the default, no need to emit
 
     let define_component =
         format!("{ns}.\u{0275}\u{0275}defineComponent({{ {} }})", parts.join(", "));
@@ -2743,6 +2746,26 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         assert!(
             result.code.contains("changeDetection: 0"),
             "ChangeDetectionStrategy.OnPush should be 0, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_with_eager_change_detection() {
+        // Angular v22's `Eager` strategy must resolve to the numeric `1` so the
+        // runtime computes `onPush = (1 !== Eager) = false`.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.0.0", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>", changeDetection: i0.ChangeDetectionStrategy.Eager });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("changeDetection: 1"),
+            "ChangeDetectionStrategy.Eager should resolve to 1, got:\n{}",
             result.code
         );
     }

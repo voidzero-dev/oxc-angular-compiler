@@ -24,13 +24,7 @@ export class AnalyticsErrorReportHandler extends ErrorHandler {
 }
 "#;
 
-    let result = transform_angular_file(
-        &allocator,
-        "error-report-handler.ts",
-        source,
-        None,
-        None,
-    );
+    let result = transform_angular_file(&allocator, "error-report-handler.ts", source, None, None);
     assert!(!result.has_errors(), "unexpected errors: {:?}", result.diagnostics);
     let code = &result.code;
 
