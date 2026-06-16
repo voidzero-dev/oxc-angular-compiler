@@ -469,8 +469,11 @@ fn extract_change_detection(expr: &Expression<'_>) -> ChangeDetectionStrategy {
     match expr {
         Expression::StaticMemberExpression(member) => match member.property.name.as_str() {
             "OnPush" => ChangeDetectionStrategy::OnPush,
-            // `Default` is a deprecated alias for `Eager` in Angular v22.
-            "Eager" | "Default" => ChangeDetectionStrategy::Eager,
+            "Eager" => ChangeDetectionStrategy::Eager,
+            // `Default` (value 1) is the pre-v22 spelling of `Eager`. Keep it
+            // distinct so partial emit can preserve the author's exact member
+            // for older Angular targets that lack `Eager`.
+            "Default" => ChangeDetectionStrategy::Default,
             _ => ChangeDetectionStrategy::default(),
         },
         Expression::NumericLiteral(num) => {
@@ -1509,8 +1512,9 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_change_detection_default_is_eager() {
-        // `Default` is a deprecated alias for `Eager` in Angular v22.
+    fn test_extract_change_detection_default_is_distinct() {
+        // `Default` (value 1) is the pre-v22 spelling of `Eager`. It is kept as
+        // a distinct variant so partial emit can preserve the author's member.
         let code = r#"
             @Component({
                 selector: 'app-test',
@@ -1520,7 +1524,7 @@ mod tests {
             class TestComponent {}
         "#;
         assert_metadata(code, |meta| {
-            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::Eager));
+            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::Default));
         });
     }
 

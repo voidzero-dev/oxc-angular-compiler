@@ -46,6 +46,8 @@ use oxc_syntax::symbol::SymbolId;
 
 use crate::optimizer::Edit;
 
+use super::transform::{ImportMap, is_angular_core_export, is_angular_core_namespace};
+
 /// Per-statement record collected during the initial scan. Multi-declarator
 /// statements (`const A = 1, B = 2;`) get a single entry shared by every
 /// symbol they bind; `init_symbols` is the union of identifier references
@@ -95,6 +97,7 @@ pub fn collect_hoist_edits<'a>(
     program: &Program<'a>,
     source: &str,
     semantic: &Semantic<'a>,
+    import_map: &ImportMap<'a>,
 ) -> Vec<Edit> {
     // Step 1: index top-level bindings (keyed by SymbolId).
     //   - `symbol_to_stmt`: binding SymbolId → containing statement's `start`.
@@ -159,7 +162,7 @@ pub fn collect_hoist_edits<'a>(
     let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>, HashSet<SymbolId>)> = Vec::new();
     for stmt in &program.body {
         let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
-        if !has_angular_decorator(class) {
+        if !has_hoistable_angular_decorator(class, import_map) {
             continue;
         }
         let mut direct: HashSet<SymbolId> = HashSet::new();
@@ -887,6 +890,11 @@ fn class_of<'a, 'src>(stmt: &'src Statement<'a>) -> Option<(&'src Class<'a>, u32
 /// Does this class carry any decorator that Angular's compiler emits eager
 /// definitions for? We don't try to be precise here — any of the well-known
 /// Angular decorators makes the class a candidate.
+///
+/// Name-only and import-agnostic: used by the cheap pre-check
+/// [`program_has_angular_decorated_class`], where a false positive only costs
+/// a wasted scan. The actual hoist filter uses the import-aware
+/// [`has_hoistable_angular_decorator`].
 fn has_angular_decorator(class: &Class<'_>) -> bool {
     class.decorators.iter().any(|d| {
         let callee = match &d.expression {
@@ -899,6 +907,47 @@ fn has_angular_decorator(class: &Class<'_>) -> bool {
             _ => return false,
         };
         matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable" | "Service")
+    })
+}
+
+/// Whether this class carries an Angular decorator that warrants hoisting its
+/// referenced declarations.
+///
+/// Like [`has_angular_decorator`], but verifies `@Service` resolves to
+/// `@angular/core` before treating it as Angular. `Service` is a common name
+/// in non-Angular code, and hoisting a third-party `@Service` class's
+/// referenced declarations would reorder statements and change that class's
+/// runtime evaluation semantics. The other decorator names predate this check
+/// and stay name-only — over-triggering there is the long-standing behavior and
+/// only ever hoists a TDZ-safe declaration earlier.
+fn has_hoistable_angular_decorator<'a>(class: &Class<'a>, import_map: &ImportMap<'a>) -> bool {
+    class.decorators.iter().any(|d| {
+        let callee = match &d.expression {
+            Expression::CallExpression(call) => &call.callee,
+            expr => expr,
+        };
+        match callee {
+            Expression::Identifier(id) => {
+                let name = id.name.as_str();
+                if name == "Service" {
+                    is_angular_core_export(import_map, name, "Service")
+                } else {
+                    matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable")
+                }
+            }
+            Expression::StaticMemberExpression(member) => {
+                let name = member.property.name.as_str();
+                if name == "Service" {
+                    // `@ns.Service()` — accept only when `ns` is a namespace
+                    // import from `@angular/core`.
+                    matches!(&member.object, Expression::Identifier(ns)
+                        if is_angular_core_namespace(import_map, ns.name.as_str()))
+                } else {
+                    matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable")
+                }
+            }
+            _ => false,
+        }
     })
 }
 

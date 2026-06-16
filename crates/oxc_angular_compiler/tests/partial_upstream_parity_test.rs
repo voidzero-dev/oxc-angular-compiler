@@ -288,6 +288,9 @@ fn change_detection_partial_emit_matches_upstream() {
     for (strategy, expected) in [
         ("Eager", "changeDetection:i0.ChangeDetectionStrategy.Eager"),
         ("OnPush", "changeDetection:i0.ChangeDetectionStrategy.OnPush"),
+        // `Default` must be preserved as-is, not normalized to `Eager`: a
+        // partial lib built for a pre-v22 Angular has no `Eager` member.
+        ("Default", "changeDetection:i0.ChangeDetectionStrategy.Default"),
     ] {
         let source = format!(
             "import {{ Component, ChangeDetectionStrategy }} from '@angular/core';\n\

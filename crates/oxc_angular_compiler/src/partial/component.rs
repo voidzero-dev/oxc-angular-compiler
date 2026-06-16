@@ -273,9 +273,14 @@ pub fn compile_declare_component_from_metadata<'a>(
     // is applied later, when the linker fully compiles the declaration against
     // the consuming app's Angular version.
     if let Some(strategy) = meta.change_detection {
+        // Preserve the exact member the author wrote: `Eager` and `Default`
+        // share a numeric value but are different symbols, and a partial
+        // declaration targeting a pre-v22 Angular must not reference `Eager`
+        // (which does not exist there).
         let variant = match strategy {
             ChangeDetectionStrategy::OnPush => "OnPush",
             ChangeDetectionStrategy::Eager => "Eager",
+            ChangeDetectionStrategy::Default => "Default",
         };
         entries.push(LiteralMapEntry::new(
             Ident::from("changeDetection"),

@@ -495,7 +495,9 @@ fn generate_cmp_definition<'a>(
     if let Some(strategy) = metadata.change_detection {
         let value = match strategy {
             ChangeDetectionStrategy::OnPush => 0,
-            ChangeDetectionStrategy::Eager => 1,
+            // `Eager` and `Default` are the same numeric value (1); the AOT
+            // output is numeric, so the spelling distinction does not matter here.
+            ChangeDetectionStrategy::Eager | ChangeDetectionStrategy::Default => 1,
         };
         let omitted_default =
             if job.angular_version.map_or(true, |v| v.change_detection_default_is_on_push()) {

@@ -180,9 +180,17 @@ pub enum ChangeDetectionStrategy {
     /// default strategy (`OnPush = 0`).
     #[default]
     OnPush,
-    /// Check the component on every change detection cycle (`Eager = 1`). Also
-    /// spelled `Default` in `@angular/core` — a deprecated alias for `Eager`.
+    /// Check the component on every change detection cycle (`Eager = 1`). The
+    /// member introduced in Angular v22 to replace `Default`.
     Eager,
+    /// Check the component on every change detection cycle. The pre-v22 spelling
+    /// (`Default = 1`), kept distinct from [`Eager`] so partial declarations
+    /// preserve the exact `ChangeDetectionStrategy` member the author wrote —
+    /// emitting `Eager` for an older Angular target would reference a member
+    /// that does not exist there.
+    ///
+    /// [`Eager`]: ChangeDetectionStrategy::Eager
+    Default,
 }
 
 /// Metadata extracted from an `@Component` decorator.

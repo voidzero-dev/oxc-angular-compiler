@@ -295,12 +295,13 @@ fn parse_view_encapsulation(s: &str) -> Option<RustViewEncapsulation> {
 
 /// Parse a ChangeDetectionStrategy string to the Rust enum.
 ///
-/// Valid values: "OnPush", "Eager" (and "Default", a deprecated alias for
-/// "Eager" in Angular v22).
+/// Valid values: "OnPush", "Eager", and "Default" (the pre-v22 spelling of
+/// "Eager", kept distinct so partial emit preserves the author's member).
 fn parse_change_detection_strategy(s: &str) -> Option<RustChangeDetectionStrategy> {
     match s {
         "OnPush" => Some(RustChangeDetectionStrategy::OnPush),
-        "Eager" | "Default" => Some(RustChangeDetectionStrategy::Eager),
+        "Eager" => Some(RustChangeDetectionStrategy::Eager),
+        "Default" => Some(RustChangeDetectionStrategy::Default),
         _ => None,
     }
 }
@@ -1599,6 +1600,7 @@ pub fn extract_component_metadata_sync(
                 let change_detection = match metadata.change_detection {
                     Some(RustChangeDetection::OnPush) => "OnPush",
                     Some(RustChangeDetection::Eager) => "Eager",
+                    Some(RustChangeDetection::Default) => "Default",
                     None => "",
                 }
                 .to_string();
