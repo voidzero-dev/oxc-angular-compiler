@@ -273,8 +273,8 @@ importers:
         specifier: workspace:^
         version: link:../..
       '@sanity/types':
-        specifier: 5.31.1
-        version: 5.31.1(@types/react@19.2.14)
+        specifier: 6.0.0
+        version: 6.0.0(@types/react@19.2.14)
       '@types/d3-force':
         specifier: 3.0.10
         version: 3.0.10
@@ -3086,8 +3086,8 @@ packages:
   '@sanity/signed-urls@2.0.2':
     resolution: {integrity: sha512-w/Aq0JDYI44WC5w8mzJBAjCem8qlGrxGTzvNbUWwBfys6kSL+TZBSypV5waCc35XRgt0X5zdYZMJOrshcjJLFw==}
 
-  '@sanity/types@5.31.1':
-    resolution: {integrity: sha512-Tl5+C6KTfGO1+QdbHFFaJd9Wyncbz2yznGg1P06JvBfzpexSdBVz476QyDtWBQaCtSkTk8eXzrwPVvW5emA8/g==}
+  '@sanity/types@6.0.0':
+    resolution: {integrity: sha512-VnNk5Hyeytr71pei4Do4xapIObDP0ZC32ce1kLKdJRGzz93tkJZNzrAYXZld/r8j4d6TYfJlxDP+VxacTtIKKQ==}
     peerDependencies:
       '@types/react': ^19.2
 
@@ -6542,7 +6542,7 @@ snapshots:
       '@noble/ed25519': 3.0.1
       '@noble/hashes': 2.0.1
 
-  '@sanity/types@5.31.1(@types/react@19.2.14)':
+  '@sanity/types@6.0.0(@types/react@19.2.14)':
     dependencies:
       '@sanity/client': 7.22.1
       '@sanity/media-library-types': 1.4.0
