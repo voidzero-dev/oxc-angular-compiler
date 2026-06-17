@@ -1039,43 +1039,17 @@ dependencies = [
 
 [[package]]
 name = "oxc-miette"
-version = "2.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4356a61f2ed4c9b3610245215fbf48970eb277126919f87db9d0efa93a74245c"
-dependencies = [
- "cfg-if",
- "owo-colors",
- "oxc-miette-derive 2.7.1",
- "textwrap",
- "thiserror",
- "unicode-segmentation",
- "unicode-width",
-]
-
-[[package]]
-name = "oxc-miette"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b776084bf11ad750806cb63f9ed2606a12ab374cf458f36a7731eba1f5d753fc"
 dependencies = [
  "cfg-if",
  "owo-colors",
- "oxc-miette-derive 3.0.0",
+ "oxc-miette-derive",
  "textwrap",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
-]
-
-[[package]]
-name = "oxc-miette-derive"
-version = "2.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b237422b014f8f8fff75bb9379e697d13f8d57551a22c88bebb39f073c1bf696"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
 ]
 
 [[package]]
@@ -1110,7 +1084,7 @@ dependencies = [
  "indexmap",
  "insta",
  "lightningcss",
- "oxc-miette 2.7.1",
+ "oxc-miette",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
@@ -1119,7 +1093,7 @@ dependencies = [
  "oxc_parser",
  "oxc_resolver",
  "oxc_semantic",
- "oxc_sourcemap 7.0.0",
+ "oxc_sourcemap",
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
@@ -1222,7 +1196,7 @@ dependencies = [
  "oxc_data_structures",
  "oxc_index",
  "oxc_semantic",
- "oxc_sourcemap 8.0.1",
+ "oxc_sourcemap",
  "oxc_span",
  "oxc_str",
  "oxc_syntax",
@@ -1258,7 +1232,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2daf5f7aede9a68b8d9ea28907632f860e284aca9862f2fee0deff288d16aff5"
 dependencies = [
  "cow-utils",
- "oxc-miette 3.0.0",
+ "oxc-miette",
  "percent-encoding",
 ]
 
@@ -1408,19 +1382,6 @@ dependencies = [
 
 [[package]]
 name = "oxc_sourcemap"
-version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db3866f9075027840e0711b52e15d2e1ba076fc5f5f01c96eeedd26375410641"
-dependencies = [
- "base64-simd 0.8.0",
- "json-escape-simd",
- "rustc-hash",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "oxc_sourcemap"
 version = "8.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "174d2498c2390ccfab0a9caaf47ef5accda1d509aaa34a5be8f45e00e5299f04"
@@ -1439,7 +1400,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "189ad3c3c0b7bd7f4710f8efbfb277565e1f171c1ebc0298ec5d530c0d1a1fbb"
 dependencies = [
  "compact_str",
- "oxc-miette 3.0.0",
+ "oxc-miette",
  "oxc_allocator",
  "oxc_ast_macros",
  "oxc_estree",
