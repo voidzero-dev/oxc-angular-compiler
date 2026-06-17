@@ -715,7 +715,7 @@ fn strip_expression_types(expr_source: &str) -> String {
         let wrapped = format!("0,({expr_source})");
         let source_type = oxc_span::SourceType::mjs();
         let parser_ret = oxc_parser::Parser::new(&allocator, &wrapped, source_type).parse();
-        if !parser_ret.panicked && parser_ret.errors.is_empty() {
+        if !parser_ret.panicked && parser_ret.diagnostics.is_empty() {
             return expr_source.to_string();
         }
     }

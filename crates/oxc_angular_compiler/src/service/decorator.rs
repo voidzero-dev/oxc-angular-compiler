@@ -166,7 +166,7 @@ fn parse_factory_expression<'a>(
     // Wrap the expression so the parser treats it as a standalone module.
     let wrapped = allocator.alloc_str(&format!("({});", src));
     let parser_ret = Parser::new(allocator, wrapped, SourceType::ts()).parse();
-    if !parser_ret.errors.is_empty() {
+    if !parser_ret.diagnostics.is_empty() {
         return None;
     }
     let stmt = parser_ret.program.body.first()?;

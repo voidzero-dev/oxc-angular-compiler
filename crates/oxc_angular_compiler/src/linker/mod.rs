@@ -92,7 +92,7 @@ pub fn link(allocator: &Allocator, code: &str, filename: &str) -> LinkResult {
     let source_type = SourceType::from_path(filename).unwrap_or(SourceType::mjs());
     let parser_result = Parser::new(allocator, code, source_type).parse();
 
-    if parser_result.panicked || !parser_result.errors.is_empty() {
+    if parser_result.panicked || !parser_result.diagnostics.is_empty() {
         return LinkResult { code: code.to_string(), map: None, linked: false };
     }
 
