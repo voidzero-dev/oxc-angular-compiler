@@ -11328,6 +11328,59 @@ export class TestComponent {}
     assert!(token_pos < class_pos, "Order should be preserved.\nCode:\n{}", result.code);
 }
 
+/// A third-party `@Service` decorator (NOT imported from `@angular/core`) must
+/// not trigger hoisting. `Service` is a common name in non-Angular DI
+/// frameworks, and reordering such a class's referenced declarations would
+/// change that class's runtime evaluation order. The hoist filter verifies the
+/// `@Service` import resolves to `@angular/core` before acting. (PR #360 review)
+#[test]
+fn third_party_service_decorator_does_not_hoist_referenced_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Service } from './di';
+@Service(CONFIG)
+export class MyService {}
+const CONFIG = { name: 'svc' };
+"#;
+    let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The const must stay where the author wrote it — after the class.
+    let config_pos = result.code.find("const CONFIG").expect("CONFIG missing");
+    let class_pos = result.code.find("class MyService").expect("class missing");
+    assert!(
+        class_pos < config_pos,
+        "Third-party @Service must NOT hoist `const CONFIG` above the class. \
+         class@{class_pos} config@{config_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// The companion to the above: a genuine `@angular/core` `@Service` whose
+/// metadata references a later-declared const still hoists it, so the
+/// import-aware gate does not regress real Angular services.
+#[test]
+fn angular_core_service_decorator_hoists_referenced_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Service } from '@angular/core';
+@Service({ autoProvided: FLAG })
+export class MyService {}
+const FLAG = false;
+"#;
+    let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let flag_pos = result.code.find("const FLAG").expect("FLAG missing");
+    let class_pos = result.code.find("class MyService").expect("class missing");
+    assert!(
+        flag_pos < class_pos,
+        "@angular/core @Service must hoist `const FLAG` above the class. \
+         flag@{flag_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
 /// When two bindings from the *same*
 /// multi-declarator statement (`const A = 1, B = 2;`) are referenced by
 /// different decorated classes, the hoist plan keys entries by binding name,

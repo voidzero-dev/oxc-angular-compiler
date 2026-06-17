@@ -485,39 +485,36 @@ fn generate_cmp_definition<'a>(
         ));
     }
 
-    // 24. changeDetection: ChangeDetectionStrategy.OnPush - only emit if not Default
-    // (to match TypeScript compiler behavior)
-    // Per Angular compiler.ts lines 334-346
-    // Angular enum values: OnPush = 0, Default = 1
-    // NOTE: Angular emits without namespace prefix (ChangeDetectionStrategy.OnPush, not i0.ChangeDetectionStrategy.OnPush)
-    if metadata.change_detection != ChangeDetectionStrategy::Default {
-        let strategy_name = match metadata.change_detection {
-            ChangeDetectionStrategy::Default => "Default",
-            ChangeDetectionStrategy::OnPush => "OnPush",
+    // 24. changeDetection — emit the resolved numeric value only when the
+    // explicit strategy differs from the value the runtime assumes when the
+    // field is omitted. That default flipped in v22:
+    //   - v22+: default is OnPush (0); runtime `onPush = cd !== Eager`.
+    //   - < v22: default is Default/Eager (1); runtime `onPush = cd === OnPush`.
+    // So pre-v22 emits `0` for an explicit OnPush while v22 emits `1` for Eager;
+    // each version omits its own default. Enum values: OnPush = 0, Eager = 1.
+    if let Some(strategy) = metadata.change_detection {
+        let value = match strategy {
+            ChangeDetectionStrategy::OnPush => 0,
+            // `Eager` and `Default` are the same numeric value (1); the AOT
+            // output is numeric, so the spelling distinction does not matter here.
+            ChangeDetectionStrategy::Eager | ChangeDetectionStrategy::Default => 1,
         };
-        // Build: ChangeDetectionStrategy.OnPush (no i0 prefix)
-        // ReadPropExpr { receiver: ReadVarExpr("ChangeDetectionStrategy"), name: "OnPush" }
-        let change_detection_strategy_expr = OutputExpression::ReadVar(Box::new_in(
-            ReadVarExpr {
-                name: Ident::from(Identifiers::CHANGE_DETECTION_STRATEGY),
-                source_span: None,
-            },
-            allocator,
-        ));
-        let strategy_value_expr = OutputExpression::ReadProp(Box::new_in(
-            ReadPropExpr {
-                receiver: Box::new_in(change_detection_strategy_expr, allocator),
-                name: Ident::from(strategy_name),
-                optional: false,
-                source_span: None,
-            },
-            allocator,
-        ));
-        entries.push(LiteralMapEntry::new(
-            Ident::from("changeDetection"),
-            strategy_value_expr,
-            false,
-        ));
+        let omitted_default =
+            if job.angular_version.map_or(true, |v| v.change_detection_default_is_on_push()) {
+                0 // v22+: OnPush is the default
+            } else {
+                1 // < v22: Default/Eager is the default
+            };
+        if value != omitted_default {
+            entries.push(LiteralMapEntry::new(
+                Ident::from("changeDetection"),
+                OutputExpression::Literal(Box::new_in(
+                    LiteralExpr { value: LiteralValue::Number(value as f64), source_span: None },
+                    allocator,
+                )),
+                false,
+            ));
+        }
     }
 
     // Create the config object

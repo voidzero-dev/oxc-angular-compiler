@@ -131,7 +131,7 @@ pub fn extract_component_metadata<'a>(
                     metadata.encapsulation = extract_encapsulation(&prop.value);
                 }
                 "changeDetection" => {
-                    metadata.change_detection = extract_change_detection(&prop.value);
+                    metadata.change_detection = Some(extract_change_detection(&prop.value));
                 }
                 "host" => {
                     metadata.host = extract_host_metadata(allocator, &prop.value, consts);
@@ -469,13 +469,18 @@ fn extract_change_detection(expr: &Expression<'_>) -> ChangeDetectionStrategy {
     match expr {
         Expression::StaticMemberExpression(member) => match member.property.name.as_str() {
             "OnPush" => ChangeDetectionStrategy::OnPush,
+            "Eager" => ChangeDetectionStrategy::Eager,
+            // `Default` (value 1) is the pre-v22 spelling of `Eager`. Keep it
+            // distinct so partial emit can preserve the author's exact member
+            // for older Angular targets that lack `Eager`.
             "Default" => ChangeDetectionStrategy::Default,
             _ => ChangeDetectionStrategy::default(),
         },
         Expression::NumericLiteral(num) => {
-            // Angular's numeric values: Default = 0, OnPush = 1
+            // Angular v22 numeric values: OnPush = 0, Eager = 1 (Default = 1).
             match num.value as i32 {
-                1 => ChangeDetectionStrategy::OnPush,
+                0 => ChangeDetectionStrategy::OnPush,
+                1 => ChangeDetectionStrategy::Eager,
                 _ => ChangeDetectionStrategy::default(),
             }
         }
@@ -1502,12 +1507,14 @@ mod tests {
             class TestComponent {}
         "#;
         assert_metadata(code, |meta| {
-            assert_eq!(meta.change_detection, ChangeDetectionStrategy::OnPush);
+            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::OnPush));
         });
     }
 
     #[test]
-    fn test_extract_change_detection_default() {
+    fn test_extract_change_detection_default_is_distinct() {
+        // `Default` (value 1) is the pre-v22 spelling of `Eager`. It is kept as
+        // a distinct variant so partial emit can preserve the author's member.
         let code = r#"
             @Component({
                 selector: 'app-test',
@@ -1517,13 +1524,13 @@ mod tests {
             class TestComponent {}
         "#;
         assert_metadata(code, |meta| {
-            assert_eq!(meta.change_detection, ChangeDetectionStrategy::Default);
+            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::Default));
         });
     }
 
     #[test]
-    fn test_extract_change_detection_numeric_on_push() {
-        // Angular uses: Default=0, OnPush=1
+    fn test_extract_change_detection_numeric_eager() {
+        // Angular v22 numeric values: OnPush = 0, Eager = 1.
         let code = r#"
             @Component({
                 selector: 'app-test',
@@ -1533,12 +1540,15 @@ mod tests {
             class TestComponent {}
         "#;
         assert_metadata(code, |meta| {
-            assert_eq!(meta.change_detection, ChangeDetectionStrategy::OnPush);
+            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::Eager));
         });
     }
 
     #[test]
-    fn test_change_detection_defaults_to_default() {
+    fn test_change_detection_unspecified_is_none() {
+        // When the decorator omits `changeDetection`, the metadata leaves it
+        // `None` so the emitter applies the target version's default (OnPush in
+        // v22+, Default/Eager before).
         let code = r#"
             @Component({
                 selector: 'app-test',
@@ -1547,7 +1557,7 @@ mod tests {
             class TestComponent {}
         "#;
         assert_metadata(code, |meta| {
-            assert_eq!(meta.change_detection, ChangeDetectionStrategy::Default);
+            assert_eq!(meta.change_detection, None);
         });
     }
 
@@ -1938,7 +1948,7 @@ mod tests {
             assert_eq!(meta.styles.len(), 1);
             assert!(meta.standalone);
             assert_eq!(meta.encapsulation, ViewEncapsulation::None);
-            assert_eq!(meta.change_detection, ChangeDetectionStrategy::OnPush);
+            assert_eq!(meta.change_detection, Some(ChangeDetectionStrategy::OnPush));
             assert!(meta.host.is_some());
             let host = meta.host.as_ref().unwrap();
             assert_eq!(host.class_attr.as_ref().unwrap().as_str(), "app-complete");

@@ -295,11 +295,13 @@ fn parse_view_encapsulation(s: &str) -> Option<RustViewEncapsulation> {
 
 /// Parse a ChangeDetectionStrategy string to the Rust enum.
 ///
-/// Valid values: "Default", "OnPush"
+/// Valid values: "OnPush", "Eager", and "Default" (the pre-v22 spelling of
+/// "Eager", kept distinct so partial emit preserves the author's member).
 fn parse_change_detection_strategy(s: &str) -> Option<RustChangeDetectionStrategy> {
     match s {
-        "Default" => Some(RustChangeDetectionStrategy::Default),
         "OnPush" => Some(RustChangeDetectionStrategy::OnPush),
+        "Eager" => Some(RustChangeDetectionStrategy::Eager),
+        "Default" => Some(RustChangeDetectionStrategy::Default),
         _ => None,
     }
 }
@@ -1592,10 +1594,14 @@ pub fn extract_component_metadata_sync(
                 }
                 .to_string();
 
-                // Convert change detection to string
+                // Convert change detection to string. `None` (unspecified) maps
+                // to "" so it round-trips back to `None` via
+                // `parse_change_detection_strategy` on the HMR re-compile.
                 let change_detection = match metadata.change_detection {
-                    RustChangeDetection::Default => "Default",
-                    RustChangeDetection::OnPush => "OnPush",
+                    Some(RustChangeDetection::OnPush) => "OnPush",
+                    Some(RustChangeDetection::Eager) => "Eager",
+                    Some(RustChangeDetection::Default) => "Default",
+                    None => "",
                 }
                 .to_string();
 

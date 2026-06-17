@@ -960,7 +960,7 @@ fn find_angular_service_decorator<'a>(
 /// the local binding is `Service`. Bare `import { Service }` (no alias)
 /// passes because `imported_name` is `None`, meaning the local name and the
 /// exported name agree.
-fn is_angular_core_export(
+pub(crate) fn is_angular_core_export(
     import_map: &ImportMap<'_>,
     local_name: &str,
     exported_name: &str,
@@ -979,7 +979,7 @@ fn is_angular_core_export(
 /// from `@angular/core`. Used to validate namespace-style decorator calls
 /// like `@ns.Service()` — without this check, any third-party namespace
 /// `Service` decorator would classify as the Angular v22 decorator.
-fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: &str) -> bool {
+pub(crate) fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: &str) -> bool {
     import_map
         .get(&Ident::from(local_name))
         .map(|info| info.source_module.as_str() == "@angular/core" && !info.is_named_import)
@@ -3511,7 +3511,12 @@ pub fn transform_angular_file(
         // The JIT path (see ~line 1380) follows the same convention.
         let hoist_semantic =
             oxc_semantic::SemanticBuilder::new().build(&parser_ret.program).semantic;
-        edits.extend(collect_hoist_edits(&parser_ret.program, source, &hoist_semantic));
+        edits.extend(collect_hoist_edits(
+            &parser_ret.program,
+            source,
+            &hoist_semantic,
+            &import_map,
+        ));
     }
 
     // Apply all edits in one pass

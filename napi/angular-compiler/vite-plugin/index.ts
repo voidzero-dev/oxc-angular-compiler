@@ -623,13 +623,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
 
           // Quick check for Angular decorators - avoids parsing files without them
-          // OXC handles @Component, @Directive, @NgModule, @Injectable, and @Pipe
+          // OXC handles @Component, @Directive, @NgModule, @Injectable, @Pipe, @Service
           const hasAngularDecorator =
             code.includes('@Component') ||
             code.includes('@Directive') ||
             code.includes('@NgModule') ||
             code.includes('@Injectable') ||
-            code.includes('@Pipe')
+            code.includes('@Pipe') ||
+            code.includes('@Service')
           if (!hasAngularDecorator) {
             return
           }
