@@ -340,18 +340,14 @@ impl TransformResult {
 
     /// Check if there are any errors.
     pub fn has_errors(&self) -> bool {
-        use miette::Diagnostic;
         use oxc_diagnostics::Severity;
-        self.diagnostics
-            .iter()
-            .any(|d| d.severity() == Some(Severity::Error) || d.severity().is_none())
+        self.diagnostics.iter().any(|d| d.severity == Severity::Error)
     }
 
     /// Check if there are any warnings.
     pub fn has_warnings(&self) -> bool {
-        use miette::Diagnostic;
         use oxc_diagnostics::Severity;
-        self.diagnostics.iter().any(|d| d.severity() == Some(Severity::Warning))
+        self.diagnostics.iter().any(|d| d.severity == Severity::Warning)
     }
 }
 
@@ -2024,8 +2020,8 @@ fn transform_angular_file_jit(
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let parser_ret = Parser::new(allocator, source, source_type).parse();
 
-    if !parser_ret.errors.is_empty() {
-        for error in parser_ret.errors {
+    if !parser_ret.diagnostics.is_empty() {
+        for error in parser_ret.diagnostics {
             result.diagnostics.push(OxcDiagnostic::error(error.to_string()));
         }
     }
@@ -2405,8 +2401,8 @@ pub fn transform_angular_file(
     let parser_ret = Parser::new(allocator, source, source_type).parse();
 
     // Collect parse errors
-    if !parser_ret.errors.is_empty() {
-        for error in parser_ret.errors {
+    if !parser_ret.diagnostics.is_empty() {
+        for error in parser_ret.diagnostics {
             result.diagnostics.push(OxcDiagnostic::error(error.to_string()));
         }
         // Still continue to try to generate output for partial results
