@@ -1,0 +1,95 @@
+name: Publish to pkg.pr.new
+
+# Publishes a continuous preview release to https://pkg.pr.new whenever a
+# maintainer adds the `pkg.pr.new` label to a pull request (or via manual
+# dispatch). Requires the pkg.pr.new GitHub App to be installed on the repo:
+# https://github.com/apps/pkg-pr-new
+
+# One-shot per label by design (matches rolldown's PR preview): a preview is
+# built only when the `pkg.pr.new` label itself is added (the job guards check
+# the triggering label, github.event.label.name, NOT the full label set, so
+# adding any other label to an already-labeled PR does not rebuild).
+# `synchronize` is intentionally NOT subscribed, so later commits do not
+# rebuild — re-apply the label or use workflow_dispatch to refresh. This avoids
+# an 8-platform native build on every push.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [labeled]
+
+permissions: {}
+
+# Cancel an in-flight preview when the label is re-applied on the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBUG: 'napi:*'
+
+jobs:
+  build:
+    name: Build
+    if: >
+      github.repository == 'voidzero-dev/oxc-angular-compiler' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
+    permissions:
+      contents: read
+    uses: ./.github/workflows/reusable-build.yml
+
+  publish:
+    name: Publish preview
+    if: >
+      github.repository == 'voidzero-dev/oxc-angular-compiler' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: taiki-e/checkout-action@7d1e50e93dc4fb3bba58f85018fadf77898aee8b # v1.4.2
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@08c4be7e2e672a47d11bd04269e27e5f3e8529cb # v6.0.0
+
+      - name: Install Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Download artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: napi/angular-compiler/artifacts
+
+      - name: Create npm dirs
+        run: pnpm --filter ./napi/angular-compiler exec napi create-npm-dirs
+
+      - name: Move artifacts
+        run: pnpm --filter ./napi/angular-compiler artifacts
+
+      - name: Build TypeScript
+        run: pnpm --filter ./napi/angular-compiler build:ts
+
+      # Inject the platform binding packages into the root package's
+      # optionalDependencies (without publishing them to npm) so pkg.pr.new
+      # rewrites those deps to the preview URLs it generates. --no-gh-release
+      # keeps `napi pre-publish` from attempting a real GitHub release tag.
+      - name: Prepare optionalDependencies
+        run: pnpm --filter ./napi/angular-compiler exec napi pre-publish -t npm --skip-optional-publish --no-gh-release
+
+      # Invoke the lockfile-pinned pkg-pr-new binary directly, NOT via
+      # `pnpm exec`: the previous step injects binding optionalDependencies into
+      # napi/angular-compiler/package.json, desyncing it from the lockfile, and
+      # the workspace's `verifyDepsBeforeRun: install` would make `pnpm exec`
+      # fail the frozen-lockfile check before pkg-pr-new runs. The direct call
+      # skips that gate while still using the pinned install (not `pnpm dlx`).
+      # Requires the pkg.pr.new GitHub App on the repo.
+      - name: Publish preview to pkg.pr.new
+        run: ./node_modules/.bin/pkg-pr-new publish './napi/angular-compiler/npm/*' './napi/angular-compiler'
