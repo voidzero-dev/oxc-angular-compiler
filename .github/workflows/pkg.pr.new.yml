@@ -6,9 +6,12 @@ name: Publish to pkg.pr.new
 # https://github.com/apps/pkg-pr-new
 
 # One-shot per label by design (matches rolldown's PR preview): a preview is
-# built when the label is added. `synchronize` is intentionally NOT subscribed,
-# so later commits do not rebuild — re-apply the label or use workflow_dispatch
-# to refresh. This avoids an 8-platform native build on every push.
+# built only when the `pkg.pr.new` label itself is added (the job guards check
+# the triggering label, github.event.label.name, NOT the full label set, so
+# adding any other label to an already-labeled PR does not rebuild).
+# `synchronize` is intentionally NOT subscribed, so later commits do not
+# rebuild — re-apply the label or use workflow_dispatch to refresh. This avoids
+# an 8-platform native build on every push.
 on:
   workflow_dispatch:
   pull_request:
@@ -16,7 +19,7 @@ on:
 
 permissions: {}
 
-# Cancel an in-flight preview when a newer commit/label arrives on the same PR.
+# Cancel an in-flight preview when the label is re-applied on the same PR.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -30,7 +33,7 @@ jobs:
     if: >
       github.repository == 'voidzero-dev/oxc-angular-compiler' &&
       (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'pkg.pr.new')))
+      (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
     permissions:
       contents: read
     uses: ./.github/workflows/reusable-build.yml
@@ -40,7 +43,7 @@ jobs:
     if: >
       github.repository == 'voidzero-dev/oxc-angular-compiler' &&
       (github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'pkg.pr.new')))
+      (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
     needs: build
     runs-on: ubuntu-latest
     permissions:
