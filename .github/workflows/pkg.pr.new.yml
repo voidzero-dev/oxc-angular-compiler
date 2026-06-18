@@ -84,7 +84,12 @@ jobs:
       - name: Prepare optionalDependencies
         run: pnpm --filter ./napi/angular-compiler exec napi pre-publish -t npm --skip-optional-publish --no-gh-release
 
-      # Use the lockfile-pinned pkg-pr-new (pnpm exec), not `pnpm dlx`, per
-      # pkg.pr.new's CI guidance. Requires the pkg.pr.new GitHub App on the repo.
+      # Invoke the lockfile-pinned pkg-pr-new binary directly, NOT via
+      # `pnpm exec`: the previous step injects binding optionalDependencies into
+      # napi/angular-compiler/package.json, desyncing it from the lockfile, and
+      # the workspace's `verifyDepsBeforeRun: install` would make `pnpm exec`
+      # fail the frozen-lockfile check before pkg-pr-new runs. The direct call
+      # skips that gate while still using the pinned install (not `pnpm dlx`).
+      # Requires the pkg.pr.new GitHub App on the repo.
       - name: Publish preview to pkg.pr.new
-        run: pnpm exec pkg-pr-new publish './napi/angular-compiler/npm/*' './napi/angular-compiler'
+        run: ./node_modules/.bin/pkg-pr-new publish './napi/angular-compiler/npm/*' './napi/angular-compiler'
