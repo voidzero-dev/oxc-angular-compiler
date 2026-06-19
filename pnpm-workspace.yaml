@@ -14,6 +14,30 @@ allowBuilds:
   msgpackr-extract: true
   protobufjs: true
 
+minimumReleaseAgeExclude:
+  - '@napi-rs/*'
+  - '@oxc-node/*'
+  - '@oxc-minify/*'
+  - '@oxc-parser/*'
+  - '@oxc-project/*'
+  - '@oxc-resolver/*'
+  - '@oxc-transform/*'
+  - '@oxfmt/*'
+  - '@oxlint-tsgolint/*'
+  - '@oxlint/*'
+  - '@rolldown/*'
+  - '@tsdown/*'
+  - '@types/*'
+  - '@vitejs/*'
+  - '@vitest/*'
+  - '@voidzero-dev/*'
+  - oxc-minify
+  - oxc-parser
+  - oxc-transform
+  - oxfmt
+  - oxlint
+  - oxlint-tsgolint
+
 catalog:
   '@napi-rs/cli': 3.7.2
   '@oxc-node/cli': 0.1.0
