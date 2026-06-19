@@ -4,7 +4,7 @@ A conformance testing framework that validates the oxc Angular compiler implemen
 
 ## Overview
 
-This crate extracts test cases from Angular's TypeScript spec files and runs them against the Rust implementation to ensure compatibility. It currently maintains a **100% pass rate** across **1,264** extracted test assertions against Angular **v22.0.0-rc.2**.
+This crate extracts test cases from Angular's TypeScript spec files and runs them against the Rust implementation to ensure compatibility. It currently maintains a **100% pass rate** across **1,264** extracted test assertions against Angular **v22.0.0** (the version the `angular` submodule is pinned to).
 
 ## Architecture
 
