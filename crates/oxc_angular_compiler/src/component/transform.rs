@@ -651,7 +651,10 @@ fn resolve_factory_dep_namespaces<'a>(
                     )),
                     allocator,
                 ),
-                name: name.clone(),
+                // Use the module's exported name, not the local binding: a namespace
+                // member access (`i1.X`) must reference the export name. For an aliased
+                // import `import { Foo as Bar }`, `imported_name` is `Some("Foo")`.
+                name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
                 optional: false,
                 source_span: None,
             },
@@ -688,7 +691,9 @@ fn resolve_host_directive_namespaces<'a>(
                     )),
                     allocator,
                 ),
-                name: name.clone(),
+                // Use the module's exported name, not the local binding (see
+                // resolve_factory_dep_namespaces): `i1.X` must use the export name.
+                name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
                 optional: false,
                 source_span: None,
             },
