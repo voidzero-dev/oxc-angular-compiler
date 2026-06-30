@@ -1299,9 +1299,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_resolver"
-version = "11.21.3"
+version = "11.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b5400dea5053fe933683bcfc63cfd6025a9826748a9ecf2da37892d2993da57"
+checksum = "a73a86454f0d1c18deb29396e0eb2a932b552f710d13e42f6536321d1f1326d8"
 dependencies = [
  "cfg-if",
  "compact_str",
@@ -1309,6 +1309,7 @@ dependencies = [
  "fast-glob",
  "indexmap",
  "json-strip-comments",
+ "memchr",
  "nodejs-built-in-modules",
  "once_cell",
  "percent-encoding",
