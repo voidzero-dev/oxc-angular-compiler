@@ -1100,6 +1100,10 @@ fn clone_output_expression<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(clone_output_expression(allocator, &rp.receiver), allocator),
                 name: rp.name.clone(),
+                // Intentionally non-optional: `clone_output_expression` is only used to
+                // build the write-back assignment `target = value` for two-way bindings
+                // (see `create_assignment`), and an optional chain (`a?.b`) is not a legal
+                // assignment target — emitting `a?.b = $event` would be a JS SyntaxError.
                 optional: false,
                 source_span: rp.source_span,
             },
@@ -1109,6 +1113,8 @@ fn clone_output_expression<'a>(
             ReadKeyExpr {
                 receiver: Box::new_in(clone_output_expression(allocator, &rk.receiver), allocator),
                 index: Box::new_in(clone_output_expression(allocator, &rk.index), allocator),
+                // Non-optional for the same reason as the `ReadProp` arm above: this
+                // clone only ever forms a two-way write-back assignment target.
                 optional: false,
                 source_span: rk.source_span,
             },
