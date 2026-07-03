@@ -69,7 +69,7 @@ impl<'a> PipeMetadata<'a> {
         // Create type expression: reference to the pipe class
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: self.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         Some(R3PipeMetadata {
@@ -252,7 +252,7 @@ fn extract_constructor_deps<'a>(
 
     // Get the constructor's parameters
     let params = &constructor.value.params;
-    let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
+    let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
         let dep = extract_param_dependency(allocator, param);
@@ -316,7 +316,7 @@ fn extract_param_dependency<'a>(
                     value: crate::output::ast::LiteralValue::String(attr_name),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))),
             attribute_name_type: token, // The type annotation
             host,
@@ -380,7 +380,7 @@ fn extract_param_token<'a>(
         // Return a reference to the type
         return Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: type_name, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 

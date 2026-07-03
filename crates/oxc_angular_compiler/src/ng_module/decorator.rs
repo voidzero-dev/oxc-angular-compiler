@@ -68,13 +68,13 @@ impl<'a> NgModuleMetadata<'a> {
         Self {
             class_name,
             class_span,
-            declarations: Vec::new_in(allocator),
-            imports: Vec::new_in(allocator),
+            declarations: Vec::new_in(&allocator),
+            imports: Vec::new_in(&allocator),
             raw_imports_expr: None,
-            exports: Vec::new_in(allocator),
+            exports: Vec::new_in(&allocator),
             providers: None,
-            bootstrap: Vec::new_in(allocator),
-            schemas: Vec::new_in(allocator),
+            bootstrap: Vec::new_in(&allocator),
+            schemas: Vec::new_in(&allocator),
             id: None,
             contains_forward_decls: false,
             deps: None,
@@ -90,7 +90,7 @@ impl<'a> NgModuleMetadata<'a> {
 
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: self.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         let mut builder = R3NgModuleMetadataBuilder::new(allocator)
@@ -102,7 +102,7 @@ impl<'a> NgModuleMetadata<'a> {
         for decl in &self.declarations {
             let decl_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: decl.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_declaration(R3Reference::value_only(decl_expr));
         }
@@ -111,7 +111,7 @@ impl<'a> NgModuleMetadata<'a> {
         for import in &self.imports {
             let import_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: import.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_import(R3Reference::value_only(import_expr));
         }
@@ -120,7 +120,7 @@ impl<'a> NgModuleMetadata<'a> {
         for export in &self.exports {
             let export_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: export.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_export(R3Reference::value_only(export_expr));
         }
@@ -129,7 +129,7 @@ impl<'a> NgModuleMetadata<'a> {
         for bootstrap in &self.bootstrap {
             let bootstrap_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: bootstrap.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_bootstrap(R3Reference::value_only(bootstrap_expr));
         }
@@ -138,7 +138,7 @@ impl<'a> NgModuleMetadata<'a> {
         for schema in &self.schemas {
             let schema_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: schema.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_schema(R3Reference::value_only(schema_expr));
         }
@@ -150,7 +150,7 @@ impl<'a> NgModuleMetadata<'a> {
                     value: crate::output::ast::LiteralValue::String(id.clone()),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             builder = builder.id(id_expr);
         }
@@ -336,7 +336,7 @@ fn extract_reference_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
 ) -> (Vec<'a, Ident<'a>>, bool) {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     let mut has_forward_refs = false;
 
     let Expression::ArrayExpression(arr) = expr else {
@@ -384,7 +384,7 @@ fn extract_identifier_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
 ) -> Vec<'a, Ident<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;
@@ -430,7 +430,7 @@ pub fn extract_constructor_deps<'a>(
 
     // Get the constructor's parameters
     let params = &constructor.value.params;
-    let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
+    let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
         let dep = extract_param_dependency(allocator, param);
@@ -483,7 +483,7 @@ fn extract_param_dependency<'a>(
                     value: crate::output::ast::LiteralValue::String(attr_name),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))),
             attribute_name_type: token, // The type annotation
             host,
@@ -546,7 +546,7 @@ fn extract_param_token<'a>(
 
         return Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: type_name, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 

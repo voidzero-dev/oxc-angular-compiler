@@ -28,11 +28,11 @@ pub fn specialize_style_bindings(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
 
     // Process root view
-    specialize_in_view(&mut job.root.update, allocator);
+    specialize_in_view(&mut job.root.update, &allocator);
 
     // Process embedded views
     for view in job.views.values_mut() {
-        specialize_in_view(&mut view.update, allocator);
+        specialize_in_view(&mut view.update, &allocator);
     }
 }
 
@@ -42,9 +42,9 @@ fn create_placeholder_expression<'a>(
 ) -> Box<'a, IrExpression<'a>> {
     let empty_expr = AngularExpression::Empty(Box::new_in(
         EmptyExpr { span: ParseSpan::new(0, 0), source_span: AbsoluteSourceSpan::new(0, 0) },
-        allocator,
+        &allocator,
     ));
-    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, allocator)), allocator)
+    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, &allocator)), &allocator)
 }
 
 /// Specializes style/class bindings within a single view's update list.
@@ -148,5 +148,5 @@ fn specialize_in_view<'a>(
 /// Host version - only processes the root unit (no embedded views).
 pub fn specialize_style_bindings_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
-    specialize_in_view(&mut job.root.update, allocator);
+    specialize_in_view(&mut job.root.update, &allocator);
 }

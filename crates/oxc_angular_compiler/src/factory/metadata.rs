@@ -201,7 +201,7 @@ mod tests {
         let allocator = Allocator::default();
         let token = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let dep = R3DependencyMetadata::simple(token);
@@ -217,7 +217,7 @@ mod tests {
         let allocator = Allocator::default();
         let token = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("OptionalService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let dep = R3DependencyMetadata::optional_dep(token);

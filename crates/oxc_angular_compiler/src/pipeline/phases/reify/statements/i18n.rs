@@ -21,26 +21,26 @@ pub fn create_i18n_start_stmt<'a>(
     message_index: Option<u32>,
     sub_template_index: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // First arg: slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Second arg: message index (required)
     if let Some(msg_idx) = message_index {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(msg_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
 
         // Third arg: sub-template index (optional)
         if let Some(sub_idx) = sub_template_index {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(sub_idx as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -58,26 +58,26 @@ pub fn create_i18n_stmt<'a>(
     message_index: Option<u32>,
     sub_template_index: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // First arg: slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Second arg: message index (required)
     if let Some(msg_idx) = message_index {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(msg_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
 
         // Third arg: sub-template index (optional)
         if let Some(sub_idx) = sub_template_index {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(sub_idx as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -87,7 +87,7 @@ pub fn create_i18n_stmt<'a>(
 
 /// Creates an ɵɵi18nEnd() call statement.
 pub fn create_i18n_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::I18N_END, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(allocator, Identifiers::I18N_END, OxcVec::new_in(&allocator))
 }
 
 /// Creates an ɵɵi18nExp() call statement.
@@ -95,7 +95,7 @@ pub fn create_i18n_exp_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::I18N_EXP, args)
 }
@@ -105,10 +105,10 @@ pub fn create_i18n_apply_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     create_instruction_call_stmt(allocator, Identifiers::I18N_APPLY, args)
 }
@@ -125,18 +125,18 @@ pub fn create_i18n_attributes_stmt<'a>(
     slot: u32,
     attrs_config_index: u32,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // First arg: slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Second arg: attrs config index (index into consts array)
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(attrs_config_index as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     create_instruction_call_stmt(allocator, Identifiers::I18N_ATTRIBUTES, args)

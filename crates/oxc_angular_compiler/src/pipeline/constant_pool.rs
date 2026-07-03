@@ -48,11 +48,11 @@ impl<'a> ConstantPool<'a> {
             allocator,
             strings: FxHashMap::default(),
             arrays: FxHashMap::default(),
-            values: Vec::new_in(allocator),
+            values: Vec::new_in(&allocator),
             next_name_index: 0,
             unique_name_offset: 0,
             claimed_names: FxHashMap::default(),
-            statements: Vec::new_in(allocator),
+            statements: Vec::new_in(&allocator),
         }
     }
 
@@ -75,11 +75,11 @@ impl<'a> ConstantPool<'a> {
             allocator,
             strings: FxHashMap::default(),
             arrays: FxHashMap::default(),
-            values: Vec::new_in(allocator),
+            values: Vec::new_in(&allocator),
             next_name_index: starting_index,
             unique_name_offset: starting_index,
             claimed_names: FxHashMap::default(),
-            statements: Vec::new_in(allocator),
+            statements: Vec::new_in(&allocator),
         }
     }
 
@@ -245,7 +245,7 @@ impl<'a> ConstantPool<'a> {
         let name = self.generate_name("_c");
 
         // Generate parameter names: a0, a1, a2, ...
-        let mut params = Vec::with_capacity_in(num_args as usize, self.allocator);
+        let mut params = Vec::with_capacity_in(num_args as usize, &self.allocator);
         for i in 0..num_args {
             params.push(Ident::from(self.allocator.alloc_str(&format!("a{}", i))));
         }
@@ -256,7 +256,7 @@ impl<'a> ConstantPool<'a> {
             value: PooledValue { index },
             kind: PooledConstantKind::PureFunction(Box::new_in(
                 PureFunctionDef { params, body: body_expr },
-                self.allocator,
+                &self.allocator,
             )),
         });
 
@@ -307,7 +307,7 @@ impl<'a> ConstantPool<'a> {
                             // Return a reference to the existing function
                             return OutputExpression::ReadVar(Box::new_in(
                                 ReadVarExpr { name: decl.name.clone(), source_span: None },
-                                self.allocator,
+                                &self.allocator,
                             ));
                         }
                     }
@@ -320,7 +320,7 @@ impl<'a> ConstantPool<'a> {
                             // Return a reference to the existing function
                             return OutputExpression::ReadVar(Box::new_in(
                                 ReadVarExpr { name: decl.name.clone(), source_span: None },
-                                self.allocator,
+                                &self.allocator,
                             ));
                         }
                     }
@@ -345,7 +345,7 @@ impl<'a> ConstantPool<'a> {
                         leading_comment: None,
                         source_span: None,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )));
             }
             OutputExpression::Function(func) => {
@@ -361,7 +361,7 @@ impl<'a> ConstantPool<'a> {
                         modifiers: StmtModifier::FINAL,
                         source_span: inner.source_span,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )));
             }
             _ => {
@@ -374,7 +374,7 @@ impl<'a> ConstantPool<'a> {
                         leading_comment: None,
                         source_span: None,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )));
             }
         }
@@ -382,7 +382,7 @@ impl<'a> ConstantPool<'a> {
         // Return a ReadVar expression that references this shared function
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: fn_name, source_span: None },
-            self.allocator,
+            &self.allocator,
         ))
     }
 
@@ -455,7 +455,7 @@ impl<'a> ConstantPool<'a> {
             let constant = &self.values[pooled.index as usize];
             return OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: constant.name.clone(), source_span: None },
-                self.allocator,
+                &self.allocator,
             ));
         }
 
@@ -466,7 +466,7 @@ impl<'a> ConstantPool<'a> {
         self.values.push(PooledConstant {
             name: name.clone(),
             value: PooledValue { index },
-            kind: PooledConstantKind::Literal(Box::new_in(literal, self.allocator)),
+            kind: PooledConstantKind::Literal(Box::new_in(literal, &self.allocator)),
         });
 
         self.strings.insert(key, PooledValue { index });
@@ -474,7 +474,7 @@ impl<'a> ConstantPool<'a> {
         // Return a ReadVar expression referencing the constant
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name, source_span: None },
-            self.allocator,
+            &self.allocator,
         ))
     }
 }

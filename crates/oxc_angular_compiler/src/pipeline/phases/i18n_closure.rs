@@ -60,47 +60,47 @@ pub fn create_closure_mode_guard<'a>(
             expr: AllocBox::new_in(
                 OutputExpression::ReadVar(AllocBox::new_in(
                     ReadVarExpr { name: Ident::from(NG_I18N_CLOSURE_MODE), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // "undefined"
     let undefined_literal = OutputExpression::Literal(AllocBox::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from("undefined")), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // typeof ngI18nClosureMode !== "undefined"
     let not_undefined = OutputExpression::BinaryOperator(AllocBox::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::NotIdentical,
-            lhs: AllocBox::new_in(typeof_expr, allocator),
-            rhs: AllocBox::new_in(undefined_literal, allocator),
+            lhs: AllocBox::new_in(typeof_expr, &allocator),
+            rhs: AllocBox::new_in(undefined_literal, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // ngI18nClosureMode
     let closure_mode_var = OutputExpression::ReadVar(AllocBox::new_in(
         ReadVarExpr { name: Ident::from(NG_I18N_CLOSURE_MODE), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // typeof ngI18nClosureMode !== "undefined" && ngI18nClosureMode
     OutputExpression::BinaryOperator(AllocBox::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::And,
-            lhs: AllocBox::new_in(not_undefined, allocator),
-            rhs: AllocBox::new_in(closure_mode_var, allocator),
+            lhs: AllocBox::new_in(not_undefined, &allocator),
+            rhs: AllocBox::new_in(closure_mode_var, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -174,21 +174,21 @@ pub fn create_goog_get_msg_statements<'a>(
     params: &[(String, String)],
     meta: Option<&I18nMessageMeta<'a>>,
 ) -> AllocVec<'a, OutputStatement<'a>> {
-    let mut statements = AllocVec::new_in(allocator);
+    let mut statements = AllocVec::new_in(&allocator);
 
     // Build goog.getMsg arguments
-    let mut goog_args = AllocVec::new_in(allocator);
+    let mut goog_args = AllocVec::new_in(&allocator);
 
     // First arg: message string with {$placeholder} format
     let message_str = allocator.alloc_str(message_string);
     goog_args.push(OutputExpression::Literal(AllocBox::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(message_str)), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Second arg: placeholder values object (if any)
     if !params.is_empty() {
-        let mut entries = AllocVec::new_in(allocator);
+        let mut entries = AllocVec::new_in(&allocator);
         for (name, value) in params {
             // Format placeholder name to camelCase for Closure
             let formatted_name = format_i18n_placeholder_name(name, true);
@@ -201,42 +201,42 @@ pub fn create_goog_get_msg_statements<'a>(
                         value: LiteralValue::String(Ident::from(value_str)),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
                 true,
             ));
         }
         goog_args.push(OutputExpression::LiteralMap(AllocBox::new_in(
             LiteralMapExpr { entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     // goog.getMsg reference
     let goog_var = OutputExpression::ReadVar(AllocBox::new_in(
         ReadVarExpr { name: Ident::from("goog"), source_span: None },
-        allocator,
+        &allocator,
     ));
     let goog_get_msg = OutputExpression::ReadProp(AllocBox::new_in(
         ReadPropExpr {
-            receiver: AllocBox::new_in(goog_var, allocator),
+            receiver: AllocBox::new_in(goog_var, &allocator),
             name: Ident::from("getMsg"),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // goog.getMsg(...)
     let goog_call = OutputExpression::InvokeFunction(AllocBox::new_in(
         InvokeFunctionExpr {
-            fn_expr: AllocBox::new_in(goog_get_msg, allocator),
+            fn_expr: AllocBox::new_in(goog_get_msg, &allocator),
             args: goog_args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create JSDoc comment if metadata is provided
@@ -251,30 +251,30 @@ pub fn create_goog_get_msg_statements<'a>(
             leading_comment,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // i18n_X = MSG_XXX
     let i18n_var = OutputExpression::ReadVar(AllocBox::new_in(
         ReadVarExpr { name: i18n_var_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
     let closure_var = OutputExpression::ReadVar(AllocBox::new_in(
         ReadVarExpr { name: closure_var_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
     let assignment = OutputExpression::BinaryOperator(AllocBox::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::Assign,
-            lhs: AllocBox::new_in(i18n_var, allocator),
-            rhs: AllocBox::new_in(closure_var, allocator),
+            lhs: AllocBox::new_in(i18n_var, &allocator),
+            rhs: AllocBox::new_in(closure_var, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     statements.push(OutputStatement::Expression(AllocBox::new_in(
         ExpressionStatement { expr: assignment, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     statements
@@ -291,25 +291,25 @@ pub fn create_localize_statements<'a>(
     i18n_var_name: &Ident<'a>,
     localized_expr: OutputExpression<'a>,
 ) -> AllocVec<'a, OutputStatement<'a>> {
-    let mut statements = AllocVec::new_in(allocator);
+    let mut statements = AllocVec::new_in(&allocator);
 
     // i18n_X = $localize`...`
     let i18n_var = OutputExpression::ReadVar(AllocBox::new_in(
         ReadVarExpr { name: i18n_var_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
     let assignment = OutputExpression::BinaryOperator(AllocBox::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::Assign,
-            lhs: AllocBox::new_in(i18n_var, allocator),
-            rhs: AllocBox::new_in(localized_expr, allocator),
+            lhs: AllocBox::new_in(i18n_var, &allocator),
+            rhs: AllocBox::new_in(localized_expr, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     statements.push(OutputStatement::Expression(AllocBox::new_in(
         ExpressionStatement { expr: assignment, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     statements
@@ -340,7 +340,7 @@ pub fn create_translation_declaration<'a>(
     localized_expr: OutputExpression<'a>,
     meta: Option<&I18nMessageMeta<'a>>,
 ) -> AllocVec<'a, OutputStatement<'a>> {
-    let mut statements = AllocVec::new_in(allocator);
+    let mut statements = AllocVec::new_in(&allocator);
 
     // var i18n_X;
     statements.push(OutputStatement::DeclareVar(AllocBox::new_in(
@@ -351,13 +351,13 @@ pub fn create_translation_declaration<'a>(
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // Create the if statement
     let guard = create_closure_mode_guard(allocator);
     let true_case = create_goog_get_msg_statements(
-        allocator,
+        &allocator,
         &i18n_var_name,
         &closure_var_name,
         message_for_closure,
@@ -368,7 +368,7 @@ pub fn create_translation_declaration<'a>(
 
     statements.push(OutputStatement::If(AllocBox::new_in(
         IfStmt { condition: guard, true_case, false_case, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     statements

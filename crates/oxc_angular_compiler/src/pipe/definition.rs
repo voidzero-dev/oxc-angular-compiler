@@ -174,14 +174,14 @@ fn generate_pipe_fac<'a>(
 
     let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
         ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Convert deps from PipeMetadata format to R3FactoryDeps
     let factory_deps = match &metadata.deps {
         Some(deps) => {
             let mut factory_deps: OxcVec<'a, R3DependencyMetadata<'a>> =
-                OxcVec::with_capacity_in(deps.len(), allocator);
+                OxcVec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 factory_deps.push(R3DependencyMetadata {
                     token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
@@ -228,7 +228,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyPipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(Ident::from("MyPipe"), type_expr)
@@ -261,7 +261,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ImpurePipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(Ident::from("ImpurePipe"), type_expr)
@@ -285,7 +285,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("LegacyPipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(Ident::from("LegacyPipe"), type_expr)
@@ -311,7 +311,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TreeShakablePipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(Ident::from("TreeShakablePipe"), type_expr)

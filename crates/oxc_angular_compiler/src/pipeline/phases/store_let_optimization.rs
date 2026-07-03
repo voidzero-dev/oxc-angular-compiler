@@ -121,7 +121,7 @@ fn transform_store_let_exprs_in_view(
     // Transform expressions in each update op
     for op in view.update.iter_mut() {
         transform_store_let_in_update_op(
-            allocator,
+            &allocator,
             op,
             let_used_externally,
             declare_lets_to_remove,
@@ -139,7 +139,7 @@ fn transform_store_let_in_update_op<'a>(
     match op {
         UpdateOp::Variable(var) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut var.initializer,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -147,7 +147,7 @@ fn transform_store_let_in_update_op<'a>(
         }
         UpdateOp::Property(prop) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut prop.expression,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -155,7 +155,7 @@ fn transform_store_let_in_update_op<'a>(
         }
         UpdateOp::StyleProp(style) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut style.expression,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -163,7 +163,7 @@ fn transform_store_let_in_update_op<'a>(
         }
         UpdateOp::ClassProp(class) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut class.expression,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -171,7 +171,7 @@ fn transform_store_let_in_update_op<'a>(
         }
         UpdateOp::Attribute(attr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut attr.expression,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -179,7 +179,7 @@ fn transform_store_let_in_update_op<'a>(
         }
         UpdateOp::InterpolateText(text) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut text.interpolation,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -188,7 +188,7 @@ fn transform_store_let_in_update_op<'a>(
         UpdateOp::Conditional(cond) => {
             if let Some(ref mut test) = cond.test {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     test,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -197,7 +197,7 @@ fn transform_store_let_in_update_op<'a>(
             for condition in cond.conditions.iter_mut() {
                 if let Some(ref mut expr) = condition.expr {
                     transform_store_let_in_expr(
-                        allocator,
+                        &allocator,
                         expr,
                         let_used_externally,
                         declare_lets_to_remove,
@@ -206,7 +206,7 @@ fn transform_store_let_in_update_op<'a>(
             }
             if let Some(ref mut processed) = cond.processed {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     processed,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -214,7 +214,7 @@ fn transform_store_let_in_update_op<'a>(
             }
             if let Some(ref mut ctx_val) = cond.context_value {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     ctx_val,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -249,7 +249,7 @@ fn transform_store_let_in_expr<'a>(
 
             // Continue transforming the replaced value
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -285,7 +285,7 @@ fn transform_store_let_in_expr_value<'a>(
 
             // Continue transforming the replaced value
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -308,7 +308,7 @@ fn transform_nested_expressions<'a>(
     match expr.as_mut() {
         IrExpression::SafeNavigationMigration(m) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut m.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -317,7 +317,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::PureFunction(pf) => {
             if let Some(ref mut body) = pf.body {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     body,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -325,7 +325,7 @@ fn transform_nested_expressions<'a>(
             }
             if let Some(ref mut fn_ref) = pf.fn_ref {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     fn_ref,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -333,7 +333,7 @@ fn transform_nested_expressions<'a>(
             }
             for arg in pf.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -343,7 +343,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::Interpolation(interp) => {
             for expr in interp.expressions.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     expr,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -353,7 +353,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::PipeBinding(pb) => {
             for arg in pb.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -362,7 +362,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::PipeBindingVariadic(pbv) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut pbv.args,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -370,7 +370,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::SafePropertyRead(spr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut spr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -378,13 +378,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::SafeKeyedRead(skr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut skr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut skr.index,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -392,14 +392,14 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::SafeInvokeFunction(sif) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut sif.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             for arg in sif.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -408,13 +408,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::SafeTernary(st) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut st.guard,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut st.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -422,19 +422,19 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Ternary(t) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.condition,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.true_expr,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.false_expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -442,7 +442,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::AssignTemporary(at) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut at.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -451,7 +451,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::ConditionalCase(cc) => {
             if let Some(ref mut e) = cc.expr {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     e,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -460,7 +460,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ConstCollected(cc) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut cc.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -468,13 +468,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::TwoWayBindingSet(twb) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut twb.target,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut twb.value,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -483,7 +483,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::StoreLet(sl) => {
             // If we get here, this StoreLet is used externally, but still transform its value
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut sl.value,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -491,13 +491,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Binary(binary) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut binary.lhs,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut binary.rhs,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -505,7 +505,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResolvedPropertyRead(rpr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rpr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -513,13 +513,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResolvedBinary(rb) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rb.left,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rb.right,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -527,14 +527,14 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResolvedCall(rc) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rc.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             for arg in rc.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -543,13 +543,13 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResolvedKeyedRead(rkr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rkr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rkr.key,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -557,7 +557,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResolvedSafePropertyRead(rspr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rspr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -566,7 +566,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::RestoreView(rv) => {
             if let crate::ir::expression::RestoreViewTarget::Dynamic(ref mut inner) = rv.view {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     inner,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -575,7 +575,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::ResetView(rv) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rv.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -584,7 +584,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::DerivedLiteralArray(arr) => {
             for entry in arr.entries.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     entry,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -594,7 +594,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::DerivedLiteralMap(map) => {
             for value in map.values.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     value,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -622,7 +622,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::LiteralArray(arr) => {
             for elem in arr.elements.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     elem,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -633,7 +633,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::LiteralMap(map) => {
             for value in map.values.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     value,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -642,7 +642,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Not(n) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut n.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -650,7 +650,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Unary(u) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut u.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -658,7 +658,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Typeof(t) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -666,7 +666,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Void(v) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut v.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -675,7 +675,7 @@ fn transform_nested_expressions<'a>(
         IrExpression::ResolvedTemplateLiteral(rtl) => {
             for e in rtl.expressions.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     e,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -685,7 +685,7 @@ fn transform_nested_expressions<'a>(
 
         IrExpression::ArrowFunction(arrow_fn) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut arrow_fn.body,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -693,7 +693,7 @@ fn transform_nested_expressions<'a>(
         }
         IrExpression::Parenthesized(paren) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut paren.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -712,7 +712,7 @@ fn transform_nested_in_expr_value<'a>(
     match expr {
         IrExpression::SafeNavigationMigration(m) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut m.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -721,7 +721,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::PureFunction(pf) => {
             if let Some(ref mut body) = pf.body {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     body,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -729,7 +729,7 @@ fn transform_nested_in_expr_value<'a>(
             }
             if let Some(ref mut fn_ref) = pf.fn_ref {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     fn_ref,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -737,7 +737,7 @@ fn transform_nested_in_expr_value<'a>(
             }
             for arg in pf.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -747,7 +747,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::Interpolation(interp) => {
             for expr in interp.expressions.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     expr,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -757,7 +757,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::PipeBinding(pb) => {
             for arg in pb.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -766,7 +766,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::PipeBindingVariadic(pbv) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut pbv.args,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -774,7 +774,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::SafePropertyRead(spr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut spr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -782,13 +782,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::SafeKeyedRead(skr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut skr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut skr.index,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -796,14 +796,14 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::SafeInvokeFunction(sif) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut sif.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             for arg in sif.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -812,13 +812,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::SafeTernary(st) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut st.guard,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut st.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -826,19 +826,19 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Ternary(t) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.condition,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.true_expr,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut t.false_expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -846,7 +846,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::AssignTemporary(at) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut at.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -855,7 +855,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::ConditionalCase(cc) => {
             if let Some(ref mut e) = cc.expr {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     e,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -864,7 +864,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ConstCollected(cc) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut cc.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -872,13 +872,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::TwoWayBindingSet(twb) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut twb.target,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut twb.value,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -887,7 +887,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::StoreLet(sl) => {
             // If we get here, this StoreLet is used externally, but still transform its value
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut sl.value,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -895,13 +895,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Binary(binary) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut binary.lhs,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut binary.rhs,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -909,7 +909,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResolvedPropertyRead(rpr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rpr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -917,13 +917,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResolvedBinary(rb) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rb.left,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rb.right,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -931,14 +931,14 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResolvedCall(rc) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rc.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             for arg in rc.args.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     arg,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -947,13 +947,13 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResolvedKeyedRead(rkr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rkr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
             );
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rkr.key,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -961,7 +961,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResolvedSafePropertyRead(rspr) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rspr.receiver,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -970,7 +970,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::RestoreView(rv) => {
             if let crate::ir::expression::RestoreViewTarget::Dynamic(ref mut inner) = rv.view {
                 transform_store_let_in_expr(
-                    allocator,
+                    &allocator,
                     inner,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -979,7 +979,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::ResetView(rv) => {
             transform_store_let_in_expr(
-                allocator,
+                &allocator,
                 &mut rv.expr,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -988,7 +988,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::DerivedLiteralArray(arr) => {
             for entry in arr.entries.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     entry,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -998,7 +998,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::DerivedLiteralMap(map) => {
             for value in map.values.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     value,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -1008,7 +1008,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::LiteralArray(arr) => {
             for elem in arr.elements.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     elem,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -1018,7 +1018,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::LiteralMap(map) => {
             for value in map.values.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     value,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -1044,7 +1044,7 @@ fn transform_nested_in_expr_value<'a>(
         | IrExpression::ReadVariable(_) => {}
         IrExpression::Not(n) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 n.expr.as_mut(),
                 let_used_externally,
                 declare_lets_to_remove,
@@ -1052,7 +1052,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Unary(u) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 u.expr.as_mut(),
                 let_used_externally,
                 declare_lets_to_remove,
@@ -1060,7 +1060,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Typeof(t) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 t.expr.as_mut(),
                 let_used_externally,
                 declare_lets_to_remove,
@@ -1068,7 +1068,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Void(v) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 v.expr.as_mut(),
                 let_used_externally,
                 declare_lets_to_remove,
@@ -1077,7 +1077,7 @@ fn transform_nested_in_expr_value<'a>(
         IrExpression::ResolvedTemplateLiteral(rtl) => {
             for e in rtl.expressions.iter_mut() {
                 transform_store_let_in_expr_value(
-                    allocator,
+                    &allocator,
                     e,
                     let_used_externally,
                     declare_lets_to_remove,
@@ -1087,7 +1087,7 @@ fn transform_nested_in_expr_value<'a>(
 
         IrExpression::ArrowFunction(arrow_fn) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut arrow_fn.body,
                 let_used_externally,
                 declare_lets_to_remove,
@@ -1095,7 +1095,7 @@ fn transform_nested_in_expr_value<'a>(
         }
         IrExpression::Parenthesized(paren) => {
             transform_store_let_in_expr_value(
-                allocator,
+                &allocator,
                 &mut paren.expr,
                 let_used_externally,
                 declare_lets_to_remove,

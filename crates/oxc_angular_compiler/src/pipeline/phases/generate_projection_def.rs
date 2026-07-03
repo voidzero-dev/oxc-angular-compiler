@@ -106,7 +106,7 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
         // Convert selectors to R3 format for projectionDef instruction
         // Build the full def array expression: [selector1, selector2, ...]
         // Where each selector is either "*" (string) or R3 format (array)
-        let mut def_elements = OxcVec::with_capacity_in(selectors.len(), allocator);
+        let mut def_elements = OxcVec::with_capacity_in(selectors.len(), &allocator);
 
         for selector in &selectors {
             if selector.as_str() == "*" {
@@ -116,7 +116,7 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
                         value: LiteralValue::String(Ident::from("*")),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )));
             } else {
                 // Parse and convert to R3 format
@@ -126,12 +126,12 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
                 // Build the selector list array - each R3 selector becomes a nested array
                 // TypeScript: literalOrArrayLiteral(parseSelectorToR3Selector(s))
                 // This preserves the nesting: [[["", "slot", "value"]]] for single selectors
-                let mut selector_array = OxcVec::with_capacity_in(r3_list.len(), allocator);
+                let mut selector_array = OxcVec::with_capacity_in(r3_list.len(), &allocator);
                 for r3_sel in &r3_list {
                     let inner_array = r3_selector_to_output_expr(allocator, r3_sel);
                     selector_array.push(OutputExpression::LiteralArray(OxcBox::new_in(
                         LiteralArrayExpr { entries: inner_array, source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
 
@@ -139,14 +139,14 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
                 // This ensures the correct nesting level: [[["", "slot", "value"]]]
                 def_elements.push(OutputExpression::LiteralArray(OxcBox::new_in(
                     LiteralArrayExpr { entries: selector_array, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
         }
 
         let literal_array = OutputExpression::LiteralArray(OxcBox::new_in(
             LiteralArrayExpr { entries: def_elements, source_span: None },
-            allocator,
+            &allocator,
         ));
         // Pool the constant like Angular TS does with job.pool.getConstLiteral()
         Some(job.pool.get_const_literal(literal_array, true))
@@ -156,16 +156,16 @@ pub fn generate_projection_defs(job: &mut ComponentCompilationJob<'_>) {
 
     // Create contentSelectors SECOND (to match TypeScript Angular's constant ordering)
     {
-        let mut selector_exprs = OxcVec::with_capacity_in(selectors.len(), allocator);
+        let mut selector_exprs = OxcVec::with_capacity_in(selectors.len(), &allocator);
         for selector in &selectors {
             selector_exprs.push(OutputExpression::Literal(OxcBox::new_in(
                 LiteralExpr { value: LiteralValue::String(selector.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         let literal_array = OutputExpression::LiteralArray(OxcBox::new_in(
             LiteralArrayExpr { entries: selector_exprs, source_span: None },
-            allocator,
+            &allocator,
         ));
         // Pool the constant like Angular TS does with job.pool.getConstLiteral()
         job.content_selectors = Some(job.pool.get_const_literal(literal_array, true));

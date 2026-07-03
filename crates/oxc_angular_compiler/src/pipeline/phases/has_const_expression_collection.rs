@@ -54,13 +54,13 @@ pub fn collect_const_expressions(job: &mut ComponentCompilationJob<'_>) {
     let view_xrefs: Vec<XrefId> = job.all_views().map(|v| v.xref).collect();
 
     // Process root view first
-    process_view_const_expressions(&mut job.root, allocator, &collected, &next_index);
+    process_view_const_expressions(&mut job.root, &allocator, &collected, &next_index);
 
     // Process embedded views
     for xref in view_xrefs {
         if xref != root_xref {
             if let Some(view) = job.views.get_mut(&xref) {
-                process_view_const_expressions(view.as_mut(), allocator, &collected, &next_index);
+                process_view_const_expressions(view.as_mut(), &allocator, &collected, &next_index);
             }
         }
     }
@@ -106,7 +106,7 @@ fn process_view_const_expressions<'a>(
             transform_expressions_in_update_op(
                 op,
                 &|expr, _flags| {
-                    collect_const_expr(expr, allocator, collected, next_index);
+                    collect_const_expr(expr, &allocator, collected, next_index);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -118,7 +118,7 @@ fn process_view_const_expressions<'a>(
         transform_expressions_in_create_op(
             op,
             &|expr, _flags| {
-                collect_const_expr(expr, allocator, collected, next_index);
+                collect_const_expr(expr, &allocator, collected, next_index);
             },
             VisitorContextFlag::NONE,
         );
@@ -129,7 +129,7 @@ fn process_view_const_expressions<'a>(
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                collect_const_expr(expr, allocator, collected, next_index);
+                collect_const_expr(expr, &allocator, collected, next_index);
             },
             VisitorContextFlag::NONE,
         );
@@ -160,7 +160,7 @@ fn collect_const_expr<'a>(
         let source_span = cc.source_span;
         *expr = IrExpression::ConstReference(Box::new_in(
             ConstReferenceExpr { index, source_span },
-            allocator,
+            &allocator,
         ));
     }
 }

@@ -62,7 +62,7 @@ pub fn generate_pure_literal_structures(job: &mut ComponentCompilationJob<'_>) {
                             return;
                         }
 
-                        transform_literal_structure(expr, allocator, expressions);
+                        transform_literal_structure(expr, &allocator, expressions);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -81,16 +81,16 @@ fn transform_literal_structure<'a>(
     // We do this in a separate step to avoid borrowing issues.
     let pure_fn_opt: Option<PureFunctionExpr<'a>> = match expr {
         IrExpression::Ast(ast_expr) => {
-            try_create_pure_function_for_angular_expr(ast_expr.as_ref(), allocator)
+            try_create_pure_function_for_angular_expr(ast_expr.as_ref(), &allocator)
         }
         IrExpression::ExpressionRef(id) => {
             let stored_expr = expressions.get(*id);
-            try_create_pure_function_for_angular_expr(stored_expr, allocator)
+            try_create_pure_function_for_angular_expr(stored_expr, &allocator)
         }
         // Handle IrExpression::LiteralArray - elements are already IR expressions
         // TypeScript always creates a PureFunction for literal arrays, even if all constant
         IrExpression::LiteralArray(arr) => {
-            create_pure_function_for_ir_array(&arr.elements, &arr.spreads, allocator, expressions)
+            create_pure_function_for_ir_array(&arr.elements, &arr.spreads, &allocator, expressions)
         }
         // Handle IrExpression::LiteralMap - values are already IR expressions
         // TypeScript always creates a PureFunction for literal maps, even if all constant
@@ -99,7 +99,7 @@ fn transform_literal_structure<'a>(
             &map.values,
             &map.quoted,
             &map.spreads,
-            allocator,
+            &allocator,
             expressions,
         ),
         // Handle IrExpression::DerivedLiteralArray - created by pipe_variadic phase
@@ -107,7 +107,7 @@ fn transform_literal_structure<'a>(
         IrExpression::DerivedLiteralArray(arr) => create_pure_function_for_derived_array(
             &arr.entries,
             &arr.spreads,
-            allocator,
+            &allocator,
             expressions,
         ),
         // Handle IrExpression::DerivedLiteralMap - created for variadic maps
@@ -116,7 +116,7 @@ fn transform_literal_structure<'a>(
             &map.values,
             &map.quoted,
             &map.spreads,
-            allocator,
+            &allocator,
             expressions,
         ),
         _ => None,
@@ -124,7 +124,7 @@ fn transform_literal_structure<'a>(
 
     // Now apply the transformation if we created a pure function
     if let Some(pure_fn) = pure_fn_opt {
-        *expr = IrExpression::PureFunction(AllocBox::new_in(pure_fn, allocator));
+        *expr = IrExpression::PureFunction(AllocBox::new_in(pure_fn, &allocator));
     }
 }
 
@@ -138,10 +138,10 @@ fn try_create_pure_function_for_angular_expr<'a>(
     match angular_expr {
         // TypeScript always creates a PureFunction for literal arrays, even if all constant
         AngularExpression::LiteralArray(arr) => {
-            create_pure_function_for_array(&arr.expressions, allocator)
+            create_pure_function_for_array(&arr.expressions, &allocator)
         }
         // TypeScript always creates a PureFunction for literal maps, even if all constant
-        AngularExpression::LiteralMap(map) => create_pure_function_for_map(map, allocator),
+        AngularExpression::LiteralMap(map) => create_pure_function_for_map(map, &allocator),
         _ => None,
     }
 }
@@ -204,8 +204,8 @@ fn resolve_expression_for_body<'a>(
         IrExpression::ExpressionRef(id) => {
             // Resolve the reference to the actual Angular expression and wrap in Ast
             let angular_expr = expressions.get(*id);
-            let cloned = clone_angular_expression(angular_expr, allocator);
-            IrExpression::Ast(AllocBox::new_in(cloned, allocator))
+            let cloned = clone_angular_expression(angular_expr, &allocator);
+            IrExpression::Ast(AllocBox::new_in(cloned, &allocator))
         }
         // For other expressions, just clone
         _ => expr.clone_in(allocator),
@@ -220,20 +220,20 @@ fn create_pure_function_for_derived_array<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) -> Option<PureFunctionExpr<'a>> {
-    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(allocator);
+    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
     let mut param_index: u32 = 0;
 
     for (i, expr) in entries.iter().enumerate() {
         let is_spread = spreads.get(i).copied().unwrap_or(false);
         if is_constant_ir_expression(expr, expressions) {
-            body_entries.push(resolve_expression_for_body(expr, allocator, expressions));
+            body_entries.push(resolve_expression_for_body(expr, &allocator, expressions));
         } else {
             args.push(expr.clone_in(allocator));
             body_entries.push(IrExpression::PureFunctionParameter(AllocBox::new_in(
                 PureFunctionParameterExpr { index: param_index, source_span: None },
-                allocator,
+                &allocator,
             )));
             param_index += 1;
         }
@@ -242,11 +242,11 @@ fn create_pure_function_for_derived_array<'a>(
 
     let body = IrExpression::DerivedLiteralArray(AllocBox::new_in(
         DerivedLiteralArrayExpr { entries: body_entries, spreads: body_spreads, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     Some(PureFunctionExpr {
-        body: Some(AllocBox::new_in(body, allocator)),
+        body: Some(AllocBox::new_in(body, &allocator)),
         args,
         fn_ref: None,     // Set by pure_function_extraction phase
         var_offset: None, // Set by var_counting phase
@@ -261,20 +261,20 @@ fn create_pure_function_for_ir_array<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) -> Option<PureFunctionExpr<'a>> {
-    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(allocator);
+    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
     let mut param_index: u32 = 0;
 
     for (i, expr) in elements.iter().enumerate() {
         let is_spread = spreads.get(i).copied().unwrap_or(false);
         if is_constant_ir_expression(expr, expressions) {
-            body_entries.push(resolve_expression_for_body(expr, allocator, expressions));
+            body_entries.push(resolve_expression_for_body(expr, &allocator, expressions));
         } else {
             args.push(expr.clone_in(allocator));
             body_entries.push(IrExpression::PureFunctionParameter(AllocBox::new_in(
                 PureFunctionParameterExpr { index: param_index, source_span: None },
-                allocator,
+                &allocator,
             )));
             param_index += 1;
         }
@@ -283,11 +283,11 @@ fn create_pure_function_for_ir_array<'a>(
 
     let body = IrExpression::DerivedLiteralArray(AllocBox::new_in(
         DerivedLiteralArrayExpr { entries: body_entries, spreads: body_spreads, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     Some(PureFunctionExpr {
-        body: Some(AllocBox::new_in(body, allocator)),
+        body: Some(AllocBox::new_in(body, &allocator)),
         args,
         fn_ref: None,     // Set by pure_function_extraction phase
         var_offset: None, // Set by var_counting phase
@@ -304,11 +304,11 @@ fn create_pure_function_for_ir_map<'a>(
     allocator: &'a oxc_allocator::Allocator,
     expressions: &ExpressionStore<'a>,
 ) -> Option<PureFunctionExpr<'a>> {
-    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_keys: AllocVec<'a, Ident<'a>> = AllocVec::new_in(allocator);
-    let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(allocator);
-    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(allocator);
+    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_keys: AllocVec<'a, Ident<'a>> = AllocVec::new_in(&allocator);
+    let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
+    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
     let mut param_index: u32 = 0;
 
     for (i, value) in values.iter().enumerate() {
@@ -322,14 +322,14 @@ fn create_pure_function_for_ir_map<'a>(
 
         if is_constant_ir_expression(value, expressions) {
             // Constant value: resolve and clone
-            body_values.push(resolve_expression_for_body(value, allocator, expressions));
+            body_values.push(resolve_expression_for_body(value, &allocator, expressions));
         } else {
             // Non-constant value: add to args and replace with PureFunctionParameterExpr
             args.push(value.clone_in(allocator));
 
             body_values.push(IrExpression::PureFunctionParameter(AllocBox::new_in(
                 PureFunctionParameterExpr { index: param_index, source_span: None },
-                allocator,
+                &allocator,
             )));
             param_index += 1;
         }
@@ -345,11 +345,11 @@ fn create_pure_function_for_ir_map<'a>(
             spreads: body_spreads,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     Some(PureFunctionExpr {
-        body: Some(AllocBox::new_in(body, allocator)),
+        body: Some(AllocBox::new_in(body, &allocator)),
         args,
         fn_ref: None,     // Set by pure_function_extraction phase
         var_offset: None, // Set by var_counting phase
@@ -366,9 +366,9 @@ fn create_pure_function_for_array<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> Option<PureFunctionExpr<'a>> {
     use crate::ast::expression::AngularExpression;
-    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(allocator);
+    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_entries: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
     let mut param_index: u32 = 0;
 
     for expr in expressions.iter() {
@@ -376,14 +376,14 @@ fn create_pure_function_for_array<'a>(
         let inner =
             if let AngularExpression::SpreadElement(s) = expr { &s.expression } else { expr };
         if is_constant_expression(inner) {
-            let cloned = clone_angular_expression(inner, allocator);
-            body_entries.push(IrExpression::Ast(AllocBox::new_in(cloned, allocator)));
+            let cloned = clone_angular_expression(inner, &allocator);
+            body_entries.push(IrExpression::Ast(AllocBox::new_in(cloned, &allocator)));
         } else {
-            let cloned = clone_angular_expression(inner, allocator);
-            args.push(IrExpression::Ast(AllocBox::new_in(cloned, allocator)));
+            let cloned = clone_angular_expression(inner, &allocator);
+            args.push(IrExpression::Ast(AllocBox::new_in(cloned, &allocator)));
             body_entries.push(IrExpression::PureFunctionParameter(AllocBox::new_in(
                 PureFunctionParameterExpr { index: param_index, source_span: None },
-                allocator,
+                &allocator,
             )));
             param_index += 1;
         }
@@ -392,11 +392,11 @@ fn create_pure_function_for_array<'a>(
 
     let body = IrExpression::DerivedLiteralArray(AllocBox::new_in(
         DerivedLiteralArrayExpr { entries: body_entries, spreads: body_spreads, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     Some(PureFunctionExpr {
-        body: Some(AllocBox::new_in(body, allocator)),
+        body: Some(AllocBox::new_in(body, &allocator)),
         args,
         fn_ref: None,     // Set by pure_function_extraction phase
         var_offset: None, // Set by var_counting phase
@@ -409,11 +409,11 @@ fn create_pure_function_for_map<'a>(
     map: &LiteralMap<'a>,
     allocator: &'a oxc_allocator::Allocator,
 ) -> Option<PureFunctionExpr<'a>> {
-    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_keys: AllocVec<'a, Ident<'a>> = AllocVec::new_in(allocator);
-    let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(allocator);
-    let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(allocator);
-    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(allocator);
+    let mut args: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_keys: AllocVec<'a, Ident<'a>> = AllocVec::new_in(&allocator);
+    let mut body_values: AllocVec<'a, IrExpression<'a>> = AllocVec::new_in(&allocator);
+    let mut body_quoted: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
+    let mut body_spreads: AllocVec<'a, bool> = AllocVec::new_in(&allocator);
     let mut param_index: u32 = 0;
 
     for (i, value) in map.values.iter().enumerate() {
@@ -433,16 +433,16 @@ fn create_pure_function_for_map<'a>(
 
         if is_constant_expression(value) {
             // Constant value: clone and wrap in IrExpression::Ast
-            let cloned = clone_angular_expression(value, allocator);
-            body_values.push(IrExpression::Ast(AllocBox::new_in(cloned, allocator)));
+            let cloned = clone_angular_expression(value, &allocator);
+            body_values.push(IrExpression::Ast(AllocBox::new_in(cloned, &allocator)));
         } else {
             // Non-constant value: add to args and replace with PureFunctionParameterExpr
-            let cloned = clone_angular_expression(value, allocator);
-            args.push(IrExpression::Ast(AllocBox::new_in(cloned, allocator)));
+            let cloned = clone_angular_expression(value, &allocator);
+            args.push(IrExpression::Ast(AllocBox::new_in(cloned, &allocator)));
 
             body_values.push(IrExpression::PureFunctionParameter(AllocBox::new_in(
                 PureFunctionParameterExpr { index: param_index, source_span: None },
-                allocator,
+                &allocator,
             )));
             param_index += 1;
         }
@@ -458,11 +458,11 @@ fn create_pure_function_for_map<'a>(
             spreads: body_spreads,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     Some(PureFunctionExpr {
-        body: Some(AllocBox::new_in(body, allocator)),
+        body: Some(AllocBox::new_in(body, &allocator)),
         args,
         fn_ref: None,     // Set by pure_function_extraction phase
         var_offset: None, // Set by var_counting phase
@@ -493,7 +493,7 @@ pub fn generate_pure_literal_structures_for_host(job: &mut HostBindingCompilatio
                     return;
                 }
 
-                transform_literal_structure(expr, allocator, expressions);
+                transform_literal_structure(expr, &allocator, expressions);
             },
             VisitorContextFlag::NONE,
         );

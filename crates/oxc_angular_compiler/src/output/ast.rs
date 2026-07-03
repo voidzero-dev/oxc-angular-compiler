@@ -343,42 +343,42 @@ impl<'a> OutputType<'a> {
 
 /// Create a dynamic type (any).
 pub fn dynamic_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Dynamic), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Dynamic), &allocator))
 }
 
 /// Create an inferred type.
 pub fn inferred_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Inferred), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Inferred), &allocator))
 }
 
 /// Create a bool type.
 pub fn bool_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Bool), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Bool), &allocator))
 }
 
 /// Create an int type.
 pub fn int_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Int), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Int), &allocator))
 }
 
 /// Create a number type.
 pub fn number_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Number), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Number), &allocator))
 }
 
 /// Create a string type.
 pub fn string_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::String), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::String), &allocator))
 }
 
 /// Create a function type.
 pub fn function_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Function), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::Function), &allocator))
 }
 
 /// Create a none type (void).
 pub fn none_type(allocator: &oxc_allocator::Allocator) -> OutputType<'_> {
-    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::None), allocator))
+    OutputType::Builtin(Box::new_in(BuiltinType::new(BuiltinTypeName::None), &allocator))
 }
 
 // ============================================================================
@@ -1115,23 +1115,23 @@ impl<'a> OutputExpression<'a> {
         match self {
             OutputExpression::Literal(e) => OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
-                    value: clone_literal_value(&e.value, allocator),
+                    value: clone_literal_value(&e.value, &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::LiteralArray(e) => {
-                let mut entries = Vec::with_capacity_in(e.entries.len(), allocator);
+                let mut entries = Vec::with_capacity_in(e.entries.len(), &allocator);
                 for entry in e.entries.iter() {
                     entries.push(entry.clone_in(allocator));
                 }
                 OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::LiteralMap(e) => {
-                let mut entries = Vec::with_capacity_in(e.entries.len(), allocator);
+                let mut entries = Vec::with_capacity_in(e.entries.len(), &allocator);
                 for entry in e.entries.iter() {
                     entries.push(LiteralMapEntry {
                         key: entry.key.clone(),
@@ -1142,7 +1142,7 @@ impl<'a> OutputExpression<'a> {
                 }
                 OutputExpression::LiteralMap(Box::new_in(
                     LiteralMapExpr { entries, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::RegularExpressionLiteral(e) => {
@@ -1152,11 +1152,11 @@ impl<'a> OutputExpression<'a> {
                         flags: e.flags.clone(),
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::TemplateLiteral(e) => {
-                let mut elements = Vec::with_capacity_in(e.elements.len(), allocator);
+                let mut elements = Vec::with_capacity_in(e.elements.len(), &allocator);
                 for elem in e.elements.iter() {
                     elements.push(TemplateLiteralElement {
                         text: elem.text.clone(),
@@ -1164,17 +1164,17 @@ impl<'a> OutputExpression<'a> {
                         source_span: elem.source_span,
                     });
                 }
-                let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+                let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
                 for expr in e.expressions.iter() {
                     expressions.push(expr.clone_in(allocator));
                 }
                 OutputExpression::TemplateLiteral(Box::new_in(
                     TemplateLiteralExpr { elements, expressions, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::TaggedTemplateLiteral(e) => {
-                let mut elements = Vec::with_capacity_in(e.template.elements.len(), allocator);
+                let mut elements = Vec::with_capacity_in(e.template.elements.len(), &allocator);
                 for elem in e.template.elements.iter() {
                     elements.push(TemplateLiteralElement {
                         text: elem.text.clone(),
@@ -1183,124 +1183,124 @@ impl<'a> OutputExpression<'a> {
                     });
                 }
                 let mut expressions =
-                    Vec::with_capacity_in(e.template.expressions.len(), allocator);
+                    Vec::with_capacity_in(e.template.expressions.len(), &allocator);
                 for expr in e.template.expressions.iter() {
                     expressions.push(expr.clone_in(allocator));
                 }
                 OutputExpression::TaggedTemplateLiteral(Box::new_in(
                     TaggedTemplateLiteralExpr {
-                        tag: Box::new_in(e.tag.clone_in(allocator), allocator),
+                        tag: Box::new_in(e.tag.clone_in(allocator), &allocator),
                         template: Box::new_in(
                             TemplateLiteralExpr {
                                 elements,
                                 expressions,
                                 source_span: e.template.source_span,
                             },
-                            allocator,
+                            &allocator,
                         ),
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::ReadVar(e) => OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: e.name.clone(), source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             OutputExpression::ReadProp(e) => OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                    receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                     name: e.name.clone(),
                     optional: e.optional,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::ReadKey(e) => OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
-                    index: Box::new_in(e.index.clone_in(allocator), allocator),
+                    receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
+                    index: Box::new_in(e.index.clone_in(allocator), &allocator),
                     optional: e.optional,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::BinaryOperator(e) => OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: e.operator,
-                    lhs: Box::new_in(e.lhs.clone_in(allocator), allocator),
-                    rhs: Box::new_in(e.rhs.clone_in(allocator), allocator),
+                    lhs: Box::new_in(e.lhs.clone_in(allocator), &allocator),
+                    rhs: Box::new_in(e.rhs.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::UnaryOperator(e) => OutputExpression::UnaryOperator(Box::new_in(
                 UnaryOperatorExpr {
                     operator: e.operator,
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     parens: e.parens,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Conditional(e) => OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(e.condition.clone_in(allocator), allocator),
-                    true_case: Box::new_in(e.true_case.clone_in(allocator), allocator),
+                    condition: Box::new_in(e.condition.clone_in(allocator), &allocator),
+                    true_case: Box::new_in(e.true_case.clone_in(allocator), &allocator),
                     false_case: e
                         .false_case
                         .as_ref()
-                        .map(|fc| Box::new_in(fc.clone_in(allocator), allocator)),
+                        .map(|fc| Box::new_in(fc.clone_in(allocator), &allocator)),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Not(e) => OutputExpression::Not(Box::new_in(
                 NotExpr {
-                    condition: Box::new_in(e.condition.clone_in(allocator), allocator),
+                    condition: Box::new_in(e.condition.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Typeof(e) => OutputExpression::Typeof(Box::new_in(
                 TypeofExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Void(e) => OutputExpression::Void(Box::new_in(
                 VoidExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Parenthesized(e) => OutputExpression::Parenthesized(Box::new_in(
                 ParenthesizedExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::Comma(e) => {
-                let mut parts = Vec::with_capacity_in(e.parts.len(), allocator);
+                let mut parts = Vec::with_capacity_in(e.parts.len(), &allocator);
                 for part in e.parts.iter() {
                     parts.push(part.clone_in(allocator));
                 }
                 OutputExpression::Comma(Box::new_in(
                     CommaExpr { parts, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::Function(e) => {
-                let mut params = Vec::with_capacity_in(e.params.len(), allocator);
+                let mut params = Vec::with_capacity_in(e.params.len(), &allocator);
                 for param in e.params.iter() {
                     params.push(FnParam { name: param.name.clone() });
                 }
-                let mut statements = Vec::with_capacity_in(e.statements.len(), allocator);
+                let mut statements = Vec::with_capacity_in(e.statements.len(), &allocator);
                 for stmt in e.statements.iter() {
-                    statements.push(clone_output_statement(stmt, allocator));
+                    statements.push(clone_output_statement(stmt, &allocator));
                 }
                 OutputExpression::Function(Box::new_in(
                     FunctionExpr {
@@ -1309,66 +1309,66 @@ impl<'a> OutputExpression<'a> {
                         statements,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::ArrowFunction(e) => {
-                let mut params = Vec::with_capacity_in(e.params.len(), allocator);
+                let mut params = Vec::with_capacity_in(e.params.len(), &allocator);
                 for param in e.params.iter() {
                     params.push(FnParam { name: param.name.clone() });
                 }
                 let body = match &e.body {
                     ArrowFunctionBody::Expression(expr) => ArrowFunctionBody::Expression(
-                        Box::new_in(expr.clone_in(allocator), allocator),
+                        Box::new_in(expr.clone_in(allocator), &allocator),
                     ),
                     ArrowFunctionBody::Statements(stmts) => {
-                        let mut statements = Vec::with_capacity_in(stmts.len(), allocator);
+                        let mut statements = Vec::with_capacity_in(stmts.len(), &allocator);
                         for stmt in stmts.iter() {
-                            statements.push(clone_output_statement(stmt, allocator));
+                            statements.push(clone_output_statement(stmt, &allocator));
                         }
                         ArrowFunctionBody::Statements(statements)
                     }
                 };
                 OutputExpression::ArrowFunction(Box::new_in(
                     ArrowFunctionExpr { params, body, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::InvokeFunction(e) => {
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
                 OutputExpression::InvokeFunction(Box::new_in(
                     InvokeFunctionExpr {
-                        fn_expr: Box::new_in(e.fn_expr.clone_in(allocator), allocator),
+                        fn_expr: Box::new_in(e.fn_expr.clone_in(allocator), &allocator),
                         args,
                         pure: e.pure,
                         optional: e.optional,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::Instantiate(e) => {
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
                 OutputExpression::Instantiate(Box::new_in(
                     InstantiateExpr {
-                        class_expr: Box::new_in(e.class_expr.clone_in(allocator), allocator),
+                        class_expr: Box::new_in(e.class_expr.clone_in(allocator), &allocator),
                         args,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::DynamicImport(e) => {
                 let url = match &e.url {
                     DynamicImportUrl::String(s) => DynamicImportUrl::String(s.clone()),
                     DynamicImportUrl::Expression(expr) => DynamicImportUrl::Expression(
-                        Box::new_in(expr.clone_in(allocator), allocator),
+                        Box::new_in(expr.clone_in(allocator), &allocator),
                     ),
                 };
                 OutputExpression::DynamicImport(Box::new_in(
@@ -1377,7 +1377,7 @@ impl<'a> OutputExpression<'a> {
                         url_comment: e.url_comment.clone(),
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::External(e) => OutputExpression::External(Box::new_in(
@@ -1388,19 +1388,19 @@ impl<'a> OutputExpression<'a> {
                     },
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::LocalizedString(e) => {
-                let mut message_parts = Vec::with_capacity_in(e.message_parts.len(), allocator);
+                let mut message_parts = Vec::with_capacity_in(e.message_parts.len(), &allocator);
                 for part in e.message_parts.iter() {
                     message_parts.push(part.clone());
                 }
                 let mut placeholder_names =
-                    Vec::with_capacity_in(e.placeholder_names.len(), allocator);
+                    Vec::with_capacity_in(e.placeholder_names.len(), &allocator);
                 for name in e.placeholder_names.iter() {
                     placeholder_names.push(name.clone());
                 }
-                let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+                let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
                 for expr in e.expressions.iter() {
                     expressions.push(expr.clone_in(allocator));
                 }
@@ -1414,12 +1414,12 @@ impl<'a> OutputExpression<'a> {
                         expressions,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::WrappedNode(e) => OutputExpression::WrappedNode(Box::new_in(
                 WrappedNodeExpr { node_id: e.node_id.clone(), source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             OutputExpression::WrappedIrNode(_) => {
                 // WrappedIrNode expressions wrap IR expressions for deferred processing.
@@ -1427,19 +1427,19 @@ impl<'a> OutputExpression<'a> {
                 // Return a placeholder undefined literal as a safe fallback.
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                    allocator,
+                    &allocator,
                 ))
             }
             OutputExpression::SpreadElement(e) => OutputExpression::SpreadElement(Box::new_in(
                 SpreadElementExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             OutputExpression::RawSource(e) => OutputExpression::RawSource(Box::new_in(
                 RawSourceExpr { source: e.source.clone(), source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
         }
     }
@@ -1537,16 +1537,16 @@ pub fn clone_output_statement<'a>(
                 leading_comment: s.leading_comment.clone(),
                 source_span: s.source_span,
             },
-            allocator,
+            &allocator,
         )),
         OutputStatement::DeclareFunction(s) => {
-            let mut params = Vec::with_capacity_in(s.params.len(), allocator);
+            let mut params = Vec::with_capacity_in(s.params.len(), &allocator);
             for param in s.params.iter() {
                 params.push(FnParam { name: param.name.clone() });
             }
-            let mut statements = Vec::with_capacity_in(s.statements.len(), allocator);
+            let mut statements = Vec::with_capacity_in(s.statements.len(), &allocator);
             for inner_stmt in s.statements.iter() {
-                statements.push(clone_output_statement(inner_stmt, allocator));
+                statements.push(clone_output_statement(inner_stmt, &allocator));
             }
             OutputStatement::DeclareFunction(Box::new_in(
                 DeclareFunctionStmt {
@@ -1556,25 +1556,25 @@ pub fn clone_output_statement<'a>(
                     modifiers: s.modifiers,
                     source_span: s.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         OutputStatement::Expression(s) => OutputStatement::Expression(Box::new_in(
             ExpressionStatement { expr: s.expr.clone_in(allocator), source_span: s.source_span },
-            allocator,
+            &allocator,
         )),
         OutputStatement::Return(s) => OutputStatement::Return(Box::new_in(
             ReturnStatement { value: s.value.clone_in(allocator), source_span: s.source_span },
-            allocator,
+            &allocator,
         )),
         OutputStatement::If(s) => {
-            let mut true_case = Vec::with_capacity_in(s.true_case.len(), allocator);
+            let mut true_case = Vec::with_capacity_in(s.true_case.len(), &allocator);
             for inner_stmt in s.true_case.iter() {
-                true_case.push(clone_output_statement(inner_stmt, allocator));
+                true_case.push(clone_output_statement(inner_stmt, &allocator));
             }
-            let mut false_case = Vec::with_capacity_in(s.false_case.len(), allocator);
+            let mut false_case = Vec::with_capacity_in(s.false_case.len(), &allocator);
             for inner_stmt in s.false_case.iter() {
-                false_case.push(clone_output_statement(inner_stmt, allocator));
+                false_case.push(clone_output_statement(inner_stmt, &allocator));
             }
             OutputStatement::If(Box::new_in(
                 IfStmt {
@@ -1583,7 +1583,7 @@ pub fn clone_output_statement<'a>(
                     false_case,
                     source_span: s.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
     }
@@ -1601,7 +1601,7 @@ impl OutputAstBuilder {
     pub fn null<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputExpression<'a> {
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -1612,7 +1612,7 @@ impl OutputAstBuilder {
     ) -> OutputExpression<'a> {
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(value), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -1620,7 +1620,7 @@ impl OutputAstBuilder {
     pub fn number<'a>(allocator: &'a oxc_allocator::Allocator, value: f64) -> OutputExpression<'a> {
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(value), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -1631,7 +1631,7 @@ impl OutputAstBuilder {
     ) -> OutputExpression<'a> {
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(value), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -1640,7 +1640,7 @@ impl OutputAstBuilder {
         allocator: &'a oxc_allocator::Allocator,
         name: Ident<'a>,
     ) -> OutputExpression<'a> {
-        OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, allocator))
+        OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, &allocator))
     }
 }
 

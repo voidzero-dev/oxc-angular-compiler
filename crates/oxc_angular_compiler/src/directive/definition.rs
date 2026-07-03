@@ -167,7 +167,7 @@ fn generate_fac_definition<'a>(
         Some(deps) => {
             // Clone deps into a new Vec for R3FactoryDeps
             let mut factory_deps: Vec<'a, R3DependencyMetadata<'a>> =
-                Vec::with_capacity_in(deps.len(), allocator);
+                Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 factory_deps.push(R3DependencyMetadata {
                     token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
@@ -191,7 +191,7 @@ fn generate_fac_definition<'a>(
                 R3FactoryDeps::None
             } else {
                 // Empty deps - constructor with no parameters
-                R3FactoryDeps::Valid(Vec::new_in(allocator))
+                R3FactoryDeps::Valid(Vec::new_in(&allocator))
             }
         }
     };
@@ -223,7 +223,7 @@ mod tests {
     fn create_test_metadata<'a>(allocator: &'a Allocator) -> R3DirectiveMetadata<'a> {
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         R3DirectiveMetadata {
@@ -232,18 +232,18 @@ mod tests {
             type_argument_count: 0,
             deps: None,
             selector: Some(Ident::from("[testDir]")),
-            queries: Vec::new_in(allocator),
-            view_queries: Vec::new_in(allocator),
+            queries: Vec::new_in(&allocator),
+            view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(allocator),
             uses_on_changes: false,
-            inputs: Vec::new_in(allocator),
-            outputs: Vec::new_in(allocator),
+            inputs: Vec::new_in(&allocator),
+            outputs: Vec::new_in(&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(allocator),
+            export_as: Vec::new_in(&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(allocator),
+            host_directives: Vec::new_in(&allocator),
         }
     }
 
@@ -297,7 +297,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ChildDirective"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
@@ -306,18 +306,18 @@ mod tests {
             type_argument_count: 0,
             deps: None, // No explicit constructor deps
             selector: Some(Ident::from("[childDir]")),
-            queries: Vec::new_in(&allocator),
-            view_queries: Vec::new_in(&allocator),
+            queries: Vec::new_in(&&allocator),
+            view_queries: Vec::new_in(&&allocator),
             host: R3HostMetadata::new(&allocator),
             uses_on_changes: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
+            inputs: Vec::new_in(&&allocator),
+            outputs: Vec::new_in(&&allocator),
             uses_inheritance: true, // Key: extends a base class
-            export_as: Vec::new_in(&allocator),
+            export_as: Vec::new_in(&&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(&allocator),
+            host_directives: Vec::new_in(&&allocator),
         };
 
         let fac = generate_fac_definition(&allocator, &metadata);
@@ -336,27 +336,27 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3DirectiveMetadata {
             name: Ident::from("TestDirective"),
             r#type: type_expr,
             type_argument_count: 0,
-            deps: Some(Vec::new_in(&allocator)), // Empty deps - has constructor but no params
+            deps: Some(Vec::new_in(&&allocator)), // Empty deps - has constructor but no params
             selector: Some(Ident::from("[testDir]")),
-            queries: Vec::new_in(&allocator),
-            view_queries: Vec::new_in(&allocator),
+            queries: Vec::new_in(&&allocator),
+            view_queries: Vec::new_in(&&allocator),
             host: R3HostMetadata::new(&allocator),
             uses_on_changes: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
+            inputs: Vec::new_in(&&allocator),
+            outputs: Vec::new_in(&&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(&allocator),
+            export_as: Vec::new_in(&&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(&allocator),
+            host_directives: Vec::new_in(&&allocator),
         };
 
         let fac = generate_fac_definition(&allocator, &metadata);
@@ -377,15 +377,15 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestDirective"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let dep_token = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("SomeService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
-        let mut deps = Vec::new_in(&allocator);
+        let mut deps = Vec::new_in(&&allocator);
         deps.push(crate::factory::R3DependencyMetadata::simple(dep_token));
 
         let metadata = R3DirectiveMetadata {
@@ -394,18 +394,18 @@ mod tests {
             type_argument_count: 0,
             deps: Some(deps),
             selector: Some(Ident::from("[testDir]")),
-            queries: Vec::new_in(&allocator),
-            view_queries: Vec::new_in(&allocator),
+            queries: Vec::new_in(&&allocator),
+            view_queries: Vec::new_in(&&allocator),
             host: R3HostMetadata::new(&allocator),
             uses_on_changes: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
+            inputs: Vec::new_in(&&allocator),
+            outputs: Vec::new_in(&&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(&allocator),
+            export_as: Vec::new_in(&&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(&allocator),
+            host_directives: Vec::new_in(&&allocator),
         };
 
         let fac = generate_fac_definition(&allocator, &metadata);
@@ -445,7 +445,7 @@ mod tests {
         // Create first directive with host bindings
         let type_expr1 = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("Dir1"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let mut host1 = R3HostMetadata::new(&allocator);
@@ -458,18 +458,18 @@ mod tests {
             type_argument_count: 0,
             deps: None,
             selector: Some(Ident::from("[dir1]")),
-            queries: Vec::new_in(&allocator),
-            view_queries: Vec::new_in(&allocator),
+            queries: Vec::new_in(&&allocator),
+            view_queries: Vec::new_in(&&allocator),
             host: host1,
             uses_on_changes: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
+            inputs: Vec::new_in(&&allocator),
+            outputs: Vec::new_in(&&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(&allocator),
+            export_as: Vec::new_in(&&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(&allocator),
+            host_directives: Vec::new_in(&&allocator),
         };
 
         // Compile first directive
@@ -484,7 +484,7 @@ mod tests {
         // Create second directive with host bindings using the returned pool index
         let type_expr2 = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("Dir2"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let mut host2 = R3HostMetadata::new(&allocator);
@@ -496,18 +496,18 @@ mod tests {
             type_argument_count: 0,
             deps: None,
             selector: Some(Ident::from("[dir2]")),
-            queries: Vec::new_in(&allocator),
-            view_queries: Vec::new_in(&allocator),
+            queries: Vec::new_in(&&allocator),
+            view_queries: Vec::new_in(&&allocator),
             host: host2,
             uses_on_changes: false,
-            inputs: Vec::new_in(&allocator),
-            outputs: Vec::new_in(&allocator),
+            inputs: Vec::new_in(&&allocator),
+            outputs: Vec::new_in(&&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(&allocator),
+            export_as: Vec::new_in(&&allocator),
             providers: None,
             is_standalone: true,
             is_signal: false,
-            host_directives: Vec::new_in(&allocator),
+            host_directives: Vec::new_in(&&allocator),
         };
 
         // Compile second directive starting from where first left off

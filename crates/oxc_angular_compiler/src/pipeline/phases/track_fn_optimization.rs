@@ -114,7 +114,7 @@ fn optimize_track_expression<'a>(
                 found_context.set(true);
                 *expr = IrExpression::TrackContext(oxc_allocator::Box::new_in(
                     TrackContextExpr { view: ctx.view, source_span: None },
-                    allocator,
+                    &allocator,
                 ));
             }
         },
@@ -135,21 +135,21 @@ fn optimize_track_expression<'a>(
     // We wrap the IR expression in WrappedIrNode so it will be resolved during reify
     let track_output = OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
         WrappedIrExpr {
-            node: oxc_allocator::Box::new_in(rep.track.clone_in(allocator), allocator),
+            node: oxc_allocator::Box::new_in(rep.track.clone_in(allocator), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     let return_stmt = OutputStatement::Return(oxc_allocator::Box::new_in(
         ReturnStatement { value: track_output, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     let statement_op =
         UpdateOp::Statement(StatementOp { base: UpdateOpBase::default(), statement: return_stmt });
 
-    let mut track_by_ops = oxc_allocator::Vec::new_in(allocator);
+    let mut track_by_ops = oxc_allocator::Vec::new_in(&allocator);
     track_by_ops.push(statement_op);
     rep.track_by_ops = Some(track_by_ops);
 }
@@ -312,34 +312,34 @@ mod tests {
     ) -> IrExpression<'a> {
         let ctx = IrExpression::Context(oxc_allocator::Box::new_in(
             ContextExpr { view: context_view, source_span: None },
-            alloc,
+            &alloc,
         ));
         let prop_read = IrExpression::ResolvedPropertyRead(oxc_allocator::Box::new_in(
             ResolvedPropertyReadExpr {
-                receiver: oxc_allocator::Box::new_in(ctx, alloc),
+                receiver: oxc_allocator::Box::new_in(ctx, &alloc),
                 name: Ident::from(method_name),
                 optional: false,
                 source_span: None,
             },
-            alloc,
+            &alloc,
         ));
         let index_arg = IrExpression::OutputExpr(oxc_allocator::Box::new_in(
             OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                 ReadVarExpr { name: Ident::from("$index"), source_span: None },
-                alloc,
+                &alloc,
             )),
-            alloc,
+            &alloc,
         ));
-        let mut args = oxc_allocator::Vec::new_in(alloc);
+        let mut args = oxc_allocator::Vec::new_in(&alloc);
         args.push(index_arg);
         IrExpression::ResolvedCall(oxc_allocator::Box::new_in(
             ResolvedCallExpr {
-                receiver: oxc_allocator::Box::new_in(prop_read, alloc),
+                receiver: oxc_allocator::Box::new_in(prop_read, &alloc),
                 args,
                 optional: false,
                 source_span: None,
             },
-            alloc,
+            &alloc,
         ))
     }
 

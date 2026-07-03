@@ -13,7 +13,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 

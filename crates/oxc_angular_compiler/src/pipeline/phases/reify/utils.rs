@@ -30,31 +30,31 @@ pub fn create_instruction_call_stmt<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(instruction),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     let invoke = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     OutputStatement::Expression(Box::new_in(
         ExpressionStatement { expr: invoke, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -69,26 +69,26 @@ pub fn create_instruction_call_expr<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(instruction),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 

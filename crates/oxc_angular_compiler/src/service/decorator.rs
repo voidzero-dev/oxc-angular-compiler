@@ -118,7 +118,7 @@ impl<'a> ServiceMetadata<'a> {
     ) -> R3ServiceMetadata<'a> {
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: self.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         let factory = self.factory.and_then(|src| parse_factory_expression(allocator, src));

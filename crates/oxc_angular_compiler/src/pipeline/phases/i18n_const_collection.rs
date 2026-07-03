@@ -170,7 +170,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
 
         // Collect messages recursively and generate statements
         let (main_var_name, statements) = collect_message(
-            allocator,
+            &allocator,
             &messages,
             &params_by_context,
             &msg_info,
@@ -185,7 +185,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
             let var_name_str = allocator.alloc_str(&main_var_name);
             let main_var = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                 ReadVarExpr { name: Ident::from(var_name_str), source_span: None },
-                allocator,
+                &allocator,
             ));
             let const_index =
                 job.add_const_with_initializers(ConstValue::Expression(main_var), statements);
@@ -220,13 +220,13 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
                                                 name: var_name_atom.clone(),
                                                 source_span: None,
                                             },
-                                            allocator,
+                                            &allocator,
                                         ));
                                     attr_op.value = Some(oxc_allocator::Box::new_in(
                                         crate::ir::expression::IrExpression::OutputExpr(
-                                            oxc_allocator::Box::new_in(var_expr, allocator),
+                                            oxc_allocator::Box::new_in(var_expr, &allocator),
                                         ),
-                                        allocator,
+                                        &allocator,
                                     ));
                                 }
                             }
@@ -323,13 +323,13 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
                         value: LiteralValue::String(Ident::from(name_str)),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
 
                 // Add i18n variable reference
                 let i18n_var = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                     ReadVarExpr { name: i18n_var_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 ));
 
                 Some(vec![name_literal, i18n_var])
@@ -339,7 +339,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
 
         if !i18n_attribute_config.is_empty() {
             // Create array expression and add to consts
-            let mut config_elements = ArenaVec::new_in(allocator);
+            let mut config_elements = ArenaVec::new_in(&allocator);
             config_elements.extend(i18n_attribute_config);
 
             let config_array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
@@ -347,7 +347,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
                     entries: config_elements,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             let const_index = job.add_const(ConstValue::Expression(config_array));
             i18n_attrs_configs.insert(config.elem_xref, const_index);
@@ -450,14 +450,14 @@ fn collect_message<'a>(
     use_external_ids: bool,
     counter: &mut usize,
 ) -> (String, ArenaVec<'a, OutputStatement<'a>>) {
-    let mut all_statements = ArenaVec::new_in(allocator);
+    let mut all_statements = ArenaVec::new_in(&allocator);
 
     // Recursively collect sub-messages first
     let mut sub_message_placeholders: FxHashMap<String, Vec<String>> = FxHashMap::default();
     for &sub_msg_xref in &msg_info.sub_messages {
         if let Some(sub_msg) = messages.get(&sub_msg_xref) {
             let (sub_var_name, sub_statements) = collect_message(
-                allocator,
+                &allocator,
                 messages,
                 params_by_context,
                 sub_msg,
@@ -526,7 +526,7 @@ fn collect_message<'a>(
 
     // Create $localize expression
     let localized_expr = create_localize_expression(
-        allocator,
+        &allocator,
         &message_for_closure,
         &params,
         msg_info.description.clone(),
@@ -546,7 +546,7 @@ fn collect_message<'a>(
     let closure_var_atom = Ident::from(allocator.alloc_str(&closure_var_name));
 
     let statements = create_translation_declaration(
-        allocator,
+        &allocator,
         i18n_var_atom,
         closure_var_atom,
         &message_for_closure,
@@ -627,9 +627,9 @@ fn create_localize_expression<'a>(
     // Parse message_string to extract text parts and placeholder names in order
     let (text_parts, placeholder_order) = parse_message_string(message_string);
 
-    let mut message_parts = ArenaVec::new_in(allocator);
-    let mut placeholder_names = ArenaVec::new_in(allocator);
-    let mut expressions = ArenaVec::new_in(allocator);
+    let mut message_parts = ArenaVec::new_in(&allocator);
+    let mut placeholder_names = ArenaVec::new_in(&allocator);
+    let mut expressions = ArenaVec::new_in(&allocator);
 
     // Build a map from placeholder name to value for quick lookup
     let params_map: FxHashMap<String, String> =
@@ -660,7 +660,7 @@ fn create_localize_expression<'a>(
                 value: LiteralValue::String(Ident::from(value_str)),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         expressions.push(literal_expr);
 
@@ -695,7 +695,7 @@ fn create_localize_expression<'a>(
             expressions,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -830,36 +830,36 @@ fn wrap_with_postprocess<'a>(
             receiver: oxc_allocator::Box::new_in(
                 OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(Identifiers::I18N_POSTPROCESS),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create args array with the localized expression
-    let mut args = ArenaVec::new_in(allocator);
+    let mut args = ArenaVec::new_in(&allocator);
     args.push(expr);
 
     // Add postprocessing params if any
     if !postprocessing_params.is_empty() {
-        let mut entries = ArenaVec::new_in(allocator);
+        let mut entries = ArenaVec::new_in(&allocator);
         for (placeholder, var_names) in postprocessing_params {
             // Format placeholder name
             let formatted_name = format_i18n_placeholder_name(placeholder, false);
             let key_str = allocator.alloc_str(&formatted_name);
 
             // Create array of variable references
-            let mut var_refs = ArenaVec::new_in(allocator);
+            let mut var_refs = ArenaVec::new_in(&allocator);
             for var_name in var_names {
                 let var_str = allocator.alloc_str(var_name);
                 var_refs.push(OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                     ReadVarExpr { name: Ident::from(var_str), source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -867,7 +867,7 @@ fn wrap_with_postprocess<'a>(
                 Ident::from(key_str),
                 OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                     LiteralArrayExpr { entries: var_refs, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
                 true,
             ));
@@ -875,20 +875,20 @@ fn wrap_with_postprocess<'a>(
 
         args.push(OutputExpression::LiteralMap(oxc_allocator::Box::new_in(
             LiteralMapExpr { entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     // Create the function call: ɵɵi18nPostprocess(localizedExpr, params?)
     OutputExpression::InvokeFunction(oxc_allocator::Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: oxc_allocator::Box::new_in(fn_var, allocator),
+            fn_expr: oxc_allocator::Box::new_in(fn_var, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -916,7 +916,7 @@ mod tests {
                 value: LiteralValue::String(Ident::from("test message")),
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         // Call wrap_with_postprocess with no extra params
@@ -942,7 +942,7 @@ mod tests {
 
         let input_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
             ReadVarExpr { name: Ident::from("i18n_0"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let params = vec![("ICU_0".to_string(), vec!["i18n_1".to_string(), "i18n_2".to_string()])];

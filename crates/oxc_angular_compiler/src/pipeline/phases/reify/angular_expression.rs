@@ -123,7 +123,7 @@ fn convert_angular_expression_with_ctx<'a>(
             };
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value, source_span: Some(lit.source_span.to_span()) },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -134,7 +134,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     name: Ident::from("ctx"),
                     source_span: Some(ir.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -145,7 +145,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     name: Ident::from("ctx"),
                     source_span: Some(tr.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -159,7 +159,7 @@ fn convert_angular_expression_with_ctx<'a>(
                             name: Ident::from("$event"),
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     ));
                 }
             }
@@ -167,12 +167,12 @@ fn convert_angular_expression_with_ctx<'a>(
                 convert_angular_expression_with_ctx(allocator, &prop.receiver, root_xref, ctx);
             OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
                     name: prop.name.clone(),
                     optional: false,
                     source_span: Some(prop.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -182,31 +182,31 @@ fn convert_angular_expression_with_ctx<'a>(
             let key = convert_angular_expression_with_ctx(allocator, &keyed.key, root_xref, ctx);
             OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver, allocator),
-                    index: Box::new_in(key, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
+                    index: Box::new_in(key, &allocator),
                     optional: false,
                     source_span: Some(keyed.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         AngularExpression::Call(call) => {
             let receiver =
                 convert_angular_expression_with_ctx(allocator, &call.receiver, root_xref, ctx);
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             for arg in call.args.iter() {
                 args.push(convert_angular_expression_with_ctx(allocator, arg, root_xref, ctx));
             }
             OutputExpression::InvokeFunction(Box::new_in(
                 InvokeFunctionExpr {
-                    fn_expr: Box::new_in(receiver, allocator),
+                    fn_expr: Box::new_in(receiver, &allocator),
                     args,
                     pure: false,
                     optional: false,
                     source_span: Some(call.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -248,11 +248,11 @@ fn convert_angular_expression_with_ctx<'a>(
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: op,
-                    lhs: Box::new_in(left, allocator),
-                    rhs: Box::new_in(right, allocator),
+                    lhs: Box::new_in(left, &allocator),
+                    rhs: Box::new_in(right, &allocator),
                     source_span: Some(bin.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -266,11 +266,11 @@ fn convert_angular_expression_with_ctx<'a>(
             OutputExpression::UnaryOperator(Box::new_in(
                 UnaryOperatorExpr {
                     operator: op,
-                    expr: Box::new_in(operand, allocator),
+                    expr: Box::new_in(operand, &allocator),
                     parens: false,
                     source_span: Some(unary.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -279,10 +279,10 @@ fn convert_angular_expression_with_ctx<'a>(
                 convert_angular_expression_with_ctx(allocator, &not.expression, root_xref, ctx);
             OutputExpression::Not(Box::new_in(
                 NotExpr {
-                    condition: Box::new_in(operand, allocator),
+                    condition: Box::new_in(operand, &allocator),
                     source_span: Some(not.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -295,31 +295,31 @@ fn convert_angular_expression_with_ctx<'a>(
                 convert_angular_expression_with_ctx(allocator, &cond.false_exp, root_xref, ctx);
             OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(condition, allocator),
-                    true_case: Box::new_in(true_case, allocator),
-                    false_case: Some(Box::new_in(false_case, allocator)),
+                    condition: Box::new_in(condition, &allocator),
+                    true_case: Box::new_in(true_case, &allocator),
+                    false_case: Some(Box::new_in(false_case, &allocator)),
                     source_span: Some(cond.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         AngularExpression::LiteralArray(arr) => {
-            let mut entries = OxcVec::new_in(allocator);
+            let mut entries = OxcVec::new_in(&allocator);
             for entry in arr.expressions.iter() {
                 if let AngularExpression::SpreadElement(spread) = entry {
                     let inner = convert_angular_expression_with_ctx(
-                        allocator,
+                        &allocator,
                         &spread.expression,
                         root_xref,
                         ctx,
                     );
                     entries.push(OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
-                            expr: Box::new_in(inner, allocator),
+                            expr: Box::new_in(inner, &allocator),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 } else {
                     entries.push(convert_angular_expression_with_ctx(
@@ -329,13 +329,13 @@ fn convert_angular_expression_with_ctx<'a>(
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: Some(arr.source_span.to_span()) },
-                allocator,
+                &allocator,
             ))
         }
 
         AngularExpression::LiteralMap(map) => {
             use crate::ast::expression::LiteralMapKey;
-            let mut entries = OxcVec::new_in(allocator);
+            let mut entries = OxcVec::new_in(&allocator);
             for (i, key) in map.keys.iter().enumerate() {
                 if i < map.values.len() {
                     match key {
@@ -343,7 +343,7 @@ fn convert_angular_expression_with_ctx<'a>(
                             entries.push(LiteralMapEntry::new(
                                 prop.key.clone(),
                                 convert_angular_expression_with_ctx(
-                                    allocator,
+                                    &allocator,
                                     &map.values[i],
                                     root_xref,
                                     ctx,
@@ -354,7 +354,7 @@ fn convert_angular_expression_with_ctx<'a>(
                         LiteralMapKey::Spread(_) => {
                             entries.push(LiteralMapEntry::spread(
                                 convert_angular_expression_with_ctx(
-                                    allocator,
+                                    &allocator,
                                     &map.values[i],
                                     root_xref,
                                     ctx,
@@ -366,7 +366,7 @@ fn convert_angular_expression_with_ctx<'a>(
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: Some(map.source_span.to_span()) },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -375,7 +375,7 @@ fn convert_angular_expression_with_ctx<'a>(
                 value: LiteralValue::Undefined,
                 source_span: Some(empty.source_span.to_span()),
             },
-            allocator,
+            &allocator,
         )),
 
         AngularExpression::BindingPipe(pipe) => {
@@ -397,7 +397,7 @@ fn convert_angular_expression_with_ctx<'a>(
                 let temp_var_read = || {
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: temp_name.clone(), source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 };
 
@@ -409,11 +409,11 @@ fn convert_angular_expression_with_ctx<'a>(
                 let assign = OutputExpression::BinaryOperator(Box::new_in(
                     BinaryOperatorExpr {
                         operator: BinaryOperator::Assign,
-                        lhs: Box::new_in(temp_var_read(), allocator),
-                        rhs: Box::new_in(receiver, allocator),
+                        lhs: Box::new_in(temp_var_read(), &allocator),
+                        rhs: Box::new_in(receiver, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
 
                 // Create: ((tmp = receiver) == null ? null : tmp.prop)
@@ -421,19 +421,19 @@ fn convert_angular_expression_with_ctx<'a>(
                     // Expr: tmp.prop
                     OutputExpression::ReadProp(Box::new_in(
                         ReadPropExpr {
-                            receiver: Box::new_in(temp_var_read(), allocator),
+                            receiver: Box::new_in(temp_var_read(), &allocator),
                             name: safe.name.clone(),
                             optional: false,
                             source_span: span,
                         },
-                        allocator,
+                        &allocator,
                     ))
                 });
 
                 // Wrap in parentheses for proper grouping
                 OutputExpression::Parenthesized(Box::new_in(
-                    ParenthesizedExpr { expr: Box::new_in(ternary, allocator), source_span: span },
-                    allocator,
+                    ParenthesizedExpr { expr: Box::new_in(ternary, &allocator), source_span: span },
+                    &allocator,
                 ))
             } else {
                 // Simple case: convert receiver twice (safe for simple expressions)
@@ -445,49 +445,49 @@ fn convert_angular_expression_with_ctx<'a>(
                 let null_check = OutputExpression::BinaryOperator(Box::new_in(
                     BinaryOperatorExpr {
                         operator: BinaryOperator::Equals,
-                        lhs: Box::new_in(receiver_for_check, allocator),
+                        lhs: Box::new_in(receiver_for_check, &allocator),
                         rhs: Box::new_in(
                             OutputExpression::Literal(Box::new_in(
                                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 let prop_read = OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
-                        receiver: Box::new_in(receiver_for_prop, allocator),
+                        receiver: Box::new_in(receiver_for_prop, &allocator),
                         name: safe.name.clone(),
                         optional: false,
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 let conditional = OutputExpression::Conditional(Box::new_in(
                     ConditionalExpr {
-                        condition: Box::new_in(null_check, allocator),
+                        condition: Box::new_in(null_check, &allocator),
                         true_case: Box::new_in(
                             OutputExpression::Literal(Box::new_in(
                                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
-                        false_case: Some(Box::new_in(prop_read, allocator)),
+                        false_case: Some(Box::new_in(prop_read, &allocator)),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 // Wrap in parentheses for correct operator precedence
                 OutputExpression::Parenthesized(Box::new_in(
                     ParenthesizedExpr {
-                        expr: Box::new_in(conditional, allocator),
+                        expr: Box::new_in(conditional, &allocator),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -505,7 +505,7 @@ fn convert_angular_expression_with_ctx<'a>(
                 let temp_var_read = || {
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: temp_name.clone(), source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 };
 
@@ -517,11 +517,11 @@ fn convert_angular_expression_with_ctx<'a>(
                 let assign = OutputExpression::BinaryOperator(Box::new_in(
                     BinaryOperatorExpr {
                         operator: BinaryOperator::Assign,
-                        lhs: Box::new_in(temp_var_read(), allocator),
-                        rhs: Box::new_in(receiver, allocator),
+                        lhs: Box::new_in(temp_var_read(), &allocator),
+                        rhs: Box::new_in(receiver, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
 
                 // Create: ((tmp = receiver) == null ? null : tmp[key])
@@ -529,19 +529,19 @@ fn convert_angular_expression_with_ctx<'a>(
                     // Expr: tmp[key]
                     OutputExpression::ReadKey(Box::new_in(
                         ReadKeyExpr {
-                            receiver: Box::new_in(temp_var_read(), allocator),
-                            index: Box::new_in(key.clone_in(allocator), allocator),
+                            receiver: Box::new_in(temp_var_read(), &allocator),
+                            index: Box::new_in(key.clone_in(allocator), &allocator),
                             optional: false,
                             source_span: span,
                         },
-                        allocator,
+                        &allocator,
                     ))
                 });
 
                 // Wrap in parentheses for proper grouping
                 OutputExpression::Parenthesized(Box::new_in(
-                    ParenthesizedExpr { expr: Box::new_in(ternary, allocator), source_span: span },
-                    allocator,
+                    ParenthesizedExpr { expr: Box::new_in(ternary, &allocator), source_span: span },
+                    &allocator,
                 ))
             } else {
                 // Simple case: convert receiver twice (safe for simple expressions)
@@ -556,53 +556,53 @@ fn convert_angular_expression_with_ctx<'a>(
                             OutputExpression::BinaryOperator(Box::new_in(
                                 BinaryOperatorExpr {
                                     operator: BinaryOperator::Equals,
-                                    lhs: Box::new_in(receiver_for_check, allocator),
+                                    lhs: Box::new_in(receiver_for_check, &allocator),
                                     rhs: Box::new_in(
                                         OutputExpression::Literal(Box::new_in(
                                             LiteralExpr {
                                                 value: LiteralValue::Null,
                                                 source_span: None,
                                             },
-                                            allocator,
+                                            &allocator,
                                         )),
-                                        allocator,
+                                        &allocator,
                                     ),
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         true_case: Box::new_in(
                             OutputExpression::Literal(Box::new_in(
                                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         false_case: Some(Box::new_in(
                             OutputExpression::ReadKey(Box::new_in(
                                 ReadKeyExpr {
-                                    receiver: Box::new_in(receiver_for_access, allocator),
-                                    index: Box::new_in(key, allocator),
+                                    receiver: Box::new_in(receiver_for_access, &allocator),
+                                    index: Box::new_in(key, &allocator),
                                     optional: false,
                                     source_span: span,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         )),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 // Wrap in parentheses for correct operator precedence
                 OutputExpression::Parenthesized(Box::new_in(
                     ParenthesizedExpr {
-                        expr: Box::new_in(conditional, allocator),
+                        expr: Box::new_in(conditional, &allocator),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -619,7 +619,7 @@ fn convert_angular_expression_with_ctx<'a>(
                 let temp_var_read = || {
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: temp_name.clone(), source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 };
 
@@ -631,15 +631,15 @@ fn convert_angular_expression_with_ctx<'a>(
                 let assign = OutputExpression::BinaryOperator(Box::new_in(
                     BinaryOperatorExpr {
                         operator: BinaryOperator::Assign,
-                        lhs: Box::new_in(temp_var_read(), allocator),
-                        rhs: Box::new_in(receiver, allocator),
+                        lhs: Box::new_in(temp_var_read(), &allocator),
+                        rhs: Box::new_in(receiver, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
 
                 // Convert args for the call inside the ternary
-                let mut args = OxcVec::new_in(allocator);
+                let mut args = OxcVec::new_in(&allocator);
                 for arg in safe.args.iter() {
                     args.push(convert_angular_expression_with_ctx(allocator, arg, root_xref, ctx));
                 }
@@ -647,20 +647,20 @@ fn convert_angular_expression_with_ctx<'a>(
                 // Create: ((tmp = receiver) == null ? null : tmp())
                 let call = OutputExpression::InvokeFunction(Box::new_in(
                     InvokeFunctionExpr {
-                        fn_expr: Box::new_in(temp_var_read(), allocator),
+                        fn_expr: Box::new_in(temp_var_read(), &allocator),
                         args,
                         pure: false,
                         optional: false,
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 let ternary = safe_ternary_with_temp(allocator, assign, || call);
 
                 // Wrap in parentheses for proper grouping
                 OutputExpression::Parenthesized(Box::new_in(
-                    ParenthesizedExpr { expr: Box::new_in(ternary, allocator), source_span: span },
-                    allocator,
+                    ParenthesizedExpr { expr: Box::new_in(ternary, &allocator), source_span: span },
+                    &allocator,
                 ))
             } else {
                 // Simple case: convert receiver twice (safe for simple expressions)
@@ -670,20 +670,20 @@ fn convert_angular_expression_with_ctx<'a>(
                     convert_angular_expression_with_ctx(allocator, &safe.receiver, root_xref, ctx);
 
                 // Convert args
-                let mut args = OxcVec::new_in(allocator);
+                let mut args = OxcVec::new_in(&allocator);
                 for arg in safe.args.iter() {
                     args.push(convert_angular_expression_with_ctx(allocator, arg, root_xref, ctx));
                 }
 
                 let call = OutputExpression::InvokeFunction(Box::new_in(
                     InvokeFunctionExpr {
-                        fn_expr: Box::new_in(receiver_for_call, allocator),
+                        fn_expr: Box::new_in(receiver_for_call, &allocator),
                         args,
                         pure: false,
                         optional: false,
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 let conditional = OutputExpression::Conditional(Box::new_in(
                     ConditionalExpr {
@@ -691,42 +691,42 @@ fn convert_angular_expression_with_ctx<'a>(
                             OutputExpression::BinaryOperator(Box::new_in(
                                 BinaryOperatorExpr {
                                     operator: BinaryOperator::Equals,
-                                    lhs: Box::new_in(receiver_for_check, allocator),
+                                    lhs: Box::new_in(receiver_for_check, &allocator),
                                     rhs: Box::new_in(
                                         OutputExpression::Literal(Box::new_in(
                                             LiteralExpr {
                                                 value: LiteralValue::Null,
                                                 source_span: None,
                                             },
-                                            allocator,
+                                            &allocator,
                                         )),
-                                        allocator,
+                                        &allocator,
                                     ),
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         true_case: Box::new_in(
                             OutputExpression::Literal(Box::new_in(
                                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
-                        false_case: Some(Box::new_in(call, allocator)),
+                        false_case: Some(Box::new_in(call, &allocator)),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 // Wrap in parentheses for correct operator precedence
                 OutputExpression::Parenthesized(Box::new_in(
                     ParenthesizedExpr {
-                        expr: Box::new_in(conditional, allocator),
+                        expr: Box::new_in(conditional, &allocator),
                         source_span: span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -749,7 +749,7 @@ fn convert_angular_expression_with_ctx<'a>(
                         value: LiteralValue::Undefined,
                         source_span: Some(chain.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -766,7 +766,7 @@ fn convert_angular_expression_with_ctx<'a>(
                         value: LiteralValue::String(Ident::from("")),
                         source_span: Some(interp.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -776,10 +776,10 @@ fn convert_angular_expression_with_ctx<'a>(
                 convert_angular_expression_with_ctx(allocator, &te.expression, root_xref, ctx);
             OutputExpression::Typeof(Box::new_in(
                 TypeofExpr {
-                    expr: Box::new_in(operand, allocator),
+                    expr: Box::new_in(operand, &allocator),
                     source_span: Some(te.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -788,10 +788,10 @@ fn convert_angular_expression_with_ctx<'a>(
                 convert_angular_expression_with_ctx(allocator, &ve.expression, root_xref, ctx);
             OutputExpression::Void(Box::new_in(
                 VoidExpr {
-                    expr: Box::new_in(operand, allocator),
+                    expr: Box::new_in(operand, &allocator),
                     source_span: Some(ve.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -803,8 +803,8 @@ fn convert_angular_expression_with_ctx<'a>(
 
         AngularExpression::TemplateLiteral(tl) => {
             // Convert template literal: `text ${expr} more text`
-            let mut elements = OxcVec::new_in(allocator);
-            let mut expressions = OxcVec::new_in(allocator);
+            let mut elements = OxcVec::new_in(&allocator);
+            let mut expressions = OxcVec::new_in(&allocator);
 
             for elem in tl.elements.iter() {
                 elements.push(TemplateLiteralElement {
@@ -825,7 +825,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     expressions,
                     source_span: Some(tl.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -833,8 +833,8 @@ fn convert_angular_expression_with_ctx<'a>(
             // Convert tagged template literal: tag`text ${expr}`
             let tag = convert_angular_expression_with_ctx(allocator, &ttl.tag, root_xref, ctx);
 
-            let mut elements = OxcVec::new_in(allocator);
-            let mut expressions = OxcVec::new_in(allocator);
+            let mut elements = OxcVec::new_in(&allocator);
+            let mut expressions = OxcVec::new_in(&allocator);
 
             for elem in ttl.template.elements.iter() {
                 elements.push(TemplateLiteralElement {
@@ -857,11 +857,11 @@ fn convert_angular_expression_with_ctx<'a>(
 
             OutputExpression::TaggedTemplateLiteral(Box::new_in(
                 TaggedTemplateLiteralExpr {
-                    tag: Box::new_in(tag, allocator),
-                    template: Box::new_in(template, allocator),
+                    tag: Box::new_in(tag, &allocator),
+                    template: Box::new_in(template, &allocator),
                     source_span: Some(ttl.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -873,7 +873,7 @@ fn convert_angular_expression_with_ctx<'a>(
                     flags: re.flags.clone(),
                     source_span: Some(re.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -884,7 +884,7 @@ fn convert_angular_expression_with_ctx<'a>(
 
         // Arrow function - convert to OutputExpression::ArrowFunction
         AngularExpression::ArrowFunction(arrow) => {
-            let mut params = OxcVec::new_in(allocator);
+            let mut params = OxcVec::new_in(&allocator);
             for p in arrow.parameters.iter() {
                 params.push(FnParam { name: p.name.clone() });
             }
@@ -894,10 +894,10 @@ fn convert_angular_expression_with_ctx<'a>(
             OutputExpression::ArrowFunction(Box::new_in(
                 ArrowFunctionExpr {
                     params,
-                    body: ArrowFunctionBody::Expression(Box::new_in(body, allocator)),
+                    body: ArrowFunctionBody::Expression(Box::new_in(body, &allocator)),
                     source_span: Some(arrow.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             ))
         }
     }
@@ -923,30 +923,30 @@ where
                 OutputExpression::BinaryOperator(Box::new_in(
                     BinaryOperatorExpr {
                         operator: BinaryOperator::Equals,
-                        lhs: Box::new_in(guard, allocator),
+                        lhs: Box::new_in(guard, &allocator),
                         rhs: Box::new_in(
                             OutputExpression::Literal(Box::new_in(
                                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             true_case: Box::new_in(
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Null, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            false_case: Some(Box::new_in(make_expr(), allocator)),
+            false_case: Some(Box::new_in(make_expr(), &allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }

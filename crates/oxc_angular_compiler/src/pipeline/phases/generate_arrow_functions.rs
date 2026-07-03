@@ -40,7 +40,7 @@ pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
                     transform_expressions_in_create_op(
                         op,
                         &|expr, flags| {
-                            add_arrow_function(expr, allocator, flags);
+                            add_arrow_function(expr, &allocator, flags);
                         },
                         VisitorContextFlag::NONE,
                     );
@@ -52,7 +52,7 @@ pub fn generate_arrow_functions(job: &mut ComponentCompilationJob<'_>) {
                 transform_expressions_in_update_op(
                     op,
                     &|expr, flags| {
-                        add_arrow_function(expr, allocator, flags);
+                        add_arrow_function(expr, &allocator, flags);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -97,8 +97,8 @@ fn add_arrow_function<'a>(
         if let crate::output::ast::OutputExpression::ArrowFunction(arrow_fn) = output_expr.as_ref()
         {
             // Convert output arrow function to IR arrow function
-            if let Some(ir_arrow_fn) = convert_output_arrow_to_ir(arrow_fn.as_ref(), allocator) {
-                *expr = IrExpression::ArrowFunction(AllocBox::new_in(ir_arrow_fn, allocator));
+            if let Some(ir_arrow_fn) = convert_output_arrow_to_ir(arrow_fn.as_ref(), &allocator) {
+                *expr = IrExpression::ArrowFunction(AllocBox::new_in(ir_arrow_fn, &allocator));
             }
         }
     }
@@ -117,7 +117,7 @@ fn convert_output_arrow_to_ir<'a>(
         ArrowFunctionBody::Expression(expr) => {
             // Wrap the output expression in an IrExpression::OutputExpr
             // It will be converted later in the reify phase
-            IrExpression::OutputExpr(AllocBox::new_in(expr.clone_in(allocator), allocator))
+            IrExpression::OutputExpr(AllocBox::new_in(expr.clone_in(allocator), &allocator))
         }
         ArrowFunctionBody::Statements(_) => {
             // The expression syntax doesn't support multi-line arrow functions,
@@ -128,15 +128,15 @@ fn convert_output_arrow_to_ir<'a>(
     };
 
     // Clone parameters
-    let mut params: AllocVec<'a, FnParam<'a>> = AllocVec::new_in(allocator);
+    let mut params: AllocVec<'a, FnParam<'a>> = AllocVec::new_in(&allocator);
     for param in arrow_fn.params.iter() {
         params.push(FnParam { name: param.name.clone() });
     }
 
     Some(ArrowFunctionExpr {
         params,
-        body: AllocBox::new_in(body, allocator),
-        ops: AllocVec::new_in(allocator),
+        body: AllocBox::new_in(body, &allocator),
+        ops: AllocVec::new_in(&allocator),
         var_offset: None,
         source_span: arrow_fn.source_span,
     })
@@ -156,7 +156,7 @@ pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>
             transform_expressions_in_create_op(
                 op,
                 &|expr, flags| {
-                    add_arrow_function(expr, allocator, flags);
+                    add_arrow_function(expr, &allocator, flags);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -168,7 +168,7 @@ pub fn generate_arrow_functions_for_host(job: &mut HostBindingCompilationJob<'_>
         transform_expressions_in_update_op(
             op,
             &|expr, flags| {
-                add_arrow_function(expr, allocator, flags);
+                add_arrow_function(expr, &allocator, flags);
             },
             VisitorContextFlag::NONE,
         );

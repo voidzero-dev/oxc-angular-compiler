@@ -44,7 +44,7 @@ pub fn convert_ir_expression<'a>(
             };
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: var_name, source_span: var.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -53,7 +53,7 @@ pub fn convert_ir_expression<'a>(
             // This becomes `ctx` in the generated code
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("ctx"), source_span: ctx.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -64,7 +64,7 @@ pub fn convert_ir_expression<'a>(
             if lexical.name.as_str() == "$event" || lexical.name.as_str() == "ctx" {
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: lexical.name.clone(), source_span: lexical.source_span },
-                    allocator,
+                    &allocator,
                 ))
             } else {
                 // If we still have a lexical read at this point, it's a component property
@@ -74,15 +74,15 @@ pub fn convert_ir_expression<'a>(
                         receiver: Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
                                 ReadVarExpr { name: Ident::from("ctx"), source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         name: lexical.name.clone(),
                         optional: false,
                         source_span: lexical.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -102,20 +102,20 @@ pub fn convert_ir_expression<'a>(
             // Empty expression becomes undefined
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Undefined, source_span: empty.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::NextContext(ctx) => {
             // i0.ɵɵnextContext(steps)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             if ctx.steps > 1 {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr {
                         value: LiteralValue::Number(ctx.steps as f64),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )));
             }
             create_instruction_call_expr(allocator, Identifiers::NEXT_CONTEXT, args)
@@ -124,7 +124,7 @@ pub fn convert_ir_expression<'a>(
         IrExpression::Reference(ref_expr) => {
             // i0.ɵɵreference(slot + 1 + offset)
             // TypeScript: ng.reference(expr.targetSlot.slot! + 1 + expr.offset)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             if let Some(slot) = ref_expr.target_slot.slot {
                 let slot_value = slot.0 as i32 + 1 + ref_expr.offset;
                 args.push(OutputExpression::Literal(Box::new_in(
@@ -132,7 +132,7 @@ pub fn convert_ir_expression<'a>(
                         value: LiteralValue::Number(slot_value as f64),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )));
             }
             create_instruction_call_expr(allocator, Identifiers::REFERENCE, args)
@@ -140,7 +140,7 @@ pub fn convert_ir_expression<'a>(
 
         IrExpression::RestoreView(rv) => {
             // i0.ɵɵrestoreView(savedView)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             // The view should have been resolved to a variable during resolve_names phase
             match &rv.view {
                 crate::ir::expression::RestoreViewTarget::Dynamic(inner_expr) => {
@@ -151,7 +151,7 @@ pub fn convert_ir_expression<'a>(
                     // Fallback: use _r if not resolved (shouldn't happen in correct flow)
                     args.push(OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("_r"), source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -161,33 +161,33 @@ pub fn convert_ir_expression<'a>(
         IrExpression::GetCurrentView(_) => {
             // i0.ɵɵgetCurrentView()
             create_instruction_call_expr(
-                allocator,
+                &allocator,
                 Identifiers::GET_CURRENT_VIEW,
-                OxcVec::new_in(allocator),
+                OxcVec::new_in(&allocator),
             )
         }
 
         IrExpression::ResetView(rv) => {
             // i0.ɵɵresetView(expr)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             args.push(convert_ir_expression(allocator, &rv.expr, expressions, root_xref));
             create_instruction_call_expr(allocator, Identifiers::RESET_VIEW, args)
         }
 
         IrExpression::PipeBinding(pipe) => {
             // i0.ɵɵpipeBind1/2/3/4/V(slot, varOffset, args...)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             // Add pipe slot (targetSlot.slot - must always be present after slot allocation)
             let slot_value = pipe.target_slot.slot.map_or(0, |s| s.0);
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(slot_value as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
             // Add var offset (assigned by var_counting phase)
             let var_offset = pipe.var_offset.unwrap_or(0);
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(var_offset as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
             // Add pipe arguments
             for arg in pipe.args.iter() {
@@ -201,18 +201,18 @@ pub fn convert_ir_expression<'a>(
             // i0.ɵɵpipeBindV(slot, varOffset, pureFunctionExpr)
             // For variadic pipes (>4 args), the args field contains a PureFunction
             // expression that wraps all the pipe arguments.
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             // Add pipe slot
             let slot_value = pipe.target_slot.slot.map_or(0, |s| s.0);
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(slot_value as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
             // Add var offset
             let var_offset = pipe.var_offset.unwrap_or(0);
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(var_offset as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
             // Add the pure function expression containing all arguments
             args.push(convert_ir_expression(allocator, &pipe.args, expressions, root_xref));
@@ -228,14 +228,14 @@ pub fn convert_ir_expression<'a>(
             //
             // For variadic (arg count > 8): pureFunctionV(offset, fn, [args...])
             // The args are wrapped in an array literal for the variadic case.
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             // Add var offset (assigned by var_counting phase)
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr {
                     value: LiteralValue::Number(pf.var_offset.unwrap_or(0) as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
             // Add function reference (the pure function constant)
             // This should always be set by the pure_function_extraction phase.
@@ -250,7 +250,7 @@ pub fn convert_ir_expression<'a>(
                     // Output null as placeholder - this will cause a runtime error
                     args.push(OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Null, source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -258,10 +258,10 @@ pub fn convert_ir_expression<'a>(
             let is_variadic = pf.args.len() > 8;
             if is_variadic {
                 // Variadic calling pattern: pureFunctionV(offset, fn, [args...])
-                let mut array_entries = OxcVec::with_capacity_in(pf.args.len(), allocator);
+                let mut array_entries = OxcVec::with_capacity_in(pf.args.len(), &allocator);
                 for arg in pf.args.iter() {
                     array_entries.push(convert_ir_expression(
-                        allocator,
+                        &allocator,
                         arg,
                         expressions,
                         root_xref,
@@ -269,7 +269,7 @@ pub fn convert_ir_expression<'a>(
                 }
                 args.push(OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries: array_entries, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             } else {
                 // Constant calling pattern: pureFunction1/2/etc(offset, fn, arg1, arg2, ...)
@@ -289,24 +289,24 @@ pub fn convert_ir_expression<'a>(
                     value: LiteralValue::Number(value),
                     source_span: slot_lit.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::StoreLet(store) => {
             // i0.ɵɵstoreLet(value)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             args.push(convert_ir_expression(allocator, &store.value, expressions, root_xref));
             create_instruction_call_expr(allocator, Identifiers::STORE_LET, args)
         }
 
         IrExpression::ContextLetReference(ctx_let) => {
             // i0.ɵɵreadContextLet(slot)
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             if let Some(slot) = ctx_let.target_slot.slot {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Number(slot.0 as f64), source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
             create_instruction_call_expr(allocator, Identifiers::READ_CONTEXT_LET, args)
@@ -316,7 +316,7 @@ pub fn convert_ir_expression<'a>(
             // Reference to `this` for track functions
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("this"), source_span: None },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -325,7 +325,7 @@ pub fn convert_ir_expression<'a>(
             let var_name = tmp.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: var_name, source_span: None },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -339,14 +339,14 @@ pub fn convert_ir_expression<'a>(
                     lhs: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: var_name, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    rhs: Box::new_in(value, allocator),
+                    rhs: Box::new_in(value, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -361,37 +361,37 @@ pub fn convert_ir_expression<'a>(
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Equals,
-                    lhs: Box::new_in(guard, allocator),
+                    lhs: Box::new_in(guard, &allocator),
                     rhs: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             let conditional = OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(null_check, allocator),
+                    condition: Box::new_in(null_check, &allocator),
                     true_case: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    false_case: Some(Box::new_in(true_case, allocator)),
+                    false_case: Some(Box::new_in(true_case, &allocator)),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             // Wrap in parentheses for correct precedence
             OutputExpression::Parenthesized(Box::new_in(
-                ParenthesizedExpr { expr: Box::new_in(conditional, allocator), source_span: None },
-                allocator,
+                ParenthesizedExpr { expr: Box::new_in(conditional, &allocator), source_span: None },
+                &allocator,
             ))
         }
 
@@ -405,14 +405,14 @@ pub fn convert_ir_expression<'a>(
             // Special case: [title]="{{expr}}" (single expression, all empty strings)
             // Generates: ɵɵinterpolate(expr) - uses the simple form that just stringifies
             let expr_count = interp.expressions.len();
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
 
             // For single expression with empty surrounding strings, use ɵɵinterpolate(expr)
             // This is the simple form that just stringifies the value without prefix/suffix.
             // Note: we use expr_count=0 to select ɵɵinterpolate instead of ɵɵinterpolate1.
             if expr_count == 1 && interp.strings.iter().all(|s| s.is_empty()) {
                 args.push(convert_ir_expression(
-                    allocator,
+                    &allocator,
                     &interp.expressions[0],
                     expressions,
                     root_xref,
@@ -428,7 +428,7 @@ pub fn convert_ir_expression<'a>(
                                 value: LiteralValue::String(interp.strings[i].clone()),
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         )));
                     }
                     args.push(convert_ir_expression(allocator, ir_expr, expressions, root_xref));
@@ -443,7 +443,7 @@ pub fn convert_ir_expression<'a>(
                                     value: LiteralValue::String(trailing.clone()),
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )));
                         }
                     }
@@ -462,7 +462,7 @@ pub fn convert_ir_expression<'a>(
             // Reference to a const array index - emit as a literal number
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(cr.index as f64), source_span: None },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -475,11 +475,11 @@ pub fn convert_ir_expression<'a>(
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator,
-                    lhs: Box::new_in(lhs, allocator),
-                    rhs: Box::new_in(rhs, allocator),
+                    lhs: Box::new_in(lhs, &allocator),
+                    rhs: Box::new_in(rhs, &allocator),
                     source_span: binary.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -491,12 +491,12 @@ pub fn convert_ir_expression<'a>(
                 convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
             OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
                     name: resolved.name.clone(),
                     optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -548,11 +548,11 @@ pub fn convert_ir_expression<'a>(
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator,
-                    lhs: Box::new_in(left, allocator),
-                    rhs: Box::new_in(right, allocator),
+                    lhs: Box::new_in(left, &allocator),
+                    rhs: Box::new_in(right, &allocator),
                     source_span: resolved.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -562,19 +562,19 @@ pub fn convert_ir_expression<'a>(
             // To: ctx.removeTodo(todo_i8)
             let receiver =
                 convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             for arg in resolved.args.iter() {
                 args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
             }
             OutputExpression::InvokeFunction(Box::new_in(
                 InvokeFunctionExpr {
-                    fn_expr: Box::new_in(receiver, allocator),
+                    fn_expr: Box::new_in(receiver, &allocator),
                     args,
                     pure: false,
                     optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -587,12 +587,12 @@ pub fn convert_ir_expression<'a>(
             let index = convert_ir_expression(allocator, &resolved.key, expressions, root_xref);
             OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver, allocator),
-                    index: Box::new_in(index, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
+                    index: Box::new_in(index, &allocator),
                     optional: resolved.optional,
                     source_span: resolved.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -608,12 +608,12 @@ pub fn convert_ir_expression<'a>(
             // should have already transformed this into a safe ternary pattern
             OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
                     name: resolved.name.clone(),
                     optional: false,
                     source_span: resolved.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -634,46 +634,46 @@ pub fn convert_ir_expression<'a>(
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Equals,
-                    lhs: Box::new_in(receiver, allocator),
+                    lhs: Box::new_in(receiver, &allocator),
                     rhs: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             let prop_read = OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver_clone, allocator),
+                    receiver: Box::new_in(receiver_clone, &allocator),
                     name: safe.name.clone(),
                     optional: false,
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             let conditional = OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(null_check, allocator),
+                    condition: Box::new_in(null_check, &allocator),
                     true_case: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    false_case: Some(Box::new_in(prop_read, allocator)),
+                    false_case: Some(Box::new_in(prop_read, &allocator)),
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             // Wrap in parentheses for correct operator precedence
             OutputExpression::Parenthesized(Box::new_in(
-                ParenthesizedExpr { expr: Box::new_in(conditional, allocator), source_span: span },
-                allocator,
+                ParenthesizedExpr { expr: Box::new_in(conditional, &allocator), source_span: span },
+                &allocator,
             ))
         }
 
@@ -687,46 +687,46 @@ pub fn convert_ir_expression<'a>(
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Equals,
-                    lhs: Box::new_in(receiver, allocator),
+                    lhs: Box::new_in(receiver, &allocator),
                     rhs: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             let keyed_read = OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver_clone, allocator),
-                    index: Box::new_in(index, allocator),
+                    receiver: Box::new_in(receiver_clone, &allocator),
+                    index: Box::new_in(index, &allocator),
                     optional: false,
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             let conditional = OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(null_check, allocator),
+                    condition: Box::new_in(null_check, &allocator),
                     true_case: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    false_case: Some(Box::new_in(keyed_read, allocator)),
+                    false_case: Some(Box::new_in(keyed_read, &allocator)),
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             // Wrap in parentheses for correct operator precedence
             OutputExpression::Parenthesized(Box::new_in(
-                ParenthesizedExpr { expr: Box::new_in(conditional, allocator), source_span: span },
-                allocator,
+                ParenthesizedExpr { expr: Box::new_in(conditional, &allocator), source_span: span },
+                &allocator,
             ))
         }
 
@@ -736,54 +736,54 @@ pub fn convert_ir_expression<'a>(
             let span = safe.source_span;
             let receiver = convert_ir_expression(allocator, &safe.receiver, expressions, root_xref);
             let receiver_clone = receiver.clone_in(allocator);
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             for arg in safe.args.iter() {
                 args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
             }
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Equals,
-                    lhs: Box::new_in(receiver, allocator),
+                    lhs: Box::new_in(receiver, &allocator),
                     rhs: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             let call = OutputExpression::InvokeFunction(Box::new_in(
                 InvokeFunctionExpr {
-                    fn_expr: Box::new_in(receiver_clone, allocator),
+                    fn_expr: Box::new_in(receiver_clone, &allocator),
                     args,
                     pure: false,
                     optional: false,
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             let conditional = OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(null_check, allocator),
+                    condition: Box::new_in(null_check, &allocator),
                     true_case: Box::new_in(
                         OutputExpression::Literal(Box::new_in(
                             LiteralExpr { value: LiteralValue::Null, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    false_case: Some(Box::new_in(call, allocator)),
+                    false_case: Some(Box::new_in(call, &allocator)),
                     source_span: span,
                 },
-                allocator,
+                &allocator,
             ));
             // Wrap in parentheses for correct operator precedence
             OutputExpression::Parenthesized(Box::new_in(
-                ParenthesizedExpr { expr: Box::new_in(conditional, allocator), source_span: span },
-                allocator,
+                ParenthesizedExpr { expr: Box::new_in(conditional, &allocator), source_span: span },
+                &allocator,
             ))
         }
 
@@ -797,26 +797,26 @@ pub fn convert_ir_expression<'a>(
                 convert_ir_expression(allocator, &ternary.false_expr, expressions, root_xref);
             OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(condition, allocator),
-                    true_case: Box::new_in(true_case, allocator),
-                    false_case: Some(Box::new_in(false_case, allocator)),
+                    condition: Box::new_in(condition, &allocator),
+                    true_case: Box::new_in(true_case, &allocator),
+                    false_case: Some(Box::new_in(false_case, &allocator)),
                     source_span: ternary.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::LiteralArray(arr) => {
-            let mut entries = OxcVec::with_capacity_in(arr.elements.len(), allocator);
+            let mut entries = OxcVec::with_capacity_in(arr.elements.len(), &allocator);
             for (i, elem) in arr.elements.iter().enumerate() {
                 let converted = convert_ir_expression(allocator, elem, expressions, root_xref);
                 if arr.spreads.get(i).copied().unwrap_or(false) {
                     entries.push(OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
-                            expr: Box::new_in(converted, allocator),
+                            expr: Box::new_in(converted, &allocator),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 } else {
                     entries.push(converted);
@@ -824,12 +824,12 @@ pub fn convert_ir_expression<'a>(
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: arr.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::LiteralMap(map) => {
-            let mut entries = OxcVec::with_capacity_in(map.values.len(), allocator);
+            let mut entries = OxcVec::with_capacity_in(map.values.len(), &allocator);
             for (i, value) in map.values.iter().enumerate() {
                 let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
@@ -840,21 +840,21 @@ pub fn convert_ir_expression<'a>(
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::DerivedLiteralArray(arr) => {
-            let mut entries = OxcVec::with_capacity_in(arr.entries.len(), allocator);
+            let mut entries = OxcVec::with_capacity_in(arr.entries.len(), &allocator);
             for (i, entry) in arr.entries.iter().enumerate() {
                 let converted = convert_ir_expression(allocator, entry, expressions, root_xref);
                 if arr.spreads.get(i).copied().unwrap_or(false) {
                     entries.push(OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
-                            expr: Box::new_in(converted, allocator),
+                            expr: Box::new_in(converted, &allocator),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 } else {
                     entries.push(converted);
@@ -862,12 +862,12 @@ pub fn convert_ir_expression<'a>(
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: arr.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
         IrExpression::DerivedLiteralMap(map) => {
-            let mut entries = OxcVec::with_capacity_in(map.values.len(), allocator);
+            let mut entries = OxcVec::with_capacity_in(map.values.len(), &allocator);
             for (i, value) in map.values.iter().enumerate() {
                 let key = map.keys.get(i).cloned().unwrap_or_else(|| Ident::from(""));
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
@@ -878,7 +878,7 @@ pub fn convert_ir_expression<'a>(
             }
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: map.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -887,10 +887,10 @@ pub fn convert_ir_expression<'a>(
             let expr = convert_ir_expression(allocator, &not.expr, expressions, root_xref);
             OutputExpression::Not(Box::new_in(
                 crate::output::ast::NotExpr {
-                    condition: Box::new_in(expr, allocator),
+                    condition: Box::new_in(expr, &allocator),
                     source_span: not.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -908,11 +908,11 @@ pub fn convert_ir_expression<'a>(
             OutputExpression::UnaryOperator(Box::new_in(
                 crate::output::ast::UnaryOperatorExpr {
                     operator,
-                    expr: Box::new_in(expr, allocator),
+                    expr: Box::new_in(expr, &allocator),
                     parens: false,
                     source_span: unary.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -921,10 +921,10 @@ pub fn convert_ir_expression<'a>(
             let expr = convert_ir_expression(allocator, &typeof_expr.expr, expressions, root_xref);
             OutputExpression::Typeof(Box::new_in(
                 crate::output::ast::TypeofExpr {
-                    expr: Box::new_in(expr, allocator),
+                    expr: Box::new_in(expr, &allocator),
                     source_span: typeof_expr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -933,18 +933,18 @@ pub fn convert_ir_expression<'a>(
             let expr = convert_ir_expression(allocator, &void_expr.expr, expressions, root_xref);
             OutputExpression::Void(Box::new_in(
                 crate::output::ast::VoidExpr {
-                    expr: Box::new_in(expr, allocator),
+                    expr: Box::new_in(expr, &allocator),
                     source_span: void_expr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         // Resolved template literal (template literal with resolved expressions)
         IrExpression::ResolvedTemplateLiteral(rtl) => {
             // Convert to OutputExpression::TemplateLiteral
-            let mut elements = OxcVec::new_in(allocator);
-            let mut output_expressions = OxcVec::new_in(allocator);
+            let mut elements = OxcVec::new_in(&allocator);
+            let mut output_expressions = OxcVec::new_in(&allocator);
 
             for elem in rtl.elements.iter() {
                 elements.push(crate::output::ast::TemplateLiteralElement {
@@ -956,7 +956,7 @@ pub fn convert_ir_expression<'a>(
 
             for expr in rtl.expressions.iter() {
                 output_expressions.push(convert_ir_expression(
-                    allocator,
+                    &allocator,
                     expr,
                     expressions,
                     root_xref,
@@ -969,7 +969,7 @@ pub fn convert_ir_expression<'a>(
                     expressions: output_expressions,
                     source_span: rtl.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -977,17 +977,17 @@ pub fn convert_ir_expression<'a>(
             let inner = convert_ir_expression(allocator, &paren.expr, expressions, root_xref);
             OutputExpression::Parenthesized(Box::new_in(
                 ParenthesizedExpr {
-                    expr: Box::new_in(inner, allocator),
+                    expr: Box::new_in(inner, &allocator),
                     source_span: paren.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
 
         // For any remaining IR expressions, return null placeholder
         _ => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )),
     }
 }
@@ -1018,12 +1018,12 @@ fn convert_two_way_binding_set<'a>(
 
         // Wrap assignment in parentheses
         let parens_assignment = OutputExpression::Parenthesized(Box::new_in(
-            ParenthesizedExpr { expr: Box::new_in(assignment, allocator), source_span: None },
-            allocator,
+            ParenthesizedExpr { expr: Box::new_in(assignment, &allocator), source_span: None },
+            &allocator,
         ));
 
         // Create args using fresh clones for the instruction call
-        let mut args = OxcVec::new_in(allocator);
+        let mut args = OxcVec::new_in(&allocator);
         args.push(target);
         args.push(value);
         let instruction_call =
@@ -1033,15 +1033,15 @@ fn convert_two_way_binding_set<'a>(
         OutputExpression::BinaryOperator(Box::new_in(
             BinaryOperatorExpr {
                 operator: BinaryOperator::Or,
-                lhs: Box::new_in(instruction_call, allocator),
-                rhs: Box::new_in(parens_assignment, allocator),
+                lhs: Box::new_in(instruction_call, &allocator),
+                rhs: Box::new_in(parens_assignment, &allocator),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     } else {
         // For variable targets: just the instruction call
-        let mut args = OxcVec::new_in(allocator);
+        let mut args = OxcVec::new_in(&allocator);
         args.push(target);
         args.push(value);
         create_instruction_call_expr(allocator, Identifiers::TWO_WAY_BINDING_SET, args)
@@ -1078,11 +1078,11 @@ fn create_assignment<'a>(
     OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::Assign,
-            lhs: Box::new_in(clone_output_expression(allocator, target), allocator),
-            rhs: Box::new_in(clone_output_expression(allocator, value), allocator),
+            lhs: Box::new_in(clone_output_expression(allocator, target), &allocator),
+            rhs: Box::new_in(clone_output_expression(allocator, value), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1094,11 +1094,11 @@ fn clone_output_expression<'a>(
     match expr {
         OutputExpression::ReadVar(rv) => OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: rv.name.clone(), source_span: rv.source_span },
-            allocator,
+            &allocator,
         )),
         OutputExpression::ReadProp(rp) => OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
-                receiver: Box::new_in(clone_output_expression(allocator, &rp.receiver), allocator),
+                receiver: Box::new_in(clone_output_expression(allocator, &rp.receiver), &allocator),
                 name: rp.name.clone(),
                 // Intentionally non-optional: `clone_output_expression` is only used to
                 // build the write-back assignment `target = value` for two-way bindings
@@ -1107,22 +1107,22 @@ fn clone_output_expression<'a>(
                 optional: false,
                 source_span: rp.source_span,
             },
-            allocator,
+            &allocator,
         )),
         OutputExpression::ReadKey(rk) => OutputExpression::ReadKey(Box::new_in(
             ReadKeyExpr {
-                receiver: Box::new_in(clone_output_expression(allocator, &rk.receiver), allocator),
-                index: Box::new_in(clone_output_expression(allocator, &rk.index), allocator),
+                receiver: Box::new_in(clone_output_expression(allocator, &rk.receiver), &allocator),
+                index: Box::new_in(clone_output_expression(allocator, &rk.index), &allocator),
                 // Non-optional for the same reason as the `ReadProp` arm above: this
                 // clone only ever forms a two-way write-back assignment target.
                 optional: false,
                 source_span: rk.source_span,
             },
-            allocator,
+            &allocator,
         )),
         OutputExpression::Literal(lit) => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: clone_literal_value(&lit.value), source_span: lit.source_span },
-            allocator,
+            &allocator,
         )),
         // For all other types, use the built-in clone_in
         other => other.clone_in(allocator),

@@ -226,7 +226,7 @@ pub fn generate_full_ng_module_definition<'a>(
                 mod_definition,
                 fac_definition,
                 inj_definition,
-                statements: OxcVec::new_in(allocator),
+                statements: OxcVec::new_in(&allocator),
             })
         }
     }
@@ -241,14 +241,14 @@ fn generate_ng_module_fac<'a>(
 
     let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
         ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Convert deps to R3FactoryDeps
     let factory_deps = match &metadata.deps {
         Some(deps) => {
             let mut factory_deps: OxcVec<'a, R3DependencyMetadata<'a>> =
-                OxcVec::with_capacity_in(deps.len(), allocator);
+                OxcVec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 factory_deps.push(R3DependencyMetadata {
                     token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
@@ -299,7 +299,7 @@ fn build_injector_metadata<'a>(
 ) -> crate::injector::R3InjectorMetadata<'a> {
     let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
         ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     let mut builder = R3InjectorMetadataBuilder::new(allocator)
@@ -318,7 +318,7 @@ fn build_injector_metadata<'a>(
         for import in &metadata.imports {
             let import_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                 ReadVarExpr { name: import.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
             builder = builder.add_import(import_expr);
         }
@@ -373,7 +373,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("AppModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -400,11 +400,11 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let component_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyComponent"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -429,15 +429,15 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("SharedModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let import_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("CommonModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let export_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("SharedComponent"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -465,11 +465,11 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("RootModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let bootstrap_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("AppComponent"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -493,11 +493,11 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("JitModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let decl_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("JitComponent"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -519,7 +519,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)
@@ -651,7 +651,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TreeShakableModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3NgModuleMetadataBuilder::new(&allocator)

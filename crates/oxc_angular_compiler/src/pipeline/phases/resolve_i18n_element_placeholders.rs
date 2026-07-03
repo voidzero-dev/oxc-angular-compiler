@@ -400,7 +400,7 @@ fn resolve_placeholders_for_view<'a>(
                         context_xref,
                         start_name.as_str(),
                         param_value,
-                        allocator,
+                        &allocator,
                     );
                 }
             }
@@ -431,7 +431,7 @@ fn resolve_placeholders_for_view<'a>(
                         context_xref,
                         close_name.as_str(),
                         param_value,
-                        allocator,
+                        &allocator,
                     );
                 }
             }
@@ -463,7 +463,7 @@ fn resolve_placeholders_for_view<'a>(
                         context_xref,
                         start_name.as_str(),
                         structural_value,
-                        allocator,
+                        &allocator,
                     );
                 }
 
@@ -480,7 +480,7 @@ fn resolve_placeholders_for_view<'a>(
                     context_xref,
                     start_name.as_str(),
                     param_value,
-                    allocator,
+                    &allocator,
                 );
             }
             OpInfo::TemplateEnd {
@@ -505,7 +505,7 @@ fn resolve_placeholders_for_view<'a>(
                     context_xref,
                     close_name.as_str(),
                     param_value,
-                    allocator,
+                    &allocator,
                 );
 
                 // If associated with structural directive, record it after
@@ -520,7 +520,7 @@ fn resolve_placeholders_for_view<'a>(
                         context_xref,
                         close_name.as_str(),
                         structural_value,
-                        allocator,
+                        &allocator,
                     );
                 }
             }
@@ -614,7 +614,7 @@ fn add_param_to_context<'a>(
     for op in job.root.create.iter_mut() {
         if let CreateOp::I18nContext(ctx) = op {
             if ctx.xref == context_xref {
-                add_to_params_map(&mut ctx.params, placeholder_atom, value, allocator);
+                add_to_params_map(&mut ctx.params, placeholder_atom, value, &allocator);
                 return;
             }
         }
@@ -627,7 +627,7 @@ fn add_param_to_context<'a>(
             for op in view.create.iter_mut() {
                 if let CreateOp::I18nContext(ctx) = op {
                     if ctx.xref == context_xref {
-                        add_to_params_map(&mut ctx.params, placeholder_atom, value, allocator);
+                        add_to_params_map(&mut ctx.params, placeholder_atom, value, &allocator);
                         return;
                     }
                 }
@@ -646,7 +646,7 @@ fn add_to_params_map<'a>(
     if let Some(values) = params.get_mut(&placeholder) {
         values.push(value);
     } else {
-        let mut values = oxc_allocator::Vec::new_in(allocator);
+        let mut values = oxc_allocator::Vec::new_in(&allocator);
         values.push(value);
         params.insert(placeholder, values);
     }
