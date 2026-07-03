@@ -579,7 +579,10 @@ fn clone_expression<'a>(
                     clone_expression(allocator, &key.receiver, diagnostics),
                     &allocator,
                 ),
-                index: Box::new_in(clone_expression(allocator, &key.index, diagnostics), &allocator),
+                index: Box::new_in(
+                    clone_expression(allocator, &key.index, diagnostics),
+                    &allocator,
+                ),
                 optional: key.optional,
                 source_span: key.source_span,
             },
@@ -597,7 +600,10 @@ fn clone_expression<'a>(
         OutputExpression::UnaryOperator(unary) => OutputExpression::UnaryOperator(Box::new_in(
             UnaryOperatorExpr {
                 operator: unary.operator,
-                expr: Box::new_in(clone_expression(allocator, &unary.expr, diagnostics), &allocator),
+                expr: Box::new_in(
+                    clone_expression(allocator, &unary.expr, diagnostics),
+                    &allocator,
+                ),
                 parens: unary.parens,
                 source_span: unary.source_span,
             },
@@ -656,7 +662,10 @@ fn clone_expression<'a>(
         )),
         OutputExpression::Parenthesized(paren) => OutputExpression::Parenthesized(Box::new_in(
             ParenthesizedExpr {
-                expr: Box::new_in(clone_expression(allocator, &paren.expr, diagnostics), &allocator),
+                expr: Box::new_in(
+                    clone_expression(allocator, &paren.expr, diagnostics),
+                    &allocator,
+                ),
                 source_span: paren.source_span,
             },
             &allocator,

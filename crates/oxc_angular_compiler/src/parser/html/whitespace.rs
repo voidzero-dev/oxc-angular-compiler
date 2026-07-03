@@ -332,9 +332,10 @@ impl<'a> WhitespaceVisitor<'a> {
             HtmlNode::Element(el) => {
                 HtmlNode::Element(Box::new_in(self.clone_element_shallow(el), &self.allocator))
             }
-            HtmlNode::Component(comp) => {
-                HtmlNode::Component(Box::new_in(self.clone_component_shallow(comp), &self.allocator))
-            }
+            HtmlNode::Component(comp) => HtmlNode::Component(Box::new_in(
+                self.clone_component_shallow(comp),
+                &self.allocator,
+            )),
             HtmlNode::Comment(c) => HtmlNode::Comment(Box::new_in(
                 HtmlComment { value: c.value.clone(), span: c.span },
                 &self.allocator,

@@ -450,7 +450,11 @@ pub fn create_disable_bindings_stmt<'a>(
 pub fn create_enable_bindings_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::ENABLE_BINDINGS, OxcVec::new_in(&allocator))
+    create_instruction_call_stmt(
+        allocator,
+        Identifiers::ENABLE_BINDINGS,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 /// Creates an ɵɵpipe() call statement.

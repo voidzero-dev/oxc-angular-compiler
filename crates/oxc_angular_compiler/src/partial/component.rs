@@ -484,7 +484,8 @@ fn create_outputs_map<'a>(
     allocator: &'a Allocator,
     outputs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(outputs.len(), &allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> =
+        Vec::with_capacity_in(outputs.len(), &allocator);
     for (class_name, binding_name) in outputs {
         let quoted = is_unsafe_object_key(class_name.as_str());
         entries.push(LiteralMapEntry::new(
@@ -766,7 +767,8 @@ fn ident_array_string_literals<'a>(
     allocator: &'a Allocator,
     names: &Vec<'a, Ident<'a>>,
 ) -> OutputExpression<'a> {
-    let mut elements: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(names.len(), &allocator);
+    let mut elements: Vec<'a, OutputExpression<'a>> =
+        Vec::with_capacity_in(names.len(), &allocator);
     for name in names {
         elements.push(string_literal_owned(allocator, name.clone()));
     }

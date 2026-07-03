@@ -869,9 +869,12 @@ fn extract_param_type_expression<'a>(
         TSType::TSTypeReference(type_ref) => {
             // Handle simple type references like SomeService
             match &type_ref.type_name {
-                TSTypeName::IdentifierReference(id) => Some(OutputExpression::ReadVar(
-                    Box::new_in(ReadVarExpr { name: id.name.into(), source_span: None }, &allocator),
-                )),
+                TSTypeName::IdentifierReference(id) => {
+                    Some(OutputExpression::ReadVar(Box::new_in(
+                        ReadVarExpr { name: id.name.into(), source_span: None },
+                        &allocator,
+                    )))
+                }
                 TSTypeName::QualifiedName(qualified) => {
                     // Handle qualified names like ns.SomeType
                     Some(OutputExpression::ReadVar(Box::new_in(

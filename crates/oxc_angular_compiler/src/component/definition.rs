@@ -2117,7 +2117,8 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::RuntimeResolved;
 
         // Test with an array literal as raw_imports (like imports: [A, B, C])
-        let mut entries: OxcVec<'_, OutputExpression<'_>> = OxcVec::with_capacity_in(3, &&allocator);
+        let mut entries: OxcVec<'_, OutputExpression<'_>> =
+            OxcVec::with_capacity_in(3, &&allocator);
         entries.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("A"), source_span: None },
             &&allocator,

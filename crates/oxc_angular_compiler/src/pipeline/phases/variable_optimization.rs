@@ -2215,7 +2215,10 @@ fn clone_update_op<'a>(
             xref: var.xref,
             kind: var.kind,
             name: var.name.clone(),
-            initializer: oxc_allocator::Box::new_in(var.initializer.clone_in(allocator), &allocator),
+            initializer: oxc_allocator::Box::new_in(
+                var.initializer.clone_in(allocator),
+                &allocator,
+            ),
             flags: var.flags,
             view: var.view,
             local: var.local,
@@ -3220,14 +3223,12 @@ where
         }
         IrExpression::PureFunction(pf) => {
             use crate::ir::expression::PureFunctionExpr;
-            let body = pf
-                .body
-                .as_ref()
-                .map(|b| OxcBox::new_in(transform_expression(b, &allocator, transform), &allocator));
-            let fn_ref = pf
-                .fn_ref
-                .as_ref()
-                .map(|f| OxcBox::new_in(transform_expression(f, &allocator, transform), &allocator));
+            let body = pf.body.as_ref().map(|b| {
+                OxcBox::new_in(transform_expression(b, &allocator, transform), &allocator)
+            });
+            let fn_ref = pf.fn_ref.as_ref().map(|f| {
+                OxcBox::new_in(transform_expression(f, &allocator, transform), &allocator)
+            });
             let mut args = OxcVec::with_capacity_in(pf.args.len(), &allocator);
             for arg in pf.args.iter() {
                 args.push(transform_expression(arg, &allocator, transform));

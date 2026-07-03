@@ -261,7 +261,10 @@ fn convert_i18n_text_in_view(job: &mut ComponentCompilationJob<'_>, view_xref: X
                         target: info.i18n_xref,
                         context: context_id,
                         handle: info.i18n_handle,
-                        expression: oxc_allocator::Box::new_in(expr.clone_in(allocator), &allocator),
+                        expression: oxc_allocator::Box::new_in(
+                            expr.clone_in(allocator),
+                            &allocator,
+                        ),
                         resolution_time,
                         usage: I18nExpressionFor::I18nText,
                         name: Ident::from(""),

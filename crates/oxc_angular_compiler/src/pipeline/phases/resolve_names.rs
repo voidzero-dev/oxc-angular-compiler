@@ -1034,7 +1034,10 @@ fn resolve_angular_expression<'a>(
                 // At least one part was resolved, create a ResolvedKeyedRead
                 let receiver = resolved_receiver.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&keyed.receiver, &allocator),
+                        crate::ir::expression::clone_angular_expression(
+                            &keyed.receiver,
+                            &allocator,
+                        ),
                         &allocator,
                     ))
                 });
@@ -1181,7 +1184,10 @@ fn resolve_angular_expression<'a>(
             if resolved_condition.is_some() || resolved_true.is_some() || resolved_false.is_some() {
                 let condition = resolved_condition.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&cond.condition, &allocator),
+                        crate::ir::expression::clone_angular_expression(
+                            &cond.condition,
+                            &allocator,
+                        ),
                         &allocator,
                     ))
                 });
@@ -1193,7 +1199,10 @@ fn resolve_angular_expression<'a>(
                 });
                 let false_expr = resolved_false.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&cond.false_exp, &allocator),
+                        crate::ir::expression::clone_angular_expression(
+                            &cond.false_exp,
+                            &allocator,
+                        ),
                         &allocator,
                     ))
                 });
@@ -1429,7 +1438,8 @@ fn resolve_angular_expression<'a>(
             let mut any_arg_resolved = false;
 
             for arg in safe_call.args.iter() {
-                if let Some(resolved) = resolve_angular_expression(arg, scope, root_xref, &allocator)
+                if let Some(resolved) =
+                    resolve_angular_expression(arg, scope, root_xref, &allocator)
                 {
                     resolved_args.push(resolved);
                     any_arg_resolved = true;
@@ -1485,7 +1495,10 @@ fn resolve_angular_expression<'a>(
                 });
                 let key = resolved_key.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&safe_keyed.key, &allocator),
+                        crate::ir::expression::clone_angular_expression(
+                            &safe_keyed.key,
+                            &allocator,
+                        ),
                         &allocator,
                     ))
                 });

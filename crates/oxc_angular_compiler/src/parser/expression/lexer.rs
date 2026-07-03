@@ -995,7 +995,8 @@ impl<'a> Lexer<'a> {
             if ch == chars::DOLLAR && self.peek_at(1) == chars::LBRACE {
                 // Start of substitution - create TemplateHead ending at current position
                 let head_end = self.index;
-                let token = Token::new_template_head(part_start, head_end, &result, &self.allocator);
+                let token =
+                    Token::new_template_head(part_start, head_end, &result, &self.allocator);
                 self.tokens.push(token);
 
                 // Emit the ${ as an operator token

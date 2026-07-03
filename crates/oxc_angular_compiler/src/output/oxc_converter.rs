@@ -413,7 +413,11 @@ fn convert_new_expression<'a>(
     }
 
     Some(OutputExpression::Instantiate(Box::new_in(
-        InstantiateExpr { class_expr: Box::new_in(class_expr, &allocator), args, source_span: None },
+        InstantiateExpr {
+            class_expr: Box::new_in(class_expr, &allocator),
+            args,
+            source_span: None,
+        },
         &allocator,
     )))
 }
@@ -442,7 +446,9 @@ fn convert_arrow_function_expression<'a>(
         let expr_body = arrow.body.statements.first()?;
         if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = expr_body {
             match convert_oxc_expression(allocator, &expr_stmt.expression, source_text) {
-                Some(converted) => ArrowFunctionBody::Expression(Box::new_in(converted, &allocator)),
+                Some(converted) => {
+                    ArrowFunctionBody::Expression(Box::new_in(converted, &allocator))
+                }
                 None => {
                     // Unsupported expression (e.g., await, yield, class) —
                     // fall back to raw source for the entire arrow

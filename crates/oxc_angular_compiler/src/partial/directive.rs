@@ -336,7 +336,8 @@ fn create_outputs_map<'a>(
     allocator: &'a Allocator,
     outputs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(outputs.len(), &allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> =
+        Vec::with_capacity_in(outputs.len(), &allocator);
     for (class_name, binding_name) in outputs {
         let quoted = is_unsafe_object_key(class_name.as_str());
         entries.push(LiteralMapEntry::new(

@@ -130,7 +130,11 @@ pub fn create_dom_element_stmt<'a>(
 pub fn create_dom_element_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT_END, OxcVec::new_in(&allocator))
+    create_instruction_call_stmt(
+        allocator,
+        Identifiers::DOM_ELEMENT_END,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 /// Creates an ɵɵtext() call statement.
