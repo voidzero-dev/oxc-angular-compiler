@@ -315,7 +315,7 @@ fn populate_declarations_from_imports<'a>(
         // A more sophisticated implementation would analyze the template to determine
         // the actual dependency type (directive, component, pipe, or NgModule)
         let mut dep = TemplateDependency::directive(
-            allocator,
+            &allocator,
             import_name.clone(),
             // Use a placeholder selector - the actual selector isn't used for dependencies array
             Ident::from("*"),
@@ -399,7 +399,7 @@ fn extract_string_array<'a>(
         return None;
     };
 
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     for element in &arr.elements {
         // ArrayExpressionElement variants that can hold a value expression all
         // carry one — funnel them through `as_expression()` and let the shared
@@ -418,7 +418,7 @@ fn extract_identifier_array<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
 ) -> Vec<'a, Ident<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;
@@ -501,9 +501,9 @@ fn extract_host_metadata<'a>(
     };
 
     let mut host = HostMetadata {
-        properties: Vec::new_in(allocator),
-        attributes: Vec::new_in(allocator),
-        listeners: Vec::new_in(allocator),
+        properties: Vec::new_in(&allocator),
+        attributes: Vec::new_in(&allocator),
+        listeners: Vec::new_in(&allocator),
         class_attr: None,
         style_attr: None,
     };
@@ -564,7 +564,7 @@ fn extract_host_directives<'a>(
     import_map: &ImportMap<'a>,
     consts: &StringConsts<'a>,
 ) -> Vec<'a, HostDirectiveMetadata<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;
@@ -606,8 +606,8 @@ fn extract_single_host_directive<'a>(
         // Object expression: { directive: ColorDirective, inputs: [...], outputs: [...] }
         ArrayExpressionElement::ObjectExpression(obj) => {
             let mut directive_name: Option<Ident<'a>> = None;
-            let mut inputs = Vec::new_in(allocator);
-            let mut outputs = Vec::new_in(allocator);
+            let mut inputs = Vec::new_in(&allocator);
+            let mut outputs = Vec::new_in(&allocator);
             let mut is_forward_reference = false;
 
             for prop in &obj.properties {
@@ -745,7 +745,7 @@ fn extract_io_mappings<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;
@@ -901,7 +901,7 @@ fn extract_constructor_deps<'a>(
     match constructor {
         Some(ctor) => {
             // Constructor found - extract parameters (may be empty)
-            let mut deps = Vec::new_in(allocator);
+            let mut deps = Vec::new_in(&allocator);
             let params = &ctor.value.params;
 
             for param in &params.items {
@@ -916,7 +916,7 @@ fn extract_constructor_deps<'a>(
             // If class has a superclass, use inherited factory pattern (return None)
             // If class has no superclass, use simple factory with empty deps (return Some([]))
             // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
-            if has_superclass { None } else { Some(Vec::new_in(allocator)) }
+            if has_superclass { None } else { Some(Vec::new_in(&allocator)) }
         }
     }
 }

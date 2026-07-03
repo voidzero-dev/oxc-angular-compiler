@@ -108,15 +108,15 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(identifier),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -124,7 +124,7 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
 fn variable<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -132,7 +132,7 @@ fn variable<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 fn literal_number<'a>(allocator: &'a Allocator, value: u32) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(f64::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -140,12 +140,12 @@ fn literal_number<'a>(allocator: &'a Allocator, value: u32) -> OutputExpression<
 fn context_prop<'a>(allocator: &'a Allocator, property_name: &Ident<'a>) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(variable(allocator, CONTEXT_NAME), allocator),
+            receiver: Box::new_in(variable(allocator, CONTEXT_NAME), &allocator),
             name: property_name.clone(),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -157,13 +157,13 @@ fn call_fn<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -177,21 +177,21 @@ fn render_flag_check_if_stmt<'a>(
     let condition = OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::BitwiseAnd,
-            lhs: Box::new_in(variable(allocator, RENDER_FLAGS), allocator),
-            rhs: Box::new_in(literal_number(allocator, flags), allocator),
+            lhs: Box::new_in(variable(allocator, RENDER_FLAGS), &allocator),
+            rhs: Box::new_in(literal_number(allocator, flags), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     OutputStatement::If(Box::new_in(
         IfStmt {
             condition,
             true_case: statements,
-            false_case: Vec::new_in(allocator),
+            false_case: Vec::new_in(&allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -199,7 +199,7 @@ fn render_flag_check_if_stmt<'a>(
 fn expr_stmt<'a>(allocator: &'a Allocator, expr: OutputExpression<'a>) -> OutputStatement<'a> {
     OutputStatement::Expression(Box::new_in(
         ExpressionStatement { expr, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -225,7 +225,7 @@ fn get_query_predicate<'a>(
         QueryPredicate::Selectors(selectors) => {
             // Convert selectors to literal array
             // Each selector may contain comma-separated refs that need splitting
-            let mut entries = Vec::new_in(allocator);
+            let mut entries = Vec::new_in(&allocator);
 
             for selector in selectors.iter() {
                 // Split by comma and trim
@@ -237,7 +237,7 @@ fn get_query_predicate<'a>(
                                 value: LiteralValue::String(Ident::from(trimmed)),
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         )));
                     }
                 }
@@ -245,7 +245,7 @@ fn get_query_predicate<'a>(
 
             let array_expr = OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
-                allocator,
+                &allocator,
             ));
 
             // Pool the array to a top-level constant if pool is provided
@@ -277,7 +277,7 @@ fn get_query_create_parameters_with_predicate<'a>(
     query: &R3QueryMetadata<'a>,
     predicate: OutputExpression<'a>,
 ) -> Vec<'a, OutputExpression<'a>> {
-    let mut parameters = Vec::new_in(allocator);
+    let mut parameters = Vec::new_in(&allocator);
 
     // For signal queries, first param is ctx.propertyName
     if query.is_signal {
@@ -311,7 +311,7 @@ fn get_content_query_create_parameters_with_predicate<'a>(
     predicate: OutputExpression<'a>,
     prepend_params: Vec<'a, OutputExpression<'a>>,
 ) -> Vec<'a, OutputExpression<'a>> {
-    let mut parameters = Vec::new_in(allocator);
+    let mut parameters = Vec::new_in(&allocator);
 
     // Add prepend params (e.g., dirIndex for content queries)
     for param in prepend_params {
@@ -356,14 +356,14 @@ fn collapse_advance_statements<'a>(
     allocator: &'a Allocator,
     statements: Vec<'a, MaybeAdvanceStatement<'a>>,
 ) -> Vec<'a, OutputStatement<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     let mut advance_count = 0u32;
 
     // Process statements and flush pending advances
     let flush_advance = |result: &mut Vec<'a, OutputStatement<'a>>, count: &mut u32| {
         if *count > 0 {
             // Create ɵɵqueryAdvance() or ɵɵqueryAdvance(count)
-            let mut args = Vec::new_in(allocator);
+            let mut args = Vec::new_in(&allocator);
             if *count > 1 {
                 args.push(literal_number(allocator, *count));
             }
@@ -414,7 +414,7 @@ impl TempAllocator {
         self.allocated = true;
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(TEMPORARY_NAME), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -457,8 +457,8 @@ pub fn create_view_queries_function<'a>(
         view_queries.iter().map(|query| get_query_predicate(allocator, query, None)).collect()
     };
 
-    let mut create_statements = Vec::new_in(allocator);
-    let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
+    let mut create_statements = Vec::new_in(&allocator);
+    let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(&allocator);
     let mut temp_allocator = TempAllocator::new();
 
     // Chained emit (`ɵɵviewQuery(p1)(p2)`) requires Angular 21.0.4+ /
@@ -487,7 +487,7 @@ pub fn create_view_queries_function<'a>(
         // Creation: ɵɵviewQuery(predicate, flags, read) or ɵɵviewQuerySignal(ctx.prop, predicate, flags, read)
         // Use pre-pooled predicate instead of calling get_query_create_parameters
         let params = get_query_create_parameters_with_predicate(
-            allocator,
+            &allocator,
             query,
             pooled_predicates[idx].clone_in(allocator),
         );
@@ -527,25 +527,25 @@ pub fn create_view_queries_function<'a>(
 
             // _t = ɵɵloadQuery()
             let load_query = call_fn(
-                allocator,
+                &allocator,
                 import_expr(allocator, Identifiers::LOAD_QUERY),
-                Vec::new_in(allocator),
+                Vec::new_in(&allocator),
             );
             let temp_set = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Assign,
-                    lhs: Box::new_in(temp.clone_in(allocator), allocator),
-                    rhs: Box::new_in(load_query, allocator),
+                    lhs: Box::new_in(temp.clone_in(allocator), &allocator),
+                    rhs: Box::new_in(load_query, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             // ɵɵqueryRefresh(_t = ɵɵloadQuery())
-            let mut refresh_args = Vec::new_in(allocator);
+            let mut refresh_args = Vec::new_in(&allocator);
             refresh_args.push(temp_set);
             let refresh = call_fn(
-                allocator,
+                &allocator,
                 import_expr(allocator, Identifiers::QUERY_REFRESH),
                 refresh_args,
             );
@@ -554,12 +554,12 @@ pub fn create_view_queries_function<'a>(
             let value = if query.first {
                 OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
-                        receiver: Box::new_in(temp.clone_in(allocator), allocator),
+                        receiver: Box::new_in(temp.clone_in(allocator), &allocator),
                         name: Ident::from("first"),
                         optional: false,
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ))
             } else {
                 temp.clone_in(allocator)
@@ -568,22 +568,22 @@ pub fn create_view_queries_function<'a>(
             let update_directive = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Assign,
-                    lhs: Box::new_in(context_prop(allocator, &query.property_name), allocator),
-                    rhs: Box::new_in(value, allocator),
+                    lhs: Box::new_in(context_prop(allocator, &query.property_name), &allocator),
+                    rhs: Box::new_in(value, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             // refresh && (ctx.prop = ...)
             let and_expr = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::And,
-                    lhs: Box::new_in(refresh, allocator),
-                    rhs: Box::new_in(update_directive, allocator),
+                    lhs: Box::new_in(refresh, &allocator),
+                    rhs: Box::new_in(update_directive, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             update_statements
@@ -595,7 +595,7 @@ pub fn create_view_queries_function<'a>(
     flush_chain(allocator, &mut current_chain, &mut create_statements);
 
     // Build update statements with temp variable declarations
-    let mut final_update_statements = Vec::new_in(allocator);
+    let mut final_update_statements = Vec::new_in(&allocator);
 
     // Add temp variable declarations if needed
     if temp_allocator.needs_declaration() {
@@ -607,7 +607,7 @@ pub fn create_view_queries_function<'a>(
                 leading_comment: None,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -617,32 +617,32 @@ pub fn create_view_queries_function<'a>(
     }
 
     // Build function body
-    let mut body = Vec::new_in(allocator);
+    let mut body = Vec::new_in(&allocator);
     if !create_statements.is_empty() {
         body.push(render_flag_check_if_stmt(allocator, render_flags::CREATE, create_statements));
     }
     if !final_update_statements.is_empty() {
         body.push(render_flag_check_if_stmt(
-            allocator,
+            &allocator,
             render_flags::UPDATE,
             final_update_statements,
         ));
     }
 
     // Build function parameters
-    let mut params = Vec::new_in(allocator);
+    let mut params = Vec::new_in(&allocator);
     params.push(FnParam { name: Ident::from(RENDER_FLAGS) });
     params.push(FnParam { name: Ident::from(CONTEXT_NAME) });
 
     // Create function name
     let fn_name = name.map(|n| {
         let formatted = format!("{n}_Query");
-        Ident::from_in(formatted.as_str(), allocator)
+        Ident::from_in(formatted.as_str(), &allocator)
     });
 
     OutputExpression::Function(Box::new_in(
         FunctionExpr { name: fn_name, params, statements: body, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -680,8 +680,8 @@ pub fn create_content_queries_function<'a>(
         queries.iter().map(|query| get_query_predicate(allocator, query, None)).collect()
     };
 
-    let mut create_statements = Vec::new_in(allocator);
-    let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(allocator);
+    let mut create_statements = Vec::new_in(&allocator);
+    let mut update_statements: Vec<'a, MaybeAdvanceStatement<'a>> = Vec::new_in(&allocator);
     let mut temp_allocator = TempAllocator::new();
 
     // See note in `create_view_queries_function` — chained content-query
@@ -703,11 +703,11 @@ pub fn create_content_queries_function<'a>(
 
     for (idx, query) in queries.iter().enumerate() {
         // Prepend dirIndex parameter for content queries
-        let mut prepend = Vec::new_in(allocator);
+        let mut prepend = Vec::new_in(&allocator);
         prepend.push(variable(allocator, "dirIndex"));
         // Use pre-pooled predicate instead of calling get_query_create_parameters
         let params = get_content_query_create_parameters_with_predicate(
-            allocator,
+            &allocator,
             query,
             pooled_predicates[idx].clone_in(allocator),
             prepend,
@@ -743,24 +743,24 @@ pub fn create_content_queries_function<'a>(
             let temp = temp_allocator.allocate(allocator);
 
             let load_query = call_fn(
-                allocator,
+                &allocator,
                 import_expr(allocator, Identifiers::LOAD_QUERY),
-                Vec::new_in(allocator),
+                Vec::new_in(&allocator),
             );
             let temp_set = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Assign,
-                    lhs: Box::new_in(temp.clone_in(allocator), allocator),
-                    rhs: Box::new_in(load_query, allocator),
+                    lhs: Box::new_in(temp.clone_in(allocator), &allocator),
+                    rhs: Box::new_in(load_query, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
-            let mut refresh_args = Vec::new_in(allocator);
+            let mut refresh_args = Vec::new_in(&allocator);
             refresh_args.push(temp_set);
             let refresh = call_fn(
-                allocator,
+                &allocator,
                 import_expr(allocator, Identifiers::QUERY_REFRESH),
                 refresh_args,
             );
@@ -768,12 +768,12 @@ pub fn create_content_queries_function<'a>(
             let value = if query.first {
                 OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
-                        receiver: Box::new_in(temp.clone_in(allocator), allocator),
+                        receiver: Box::new_in(temp.clone_in(allocator), &allocator),
                         name: Ident::from("first"),
                         optional: false,
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ))
             } else {
                 temp.clone_in(allocator)
@@ -782,21 +782,21 @@ pub fn create_content_queries_function<'a>(
             let update_directive = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Assign,
-                    lhs: Box::new_in(context_prop(allocator, &query.property_name), allocator),
-                    rhs: Box::new_in(value, allocator),
+                    lhs: Box::new_in(context_prop(allocator, &query.property_name), &allocator),
+                    rhs: Box::new_in(value, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             let and_expr = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::And,
-                    lhs: Box::new_in(refresh, allocator),
-                    rhs: Box::new_in(update_directive, allocator),
+                    lhs: Box::new_in(refresh, &allocator),
+                    rhs: Box::new_in(update_directive, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             update_statements
@@ -808,7 +808,7 @@ pub fn create_content_queries_function<'a>(
     flush_chain(allocator, &mut current_chain, &mut create_statements);
 
     // Build update statements with temp variable declarations
-    let mut final_update_statements = Vec::new_in(allocator);
+    let mut final_update_statements = Vec::new_in(&allocator);
 
     if temp_allocator.needs_declaration() {
         final_update_statements.push(OutputStatement::DeclareVar(Box::new_in(
@@ -819,7 +819,7 @@ pub fn create_content_queries_function<'a>(
                 leading_comment: None,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -828,20 +828,20 @@ pub fn create_content_queries_function<'a>(
     }
 
     // Build function body
-    let mut body = Vec::new_in(allocator);
+    let mut body = Vec::new_in(&allocator);
     if !create_statements.is_empty() {
         body.push(render_flag_check_if_stmt(allocator, render_flags::CREATE, create_statements));
     }
     if !final_update_statements.is_empty() {
         body.push(render_flag_check_if_stmt(
-            allocator,
+            &allocator,
             render_flags::UPDATE,
             final_update_statements,
         ));
     }
 
     // Build function parameters (rf, ctx, dirIndex)
-    let mut params = Vec::new_in(allocator);
+    let mut params = Vec::new_in(&allocator);
     params.push(FnParam { name: Ident::from(RENDER_FLAGS) });
     params.push(FnParam { name: Ident::from(CONTEXT_NAME) });
     params.push(FnParam { name: Ident::from("dirIndex") });
@@ -849,12 +849,12 @@ pub fn create_content_queries_function<'a>(
     // Create function name
     let fn_name = name.map(|n| {
         let formatted = format!("{n}_ContentQueries");
-        Ident::from_in(formatted.as_str(), allocator)
+        Ident::from_in(formatted.as_str(), &allocator)
     });
 
     OutputExpression::Function(Box::new_in(
         FunctionExpr { name: fn_name, params, statements: body, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -919,7 +919,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("SomeComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: false,
@@ -961,7 +961,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("ContentComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: false,
@@ -1011,7 +1011,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("Component1"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: false,
@@ -1025,7 +1025,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("Component2"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: false,
@@ -1082,7 +1082,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("ChildComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: true,
@@ -1096,7 +1096,7 @@ mod tests {
             first: false,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("OtherComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: true,
@@ -1145,7 +1145,7 @@ mod tests {
             first: false,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("ItemComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: true,
             emit_distinct_changes_only: true,
@@ -1159,7 +1159,7 @@ mod tests {
             first: true,
             predicate: QueryPredicate::Type(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from("HeaderComponent"), source_span: None },
-                &allocator,
+                &&allocator,
             ))),
             descendants: false,
             emit_distinct_changes_only: true,
@@ -1204,7 +1204,7 @@ mod tests {
         let allocator = Allocator::default();
 
         // Create a signal query with a string selector
-        let mut selectors = Vec::new_in(&allocator);
+        let mut selectors = Vec::new_in(&&allocator);
         selectors.push(Ident::from("myRef"));
 
         let query = R3QueryMetadata {

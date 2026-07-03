@@ -232,8 +232,8 @@ impl<'a> ComponentCompilationJob<'a> {
             expressions: ExpressionStore::new(allocator),
             root,
             views: IndexMap::with_hasher(FxBuildHasher),
-            consts: Vec::new_in(allocator),
-            consts_initializers: Vec::new_in(allocator),
+            consts: Vec::new_in(&allocator),
+            consts_initializers: Vec::new_in(&allocator),
             next_xref_id: 1, // 0 is reserved for root
             compatibility_mode: CompatibilityMode::TemplateDefinitionBuilder,
             mode: TemplateCompilationMode::default(),
@@ -241,7 +241,7 @@ impl<'a> ComponentCompilationJob<'a> {
             i18n_message_metadata: FxHashMap::default(),
             i18n_use_external_ids: true, // Default matches Angular's JIT behavior
             relative_context_file_path: None,
-            relocation_entries: Vec::new_in(allocator),
+            relocation_entries: Vec::new_in(&allocator),
             enable_debug_locations: false,
             relative_template_path: None,
             template_source: None,
@@ -332,7 +332,7 @@ impl<'a> ComponentCompilationJob<'a> {
     pub fn allocate_view(&mut self, parent: Option<XrefId>) -> XrefId {
         let xref = self.allocate_xref_id();
         let view = ViewCompilationUnit::new(self.allocator, xref, parent);
-        let boxed = Box::new_in(view, self.allocator);
+        let boxed = Box::new_in(view, &self.allocator);
         self.views.insert(xref, boxed);
         xref
     }
@@ -463,15 +463,15 @@ impl<'a> ViewCompilationUnit<'a> {
             parent,
             create: CreateOpList::new(allocator),
             update: UpdateOpList::new(allocator),
-            create_statements: Vec::new_in(allocator),
-            update_statements: Vec::new_in(allocator),
+            create_statements: Vec::new_in(&allocator),
+            update_statements: Vec::new_in(&allocator),
             vars: None,
             fn_name: None,
             decl_count: None,
             first_child: None,
-            context_variables: Vec::new_in(allocator),
-            aliases: Vec::new_in(allocator),
-            functions: Vec::new_in(allocator),
+            context_variables: Vec::new_in(&allocator),
+            aliases: Vec::new_in(&allocator),
+            functions: Vec::new_in(&allocator),
         }
     }
 }
@@ -781,8 +781,8 @@ impl<'a> HostBindingCompilationUnit<'a> {
             xref,
             create: CreateOpList::new(allocator),
             update: UpdateOpList::new(allocator),
-            create_statements: Vec::new_in(allocator),
-            update_statements: Vec::new_in(allocator),
+            create_statements: Vec::new_in(&allocator),
+            update_statements: Vec::new_in(&allocator),
             attributes: None,
             vars: None,
             fn_name: None,

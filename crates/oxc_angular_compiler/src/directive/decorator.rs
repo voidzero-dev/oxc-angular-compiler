@@ -282,7 +282,7 @@ fn extract_constructor_deps<'a>(
         Some(ctor) => {
             // Constructor found - extract parameters (may be empty)
             let params = &ctor.value.params;
-            let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
+            let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
             for param in &params.items {
                 let dep = extract_param_dependency(allocator, param, source_text);
@@ -296,7 +296,7 @@ fn extract_constructor_deps<'a>(
             // If class has a superclass, use inherited factory pattern (return None)
             // If class has no superclass, use simple factory with empty deps (return Some([]))
             // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
-            if has_superclass { None } else { Some(Vec::new_in(allocator)) }
+            if has_superclass { None } else { Some(Vec::new_in(&allocator)) }
         }
     }
 }
@@ -357,7 +357,7 @@ fn extract_param_dependency<'a>(
                     value: crate::output::ast::LiteralValue::String(attr_name),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))),
             attribute_name_type: token, // The type annotation
             host,
@@ -425,7 +425,7 @@ fn extract_param_token<'a>(
 
         return Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: type_name, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -676,7 +676,7 @@ fn extract_host_directives<'a>(
     expr: &Expression<'a>,
     consts: &StringConsts<'a>,
 ) -> Vec<'a, R3HostDirectiveMetadata<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;
@@ -702,15 +702,15 @@ fn extract_single_host_directive<'a>(
         ArrayExpressionElement::Identifier(id) => Some(R3HostDirectiveMetadata {
             directive: OutputAstBuilder::variable(allocator, id.name.clone().into()),
             is_forward_reference: false,
-            inputs: Vec::new_in(allocator),
-            outputs: Vec::new_in(allocator),
+            inputs: Vec::new_in(&allocator),
+            outputs: Vec::new_in(&allocator),
         }),
 
         // Object expression: { directive: ColorDirective, inputs: [...], outputs: [...] }
         ArrayExpressionElement::ObjectExpression(obj) => {
             let mut directive_expr = None;
-            let mut inputs = Vec::new_in(allocator);
-            let mut outputs = Vec::new_in(allocator);
+            let mut inputs = Vec::new_in(&allocator);
+            let mut outputs = Vec::new_in(&allocator);
             let mut is_forward_reference = false;
 
             for prop in &obj.properties {
@@ -752,8 +752,8 @@ fn extract_single_host_directive<'a>(
                     return Some(R3HostDirectiveMetadata {
                         directive: OutputAstBuilder::variable(allocator, name),
                         is_forward_reference: true,
-                        inputs: Vec::new_in(allocator),
-                        outputs: Vec::new_in(allocator),
+                        inputs: Vec::new_in(&allocator),
+                        outputs: Vec::new_in(&allocator),
                     });
                 }
             }
@@ -834,7 +834,7 @@ fn extract_io_mappings<'a>(
     allocator: &'a Allocator,
     expr: &Expression<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
 
     let Expression::ArrayExpression(arr) = expr else {
         return result;

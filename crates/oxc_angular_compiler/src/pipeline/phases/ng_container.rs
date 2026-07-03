@@ -51,7 +51,7 @@ pub fn generate_ng_container_ops(job: &mut ComponentCompilationJob<'_>) {
                             local_refs_index: elem.local_refs_index, // Copy from element
                             local_refs: std::mem::replace(
                                 &mut elem.local_refs,
-                                ArenaVec::new_in(allocator),
+                                ArenaVec::new_in(&allocator),
                             ),
                             non_bindable: elem.non_bindable,
                             i18n_placeholder: elem.i18n_placeholder.clone(),

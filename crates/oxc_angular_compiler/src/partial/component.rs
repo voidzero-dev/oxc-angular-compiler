@@ -71,7 +71,7 @@ pub fn compile_declare_component_from_metadata<'a>(
     meta: &ComponentMetadata<'a>,
     inputs: &PartialComponentInputs<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     let min_version = compute_min_version(meta, inputs.template);
     entries.push(string_entry(allocator, "minVersion", min_version));
@@ -79,7 +79,7 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: meta.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
     entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
@@ -143,7 +143,7 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     if !meta.export_as.is_empty() {
         let mut elements: Vec<'a, OutputExpression<'a>> =
-            Vec::with_capacity_in(meta.export_as.len(), allocator);
+            Vec::with_capacity_in(meta.export_as.len(), &allocator);
         for name in &meta.export_as {
             elements.push(string_literal_owned(allocator, name.clone()));
         }
@@ -151,7 +151,7 @@ pub fn compile_declare_component_from_metadata<'a>(
             Ident::from("exportAs"),
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: elements, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -203,7 +203,7 @@ pub fn compile_declare_component_from_metadata<'a>(
 
     if !meta.styles.is_empty() {
         let mut elements: Vec<'a, OutputExpression<'a>> =
-            Vec::with_capacity_in(meta.styles.len(), allocator);
+            Vec::with_capacity_in(meta.styles.len(), &allocator);
         for s in &meta.styles {
             elements.push(string_literal_owned(allocator, s.clone()));
         }
@@ -211,7 +211,7 @@ pub fn compile_declare_component_from_metadata<'a>(
             Ident::from("styles"),
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: elements, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -244,7 +244,7 @@ pub fn compile_declare_component_from_metadata<'a>(
         entries.push(LiteralMapEntry::new(
             Ident::from("dependencies"),
             create_dependencies_array_from_slice(
-                allocator,
+                &allocator,
                 declarations_to_emit,
                 meta.declaration_list_emit_mode,
             ),
@@ -335,7 +335,7 @@ pub fn compile_declare_factory_for_component<'a>(
 ) -> OutputExpression<'a> {
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: meta.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -403,9 +403,9 @@ fn create_inputs_partial_metadata<'a>(
     allocator: &'a Allocator,
     inputs: &Vec<'a, R3InputMetadata<'a>>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(inputs.len(), allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(inputs.len(), &allocator);
     for input in inputs {
-        let mut input_map: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+        let mut input_map: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         input_map.push(LiteralMapEntry::new(
             Ident::from("classPropertyName"),
             string_literal_owned(allocator, input.class_property_name.clone()),
@@ -438,14 +438,14 @@ fn create_inputs_partial_metadata<'a>(
             key,
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries: input_map, source_span: None },
-                allocator,
+                &allocator,
             )),
             quoted,
         ));
     }
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -453,12 +453,12 @@ fn legacy_inputs_partial_metadata<'a>(
     allocator: &'a Allocator,
     inputs: &Vec<'a, R3InputMetadata<'a>>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(inputs.len(), allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(inputs.len(), &allocator);
     for input in inputs {
         let declared = &input.class_property_name;
         let public = &input.binding_property_name;
         let value = if declared.as_str() != public.as_str() || input.transform_function.is_some() {
-            let mut tuple: Vec<'a, OutputExpression<'a>> = Vec::new_in(allocator);
+            let mut tuple: Vec<'a, OutputExpression<'a>> = Vec::new_in(&allocator);
             tuple.push(string_literal_owned(allocator, public.clone()));
             tuple.push(string_literal_owned(allocator, declared.clone()));
             if let Some(transform) = &input.transform_function {
@@ -466,7 +466,7 @@ fn legacy_inputs_partial_metadata<'a>(
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: tuple, source_span: None },
-                allocator,
+                &allocator,
             ))
         } else {
             string_literal_owned(allocator, public.clone())
@@ -476,7 +476,7 @@ fn legacy_inputs_partial_metadata<'a>(
     }
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -484,7 +484,7 @@ fn create_outputs_map<'a>(
     allocator: &'a Allocator,
     outputs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(outputs.len(), allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(outputs.len(), &allocator);
     for (class_name, binding_name) in outputs {
         let quoted = is_unsafe_object_key(class_name.as_str());
         entries.push(LiteralMapEntry::new(
@@ -495,7 +495,7 @@ fn create_outputs_map<'a>(
     }
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -517,7 +517,7 @@ fn compile_host_metadata<'a>(
         return None;
     }
 
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     if !host.attributes.is_empty() {
         entries.push(LiteralMapEntry::new(
@@ -557,7 +557,7 @@ fn compile_host_metadata<'a>(
 
     Some(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -565,7 +565,7 @@ fn ident_pairs_to_string_map<'a>(
     allocator: &'a Allocator,
     pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(pairs.len(), allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::with_capacity_in(pairs.len(), &allocator);
     for (key, value) in pairs {
         let quoted = is_unsafe_object_key(key.as_str());
         entries.push(LiteralMapEntry::new(
@@ -576,7 +576,7 @@ fn ident_pairs_to_string_map<'a>(
     }
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -587,12 +587,12 @@ fn create_host_directives_array<'a>(
     host_directives: &Vec<'a, HostDirectiveMetadata<'a>>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
-        Vec::with_capacity_in(host_directives.len(), allocator);
+        Vec::with_capacity_in(host_directives.len(), &allocator);
     for hd in host_directives {
-        let mut hd_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+        let mut hd_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         let directive_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: hd.directive.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
         let directive_expr = if hd.is_forward_reference {
             wrap_forward_ref(allocator, directive_expr)
@@ -617,12 +617,12 @@ fn create_host_directives_array<'a>(
         }
         entries.push(OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries: hd_entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -631,14 +631,14 @@ fn host_directives_mapping_array<'a>(
     pairs: &Vec<'a, (Ident<'a>, Ident<'a>)>,
 ) -> OutputExpression<'a> {
     let mut elements: Vec<'a, OutputExpression<'a>> =
-        Vec::with_capacity_in(pairs.len() * 2, allocator);
+        Vec::with_capacity_in(pairs.len() * 2, &allocator);
     for (public_name, alias) in pairs {
         elements.push(string_literal_owned(allocator, public_name.clone()));
         elements.push(string_literal_owned(allocator, alias.clone()));
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: elements, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -657,10 +657,10 @@ fn lower_imports_to_declarations<'a>(
     allocator: &'a Allocator,
     imports: &Vec<'a, Ident<'a>>,
 ) -> Vec<'a, TemplateDependency<'a>> {
-    let mut out = Vec::with_capacity_in(imports.len(), allocator);
+    let mut out = Vec::with_capacity_in(imports.len(), &allocator);
     for name in imports {
         out.push(TemplateDependency::directive(
-            allocator,
+            &allocator,
             name.clone(),
             Ident::from("*"),
             false, // is_component — unknown at this point
@@ -679,9 +679,9 @@ fn create_dependencies_array_from_slice<'a>(
         DeclarationListEmitMode::Closure | DeclarationListEmitMode::ClosureResolved
     );
 
-    let mut entries: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(deps.len(), allocator);
+    let mut entries: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(deps.len(), &allocator);
     for dep in deps {
-        let mut dep_map: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+        let mut dep_map: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         let kind = match dep.kind {
             TemplateDependencyKind::Directive => {
                 if dep.is_component {
@@ -701,7 +701,7 @@ fn create_dependencies_array_from_slice<'a>(
 
         let mut type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: dep.type_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
         if wrap_in_forward_ref || dep.is_forward_reference {
             type_expr = wrap_forward_ref(allocator, type_expr);
@@ -752,13 +752,13 @@ fn create_dependencies_array_from_slice<'a>(
 
         entries.push(OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries: dep_map, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -766,13 +766,13 @@ fn ident_array_string_literals<'a>(
     allocator: &'a Allocator,
     names: &Vec<'a, Ident<'a>>,
 ) -> OutputExpression<'a> {
-    let mut elements: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(names.len(), allocator);
+    let mut elements: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(names.len(), &allocator);
     for name in names {
         elements.push(string_literal_owned(allocator, name.clone()));
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: elements, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -789,18 +789,18 @@ fn clone_factory_deps<'a>(
 ) -> R3FactoryDeps<'a> {
     match deps {
         Some(deps) => {
-            let mut out = Vec::with_capacity_in(deps.len(), allocator);
+            let mut out = Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 let token_expr = dep.token.as_ref().map(|t| {
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: t.clone(), source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 });
                 let attr_expr = dep.attribute_name.as_ref().map(|a| {
                     OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::String(a.clone()), source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 });
                 out.push(R3DependencyMetadata {
@@ -819,7 +819,7 @@ fn clone_factory_deps<'a>(
             if uses_inheritance {
                 R3FactoryDeps::None
             } else {
-                R3FactoryDeps::Valid(Vec::new_in(allocator))
+                R3FactoryDeps::Valid(Vec::new_in(&allocator))
             }
         }
     }
@@ -838,26 +838,26 @@ fn invoke_declare<'a>(
 ) -> OutputExpression<'a> {
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -868,12 +868,12 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -887,12 +887,12 @@ fn namespaced_enum_member<'a>(
     let enum_ref = namespaced_prop(allocator, "i0", enum_name);
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(enum_ref, allocator),
+            receiver: Box::new_in(enum_ref, &allocator),
             name: Ident::from(variant),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -902,14 +902,14 @@ fn string_literal_static<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal_owned<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -917,7 +917,7 @@ fn string_literal_str<'a>(allocator: &'a Allocator, value: &str) -> OutputExpres
     let owned = allocator.alloc_str(value);
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(owned)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -932,13 +932,13 @@ fn string_entry<'a>(
 fn bool_lit<'a>(allocator: &'a Allocator, value: bool) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Boolean(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
 fn null_lit<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Null, source_span: None },
-        allocator,
+        &allocator,
     ))
 }

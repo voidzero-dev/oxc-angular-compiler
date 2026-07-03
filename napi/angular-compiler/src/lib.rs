@@ -1362,7 +1362,7 @@ pub fn compile_pipe_sync(
 
                 let type_expr = OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: metadata.class_name, source_span: None },
-                    &allocator,
+                    &&allocator,
                 ));
 
                 // Build R3PipeMetadata
@@ -1877,7 +1877,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     // Create type expression for the injector class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Build the metadata
@@ -1889,7 +1889,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     if let Some(providers_str) = &input.providers {
         let providers_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(providers_str.as_str()), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         builder = builder.providers(providers_expr);
     }
@@ -1899,7 +1899,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
         for import_name in imports {
             let import_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from(import_name.as_str()), source_span: None },
-                &allocator,
+                &&allocator,
             ));
             builder = builder.add_import(import_expr);
         }
@@ -2027,7 +2027,7 @@ pub fn compile_class_metadata_sync(
     // Build the class type expression
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(class_name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
@@ -2248,7 +2248,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
     // Create type expression for the class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Parse deps_kind and build deps
@@ -2257,14 +2257,14 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
         Some("None") => R3FactoryDeps::None,
         Some("Valid") | None => {
             // Build valid dependencies
-            let mut dep_list = AllocVec::new_in(&allocator);
+            let mut dep_list = AllocVec::new_in(&&allocator);
             if let Some(deps) = &input.deps {
                 for dep in deps {
                     // Use ReadVarExpr for token since WrappedNodeExpr cannot be emitted
                     let token = dep.token.as_ref().map(|t| {
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from(t.as_str()), source_span: None },
-                            &allocator,
+                            &&allocator,
                         ))
                     });
 
@@ -2272,7 +2272,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
                     let attribute_name_type = dep.attribute_name_type.as_ref().map(|a| {
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from(a.as_str()), source_span: None },
-                            &allocator,
+                            &&allocator,
                         ))
                     });
 

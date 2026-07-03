@@ -80,7 +80,7 @@ pub fn generate_component_definitions<'a>(
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     let fac_definition = generate_fac_definition(allocator, metadata, namespace_registry);
     let cmp_definition = generate_cmp_definition(
-        allocator,
+        &allocator,
         metadata,
         options,
         job,
@@ -122,7 +122,7 @@ fn generate_cmp_definition<'a>(
     content_queries_fn: Option<OutputExpression<'a>>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(allocator);
+    let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(&allocator);
 
     // =========================================================================
     // Angular field ordering from baseDirectiveFields (compiler.ts lines 41-104)
@@ -133,7 +133,7 @@ fn generate_cmp_definition<'a>(
         Ident::from("type"),
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -182,7 +182,7 @@ fn generate_cmp_definition<'a>(
                         value: LiteralValue::Number(host_vars as f64),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
                 false,
             ));
@@ -192,7 +192,7 @@ fn generate_cmp_definition<'a>(
         if let Some(host_fn) = host_result.host_binding_fn {
             entries.push(LiteralMapEntry::new(
                 Ident::from("hostBindings"),
-                OutputExpression::Function(Box::new_in(host_fn, allocator)),
+                OutputExpression::Function(Box::new_in(host_fn, &allocator)),
                 false,
             ));
         }
@@ -217,18 +217,18 @@ fn generate_cmp_definition<'a>(
     // 10. exportAs: [...] (if not null)
     // Per Angular compiler.ts lines 92-94 (baseDirectiveFields)
     if !metadata.export_as.is_empty() {
-        let mut export_items = OxcVec::new_in(allocator);
+        let mut export_items = OxcVec::new_in(&allocator);
         for name in &metadata.export_as {
             export_items.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         entries.push(LiteralMapEntry::new(
             Ident::from("exportAs"),
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: export_items, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -241,7 +241,7 @@ fn generate_cmp_definition<'a>(
             Ident::from("standalone"),
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -254,7 +254,7 @@ fn generate_cmp_definition<'a>(
             Ident::from("signals"),
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -300,7 +300,7 @@ fn generate_cmp_definition<'a>(
         Ident::from("decls"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(decls as f64), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -312,7 +312,7 @@ fn generate_cmp_definition<'a>(
         Ident::from("vars"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(vars as f64), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -322,7 +322,7 @@ fn generate_cmp_definition<'a>(
     // - If there are const initializers (e.g., for i18n dual-mode), wrap in arrow function
     // - Otherwise, emit as plain literal array
     if !job.consts.is_empty() {
-        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
             const_entries.push(const_value_to_expression(allocator, const_value));
         }
@@ -331,7 +331,7 @@ fn generate_cmp_definition<'a>(
             // Wrap consts in an arrow function that runs initializers first
             // function() { ...initializers...; return [...consts...]; }
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
-                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, allocator);
+                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
 
             // Add all initializer statements
             for stmt in job.consts_initializers.drain(..) {
@@ -343,27 +343,27 @@ fn generate_cmp_definition<'a>(
                 ReturnStatement {
                     value: OutputExpression::LiteralArray(Box::new_in(
                         LiteralArrayExpr { entries: const_entries, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
 
             OutputExpression::Function(Box::new_in(
                 FunctionExpr {
                     name: None,
-                    params: OxcVec::new_in(allocator),
+                    params: OxcVec::new_in(&allocator),
                     statements: fn_stmts,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         } else {
             // Plain literal array
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: const_entries, source_span: None },
-                allocator,
+                &allocator,
             ))
         };
 
@@ -374,7 +374,7 @@ fn generate_cmp_definition<'a>(
     // Per Angular compiler.ts line 270
     entries.push(LiteralMapEntry::new(
         Ident::from("template"),
-        OutputExpression::Function(Box::new_in(template_fn, allocator)),
+        OutputExpression::Function(Box::new_in(template_fn, &allocator)),
         false,
     ));
 
@@ -402,7 +402,7 @@ fn generate_cmp_definition<'a>(
     let host_attr = "_nghost-%COMP%";
 
     if !metadata.styles.is_empty() {
-        let mut style_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+        let mut style_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for style in &metadata.styles {
             let style = crate::styles::finalize_component_style(
                 style.as_str(),
@@ -414,11 +414,11 @@ fn generate_cmp_definition<'a>(
             if style.trim().is_empty() {
                 continue;
             }
-            let style_value = Ident::from_in(style.as_str(), allocator);
+            let style_value = Ident::from_in(style.as_str(), &allocator);
 
             style_entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(style_value), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
 
@@ -428,7 +428,7 @@ fn generate_cmp_definition<'a>(
                 Ident::from("styles"),
                 OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries: style_entries, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
                 false,
             ));
@@ -457,7 +457,7 @@ fn generate_cmp_definition<'a>(
                     value: LiteralValue::Number(encapsulation_value as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -468,7 +468,7 @@ fn generate_cmp_definition<'a>(
     if let Some(ref animations) = metadata.animations {
         // Create the inner map: {animation: animationsExpr}
         let mut data_entries: OxcVec<'a, LiteralMapEntry<'a>> =
-            OxcVec::with_capacity_in(1, allocator);
+            OxcVec::with_capacity_in(1, &allocator);
         data_entries.push(LiteralMapEntry::new(
             Ident::from("animation"),
             animations.clone_in(allocator),
@@ -479,7 +479,7 @@ fn generate_cmp_definition<'a>(
             Ident::from("data"),
             OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries: data_entries, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -510,7 +510,7 @@ fn generate_cmp_definition<'a>(
                 Ident::from("changeDetection"),
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Number(value as f64), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
                 false,
             ));
@@ -520,7 +520,7 @@ fn generate_cmp_definition<'a>(
     // Create the config object
     let config = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Wrap in ɵɵdefineComponent call
@@ -594,14 +594,14 @@ fn generate_constructor_factory<'a>(
 ) -> OutputExpression<'a> {
     // Function name: ComponentClass_Factory
     let fn_name_string = format!("{}_Factory", metadata.class_name);
-    let fn_name = Ident::from_in(fn_name_string.as_str(), allocator);
+    let fn_name = Ident::from_in(fn_name_string.as_str(), &allocator);
 
     // Parameter: __ngFactoryType__ (type override for inheritance/testing)
-    let mut params: OxcVec<'a, FnParam<'a>> = OxcVec::new_in(allocator);
+    let mut params: OxcVec<'a, FnParam<'a>> = OxcVec::new_in(&allocator);
     params.push(FnParam { name: Ident::from("__ngFactoryType__") });
 
     // Body: return new (__ngFactoryType__ || ComponentClass)(deps...);
-    let mut statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+    let mut statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
 
     // Create: (__ngFactoryType__ || ComponentClass)
     let or_expr = OutputExpression::BinaryOperator(Box::new_in(
@@ -610,20 +610,20 @@ fn generate_constructor_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("__ngFactoryType__"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             rhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // If any constructor parameter resolved to a type-only import, the whole
@@ -636,12 +636,12 @@ fn generate_constructor_factory<'a>(
                 expr: create_invalid_factory_call(allocator),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
 
         return OutputExpression::Function(Box::new_in(
             FunctionExpr { name: Some(fn_name), params, statements, source_span: None },
-            allocator,
+            &allocator,
         ));
     }
 
@@ -649,7 +649,7 @@ fn generate_constructor_factory<'a>(
     // Uses FactoryTarget::Component for components
     // The namespace_registry is used to resolve imported dependency namespaces
     let constructor_args = if deps.is_empty() {
-        OxcVec::new_in(allocator)
+        OxcVec::new_in(&allocator)
     } else {
         compile_inject_dependencies(allocator, deps, FactoryTarget::Component, namespace_registry)
     };
@@ -657,22 +657,22 @@ fn generate_constructor_factory<'a>(
     // Create: new (__ngFactoryType__ || ComponentClass)(dep1, dep2, ...)
     let new_expr = OutputExpression::Instantiate(Box::new_in(
         InstantiateExpr {
-            class_expr: Box::new_in(or_expr, allocator),
+            class_expr: Box::new_in(or_expr, &allocator),
             args: constructor_args,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // return new (__ngFactoryType__ || ComponentClass)(deps...);
     statements.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: new_expr, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     OutputExpression::Function(Box::new_in(
         FunctionExpr { name: Some(fn_name), params, statements, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -704,11 +704,11 @@ fn generate_inherited_factory<'a>(
 
     // Create base factory variable name: ɵComponentClass_BaseFactory
     let base_factory_var_name =
-        Ident::from_in(format!("ɵ{}_BaseFactory", metadata.class_name).as_str(), allocator);
+        Ident::from_in(format!("ɵ{}_BaseFactory", metadata.class_name).as_str(), &allocator);
 
     // Function name: ComponentClass_Factory
     let fn_name_string = format!("{}_Factory", metadata.class_name);
-    let fn_name = Ident::from_in(fn_name_string.as_str(), allocator);
+    let fn_name = Ident::from_in(fn_name_string.as_str(), &allocator);
 
     // Create ɵɵgetInheritedFactory(ComponentClass) call
     let get_inherited_factory_call = {
@@ -717,32 +717,32 @@ fn generate_inherited_factory<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::GET_INHERITED_FACTORY),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
-        let mut args = OxcVec::new_in(allocator);
+        let mut args = OxcVec::new_in(&allocator);
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         )));
 
         OutputExpression::InvokeFunction(Box::new_in(
             InvokeFunctionExpr {
-                fn_expr: Box::new_in(fn_expr, allocator),
+                fn_expr: Box::new_in(fn_expr, &allocator),
                 args,
                 pure: false,
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     };
 
@@ -753,14 +753,14 @@ fn generate_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: base_factory_var_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(get_inherited_factory_call, allocator),
+            rhs: Box::new_in(get_inherited_factory_call, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create memoization pattern: baseFactoryVar || (baseFactoryVar = ɵɵgetInheritedFactory(...))
@@ -770,14 +770,14 @@ fn generate_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: base_factory_var_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(assignment, allocator),
+            rhs: Box::new_in(assignment, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create (__ngFactoryType__ || ComponentClass)
@@ -787,46 +787,46 @@ fn generate_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: factory_type_param.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             rhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create the factory call: (memoizedFactory)(__ngFactoryType__ || ComponentClass)
-    let mut factory_call_args = OxcVec::new_in(allocator);
+    let mut factory_call_args = OxcVec::new_in(&allocator);
     factory_call_args.push(type_for_ctor);
 
     let factory_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(memoized_factory, allocator),
+            fn_expr: Box::new_in(memoized_factory, &allocator),
             args: factory_call_args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create return statement for inner function
-    let mut inner_body: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+    let mut inner_body: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
     inner_body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: factory_call, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Create inner function: function ComponentClass_Factory(__ngFactoryType__) { ... }
-    let mut inner_params = OxcVec::new_in(allocator);
+    let mut inner_params = OxcVec::new_in(&allocator);
     inner_params.push(FnParam { name: factory_type_param });
 
     let inner_fn = OutputExpression::Function(Box::new_in(
@@ -836,11 +836,11 @@ fn generate_inherited_factory<'a>(
             statements: inner_body,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create IIFE body: let ɵComponentClass_BaseFactory; return function...;
-    let mut iife_body: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+    let mut iife_body: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
 
     // Declaration: let ɵComponentClass_BaseFactory;
     iife_body.push(OutputStatement::DeclareVar(Box::new_in(
@@ -851,35 +851,35 @@ fn generate_inherited_factory<'a>(
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // Return the inner function
     iife_body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: inner_fn, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Create arrow function IIFE: () => { let x; return function...; }
     let arrow_fn = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: OxcVec::new_in(allocator),
+            params: OxcVec::new_in(&allocator),
             body: ArrowFunctionBody::Statements(iife_body),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Invoke the IIFE: (() => { ... })()
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(arrow_fn, allocator),
-            args: OxcVec::new_in(allocator),
+            fn_expr: Box::new_in(arrow_fn, &allocator),
+            args: OxcVec::new_in(&allocator),
             pure: true, // Mark as @__PURE__ for tree-shaking
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -894,30 +894,30 @@ fn create_define_component_call<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(Identifiers::DEFINE_COMPONENT),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Call: i0.ɵɵdefineComponent(config)
-    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
     args.push(config);
 
     OutputExpression::InvokeFunction(Box::new_in(
         crate::output::ast::InvokeFunctionExpr {
-            fn_expr: Box::new_in(define_component, allocator),
+            fn_expr: Box::new_in(define_component, &allocator),
             args,
             pure: true,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -937,19 +937,19 @@ fn parse_selector_to_array<'a>(
 ) -> OutputExpression<'a> {
     let r3_selectors = parse_selector_to_r3_selector(selector.as_str());
 
-    let mut outer_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+    let mut outer_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
 
     for r3_selector in &r3_selectors {
         let inner_entries = r3_selector_to_output_expr(allocator, r3_selector);
         outer_entries.push(OutputExpression::LiteralArray(Box::new_in(
             LiteralArrayExpr { entries: inner_entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: outer_entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -976,7 +976,7 @@ fn generate_features_array<'a>(
     metadata: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
-    let mut features: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+    let mut features: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
 
     // 1. ProvidersFeature - when providers or viewProviders are defined
     // Format: ɵɵProvidersFeature([providers], [viewProviders]?)
@@ -1019,7 +1019,7 @@ fn generate_features_array<'a>(
     } else {
         Some(OutputExpression::LiteralArray(Box::new_in(
             LiteralArrayExpr { entries: features, source_span: None },
-            allocator,
+            &allocator,
         )))
     }
 }
@@ -1036,14 +1036,14 @@ fn generate_providers_feature<'a>(
     // Build args: [providers, viewProviders?]
     let has_view_providers = metadata.view_providers.is_some();
     let capacity = if has_view_providers { 2 } else { 1 };
-    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(capacity, allocator);
+    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(capacity, &allocator);
 
     // First arg: providers expression (or empty array if no providers)
     let providers_expr = metadata.providers.as_ref().map_or_else(
         || {
             OutputExpression::LiteralArray(Box::new_in(
-                LiteralArrayExpr { entries: OxcVec::new_in(allocator), source_span: None },
-                allocator,
+                LiteralArrayExpr { entries: OxcVec::new_in(&allocator), source_span: None },
+                &allocator,
             ))
         },
         |p| p.clone_in(allocator),
@@ -1057,13 +1057,13 @@ fn generate_providers_feature<'a>(
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1087,18 +1087,18 @@ fn generate_host_directives_feature<'a>(
     let host_directives_arg =
         create_host_directives_arg(allocator, &metadata.host_directives, namespace_registry);
 
-    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(1, allocator);
+    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(1, &allocator);
     args.push(host_directives_arg);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1122,21 +1122,21 @@ fn create_directive_reference<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: namespace, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: directive.directive.clone(),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
     }
     // No source module - use bare type name (local directive)
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: directive.directive.clone(), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1154,7 +1154,7 @@ fn create_host_directives_arg<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
     let mut expressions: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(host_directives.len(), allocator);
+        OxcVec::with_capacity_in(host_directives.len(), &allocator);
     let mut has_forward_ref = false;
 
     for directive in host_directives {
@@ -1170,7 +1170,7 @@ fn create_host_directives_arg<'a>(
             expressions.push(directive_ref);
         } else {
             // Complex case: object with directive, inputs, outputs
-            let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(allocator);
+            let mut entries: OxcVec<'a, LiteralMapEntry<'a>> = OxcVec::new_in(&allocator);
 
             // directive: DirectiveClass (or i1.DirectiveClass for imports)
             entries.push(LiteralMapEntry::new(Ident::from("directive"), directive_ref, false));
@@ -1191,33 +1191,33 @@ fn create_host_directives_arg<'a>(
 
             expressions.push(OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
 
     let array_expr = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: expressions, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // If there's a forward reference, wrap in: function() { return [directives] }
     if has_forward_ref {
         let mut statements: OxcVec<'a, OutputStatement<'a>> =
-            OxcVec::with_capacity_in(1, allocator);
+            OxcVec::with_capacity_in(1, &allocator);
         statements.push(OutputStatement::Return(Box::new_in(
             ReturnStatement { value: array_expr, source_span: None },
-            allocator,
+            &allocator,
         )));
 
         OutputExpression::Function(Box::new_in(
             FunctionExpr {
                 name: None,
-                params: OxcVec::new_in(allocator),
+                params: OxcVec::new_in(&allocator),
                 statements,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     } else {
         array_expr
@@ -1235,32 +1235,32 @@ fn generate_external_styles_feature<'a>(
 
     // Create array of external style paths
     let mut style_entries: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(metadata.external_styles.len(), allocator);
+        OxcVec::with_capacity_in(metadata.external_styles.len(), &allocator);
 
     for style_url in &metadata.external_styles {
         style_entries.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(style_url.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     let styles_array = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: style_entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
-    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(1, allocator);
+    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(1, &allocator);
     args.push(styles_array);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1274,15 +1274,15 @@ fn create_angular_fn_ref<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(fn_name),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1338,12 +1338,12 @@ fn generate_runtime_resolved_dependencies<'a>(
     let fn_expr = create_angular_fn_ref(allocator, Identifiers::GET_COMPONENT_DEPS_FACTORY);
 
     let capacity = if metadata.raw_imports.is_some() { 2 } else { 1 };
-    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(capacity, allocator);
+    let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(capacity, &allocator);
 
     // First arg: Component type
     args.push(OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Second arg: raw imports expression (optional)
@@ -1354,13 +1354,13 @@ fn generate_runtime_resolved_dependencies<'a>(
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1374,7 +1374,7 @@ fn create_dependencies_array<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(metadata.declarations.len(), allocator);
+        OxcVec::with_capacity_in(metadata.declarations.len(), &allocator);
 
     for dep in &metadata.declarations {
         let dep_expr = if let Some(ref source_module) = dep.source_module {
@@ -1385,21 +1385,21 @@ fn create_dependencies_array<'a>(
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: namespace, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     name: dep.type_name.clone(),
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         } else {
             // Local dependency - use bare type name
             OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: dep.type_name.clone(), source_span: None },
-                allocator,
+                &allocator,
             ))
         };
         entries.push(dep_expr);
@@ -1407,7 +1407,7 @@ fn create_dependencies_array<'a>(
 
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1438,18 +1438,18 @@ fn compile_declaration_list<'a>(
                     fn_expr: Box::new_in(
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
-                                receiver: Box::new_in(list, allocator),
+                                receiver: Box::new_in(list, &allocator),
                                 name: Ident::from("map"),
                                 optional: false,
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     args: {
                         let mut args: OxcVec<'a, OutputExpression<'a>> =
-                            OxcVec::with_capacity_in(1, allocator);
+                            OxcVec::with_capacity_in(1, &allocator);
                         args.push(resolve_fn);
                         args
                     },
@@ -1457,7 +1457,7 @@ fn compile_declaration_list<'a>(
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
 
             wrap_in_arrow_function(allocator, map_call)
@@ -1475,20 +1475,20 @@ fn wrap_in_arrow_function<'a>(
     allocator: &'a Allocator,
     expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let mut statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::with_capacity_in(1, allocator);
+    let mut statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::with_capacity_in(1, &allocator);
     statements.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: expr, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     OutputExpression::Function(Box::new_in(
         FunctionExpr {
             name: None,
-            params: OxcVec::new_in(allocator),
+            params: OxcVec::new_in(&allocator),
             statements,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -1506,28 +1506,28 @@ pub fn const_value_to_expression<'a>(
     match value {
         ConstValue::String(s) => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(s.clone()), source_span: None },
-            allocator,
+            &allocator,
         )),
         ConstValue::Number(n) => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(*n), source_span: None },
-            allocator,
+            &allocator,
         )),
         ConstValue::Boolean(b) => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(*b), source_span: None },
-            allocator,
+            &allocator,
         )),
         ConstValue::Null => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )),
         ConstValue::Array(arr) => {
-            let mut entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+            let mut entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
             for item in arr.iter() {
                 entries.push(const_value_to_expression(allocator, item));
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
-                allocator,
+                &allocator,
             ))
         }
         ConstValue::External(ext) => {
@@ -1537,15 +1537,15 @@ pub fn const_value_to_expression<'a>(
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     name: ext.name.clone(),
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         }
         ConstValue::Expression(expr) => expr.clone_in(allocator),
@@ -1674,16 +1674,16 @@ mod tests {
         names: &[&'a str],
     ) -> OutputExpression<'a> {
         let mut entries: OxcVec<'a, OutputExpression<'a>> =
-            OxcVec::with_capacity_in(names.len(), allocator);
+            OxcVec::with_capacity_in(names.len(), &allocator);
         for name in names {
             entries.push(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from(*name), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         OutputExpression::LiteralArray(Box::new_in(
             LiteralArrayExpr { entries, source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -2091,7 +2091,7 @@ mod tests {
         // Test with a variable reference as raw_imports
         metadata.raw_imports = Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("IMPORTS"), source_span: None },
-            &allocator,
+            &&allocator,
         )));
 
         let result =
@@ -2117,22 +2117,22 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::RuntimeResolved;
 
         // Test with an array literal as raw_imports (like imports: [A, B, C])
-        let mut entries: OxcVec<'_, OutputExpression<'_>> = OxcVec::with_capacity_in(3, &allocator);
+        let mut entries: OxcVec<'_, OutputExpression<'_>> = OxcVec::with_capacity_in(3, &&allocator);
         entries.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("A"), source_span: None },
-            &allocator,
+            &&allocator,
         )));
         entries.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("B"), source_span: None },
-            &allocator,
+            &&allocator,
         )));
         entries.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("C"), source_span: None },
-            &allocator,
+            &&allocator,
         )));
         metadata.raw_imports = Some(OutputExpression::LiteralArray(Box::new_in(
             LiteralArrayExpr { entries, source_span: None },
-            &allocator,
+            &&allocator,
         )));
 
         let result =
@@ -2274,7 +2274,7 @@ mod tests {
         // Create an animations expression (identifier reference)
         metadata.animations = Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("myAnimations"), source_span: None },
-            &allocator,
+            &&allocator,
         )));
 
         // We need a full compilation job to generate the definition

@@ -483,7 +483,7 @@ fn generate_variables_in_scope_for_view<'a>(
     for (name, value) in &scope.context_variables {
         let xref = job.allocate_xref_id();
         new_ops.push(create_context_read_variable(
-            allocator,
+            &allocator,
             xref,
             scope.view,
             name.clone(),
@@ -495,7 +495,7 @@ fn generate_variables_in_scope_for_view<'a>(
     for (name, expr) in &scope.alias_variables {
         let xref = job.allocate_xref_id();
         new_ops.push(create_alias_variable(
-            allocator,
+            &allocator,
             xref,
             scope.view,
             name.clone(),
@@ -516,7 +516,7 @@ fn generate_variables_in_scope_for_view<'a>(
         for decl in &scope.let_declarations {
             let xref = job.allocate_xref_id();
             new_ops.push(create_context_let_reference_variable(
-                allocator,
+                &allocator,
                 xref,
                 decl.variable_name.clone(),
                 decl.target_id,
@@ -543,7 +543,7 @@ fn clone_update_op<'a>(allocator: &'a oxc_allocator::Allocator, op: &UpdateOp<'a
             xref: var.xref,
             kind: var.kind,
             name: var.name.clone(),
-            initializer: Box::new_in(var.initializer.clone_in(allocator), allocator),
+            initializer: Box::new_in(var.initializer.clone_in(allocator), &allocator),
             flags: var.flags,
             view: var.view,
             local: var.local,
@@ -558,9 +558,9 @@ fn clone_update_op<'a>(allocator: &'a oxc_allocator::Allocator, op: &UpdateOp<'a
             initializer: Box::new_in(
                 IrExpression::NextContext(Box::new_in(
                     NextContextExpr { steps: 0, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             flags: VariableFlags::NONE,
             view: None,
@@ -667,7 +667,7 @@ fn create_next_context_variable<'a>(
 ) -> UpdateOp<'a> {
     let initializer = IrExpression::NextContext(Box::new_in(
         NextContextExpr { steps: 1, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     UpdateOp::Variable(UpdateVariableOp {
@@ -675,7 +675,7 @@ fn create_next_context_variable<'a>(
         xref,
         kind: SemanticVariableKind::Context,
         name: Ident::from(""), // Empty = naming phase will assign it
-        initializer: Box::new_in(initializer, allocator),
+        initializer: Box::new_in(initializer, &allocator),
         flags: VariableFlags::NONE,
         view: Some(context_view),
         local: false,
@@ -703,7 +703,7 @@ fn create_context_read_variable<'a>(
     // This will be resolved by resolve_contexts to either `ctx` or `ReadVariable(nextContext_var)`
     let context_expr = IrExpression::Context(Box::new_in(
         ContextExpr { view: view_xref, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Per Angular's generate_variables.ts line 257-258:
@@ -715,12 +715,12 @@ fn create_context_read_variable<'a>(
         // Create a property read from the context: ctx.$implicit, ctx.$index, etc.
         IrExpression::ResolvedPropertyRead(Box::new_in(
             ResolvedPropertyReadExpr {
-                receiver: Box::new_in(context_expr, allocator),
+                receiver: Box::new_in(context_expr, &allocator),
                 name: context_value,
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     };
 
@@ -729,7 +729,7 @@ fn create_context_read_variable<'a>(
         xref,
         kind: SemanticVariableKind::Identifier,
         name,
-        initializer: Box::new_in(initializer, allocator),
+        initializer: Box::new_in(initializer, &allocator),
         flags: VariableFlags::NONE,
         view: Some(view_xref),
         local: false,
@@ -749,7 +749,7 @@ fn create_alias_variable<'a>(
         xref,
         kind: SemanticVariableKind::Alias,
         name,
-        initializer: Box::new_in(expression, allocator),
+        initializer: Box::new_in(expression, &allocator),
         flags: VariableFlags::ALWAYS_INLINE,
         view: Some(view_xref),
         local: false,
@@ -775,7 +775,7 @@ fn create_reference_variable<'a>(
             offset: local_ref.offset,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     UpdateOp::Variable(UpdateVariableOp {
@@ -783,7 +783,7 @@ fn create_reference_variable<'a>(
         xref,
         kind: SemanticVariableKind::Identifier,
         name: local_ref.name,
-        initializer: Box::new_in(initializer, allocator),
+        initializer: Box::new_in(initializer, &allocator),
         flags: VariableFlags::NONE,
         view: Some(view_xref),
         local: false,
@@ -807,7 +807,7 @@ fn create_context_let_reference_variable<'a>(
 
     let initializer = IrExpression::ContextLetReference(Box::new_in(
         ContextLetReferenceExpr { target: target_id, target_slot: slot_handle, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     UpdateOp::Variable(UpdateVariableOp {
@@ -815,7 +815,7 @@ fn create_context_let_reference_variable<'a>(
         xref,
         kind: SemanticVariableKind::Identifier,
         name,
-        initializer: Box::new_in(initializer, allocator),
+        initializer: Box::new_in(initializer, &allocator),
         flags: VariableFlags::NONE,
         view: None,
         local: false,

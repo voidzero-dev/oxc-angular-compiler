@@ -135,11 +135,11 @@ impl<'a> R3NgModuleMetadataBuilder<'a> {
     pub fn new(allocator: &'a oxc_allocator::Allocator) -> Self {
         Self {
             r#type: None,
-            bootstrap: Vec::new_in(allocator),
-            declarations: Vec::new_in(allocator),
-            imports: Vec::new_in(allocator),
-            exports: Vec::new_in(allocator),
-            schemas: Vec::new_in(allocator),
+            bootstrap: Vec::new_in(&allocator),
+            declarations: Vec::new_in(&allocator),
+            imports: Vec::new_in(&allocator),
+            exports: Vec::new_in(&allocator),
+            schemas: Vec::new_in(&allocator),
             id: None,
             selector_scope_mode: R3SelectorScopeMode::Inline,
             contains_forward_decls: false,

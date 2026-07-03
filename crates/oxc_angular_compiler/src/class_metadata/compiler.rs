@@ -58,7 +58,7 @@ pub fn compile_component_class_metadata<'a>(
         }
         Some(deps) => {
             // Has deferred dependencies - use setClassMetadataAsync
-            let mut params = Vec::new_in(allocator);
+            let mut params = Vec::new_in(&allocator);
             for dep in deps {
                 params.push(FnParam { name: dep.param_name.clone() });
             }
@@ -79,7 +79,7 @@ pub fn compile_opaque_async_class_metadata<'a>(
     defer_resolver: OutputExpression<'a>,
     deferred_dependency_names: &[Ident<'a>],
 ) -> OutputExpression<'a> {
-    let mut params = Vec::new_in(allocator);
+    let mut params = Vec::new_in(&allocator);
     for name in deferred_dependency_names {
         params.push(FnParam { name: name.clone() });
     }
@@ -101,11 +101,11 @@ pub fn compile_component_metadata_async_resolver<'a>(
     allocator: &'a Allocator,
     dependencies: &[R3DeferPerComponentDependency<'a>],
 ) -> OutputExpression<'a> {
-    let mut dynamic_imports = Vec::new_in(allocator);
+    let mut dynamic_imports = Vec::new_in(&allocator);
 
     for dep in dependencies {
         // Create: (m) => m.CmpA  (or m.default for default imports)
-        let mut inner_params = Vec::new_in(allocator);
+        let mut inner_params = Vec::new_in(&allocator);
         inner_params.push(FnParam { name: Ident::from("m") });
 
         let prop_name =
@@ -116,24 +116,24 @@ pub fn compile_component_metadata_async_resolver<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("m"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: prop_name,
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         let inner_fn = OutputExpression::ArrowFunction(Box::new_in(
             ArrowFunctionExpr {
                 params: inner_params,
-                body: ArrowFunctionBody::Expression(Box::new_in(inner_body, allocator)),
+                body: ArrowFunctionBody::Expression(Box::new_in(inner_body, &allocator)),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         // Create: import('./cmp-a').then((m) => m.CmpA)
@@ -143,31 +143,31 @@ pub fn compile_component_metadata_async_resolver<'a>(
                 url_comment: None,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         let then_prop = OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
-                receiver: Box::new_in(dynamic_import, allocator),
+                receiver: Box::new_in(dynamic_import, &allocator),
                 name: Ident::from("then"),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
-        let mut then_args = Vec::new_in(allocator);
+        let mut then_args = Vec::new_in(&allocator);
         then_args.push(inner_fn);
 
         let then_call = OutputExpression::InvokeFunction(Box::new_in(
             InvokeFunctionExpr {
-                fn_expr: Box::new_in(then_prop, allocator),
+                fn_expr: Box::new_in(then_prop, &allocator),
                 args: then_args,
                 pure: false,
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         dynamic_imports.push(then_call);
@@ -176,17 +176,17 @@ pub fn compile_component_metadata_async_resolver<'a>(
     // Create: () => [...]
     let array = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: dynamic_imports, source_span: None },
-        allocator,
+        &allocator,
     ));
 
-    let empty_params = Vec::new_in(allocator);
+    let empty_params = Vec::new_in(&allocator);
     OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
             params: empty_params,
-            body: ArrowFunctionBody::Expression(Box::new_in(array, allocator)),
+            body: ArrowFunctionBody::Expression(Box::new_in(array, &allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -201,7 +201,7 @@ fn internal_compile_class_metadata<'a>(
 ) -> OutputExpression<'a> {
     let import = import_expr(allocator, Identifiers::SET_CLASS_METADATA);
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(metadata.r#type.clone_in(allocator));
     args.push(metadata.decorators.clone_in(allocator));
     args.push(
@@ -221,13 +221,13 @@ fn internal_compile_class_metadata<'a>(
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(import, allocator),
+            fn_expr: Box::new_in(import, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -242,7 +242,7 @@ fn internal_compile_set_class_metadata_async<'a>(
     let set_class_metadata_call = internal_compile_class_metadata(allocator, metadata);
 
     // Create wrapper: (deps...) => { setClassMetadata(...); }
-    let mut wrapper_stmts = Vec::new_in(allocator);
+    let mut wrapper_stmts = Vec::new_in(&allocator);
     wrapper_stmts.push(expr_stmt(allocator, set_class_metadata_call));
 
     let set_class_meta_wrapper = OutputExpression::ArrowFunction(Box::new_in(
@@ -251,26 +251,26 @@ fn internal_compile_set_class_metadata_async<'a>(
             body: ArrowFunctionBody::Statements(wrapper_stmts),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create: setClassMetadataAsync(type, resolver, wrapper)
     let import = import_expr(allocator, Identifiers::SET_CLASS_METADATA_ASYNC);
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(metadata.r#type.clone_in(allocator));
     args.push(dependency_resolver_fn);
     args.push(set_class_meta_wrapper);
 
     let set_class_meta_async = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(import, allocator),
+            fn_expr: Box::new_in(import, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Wrap in dev-only guard and IIFE
@@ -297,49 +297,49 @@ fn guarded_expression<'a>(
 ) -> OutputExpression<'a> {
     let guard_var = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(guard), source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // typeof guard
     let typeof_guard = OutputExpression::Typeof(Box::new_in(
         TypeofExpr {
-            expr: Box::new_in(guard_var.clone_in(allocator), allocator),
+            expr: Box::new_in(guard_var.clone_in(allocator), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // typeof guard === "undefined"
     let guard_not_defined = OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::Identical,
-            lhs: Box::new_in(typeof_guard, allocator),
-            rhs: Box::new_in(literal_string(allocator, "undefined"), allocator),
+            lhs: Box::new_in(typeof_guard, &allocator),
+            rhs: Box::new_in(literal_string(allocator, "undefined"), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // typeof guard === "undefined" || guard
     let guard_undefined_or_true = OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::Or,
-            lhs: Box::new_in(guard_not_defined, allocator),
-            rhs: Box::new_in(guard_var, allocator),
+            lhs: Box::new_in(guard_not_defined, &allocator),
+            rhs: Box::new_in(guard_var, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // (typeof guard === "undefined" || guard) && expr
     OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: BinaryOperator::And,
-            lhs: Box::new_in(guard_undefined_or_true, allocator),
-            rhs: Box::new_in(expr, allocator),
+            lhs: Box::new_in(guard_undefined_or_true, &allocator),
+            rhs: Box::new_in(expr, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -350,15 +350,15 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(identifier),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -366,7 +366,7 @@ fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> Output
 fn literal_null<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Null, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -374,7 +374,7 @@ fn literal_null<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
 fn literal_string<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -382,7 +382,7 @@ fn literal_string<'a>(allocator: &'a Allocator, value: &'static str) -> OutputEx
 fn expr_stmt<'a>(allocator: &'a Allocator, expr: OutputExpression<'a>) -> OutputStatement<'a> {
     OutputStatement::Expression(Box::new_in(
         ExpressionStatement { expr, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -391,8 +391,8 @@ fn create_arrow_iife<'a>(
     allocator: &'a Allocator,
     stmt: OutputStatement<'a>,
 ) -> OutputExpression<'a> {
-    let empty_params = Vec::new_in(allocator);
-    let mut stmts = Vec::new_in(allocator);
+    let empty_params = Vec::new_in(&allocator);
+    let mut stmts = Vec::new_in(&allocator);
     stmts.push(stmt);
 
     let arrow = OutputExpression::ArrowFunction(Box::new_in(
@@ -401,19 +401,19 @@ fn create_arrow_iife<'a>(
             body: ArrowFunctionBody::Statements(stmts),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Call the arrow function: arrow()
-    let empty_args = Vec::new_in(allocator);
+    let empty_args = Vec::new_in(&allocator);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(arrow, allocator),
+            fn_expr: Box::new_in(arrow, &allocator),
             args: empty_args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }

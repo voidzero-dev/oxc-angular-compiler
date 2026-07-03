@@ -32,7 +32,7 @@ pub fn delete_any_casts(job: &mut ComponentCompilationJob<'_>) {
                 transform_expressions_in_create_op(
                     op,
                     &|expr, _flags| {
-                        remove_any_cast(expr, allocator);
+                        remove_any_cast(expr, &allocator);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -43,7 +43,7 @@ pub fn delete_any_casts(job: &mut ComponentCompilationJob<'_>) {
                 transform_expressions_in_update_op(
                     op,
                     &|expr, _flags| {
-                        remove_any_cast(expr, allocator);
+                        remove_any_cast(expr, &allocator);
                     },
                     VisitorContextFlag::NONE,
                 );
@@ -100,7 +100,7 @@ pub fn delete_any_casts_for_host(job: &mut HostBindingCompilationJob<'_>) {
         transform_expressions_in_create_op(
             op,
             &|expr, _flags| {
-                remove_any_cast(expr, allocator);
+                remove_any_cast(expr, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -111,7 +111,7 @@ pub fn delete_any_casts_for_host(job: &mut HostBindingCompilationJob<'_>) {
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                remove_any_cast(expr, allocator);
+                remove_any_cast(expr, &allocator);
             },
             VisitorContextFlag::NONE,
         );

@@ -64,7 +64,7 @@ fn generate_fac_definition<'a>(
         type_expr: metadata.r#type.clone_in(allocator),
         type_decl: metadata.r#type.clone_in(allocator),
         type_argument_count: metadata.type_argument_count,
-        deps: R3FactoryDeps::Valid(OxcVec::new_in(allocator)),
+        deps: R3FactoryDeps::Valid(OxcVec::new_in(&allocator)),
         target: FactoryTarget::Service,
     });
 
@@ -85,7 +85,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let metadata = R3ServiceMetadata {
             name: Ident::from("MyService"),

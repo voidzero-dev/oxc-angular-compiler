@@ -97,7 +97,7 @@ impl<'a> Token<'a> {
             index,
             end,
             code as u32 as f64,
-            Ident::from_in(String::from(code), allocator),
+            Ident::from_in(String::from(code), &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -109,7 +109,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -121,7 +121,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -133,7 +133,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -145,7 +145,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -157,7 +157,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -169,7 +169,7 @@ impl<'a> Token<'a> {
             index,
             end,
             value,
-            Ident::from_in("", allocator),
+            Ident::from_in("", &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -181,7 +181,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(message, allocator),
+            Ident::from_in(message, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -198,7 +198,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::TemplateLiteralEnd,
         )
     }
@@ -210,7 +210,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::TemplateLiteralPart,
         )
     }
@@ -222,7 +222,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::TemplateLiteralPart,
         )
     }
@@ -234,7 +234,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::TemplateLiteralEnd,
         )
     }
@@ -246,7 +246,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -258,7 +258,7 @@ impl<'a> Token<'a> {
             index,
             end,
             0.0,
-            Ident::from_in(text, allocator),
+            Ident::from_in(text, &allocator),
             StringTokenKind::Plain,
         )
     }
@@ -709,13 +709,13 @@ impl<'a> Lexer<'a> {
 
     /// Scans a character token.
     fn scan_character(&mut self, start: u32, ch: char) {
-        let token = Token::new_character(start, self.index, ch, self.allocator);
+        let token = Token::new_character(start, self.index, ch, &self.allocator);
         self.tokens.push(token);
     }
 
     /// Scans an operator token.
     fn scan_operator(&mut self, start: u32, op: &str) {
-        let token = Token::new_operator(start, self.index, op, self.allocator);
+        let token = Token::new_operator(start, self.index, op, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -727,9 +727,9 @@ impl<'a> Lexer<'a> {
 
         let text = &self.input[start as usize..self.index as usize];
         let token = if KEYWORDS.contains(&text) {
-            Token::new_keyword(start, self.index, text, self.allocator)
+            Token::new_keyword(start, self.index, text, &self.allocator)
         } else {
-            Token::new_identifier(start, self.index, text, self.allocator)
+            Token::new_identifier(start, self.index, text, &self.allocator)
         };
         self.tokens.push(token);
     }
@@ -743,7 +743,7 @@ impl<'a> Lexer<'a> {
 
         // Include the # in the str_value to match Angular's TypeScript implementation
         let text = &self.input[start as usize..self.index as usize];
-        let token = Token::new_private_identifier(start, self.index, text, self.allocator);
+        let token = Token::new_private_identifier(start, self.index, text, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -877,7 +877,7 @@ impl<'a> Lexer<'a> {
             cleaned_text.parse::<i64>().unwrap_or(0) as f64
         };
 
-        let token = Token::new_number(start, self.index, value, self.allocator);
+        let token = Token::new_number(start, self.index, value, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -893,7 +893,7 @@ impl<'a> Lexer<'a> {
         let text = &self.input[(start + 2) as usize..self.index as usize];
         let text = text.replace('_', "");
         let value = i64::from_str_radix(&text, 16).unwrap_or(0) as f64;
-        let token = Token::new_number(start, self.index, value, self.allocator);
+        let token = Token::new_number(start, self.index, value, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -909,7 +909,7 @@ impl<'a> Lexer<'a> {
         let text = &self.input[(start + 2) as usize..self.index as usize];
         let text = text.replace('_', "");
         let value = i64::from_str_radix(&text, 8).unwrap_or(0) as f64;
-        let token = Token::new_number(start, self.index, value, self.allocator);
+        let token = Token::new_number(start, self.index, value, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -925,7 +925,7 @@ impl<'a> Lexer<'a> {
         let text = &self.input[(start + 2) as usize..self.index as usize];
         let text = text.replace('_', "");
         let value = i64::from_str_radix(&text, 2).unwrap_or(0) as f64;
-        let token = Token::new_number(start, self.index, value, self.allocator);
+        let token = Token::new_number(start, self.index, value, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -958,7 +958,7 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        let token = Token::new_string(start, self.index, &result, self.allocator);
+        let token = Token::new_string(start, self.index, &result, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -987,7 +987,7 @@ impl<'a> Lexer<'a> {
                     part_start,
                     self.index,
                     &result,
-                    self.allocator,
+                    &self.allocator,
                 );
                 self.tokens.push(token);
                 return;
@@ -995,7 +995,7 @@ impl<'a> Lexer<'a> {
             if ch == chars::DOLLAR && self.peek_at(1) == chars::LBRACE {
                 // Start of substitution - create TemplateHead ending at current position
                 let head_end = self.index;
-                let token = Token::new_template_head(part_start, head_end, &result, self.allocator);
+                let token = Token::new_template_head(part_start, head_end, &result, &self.allocator);
                 self.tokens.push(token);
 
                 // Emit the ${ as an operator token
@@ -1003,7 +1003,7 @@ impl<'a> Lexer<'a> {
                 self.advance(); // $
                 self.advance(); // {
                 let interp_token =
-                    Token::new_operator(interp_start, self.index, "${", self.allocator);
+                    Token::new_operator(interp_start, self.index, "${", &self.allocator);
                 self.tokens.push(interp_token);
 
                 // Scan the expression tokens inside ${...}
@@ -1087,7 +1087,7 @@ impl<'a> Lexer<'a> {
                 self.advance();
                 // End of template - create TemplateTail
                 let token =
-                    Token::new_template_tail(part_start, self.index, &result, self.allocator);
+                    Token::new_template_tail(part_start, self.index, &result, &self.allocator);
                 self.tokens.push(token);
                 return;
             }
@@ -1095,7 +1095,7 @@ impl<'a> Lexer<'a> {
                 // Another substitution - create TemplateMiddle ending at current position
                 let middle_end = self.index;
                 let token =
-                    Token::new_template_middle(part_start, middle_end, &result, self.allocator);
+                    Token::new_template_middle(part_start, middle_end, &result, &self.allocator);
                 self.tokens.push(token);
 
                 // Emit the ${ as an operator token
@@ -1103,7 +1103,7 @@ impl<'a> Lexer<'a> {
                 self.advance(); // $
                 self.advance(); // {
                 let interp_token =
-                    Token::new_operator(interp_start, self.index, "${", self.allocator);
+                    Token::new_operator(interp_start, self.index, "${", &self.allocator);
                 self.tokens.push(interp_token);
 
                 // Scan the expression tokens
@@ -1372,13 +1372,13 @@ impl<'a> Lexer<'a> {
 
     /// Records an error with the current position as the end.
     fn error(&mut self, start: u32, message: &str) {
-        let token = Token::new_error(start, self.index, message, self.allocator);
+        let token = Token::new_error(start, self.index, message, &self.allocator);
         self.tokens.push(token);
     }
 
     /// Records an error at specific index and end positions.
     fn error_at(&mut self, index: u32, end: u32, message: &str) {
-        let token = Token::new_error(index, end, message, self.allocator);
+        let token = Token::new_error(index, end, message, &self.allocator);
         self.tokens.push(token);
     }
 
@@ -1441,7 +1441,7 @@ impl<'a> Lexer<'a> {
         let body_end = self.index;
 
         // Create the body token (just the pattern, not including slashes)
-        let body_token = Token::new_regexp_body(start, body_end, &pattern, self.allocator);
+        let body_token = Token::new_regexp_body(start, body_end, &pattern, &self.allocator);
         self.tokens.push(body_token);
 
         // Scan flags
@@ -1454,7 +1454,7 @@ impl<'a> Lexer<'a> {
         if self.index > flags_start {
             let flags = &self.input[flags_start as usize..self.index as usize];
             let flags_token =
-                Token::new_regexp_flags(flags_start, self.index, flags, self.allocator);
+                Token::new_regexp_flags(flags_start, self.index, flags, &self.allocator);
             self.tokens.push(flags_token);
 
             // Validate flags (this reports errors but doesn't prevent token creation)

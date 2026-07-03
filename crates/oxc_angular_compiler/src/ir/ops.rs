@@ -2023,7 +2023,7 @@ mod tests {
             host_listener: true,
             name: Ident::from(""),
             handler_expression: None,
-            handler_ops: AllocVec::new_in(allocator),
+            handler_ops: AllocVec::new_in(&allocator),
             handler_fn_name: None,
             consume_fn_name: None,
             is_animation_listener: legacy_animation_phase.is_some(),

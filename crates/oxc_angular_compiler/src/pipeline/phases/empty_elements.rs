@@ -126,7 +126,7 @@ pub fn collapse_empty_instructions(job: &mut ComponentCompilationJob<'_>) {
                                         attribute_namespace: start.attribute_namespace.clone(),
                                         local_refs: std::mem::replace(
                                             &mut start.local_refs,
-                                            oxc_allocator::Vec::new_in(allocator),
+                                            oxc_allocator::Vec::new_in(&allocator),
                                         ),
                                         local_refs_index: start.local_refs_index,
                                         non_bindable: start.non_bindable,
@@ -148,7 +148,7 @@ pub fn collapse_empty_instructions(job: &mut ComponentCompilationJob<'_>) {
                                         local_refs_index: start.local_refs_index,
                                         local_refs: std::mem::replace(
                                             &mut start.local_refs,
-                                            oxc_allocator::Vec::new_in(allocator),
+                                            oxc_allocator::Vec::new_in(&allocator),
                                         ),
                                         non_bindable: start.non_bindable,
                                         i18n_placeholder: start.i18n_placeholder.clone(),

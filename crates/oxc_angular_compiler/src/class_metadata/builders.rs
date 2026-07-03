@@ -44,29 +44,29 @@ pub fn build_decorator_metadata_array<'a>(
     inlined_styles: Option<&[Ident<'a>]>,
     consts: Option<&StringConsts<'a>>,
 ) -> OutputExpression<'a> {
-    let mut decorator_entries = AllocVec::new_in(allocator);
+    let mut decorator_entries = AllocVec::new_in(&allocator);
 
     for (decorator_idx, decorator) in decorators.iter().enumerate() {
-        let mut map_entries = AllocVec::new_in(allocator);
+        let mut map_entries = AllocVec::new_in(&allocator);
 
         // Get decorator type name
         let type_expr = match &decorator.expression {
             Expression::CallExpression(call) => match &call.callee {
                 Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: id.name.into(), source_span: None },
-                    allocator,
+                    &allocator,
                 ))),
                 Expression::StaticMemberExpression(member) => {
                     // Handle namespaced decorators like ng.Component
                     convert_oxc_expression(allocator, &member.object, source_text).map(|receiver| {
                         OutputExpression::ReadProp(Box::new_in(
                             ReadPropExpr {
-                                receiver: Box::new_in(receiver, allocator),
+                                receiver: Box::new_in(receiver, &allocator),
                                 name: member.property.name.into(),
                                 optional: false,
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         ))
                     })
                 }
@@ -74,7 +74,7 @@ pub fn build_decorator_metadata_array<'a>(
             },
             Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: id.name.into(), source_span: None },
-                allocator,
+                &allocator,
             ))),
             _ => None,
         };
@@ -98,7 +98,7 @@ pub fn build_decorator_metadata_array<'a>(
             let is_component_decorator =
                 get_decorator_name(decorator).is_some_and(|n| n == "Component");
 
-            let mut args = AllocVec::new_in(allocator);
+            let mut args = AllocVec::new_in(&allocator);
             for (arg_idx, arg) in call.arguments.iter().enumerate() {
                 let expr = arg.to_expression();
                 if let Some(mut converted) = convert_oxc_expression(allocator, expr, source_text) {
@@ -107,7 +107,7 @@ pub fn build_decorator_metadata_array<'a>(
                     // are left alone.
                     if is_component_decorator && decorator_idx == 0 && arg_idx == 0 {
                         inline_component_resources(
-                            allocator,
+                            &allocator,
                             &mut converted,
                             inlined_template,
                             inlined_styles,
@@ -118,7 +118,7 @@ pub fn build_decorator_metadata_array<'a>(
                         // template literal would leak verbatim into `setClassMetadata`.
                         if let Some(consts) = consts {
                             drop_unresolvable_template_literal_fields(
-                                allocator,
+                                &allocator,
                                 &mut converted,
                                 expr,
                                 consts,
@@ -134,7 +134,7 @@ pub fn build_decorator_metadata_array<'a>(
                     Ident::from("args"),
                     OutputExpression::LiteralArray(Box::new_in(
                         LiteralArrayExpr { entries: args, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                     false,
                 ));
@@ -144,13 +144,13 @@ pub fn build_decorator_metadata_array<'a>(
         // Create the decorator object: { type: ..., args: [...] }
         decorator_entries.push(OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries: map_entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: decorator_entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -196,7 +196,7 @@ fn inline_component_resources<'a>(
         return;
     }
 
-    let original_entries = std::mem::replace(&mut map_box.entries, AllocVec::new_in(allocator));
+    let original_entries = std::mem::replace(&mut map_box.entries, AllocVec::new_in(&allocator));
 
     // First pass: drop the deleted keys; if both `templateUrl` and `template`
     // existed in source, overwrite the existing `template` in place (Map.set
@@ -231,7 +231,7 @@ fn inline_component_resources<'a>(
     // `styles`/`styleUrl(s)`, mirroring Angular's unconditional `metadata.delete`
     // for all three keys before `metadata.set('styles', …)`).
     if let Some(styles) = inlined_styles {
-        let mut style_entries = AllocVec::new_in(allocator);
+        let mut style_entries = AllocVec::new_in(&allocator);
         for style in styles {
             // Match Angular's `style.trim().length > 0` filter.
             if style.as_str().trim().is_empty() {
@@ -239,7 +239,7 @@ fn inline_component_resources<'a>(
             }
             style_entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(*style), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         if !style_entries.is_empty() {
@@ -247,7 +247,7 @@ fn inline_component_resources<'a>(
                 Ident::from("styles"),
                 OutputExpression::LiteralArray(Box::new_in(
                     LiteralArrayExpr { entries: style_entries, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
                 false,
             ));
@@ -302,7 +302,7 @@ fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> Liter
         Ident::from("template"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(Ident::from(content)), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     )
@@ -335,15 +335,15 @@ pub fn build_ctor_params_metadata<'a>(
         None
     })?;
 
-    let mut param_entries = AllocVec::new_in(allocator);
+    let mut param_entries = AllocVec::new_in(&allocator);
 
     for (i, param) in constructor.iter().enumerate() {
-        let mut map_entries = AllocVec::new_in(allocator);
+        let mut map_entries = AllocVec::new_in(&allocator);
 
         // Extract type from TypeScript type annotation, using namespace-prefixed
         // references for imported types when constructor dependency info is available.
         let type_expr = build_param_type_expression(
-            allocator,
+            &allocator,
             param,
             constructor_deps.and_then(|deps| deps.get(i)),
             namespace_registry,
@@ -352,7 +352,7 @@ pub fn build_ctor_params_metadata<'a>(
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                allocator,
+                &allocator,
             ))
         });
 
@@ -362,7 +362,7 @@ pub fn build_ctor_params_metadata<'a>(
         let param_decorators = extract_angular_decorators_from_param(param);
         if !param_decorators.is_empty() {
             let decorators_array = build_decorator_metadata_array(
-                allocator,
+                &allocator,
                 &param_decorators,
                 source_text,
                 None,
@@ -378,7 +378,7 @@ pub fn build_ctor_params_metadata<'a>(
 
         param_entries.push(OutputExpression::LiteralMap(Box::new_in(
             LiteralMapExpr { entries: map_entries, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -390,16 +390,16 @@ pub fn build_ctor_params_metadata<'a>(
     // Wrap in arrow function: () => [...]
     let array_expr = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: param_entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     Some(OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: AllocVec::new_in(allocator),
-            body: ArrowFunctionBody::Expression(Box::new_in(array_expr, allocator)),
+            params: AllocVec::new_in(&allocator),
+            body: ArrowFunctionBody::Expression(Box::new_in(array_expr, &allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -424,7 +424,7 @@ pub fn build_prop_decorators_metadata<'a>(
         "ContentChildren",
     ];
 
-    let mut prop_entries = AllocVec::new_in(allocator);
+    let mut prop_entries = AllocVec::new_in(&allocator);
 
     for element in &class.body.body {
         let (decorators, property_name, value) = match element {
@@ -456,7 +456,7 @@ pub fn build_prop_decorators_metadata<'a>(
         if !angular_decorators.is_empty() {
             // Build decorators array from the real decorators present in source.
             let decorators_array = build_decorator_metadata_array(
-                allocator,
+                &allocator,
                 &angular_decorators,
                 source_text,
                 None,
@@ -475,7 +475,7 @@ pub fn build_prop_decorators_metadata<'a>(
         // builds); without it, `setInput`/router-binding fail with NG0315/NG0303/NG0950.
         if let Some(value) = value
             && let Some(decorators_array) = build_initializer_api_prop_decorators(
-                allocator,
+                &allocator,
                 value,
                 &prop_name,
                 source_text,
@@ -492,7 +492,7 @@ pub fn build_prop_decorators_metadata<'a>(
 
     Some(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: prop_entries, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -506,7 +506,7 @@ fn build_initializer_api_prop_decorators<'a>(
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
-    let mut decorators = AllocVec::new_in(allocator);
+    let mut decorators = AllocVec::new_in(&allocator);
 
     if let Some(input) = try_parse_signal_input(allocator, value, property_name.clone()) {
         // input() / input.required() → `Input({ isSignal, alias, required })`
@@ -515,7 +515,7 @@ fn build_initializer_api_prop_decorators<'a>(
         // model() → `Input({ isSignal, alias, required })` + `Output("<name>Change")`
         decorators.push(build_signal_input_decorator(allocator, namespace_registry, &model.input));
         decorators.push(build_core_decorator_with_string_arg(
-            allocator,
+            &allocator,
             namespace_registry,
             "Output",
             model.output.1.clone(),
@@ -523,7 +523,7 @@ fn build_initializer_api_prop_decorators<'a>(
     } else if let Some((_, binding)) = try_parse_signal_output(value, property_name.clone()) {
         // output() / outputFromObservable() → `Output("<binding>")`
         decorators.push(build_core_decorator_with_string_arg(
-            allocator,
+            &allocator,
             namespace_registry,
             "Output",
             binding,
@@ -540,7 +540,7 @@ fn build_initializer_api_prop_decorators<'a>(
 
     Some(OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: decorators, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -555,7 +555,7 @@ fn build_signal_input_decorator<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
     input: &R3InputMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut config = AllocVec::new_in(allocator);
+    let mut config = AllocVec::new_in(&allocator);
     config.push(LiteralMapEntry::new(
         Ident::from("isSignal"),
         bool_literal(allocator, true),
@@ -572,10 +572,10 @@ fn build_signal_input_decorator<'a>(
         false,
     ));
 
-    let mut args = AllocVec::new_in(allocator);
+    let mut args = AllocVec::new_in(&allocator);
     args.push(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: config, source_span: None },
-        allocator,
+        &allocator,
     )));
     build_core_decorator(allocator, namespace_registry, "Input", args)
 }
@@ -600,13 +600,13 @@ fn build_signal_query_decorator<'a>(
     // decorator.
     let predicate =
         convert_oxc_expression(allocator, call.arguments.first()?.to_expression(), source_text)?;
-    let mut args = AllocVec::new_in(allocator);
+    let mut args = AllocVec::new_in(&allocator);
     args.push(predicate);
 
     // Options: `{ ...<sourceOptions>, isSignal: true }`. Spread the second positional
     // argument verbatim (matching Angular's `factory.createSpreadAssignment(callArgs[1])`),
     // which preserves any options expression, object literal or not.
-    let mut options = AllocVec::new_in(allocator);
+    let mut options = AllocVec::new_in(&allocator);
     if let Some(second) = call.arguments.get(1)
         && let Some(source_options) =
             convert_oxc_expression(allocator, second.to_expression(), source_text)
@@ -620,7 +620,7 @@ fn build_signal_query_decorator<'a>(
     ));
     args.push(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: options, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     Some(build_core_decorator(allocator, namespace_registry, decorator_name, args))
@@ -667,7 +667,7 @@ fn build_core_decorator_with_string_arg<'a>(
     decorator_name: &'static str,
     arg: Ident<'a>,
 ) -> OutputExpression<'a> {
-    let mut args = AllocVec::new_in(allocator);
+    let mut args = AllocVec::new_in(&allocator);
     args.push(string_literal(allocator, arg));
     build_core_decorator(allocator, namespace_registry, decorator_name, args)
 }
@@ -688,25 +688,25 @@ fn build_core_decorator<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: core_namespace, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(decorator_name),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
-    let mut entries = AllocVec::new_in(allocator);
+    let mut entries = AllocVec::new_in(&allocator);
     entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
     if !args.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("args"),
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: args, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -714,7 +714,7 @@ fn build_core_decorator<'a>(
 
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -722,7 +722,7 @@ fn build_core_decorator<'a>(
 fn bool_literal<'a>(allocator: &'a Allocator, value: bool) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Boolean(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -730,7 +730,7 @@ fn bool_literal<'a>(allocator: &'a Allocator, value: bool) -> OutputExpression<'
 fn string_literal<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -782,15 +782,15 @@ fn build_param_type_expression<'a>(
                             receiver: Box::new_in(
                                 OutputExpression::ReadVar(Box::new_in(
                                     ReadVarExpr { name: namespace, source_span: None },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             ),
                             name,
                             optional: false,
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -815,15 +815,15 @@ fn build_param_type_expression<'a>(
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: namespace, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     name: tn.clone(),
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -870,13 +870,13 @@ fn extract_param_type_expression<'a>(
             // Handle simple type references like SomeService
             match &type_ref.type_name {
                 TSTypeName::IdentifierReference(id) => Some(OutputExpression::ReadVar(
-                    Box::new_in(ReadVarExpr { name: id.name.into(), source_span: None }, allocator),
+                    Box::new_in(ReadVarExpr { name: id.name.into(), source_span: None }, &allocator),
                 )),
                 TSTypeName::QualifiedName(qualified) => {
                     // Handle qualified names like ns.SomeType
                     Some(OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: qualified.right.name.into(), source_span: None },
-                        allocator,
+                        &allocator,
                     )))
                 }
                 TSTypeName::ThisExpression(_) => {

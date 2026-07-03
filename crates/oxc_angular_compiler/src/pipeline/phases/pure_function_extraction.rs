@@ -115,11 +115,11 @@ fn extract_pure_function<'a>(
                 IrExpression::OutputExpr(Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: fn_name, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ));
         }
     }

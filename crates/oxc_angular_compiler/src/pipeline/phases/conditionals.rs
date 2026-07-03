@@ -99,7 +99,7 @@ pub fn generate_conditional_expressions(job: &mut ComponentCompilationJob<'_>) {
 
                     // Build the conditional expression
                     let (processed, context_value) = build_conditional_expression(
-                        allocator,
+                        &allocator,
                         &mut cond.conditions,
                         cond.test.as_ref(),
                         temp_xref,
@@ -178,36 +178,36 @@ fn build_conditional_expression<'a>(
                         Box::new_in(
                             IrExpression::AssignTemporary(Box::new_in(
                                 AssignTemporaryExpr {
-                                    expr: Box::new_in(switch_test.clone_in(allocator), allocator),
+                                    expr: Box::new_in(switch_test.clone_in(allocator), &allocator),
                                     xref,
                                     name: None,
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         )
                     } else {
-                        Box::new_in(switch_test.clone_in(allocator), allocator)
+                        Box::new_in(switch_test.clone_in(allocator), &allocator)
                     }
                 } else if let Some(xref) = temp_xref {
                     // Read from temporary
                     Box::new_in(
                         IrExpression::ReadTemporary(Box::new_in(
                             ReadTemporaryExpr { xref, name: None, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     )
                 } else {
-                    Box::new_in(switch_test.clone_in(allocator), allocator)
+                    Box::new_in(switch_test.clone_in(allocator), &allocator)
                 };
 
                 // Build: test === case_value
                 build_equality_check(
-                    allocator,
+                    &allocator,
                     use_tmp,
-                    Box::new_in(cond_expr.clone_in(allocator), allocator),
+                    Box::new_in(cond_expr.clone_in(allocator), &allocator),
                 )
             } else {
                 // @if case: handle alias capture
@@ -217,14 +217,14 @@ fn build_conditional_expression<'a>(
                         let assign_expr = Box::new_in(
                             IrExpression::AssignTemporary(Box::new_in(
                                 AssignTemporaryExpr {
-                                    expr: Box::new_in(cond_expr.clone_in(allocator), allocator),
+                                    expr: Box::new_in(cond_expr.clone_in(allocator), &allocator),
                                     xref,
                                     name: None,
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         );
 
                         // Set context value to read from the temporary
@@ -232,20 +232,20 @@ fn build_conditional_expression<'a>(
                             context_value = Some(Box::new_in(
                                 IrExpression::ReadTemporary(Box::new_in(
                                     ReadTemporaryExpr { xref, name: None, source_span: None },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             ));
                         }
 
                         // Update the condition's expression to the assignment
                         *cond_expr = assign_expr;
-                        Box::new_in(cond_expr.clone_in(allocator), allocator)
+                        Box::new_in(cond_expr.clone_in(allocator), &allocator)
                     } else {
-                        Box::new_in(cond_expr.clone_in(allocator), allocator)
+                        Box::new_in(cond_expr.clone_in(allocator), &allocator)
                     }
                 } else {
-                    Box::new_in(cond_expr.clone_in(allocator), allocator)
+                    Box::new_in(cond_expr.clone_in(allocator), &allocator)
                 }
             }
         } else {
@@ -273,9 +273,9 @@ fn create_slot_literal_from_handle<'a>(
                 target_xref: Some(target_xref),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     )
 }
 
@@ -290,11 +290,11 @@ fn create_literal_number<'a>(
         IrExpression::Ast(Box::new_in(
             AngularExpression::LiteralPrimitive(Box::new_in(
                 LiteralPrimitive { span, source_span, value: AstLiteralValue::Number(value) },
-                allocator,
+                &allocator,
             )),
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     )
 }
 
@@ -316,9 +316,9 @@ fn build_equality_check<'a>(
                 rhs: case_value,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     )
 }
 
@@ -340,8 +340,8 @@ fn build_ternary<'a>(
                 false_expr: false_case,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     )
 }

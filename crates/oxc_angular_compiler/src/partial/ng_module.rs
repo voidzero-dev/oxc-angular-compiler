@@ -46,7 +46,7 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
     allocator: &'a Allocator,
     meta: &R3NgModuleMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_NG_MODULE));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
@@ -98,7 +98,7 @@ pub fn compile_declare_factory_for_ng_module<'a>(
         type_expr: meta.r#type.value.clone_in(allocator),
         type_decl: meta.r#type.value.clone_in(allocator),
         type_argument_count: 0,
-        deps: R3FactoryDeps::Valid(Vec::new_in(allocator)),
+        deps: R3FactoryDeps::Valid(Vec::new_in(&allocator)),
         target: FactoryTarget::NgModule,
     });
     compile_declare_factory_function(allocator, &factory_meta)
@@ -134,13 +134,13 @@ fn refs_to_array<'a>(
     refs: &Vec<'a, R3Reference<'a>>,
     contains_forward_decls: bool,
 ) -> OutputExpression<'a> {
-    let mut elements: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(refs.len(), allocator);
+    let mut elements: Vec<'a, OutputExpression<'a>> = Vec::with_capacity_in(refs.len(), &allocator);
     for r in refs {
         elements.push(r.value.clone_in(allocator));
     }
     let array_expr = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: elements, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     if !contains_forward_decls {
@@ -149,11 +149,11 @@ fn refs_to_array<'a>(
 
     OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::new_in(allocator),
-            body: ArrowFunctionBody::Expression(Box::new_in(array_expr, allocator)),
+            params: Vec::new_in(&allocator),
+            body: ArrowFunctionBody::Expression(Box::new_in(array_expr, &allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -166,26 +166,26 @@ fn invoke_declare<'a>(
 ) -> OutputExpression<'a> {
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -196,19 +196,19 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 

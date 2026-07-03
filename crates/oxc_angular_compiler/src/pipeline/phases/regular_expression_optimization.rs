@@ -62,10 +62,10 @@ pub fn optimize_regular_expressions(job: &mut ComponentCompilationJob<'_>) {
     // Process root view
     {
         for op in job.root.create.iter_mut() {
-            transform_regexes_in_create_op(op, allocator, &regex_replacements);
+            transform_regexes_in_create_op(op, &allocator, &regex_replacements);
         }
         for op in job.root.update.iter_mut() {
-            transform_regexes_in_update_op(op, allocator, &regex_replacements);
+            transform_regexes_in_update_op(op, &allocator, &regex_replacements);
         }
     }
 
@@ -76,10 +76,10 @@ pub fn optimize_regular_expressions(job: &mut ComponentCompilationJob<'_>) {
         }
         if let Some(view) = job.views.get_mut(&xref) {
             for op in view.create.iter_mut() {
-                transform_regexes_in_create_op(op, allocator, &regex_replacements);
+                transform_regexes_in_create_op(op, &allocator, &regex_replacements);
             }
             for op in view.update.iter_mut() {
-                transform_regexes_in_update_op(op, allocator, &regex_replacements);
+                transform_regexes_in_update_op(op, &allocator, &regex_replacements);
             }
         }
     }
@@ -195,26 +195,26 @@ fn transform_regexes_in_create_op<'a>(
 ) {
     match op {
         CreateOp::Variable(var) => {
-            transform_expr(&mut var.initializer, allocator, replacements);
+            transform_expr(&mut var.initializer, &allocator, replacements);
         }
         CreateOp::Listener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_regexes_in_update_op(handler_op, allocator, replacements);
+                transform_regexes_in_update_op(handler_op, &allocator, replacements);
             }
         }
         CreateOp::TwoWayListener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_regexes_in_update_op(handler_op, allocator, replacements);
+                transform_regexes_in_update_op(handler_op, &allocator, replacements);
             }
         }
         CreateOp::AnimationListener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_regexes_in_update_op(handler_op, allocator, replacements);
+                transform_regexes_in_update_op(handler_op, &allocator, replacements);
             }
         }
         CreateOp::Animation(animation) => {
             for handler_op in animation.handler_ops.iter_mut() {
-                transform_regexes_in_update_op(handler_op, allocator, replacements);
+                transform_regexes_in_update_op(handler_op, &allocator, replacements);
             }
         }
         _ => {}
@@ -229,22 +229,22 @@ fn transform_regexes_in_update_op<'a>(
 ) {
     match op {
         UpdateOp::Property(prop) => {
-            transform_expr(&mut prop.expression, allocator, replacements);
+            transform_expr(&mut prop.expression, &allocator, replacements);
         }
         UpdateOp::StyleProp(style) => {
-            transform_expr(&mut style.expression, allocator, replacements);
+            transform_expr(&mut style.expression, &allocator, replacements);
         }
         UpdateOp::ClassProp(class) => {
-            transform_expr(&mut class.expression, allocator, replacements);
+            transform_expr(&mut class.expression, &allocator, replacements);
         }
         UpdateOp::Binding(bind) => {
-            transform_expr(&mut bind.expression, allocator, replacements);
+            transform_expr(&mut bind.expression, &allocator, replacements);
         }
         UpdateOp::Variable(var) => {
-            transform_expr(&mut var.initializer, allocator, replacements);
+            transform_expr(&mut var.initializer, &allocator, replacements);
         }
         UpdateOp::InterpolateText(interp) => {
-            transform_expr(&mut interp.interpolation, allocator, replacements);
+            transform_expr(&mut interp.interpolation, &allocator, replacements);
         }
         _ => {}
     }
@@ -270,9 +270,9 @@ fn transform_expr<'a>(
                     *expr = IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: name.clone(), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ));
                 }
             }
@@ -300,9 +300,9 @@ pub fn optimize_regular_expressions_for_host(job: &mut HostBindingCompilationJob
 
     // Second pass: Replace regex expressions with references to pooled constants
     for op in job.root.create.iter_mut() {
-        transform_regexes_in_create_op(op, allocator, &regex_replacements);
+        transform_regexes_in_create_op(op, &allocator, &regex_replacements);
     }
     for op in job.root.update.iter_mut() {
-        transform_regexes_in_update_op(op, allocator, &regex_replacements);
+        transform_regexes_in_update_op(op, &allocator, &regex_replacements);
     }
 }

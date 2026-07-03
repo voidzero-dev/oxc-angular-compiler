@@ -112,7 +112,7 @@ impl<'a> ConvertedExpression<'a> {
                 // For now, we'll create a placeholder.
                 OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -125,7 +125,7 @@ impl<'a> ConvertedExpression<'a> {
         match self {
             Self::Ir(expr) => expr,
             Self::Output(output_expr) => {
-                IrExpression::OutputExpr(Box::new_in(output_expr, allocator))
+                IrExpression::OutputExpr(Box::new_in(output_expr, &allocator))
             }
         }
     }
@@ -283,7 +283,7 @@ pub fn convert_ast<'a>(
         // Empty expression
         AngularExpression::Empty(e) => ConvertedExpression::ir(IrExpression::Empty(Box::new_in(
             IrEmptyExpr { source_span: convert_source_span(e.source_span) },
-            allocator,
+            &allocator,
         ))),
 
         // Implicit receiver - converted to lexical read or context
@@ -292,7 +292,7 @@ pub fn convert_ast<'a>(
             // the receiver of a PropertyRead. Return empty as placeholder.
             ConvertedExpression::ir(IrExpression::Empty(Box::new_in(
                 IrEmptyExpr { source_span: None },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -300,7 +300,7 @@ pub fn convert_ast<'a>(
         AngularExpression::ThisReceiver(e) => {
             ConvertedExpression::ir(IrExpression::Context(Box::new_in(
                 ContextExpr { view: root_xref, source_span: convert_source_span(e.source_span) },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -321,7 +321,7 @@ pub fn convert_ast<'a>(
                         name: pr.name.clone(),
                         source_span: convert_source_span(pr.source_span),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else if is_this_receiver {
                 // Explicit `this` property read (e.g., `this.formGroup`) becomes a
@@ -340,27 +340,27 @@ pub fn convert_ast<'a>(
                                     view: root_xref,
                                     source_span: convert_source_span(pr.source_span),
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         name: pr.name.clone(),
                         optional: false,
                         source_span: convert_source_span(pr.source_span),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 // Explicit receiver property read becomes ReadPropExpr
                 let receiver = convert_ast(allocator, &pr.receiver, root_xref, allocate_xref_id);
                 ConvertedExpression::output(OutputExpression::ReadProp(Box::new_in(
                     ReadPropExpr {
-                        receiver: Box::new_in(receiver.to_output(allocator), allocator),
+                        receiver: Box::new_in(receiver.to_output(allocator), &allocator),
                         name: pr.name.clone(),
                         optional: false,
                         source_span: convert_source_span(pr.source_span),
                     },
-                    allocator,
+                    &allocator,
                 )))
             }
         }
@@ -370,11 +370,11 @@ pub fn convert_ast<'a>(
             let receiver = convert_ast(allocator, &spr.receiver, root_xref, allocate_xref_id);
             ConvertedExpression::ir(IrExpression::SafePropertyRead(Box::new_in(
                 SafePropertyReadExpr {
-                    receiver: Box::new_in(receiver.to_ir(allocator), allocator),
+                    receiver: Box::new_in(receiver.to_ir(allocator), &allocator),
                     name: spr.name.clone(),
                     source_span: convert_source_span(spr.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -384,12 +384,12 @@ pub fn convert_ast<'a>(
             let key = convert_ast(allocator, &kr.key, root_xref, allocate_xref_id);
             ConvertedExpression::output(OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver.to_output(allocator), allocator),
-                    index: Box::new_in(key.to_output(allocator), allocator),
+                    receiver: Box::new_in(receiver.to_output(allocator), &allocator),
+                    index: Box::new_in(key.to_output(allocator), &allocator),
                     optional: false,
                     source_span: convert_source_span(kr.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -399,11 +399,11 @@ pub fn convert_ast<'a>(
             let key = convert_ast(allocator, &skr.key, root_xref, allocate_xref_id);
             ConvertedExpression::ir(IrExpression::SafeKeyedRead(Box::new_in(
                 SafeKeyedReadExpr {
-                    receiver: Box::new_in(receiver.to_ir(allocator), allocator),
-                    index: Box::new_in(key.to_ir(allocator), allocator),
+                    receiver: Box::new_in(receiver.to_ir(allocator), &allocator),
+                    index: Box::new_in(key.to_ir(allocator), &allocator),
                     source_span: convert_source_span(skr.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -412,7 +412,7 @@ pub fn convert_ast<'a>(
             // Note: ImplicitReceiver in Call expression should be caught by parser.
             // If it reaches here, the receiver conversion will handle it gracefully.
             let receiver = convert_ast(allocator, &call.receiver, root_xref, allocate_xref_id);
-            let mut args = Vec::with_capacity_in(call.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(call.args.len(), &allocator);
             for arg in call.args.iter() {
                 let converted = convert_ast(allocator, arg, root_xref, allocate_xref_id);
                 args.push(converted.to_output(allocator));
@@ -420,20 +420,20 @@ pub fn convert_ast<'a>(
 
             ConvertedExpression::output(OutputExpression::InvokeFunction(Box::new_in(
                 InvokeFunctionExpr {
-                    fn_expr: Box::new_in(receiver.to_output(allocator), allocator),
+                    fn_expr: Box::new_in(receiver.to_output(allocator), &allocator),
                     args,
                     pure: false,
                     optional: false,
                     source_span: convert_source_span(call.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
         // Safe function call - becomes IR SafeInvokeFunctionExpr
         AngularExpression::SafeCall(sc) => {
             let receiver = convert_ast(allocator, &sc.receiver, root_xref, allocate_xref_id);
-            let mut args = Vec::with_capacity_in(sc.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(sc.args.len(), &allocator);
             for arg in sc.args.iter() {
                 let converted = convert_ast(allocator, arg, root_xref, allocate_xref_id);
                 args.push(converted.to_ir(allocator));
@@ -441,11 +441,11 @@ pub fn convert_ast<'a>(
 
             ConvertedExpression::ir(IrExpression::SafeInvokeFunction(Box::new_in(
                 SafeInvokeFunctionExpr {
-                    receiver: Box::new_in(receiver.to_ir(allocator), allocator),
+                    receiver: Box::new_in(receiver.to_ir(allocator), &allocator),
                     args,
                     source_span: convert_source_span(sc.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -454,7 +454,7 @@ pub fn convert_ast<'a>(
             let xref = allocate_xref_id();
             let exp = convert_ast(allocator, &pipe.exp, root_xref, allocate_xref_id);
 
-            let mut args = Vec::with_capacity_in(pipe.args.len() + 1, allocator);
+            let mut args = Vec::with_capacity_in(pipe.args.len() + 1, &allocator);
             args.push(exp.to_ir(allocator));
             for arg in pipe.args.iter() {
                 let converted = convert_ast(allocator, arg, root_xref, allocate_xref_id);
@@ -470,7 +470,7 @@ pub fn convert_ast<'a>(
                     var_offset: None,
                     source_span: convert_source_span(pipe.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -485,26 +485,26 @@ pub fn convert_ast<'a>(
             };
             ConvertedExpression::output(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value, source_span: convert_source_span(lit.source_span) },
-                allocator,
+                &allocator,
             )))
         }
 
         // Literal array
         AngularExpression::LiteralArray(arr) => {
-            let mut entries = Vec::with_capacity_in(arr.expressions.len(), allocator);
+            let mut entries = Vec::with_capacity_in(arr.expressions.len(), &allocator);
             for expr in arr.expressions.iter() {
                 let converted = convert_ast(allocator, expr, root_xref, allocate_xref_id);
                 entries.push(converted.to_output(allocator));
             }
             ConvertedExpression::output(OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: convert_source_span(arr.source_span) },
-                allocator,
+                &allocator,
             )))
         }
 
         // Literal map (object)
         AngularExpression::LiteralMap(map) => {
-            let mut entries = Vec::with_capacity_in(map.keys.len(), allocator);
+            let mut entries = Vec::with_capacity_in(map.keys.len(), &allocator);
             for (key, value) in map.keys.iter().zip(map.values.iter()) {
                 let converted_value = convert_ast(allocator, value, root_xref, allocate_xref_id);
                 match key {
@@ -522,7 +522,7 @@ pub fn convert_ast<'a>(
             }
             ConvertedExpression::output(OutputExpression::LiteralMap(Box::new_in(
                 LiteralMapExpr { entries, source_span: convert_source_span(map.source_span) },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -534,12 +534,12 @@ pub fn convert_ast<'a>(
 
             ConvertedExpression::output(OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(condition.to_output(allocator), allocator),
-                    true_case: Box::new_in(true_case.to_output(allocator), allocator),
-                    false_case: Some(Box::new_in(false_case.to_output(allocator), allocator)),
+                    condition: Box::new_in(condition.to_output(allocator), &allocator),
+                    true_case: Box::new_in(true_case.to_output(allocator), &allocator),
+                    false_case: Some(Box::new_in(false_case.to_output(allocator), &allocator)),
                     source_span: convert_source_span(cond.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -552,11 +552,11 @@ pub fn convert_ast<'a>(
             ConvertedExpression::output(OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator,
-                    lhs: Box::new_in(left.to_output(allocator), allocator),
-                    rhs: Box::new_in(right.to_output(allocator), allocator),
+                    lhs: Box::new_in(left.to_output(allocator), &allocator),
+                    rhs: Box::new_in(right.to_output(allocator), &allocator),
                     source_span: convert_source_span(bin.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -568,11 +568,11 @@ pub fn convert_ast<'a>(
             ConvertedExpression::output(OutputExpression::UnaryOperator(Box::new_in(
                 UnaryOperatorExpr {
                     operator,
-                    expr: Box::new_in(expr.to_output(allocator), allocator),
+                    expr: Box::new_in(expr.to_output(allocator), &allocator),
                     parens: false,
                     source_span: convert_source_span(unary.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -581,10 +581,10 @@ pub fn convert_ast<'a>(
             let expr = convert_ast(allocator, &not.expression, root_xref, allocate_xref_id);
             ConvertedExpression::output(OutputExpression::Not(Box::new_in(
                 NotExpr {
-                    condition: Box::new_in(expr.to_output(allocator), allocator),
+                    condition: Box::new_in(expr.to_output(allocator), &allocator),
                     source_span: convert_source_span(not.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -593,10 +593,10 @@ pub fn convert_ast<'a>(
             let expr = convert_ast(allocator, &type_of.expression, root_xref, allocate_xref_id);
             ConvertedExpression::output(OutputExpression::Typeof(Box::new_in(
                 TypeofExpr {
-                    expr: Box::new_in(expr.to_output(allocator), allocator),
+                    expr: Box::new_in(expr.to_output(allocator), &allocator),
                     source_span: convert_source_span(type_of.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -605,10 +605,10 @@ pub fn convert_ast<'a>(
             let expr = convert_ast(allocator, &void_expr.expression, root_xref, allocate_xref_id);
             ConvertedExpression::output(OutputExpression::Void(Box::new_in(
                 VoidExpr {
-                    expr: Box::new_in(expr.to_output(allocator), allocator),
+                    expr: Box::new_in(expr.to_output(allocator), &allocator),
                     source_span: convert_source_span(void_expr.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -622,16 +622,16 @@ pub fn convert_ast<'a>(
             let expr = convert_ast(allocator, &paren.expression, root_xref, allocate_xref_id);
             ConvertedExpression::output(OutputExpression::Parenthesized(Box::new_in(
                 ParenthesizedExpr {
-                    expr: Box::new_in(expr.to_output(allocator), allocator),
+                    expr: Box::new_in(expr.to_output(allocator), &allocator),
                     source_span: convert_source_span(paren.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
         // Template literal
         AngularExpression::TemplateLiteral(tl) => {
-            let mut elements = Vec::with_capacity_in(tl.elements.len(), allocator);
+            let mut elements = Vec::with_capacity_in(tl.elements.len(), &allocator);
             for elem in tl.elements.iter() {
                 elements.push(TemplateLiteralElement {
                     text: elem.text.clone(),
@@ -640,7 +640,7 @@ pub fn convert_ast<'a>(
                 });
             }
 
-            let mut expressions = Vec::with_capacity_in(tl.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(tl.expressions.len(), &allocator);
             for expr in tl.expressions.iter() {
                 let converted = convert_ast(allocator, expr, root_xref, allocate_xref_id);
                 expressions.push(converted.to_output(allocator));
@@ -652,7 +652,7 @@ pub fn convert_ast<'a>(
                     expressions,
                     source_span: convert_source_span(tl.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -660,7 +660,7 @@ pub fn convert_ast<'a>(
         AngularExpression::TaggedTemplateLiteral(ttl) => {
             let tag = convert_ast(allocator, &ttl.tag, root_xref, allocate_xref_id);
 
-            let mut elements = Vec::with_capacity_in(ttl.template.elements.len(), allocator);
+            let mut elements = Vec::with_capacity_in(ttl.template.elements.len(), &allocator);
             for elem in ttl.template.elements.iter() {
                 elements.push(TemplateLiteralElement {
                     text: elem.text.clone(),
@@ -669,7 +669,7 @@ pub fn convert_ast<'a>(
                 });
             }
 
-            let mut expressions = Vec::with_capacity_in(ttl.template.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(ttl.template.expressions.len(), &allocator);
             for expr in ttl.template.expressions.iter() {
                 let converted = convert_ast(allocator, expr, root_xref, allocate_xref_id);
                 expressions.push(converted.to_output(allocator));
@@ -677,18 +677,18 @@ pub fn convert_ast<'a>(
 
             ConvertedExpression::output(OutputExpression::TaggedTemplateLiteral(Box::new_in(
                 TaggedTemplateLiteralExpr {
-                    tag: Box::new_in(tag.to_output(allocator), allocator),
+                    tag: Box::new_in(tag.to_output(allocator), &allocator),
                     template: Box::new_in(
                         TemplateLiteralExpr {
                             elements,
                             expressions,
                             source_span: convert_source_span(ttl.template.source_span),
                         },
-                        allocator,
+                        &allocator,
                     ),
                     source_span: convert_source_span(ttl.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -700,7 +700,7 @@ pub fn convert_ast<'a>(
                     flags: re.flags.clone(),
                     source_span: convert_source_span(re.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -710,18 +710,18 @@ pub fn convert_ast<'a>(
         AngularExpression::Chain(chain) => {
             ConvertedExpression::ir(IrExpression::Empty(Box::new_in(
                 IrEmptyExpr { source_span: convert_source_span(chain.source_span) },
-                allocator,
+                &allocator,
             )))
         }
 
         // Interpolation - converted to IR Interpolation
         AngularExpression::Interpolation(interp) => {
-            let mut strings = Vec::with_capacity_in(interp.strings.len(), allocator);
+            let mut strings = Vec::with_capacity_in(interp.strings.len(), &allocator);
             for s in interp.strings.iter() {
                 strings.push(s.clone());
             }
 
-            let mut expressions = Vec::with_capacity_in(interp.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(interp.expressions.len(), &allocator);
             for expr in interp.expressions.iter() {
                 let converted = convert_ast(allocator, expr, root_xref, allocate_xref_id);
                 expressions.push(converted.to_ir(allocator));
@@ -731,10 +731,10 @@ pub fn convert_ast<'a>(
                 crate::ir::expression::Interpolation {
                     strings,
                     expressions,
-                    i18n_placeholders: Vec::new_in(allocator),
+                    i18n_placeholders: Vec::new_in(&allocator),
                     source_span: convert_source_span(interp.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -750,19 +750,19 @@ pub fn convert_ast<'a>(
             // Arrow functions in Angular templates are used as callbacks
             // Convert the body expression and wrap in ArrowFunctionExpr
             let body = convert_ast(allocator, &arrow.body, root_xref, allocate_xref_id);
-            let mut params = Vec::with_capacity_in(arrow.parameters.len(), allocator);
+            let mut params = Vec::with_capacity_in(arrow.parameters.len(), &allocator);
             for p in arrow.parameters.iter() {
                 params.push(crate::output::ast::FnParam { name: p.name.clone() });
             }
             ConvertedExpression::ir(IrExpression::ArrowFunction(Box::new_in(
                 crate::ir::expression::ArrowFunctionExpr {
                     params,
-                    body: Box::new_in(body.to_ir(allocator), allocator),
-                    ops: Vec::new_in(allocator),
+                    body: Box::new_in(body.to_ir(allocator), &allocator),
+                    ops: Vec::new_in(&allocator),
                     var_offset: None,
                     source_span: convert_source_span(arrow.source_span),
                 },
-                allocator,
+                &allocator,
             )))
         }
     }

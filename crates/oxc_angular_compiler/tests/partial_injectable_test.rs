@@ -16,7 +16,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -117,7 +117,7 @@ fn injectable_with_use_value() {
 #[test]
 fn injectable_with_use_factory_and_deps() {
     let allocator = Allocator::default();
-    let mut deps = Vec::new_in(&allocator);
+    let mut deps = Vec::new_in(&&allocator);
     deps.push(R3DependencyMetadata::simple(read_var(&allocator, "Dep1")));
     let mut optional_dep = R3DependencyMetadata::simple(read_var(&allocator, "Dep2"));
     optional_dep.optional = true;
@@ -238,7 +238,7 @@ fn round_trip_partial_injectable_and_factory_through_linker() {
     use oxc_angular_compiler::{compile_declare_factory_function, link};
 
     let allocator = Allocator::default();
-    let mut ctor_deps = OxcVec::new_in(&allocator);
+    let mut ctor_deps = OxcVec::new_in(&&allocator);
     ctor_deps.push(R3DependencyMetadata::simple(read_var(&allocator, "HttpClient")));
 
     let injectable_meta = R3InjectableMetadataBuilder::new()
@@ -256,7 +256,7 @@ fn round_trip_partial_injectable_and_factory_through_linker() {
         type_decl: read_var(&allocator, "ApiService"),
         type_argument_count: 0,
         deps: {
-            let mut v = OxcVec::new_in(&allocator);
+            let mut v = OxcVec::new_in(&&allocator);
             v.push(R3DependencyMetadata::simple(read_var(&allocator, "HttpClient")));
             R3FactoryDeps::Valid(v)
         },

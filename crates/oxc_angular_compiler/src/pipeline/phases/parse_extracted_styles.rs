@@ -117,11 +117,11 @@ pub fn parse_extracted_styles(job: &mut ComponentCompilationJob<'_>) {
                                             allocator.alloc_str(&prop_value),
                                         )),
                                     },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         );
 
                         let new_op = CreateOp::ExtractedAttribute(ExtractedAttributeOp {
@@ -390,11 +390,11 @@ pub fn parse_extracted_styles_for_host(job: &mut HostBindingCompilationJob<'_>) 
                                     allocator.alloc_str(&prop_value),
                                 )),
                             },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 );
 
                 let new_op = CreateOp::ExtractedAttribute(ExtractedAttributeOp {

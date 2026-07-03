@@ -51,7 +51,7 @@ pub fn compile_injector_from_metadata<'a>(
     // Create the expression: ɵɵdefineInjector(definitionMap)
     let expression = create_define_injector_call(allocator, definition_map);
 
-    InjectorCompileResult { expression, statements: Vec::new_in(allocator) }
+    InjectorCompileResult { expression, statements: Vec::new_in(&allocator) }
 }
 
 /// Builds the definition map for the injector.
@@ -59,7 +59,7 @@ fn build_definition_map<'a>(
     allocator: &'a Allocator,
     metadata: &R3InjectorMetadata<'a>,
 ) -> Vec<'a, LiteralMapEntry<'a>> {
-    let mut entries = Vec::new_in(allocator);
+    let mut entries = Vec::new_in(&allocator);
 
     // providers: [...] (only if present)
     if let Some(providers) = &metadata.providers {
@@ -76,13 +76,13 @@ fn build_definition_map<'a>(
         let imports_value = if let Some(raw_imports) = &metadata.raw_imports {
             raw_imports.clone_in(allocator)
         } else {
-            let mut imports_items = Vec::new_in(allocator);
+            let mut imports_items = Vec::new_in(&allocator);
             for import in &metadata.imports {
                 imports_items.push(import.clone_in(allocator));
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: imports_items, source_span: None },
-                allocator,
+                &allocator,
             ))
         };
 
@@ -103,36 +103,36 @@ fn create_define_injector_call<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(Identifiers::DEFINE_INJECTOR),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create the literal map expression
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: definition_map, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Create the function call
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(define_injector_fn, allocator),
+            fn_expr: Box::new_in(define_injector_fn, &allocator),
             args,
             pure: true,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -147,7 +147,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
@@ -169,12 +169,12 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ProviderModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let providers_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("PROVIDERS"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
@@ -198,16 +198,16 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ImportModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let import1 = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("CommonModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let import2 = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("FormsModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)
@@ -233,7 +233,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("EmptyModule"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectorMetadataBuilder::new(&allocator)

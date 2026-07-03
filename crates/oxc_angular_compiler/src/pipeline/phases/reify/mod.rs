@@ -56,7 +56,7 @@ fn convert_statement_ir_nodes<'a>(
                 convert_output_expr_ir_nodes(allocator, &ret.value, expressions, root_xref);
             OutputStatement::Return(Box::new_in(
                 ReturnStatement { value: converted_expr, source_span: ret.source_span },
-                allocator,
+                &allocator,
             ))
         }
         OutputStatement::Expression(expr_stmt) => {
@@ -64,7 +64,7 @@ fn convert_statement_ir_nodes<'a>(
                 convert_output_expr_ir_nodes(allocator, &expr_stmt.expr, expressions, root_xref);
             OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: converted_expr, source_span: expr_stmt.source_span },
-                allocator,
+                &allocator,
             ))
         }
         // Other statement types pass through (they don't contain WrappedIrNode)
@@ -77,7 +77,7 @@ fn convert_statement_ir_nodes<'a>(
                 "Unexpected statement type in handler_ops. Only Return and Expression statements are expected."
             ));
             // Return the statement unchanged as a fallback
-            clone_output_statement(stmt, allocator)
+            clone_output_statement(stmt, &allocator)
         }
     }
 }
@@ -166,7 +166,7 @@ pub fn reify(job: &mut ComponentCompilationJob<'_>) {
     {
         let ComponentCompilationJob { expressions, root, pool, .. } = job;
         let (create_stmts, update_stmts) = reify_view_to_stmts(
-            allocator,
+            &allocator,
             root,
             expressions,
             pool,
@@ -184,7 +184,7 @@ pub fn reify(job: &mut ComponentCompilationJob<'_>) {
         if let Some(view) = views.get_mut(&xref) {
             let view = view.as_mut();
             let (create_stmts, update_stmts) = reify_view_to_stmts(
-                allocator,
+                &allocator,
                 view,
                 expressions,
                 pool,
@@ -225,7 +225,7 @@ fn reify_view_to_stmts<'a>(
     // Reify update operations
     for op in view.update.iter() {
         let stmt = reify_update_op(
-            allocator,
+            &allocator,
             op,
             expressions,
             root_xref,
@@ -260,7 +260,7 @@ fn reify_create_op<'a>(
             let local_refs_index = elem.local_refs_index;
             if is_dom_only {
                 Some(create_dom_element_start_stmt(
-                    allocator,
+                    &allocator,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -268,7 +268,7 @@ fn reify_create_op<'a>(
                 ))
             } else {
                 Some(create_element_start_stmt(
-                    allocator,
+                    &allocator,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -281,7 +281,7 @@ fn reify_create_op<'a>(
             let local_refs_index = elem.local_refs_index;
             if is_dom_only {
                 Some(create_dom_element_stmt(
-                    allocator,
+                    &allocator,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -289,7 +289,7 @@ fn reify_create_op<'a>(
                 ))
             } else {
                 Some(create_element_stmt(
-                    allocator,
+                    &allocator,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -330,7 +330,7 @@ fn reify_create_op<'a>(
                 tmpl.template_kind == crate::ir::enums::TemplateKind::Block || is_dom_only;
             if use_dom_template {
                 Some(create_dom_template_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     decls,
@@ -341,7 +341,7 @@ fn reify_create_op<'a>(
                 ))
             } else {
                 Some(create_template_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     decls,
@@ -354,7 +354,7 @@ fn reify_create_op<'a>(
         }
         CreateOp::Listener(listener) => {
             // Convert handler_ops to statements for the handler function
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
 
             // Process handler_ops if present (new approach aligned with Angular)
             // These include Variable ops (e.g., RestoreView) added by save_restore_view phase
@@ -362,7 +362,7 @@ fn reify_create_op<'a>(
                 if let UpdateOp::Statement(stmt_op) = handler_op {
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
-                        allocator,
+                        &allocator,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -370,7 +370,7 @@ fn reify_create_op<'a>(
                     );
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -391,7 +391,7 @@ fn reify_create_op<'a>(
                 // Use return statement so the handler returns the result
                 handler_stmts.push(OutputStatement::Return(Box::new_in(
                     ReturnStatement { value: output_expr, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -407,7 +407,7 @@ fn reify_create_op<'a>(
             let use_capture = listener.host_listener && listener.is_animation_listener;
             if use_dom_listener {
                 Some(create_dom_listener_stmt_with_handler(
-                    allocator,
+                    &allocator,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -416,7 +416,7 @@ fn reify_create_op<'a>(
                 ))
             } else {
                 Some(create_listener_stmt_with_handler(
-                    allocator,
+                    &allocator,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -445,7 +445,7 @@ fn reify_create_op<'a>(
             let attributes = std::mem::take(&mut proj.attributes);
 
             Some(create_projection_stmt(
-                allocator,
+                &allocator,
                 slot,
                 projection_slot_index,
                 attributes,
@@ -482,7 +482,7 @@ fn reify_create_op<'a>(
             if ctx.supports_conditional_create {
                 // Angular 20+: Emit ɵɵconditionalCreate for the first branch in @if/@switch
                 Some(create_conditional_create_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     cond.decls,
@@ -494,7 +494,7 @@ fn reify_create_op<'a>(
             } else {
                 // Angular 19: Emit ɵɵtemplate instead (conditionalCreate doesn't exist)
                 Some(create_template_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     cond.decls,
@@ -517,7 +517,7 @@ fn reify_create_op<'a>(
             // Generate track function if not already set by optimization phase
             // Ported from Angular's reifyTrackBy() in reify.ts
             let track_fn_expr = reify_track_by(
-                allocator,
+                &allocator,
                 pool,
                 expressions,
                 root_xref,
@@ -529,7 +529,7 @@ fn reify_create_op<'a>(
             );
 
             Some(create_repeater_create_stmt_with_track_expr(
-                allocator,
+                &allocator,
                 slot,
                 fn_name,
                 repeater.decls,
@@ -571,7 +571,7 @@ fn reify_create_op<'a>(
                 }
             });
             Some(create_defer_stmt(
-                allocator,
+                &allocator,
                 slot,
                 defer.main_slot.map(|s| s.0),
                 defer.resolver_fn.take(),
@@ -590,7 +590,7 @@ fn reify_create_op<'a>(
                 .as_ref()
                 .map(|expr| convert_ir_expression(allocator, expr, expressions, root_xref));
             Some(create_defer_on_stmt(
-                allocator,
+                &allocator,
                 defer_on.trigger,
                 defer_on.target_slot.map(|s| s.0),
                 defer_on.target_slot_view_steps,
@@ -603,7 +603,7 @@ fn reify_create_op<'a>(
             // Emit i18nStart instruction
             let slot = i18n.slot.map(|s| s.0).unwrap_or(0);
             Some(create_i18n_start_stmt(
-                allocator,
+                &allocator,
                 slot,
                 i18n.message_index,
                 i18n.sub_template_index,
@@ -637,13 +637,13 @@ fn reify_create_op<'a>(
         CreateOp::TwoWayListener(listener) => {
             // Emit twoWayListener instruction
             // Convert handler_ops to statements for the handler function
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
             for handler_op in listener.handler_ops.iter() {
                 // Handle Statement ops specially to convert WrappedIrNode expressions
                 if let UpdateOp::Statement(stmt_op) = handler_op {
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
-                        allocator,
+                        &allocator,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -651,7 +651,7 @@ fn reify_create_op<'a>(
                     );
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -664,7 +664,7 @@ fn reify_create_op<'a>(
                 }
             }
             Some(create_two_way_listener_stmt(
-                allocator,
+                &allocator,
                 &listener.name,
                 handler_stmts,
                 listener.handler_fn_name.as_ref(),
@@ -672,10 +672,10 @@ fn reify_create_op<'a>(
         }
         CreateOp::AnimationListener(listener) => {
             // Emit syntheticHostListener instruction for animation listeners
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
             for handler_op in listener.handler_ops.iter() {
                 if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -688,7 +688,7 @@ fn reify_create_op<'a>(
                 }
             }
             Some(create_animation_listener_stmt(
-                allocator,
+                &allocator,
                 &listener.name,
                 listener.phase,
                 handler_stmts,
@@ -704,10 +704,10 @@ fn reify_create_op<'a>(
         CreateOp::Animation(anim) => {
             // Emit ɵɵanimateEnter or ɵɵanimateLeave instruction for animation bindings (Value kind)
             // The handler_ops contain a return statement with the expression
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
             for handler_op in anim.handler_ops.iter() {
                 if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -720,7 +720,7 @@ fn reify_create_op<'a>(
                 }
             }
             Some(create_animation_op_stmt(
-                allocator,
+                &allocator,
                 anim.animation_kind,
                 handler_stmts,
                 anim.handler_fn_name.as_ref(),
@@ -763,7 +763,7 @@ fn reify_create_op<'a>(
             if ctx.supports_conditional_create {
                 // Angular 20+: Emit ɵɵconditionalBranchCreate for branches after the first
                 Some(create_conditional_branch_create_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     branch.decls,
@@ -775,7 +775,7 @@ fn reify_create_op<'a>(
             } else {
                 // Angular 19: Emit ɵɵtemplate instead (conditionalBranchCreate doesn't exist)
                 Some(create_template_stmt(
-                    allocator,
+                    &allocator,
                     slot,
                     fn_name,
                     branch.decls,
@@ -828,14 +828,14 @@ fn reify_update_op<'a>(
                 // Angular 19: Use ɵɵpropertyInterpolate*("name", s0, v0, s1, ..., [sanitizer])
                 let has_extra_args = prop.sanitizer.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
-                    allocator,
+                    &allocator,
                     &prop.expression,
                     expressions,
                     root_xref,
                     has_extra_args,
                 );
                 Some(create_property_interpolate_stmt(
-                    allocator,
+                    &allocator,
                     &prop.name,
                     interp_args,
                     expr_count,
@@ -848,14 +848,14 @@ fn reify_update_op<'a>(
                 if is_dom_only && !is_animation {
                     if supports_dom_property {
                         Some(create_dom_property_stmt(
-                            allocator,
+                            &allocator,
                             &prop.name,
                             expr,
                             prop.sanitizer.as_ref(),
                         ))
                     } else {
                         Some(create_host_property_stmt(
-                            allocator,
+                            &allocator,
                             &prop.name,
                             expr,
                             prop.sanitizer.as_ref(),
@@ -865,7 +865,7 @@ fn reify_update_op<'a>(
                     Some(create_aria_property_stmt(allocator, &prop.name, expr))
                 } else {
                     Some(create_property_stmt_with_expr(
-                        allocator,
+                        &allocator,
                         &prop.name,
                         expr,
                         prop.sanitizer.as_ref(),
@@ -876,7 +876,7 @@ fn reify_update_op<'a>(
         UpdateOp::InterpolateText(interp) => {
             // Handle multiple interpolations like "{{a}} and {{b}}"
             let (args, expr_count) = reify_interpolation(
-                allocator,
+                &allocator,
                 &interp.interpolation,
                 expressions,
                 root_xref,
@@ -898,14 +898,14 @@ fn reify_update_op<'a>(
                 // Angular 19: Use ɵɵstylePropInterpolate*("name", s0, v0, s1, ..., [unit])
                 let has_extra_args = style.unit.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
-                    allocator,
+                    &allocator,
                     &style.expression,
                     expressions,
                     root_xref,
                     has_extra_args,
                 );
                 Some(create_style_prop_interpolate_stmt(
-                    allocator,
+                    &allocator,
                     &name,
                     interp_args,
                     expr_count,
@@ -933,14 +933,14 @@ fn reify_update_op<'a>(
                 // Angular 19: Use ɵɵattributeInterpolate*("name", s0, v0, s1, ..., [sanitizer], [ns])
                 let has_extra_args = attr.sanitizer.is_some() || attr.namespace.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
-                    allocator,
+                    &allocator,
                     &attr.expression,
                     expressions,
                     root_xref,
                     has_extra_args,
                 );
                 Some(create_attribute_interpolate_stmt(
-                    allocator,
+                    &allocator,
                     &name,
                     interp_args,
                     expr_count,
@@ -952,7 +952,7 @@ fn reify_update_op<'a>(
                 let expr =
                     convert_ir_expression(allocator, &attr.expression, expressions, root_xref);
                 Some(create_attribute_stmt_with_expr(
-                    allocator,
+                    &allocator,
                     &name,
                     expr,
                     attr.sanitizer.as_ref(),
@@ -1002,7 +1002,7 @@ fn reify_update_op<'a>(
             if is_interpolation && !supports_value_interpolation {
                 // Angular 19: Use ɵɵstyleMapInterpolate*(s0, v0, s1, ...)
                 let (interp_args, expr_count) = reify_interpolation(
-                    allocator,
+                    &allocator,
                     &style.expression,
                     expressions,
                     root_xref,
@@ -1022,7 +1022,7 @@ fn reify_update_op<'a>(
             if is_interpolation && !supports_value_interpolation {
                 // Angular 19: Use ɵɵclassMapInterpolate*(s0, v0, s1, ...)
                 let (interp_args, expr_count) = reify_interpolation(
-                    allocator,
+                    &allocator,
                     &class.expression,
                     expressions,
                     root_xref,
@@ -1049,7 +1049,7 @@ fn reify_update_op<'a>(
             } else {
                 // Angular 19: Use ɵɵhostProperty instead of ɵɵdomProperty
                 Some(create_host_property_stmt(
-                    allocator,
+                    &allocator,
                     &prop.name,
                     expr,
                     prop.sanitizer.as_ref(),
@@ -1092,7 +1092,7 @@ fn reify_update_op<'a>(
         // or side-effectful expressions from variable optimization).
         // These may contain WrappedIrNode expressions that need to be converted.
         UpdateOp::Statement(stmt_op) => Some(convert_statement_ir_nodes(
-            allocator,
+            &allocator,
             &stmt_op.statement,
             expressions,
             root_xref,
@@ -1118,12 +1118,12 @@ fn reify_interpolation<'a>(
         IrExpression::Interpolation(ir_interp) => {
             // Direct IR interpolation - interleave strings and expressions
             let expr_count = ir_interp.expressions.len();
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
 
             // For single expression with empty surrounding strings, use simple form
             if expr_count == 1 && ir_interp.strings.iter().all(|s| s.is_empty()) {
                 args.push(convert_ir_expression(
-                    allocator,
+                    &allocator,
                     &ir_interp.expressions[0],
                     expressions,
                     root_xref,
@@ -1136,7 +1136,7 @@ fn reify_interpolation<'a>(
                                 value: LiteralValue::String(ir_interp.strings[i].clone()),
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         )));
                     }
                     args.push(convert_ir_expression(allocator, expr, expressions, root_xref));
@@ -1153,7 +1153,7 @@ fn reify_interpolation<'a>(
                                     value: LiteralValue::String(trailing.clone()),
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )));
                         }
                     }
@@ -1167,12 +1167,12 @@ fn reify_interpolation<'a>(
             if let AngularExpression::Interpolation(ang_interp) = angular_expr {
                 // Angular interpolation - interleave strings and expressions
                 let expr_count = ang_interp.expressions.len();
-                let mut args = OxcVec::new_in(allocator);
+                let mut args = OxcVec::new_in(&allocator);
 
                 // For single expression with empty surrounding strings, use simple form
                 if expr_count == 1 && ang_interp.strings.iter().all(|s| s.is_empty()) {
                     args.push(convert_angular_expression(
-                        allocator,
+                        &allocator,
                         &ang_interp.expressions[0],
                         root_xref,
                     ));
@@ -1184,7 +1184,7 @@ fn reify_interpolation<'a>(
                                     value: LiteralValue::String(ang_interp.strings[i].clone()),
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )));
                         }
                         args.push(convert_angular_expression(allocator, expr, root_xref));
@@ -1197,7 +1197,7 @@ fn reify_interpolation<'a>(
                                         value: LiteralValue::String(trailing.clone()),
                                         source_span: None,
                                     },
-                                    allocator,
+                                    &allocator,
                                 )));
                             }
                         }
@@ -1206,14 +1206,14 @@ fn reify_interpolation<'a>(
                 (args, expr_count)
             } else {
                 // Not an interpolation - convert as single expression
-                let mut args = OxcVec::new_in(allocator);
+                let mut args = OxcVec::new_in(&allocator);
                 args.push(convert_angular_expression(allocator, angular_expr, root_xref));
                 (args, 1)
             }
         }
         _ => {
             // Other expression types - convert directly
-            let mut args = OxcVec::new_in(allocator);
+            let mut args = OxcVec::new_in(&allocator);
             args.push(convert_ir_expression(allocator, interpolation, expressions, root_xref));
             (args, 1)
         }
@@ -1235,7 +1235,7 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
     // Reify create operations (listeners)
     for op in job.root.create.iter() {
         let stmt = reify_host_create_op(
-            allocator,
+            &allocator,
             op,
             &job.expressions,
             root_xref,
@@ -1252,7 +1252,7 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
     // Host bindings use Full mode (not DomOnly)
     for op in job.root.update.iter() {
         let stmt = reify_update_op(
-            allocator,
+            &allocator,
             op,
             &job.expressions,
             root_xref,
@@ -1282,13 +1282,13 @@ fn reify_host_create_op<'a>(
     match op {
         CreateOp::Listener(listener) => {
             // Convert handler_ops to statements for the handler function
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
             for handler_op in listener.handler_ops.iter() {
                 // Host bindings use Full mode (not DomOnly)
                 if let UpdateOp::Statement(stmt_op) = handler_op {
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
-                        allocator,
+                        &allocator,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -1296,7 +1296,7 @@ fn reify_host_create_op<'a>(
                     );
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -1317,7 +1317,7 @@ fn reify_host_create_op<'a>(
                 // Use return statement so the handler returns the result
                 handler_stmts.push(OutputStatement::Return(Box::new_in(
                     ReturnStatement { value: output_expr, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -1334,7 +1334,7 @@ fn reify_host_create_op<'a>(
             let is_synthetic_host = listener.host_listener && listener.is_legacy_animation();
             if is_synthetic_host {
                 Some(create_synthetic_host_listener_stmt(
-                    allocator,
+                    &allocator,
                     &listener.name,
                     handler_stmts,
                     listener.handler_fn_name.as_ref(),
@@ -1350,7 +1350,7 @@ fn reify_host_create_op<'a>(
                 // the relationship to the synthetic branch explicit.
                 let use_capture = listener.host_listener && listener.is_animation_listener;
                 Some(create_listener_stmt_with_handler(
-                    allocator,
+                    &allocator,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -1362,11 +1362,11 @@ fn reify_host_create_op<'a>(
         }
         CreateOp::AnimationListener(listener) => {
             // Emit syntheticHostListener for animation listeners
-            let mut handler_stmts = OxcVec::new_in(allocator);
+            let mut handler_stmts = OxcVec::new_in(&allocator);
             for handler_op in listener.handler_ops.iter() {
                 // Host bindings use Full mode (not DomOnly)
                 if let Some(stmt) = reify_update_op(
-                    allocator,
+                    &allocator,
                     handler_op,
                     expressions,
                     root_xref,
@@ -1379,7 +1379,7 @@ fn reify_host_create_op<'a>(
                 }
             }
             Some(create_animation_listener_stmt(
-                allocator,
+                &allocator,
                 &listener.name,
                 listener.phase,
                 handler_stmts,
@@ -1428,15 +1428,15 @@ fn reify_track_by<'a>(
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     name: fn_name.clone(),
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
         }
         // Handle property access like "ctx.trackByFn" or "componentInstance().fn"
@@ -1466,32 +1466,32 @@ fn reify_track_by<'a>(
                                                             name: Ident::from("i0"),
                                                             source_span: None,
                                                         },
-                                                        allocator,
+                                                        &allocator,
                                                     )),
-                                                    allocator,
+                                                    &allocator,
                                                 ),
                                                 name: call_name,
                                                 optional: false,
                                                 source_span: None,
                                             },
-                                            allocator,
+                                            &allocator,
                                         )),
-                                        allocator,
+                                        &allocator,
                                     ),
-                                    args: OxcVec::new_in(allocator),
+                                    args: OxcVec::new_in(&allocator),
                                     pure: false,
                                     optional: false,
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         name: prop_name,
                         optional: false,
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
             }
             // Simple property access like "ctx.trackByFn"
@@ -1500,25 +1500,25 @@ fn reify_track_by<'a>(
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: receiver_name, source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
                     name: prop_name,
                     optional: false,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
         }
         return OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: fn_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
     }
 
     // Create the track function with params ($index, $item)
-    let mut params = OxcVec::with_capacity_in(2, allocator);
+    let mut params = OxcVec::with_capacity_in(2, &allocator);
     params.push(FnParam { name: Ident::from("$index") });
     params.push(FnParam { name: Ident::from("$item") });
 
@@ -1535,12 +1535,12 @@ fn reify_track_by<'a>(
         //     : o.arrowFn(params, statements[0].value);
 
         // Reify each op in track_by_ops into output statements
-        let mut statements = OxcVec::new_in(allocator);
+        let mut statements = OxcVec::new_in(&allocator);
         for track_op in track_ops.iter() {
             // Track-by functions don't contain property/attribute interpolation,
             // so version flags don't matter here.
             if let Some(stmt) = reify_update_op(
-                allocator,
+                &allocator,
                 track_op,
                 expressions,
                 root_xref,
@@ -1565,7 +1565,7 @@ fn reify_track_by<'a>(
         if use_function {
             OutputExpression::Function(Box::new_in(
                 FunctionExpr { name: None, params, statements, source_span: None },
-                allocator,
+                &allocator,
             ))
         } else {
             // Single return statement → extract value for arrow function body
@@ -1580,17 +1580,17 @@ fn reify_track_by<'a>(
                 ));
                 return OutputExpression::Function(Box::new_in(
                     FunctionExpr { name: None, params, statements, source_span: None },
-                    allocator,
+                    &allocator,
                 ));
             };
 
             OutputExpression::ArrowFunction(Box::new_in(
                 ArrowFunctionExpr {
                     params,
-                    body: ArrowFunctionBody::Expression(Box::new_in(return_value, allocator)),
+                    body: ArrowFunctionBody::Expression(Box::new_in(return_value, &allocator)),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         }
     } else {
@@ -1602,24 +1602,24 @@ fn reify_track_by<'a>(
         let track_body = convert_ir_expression(allocator, track, expressions, root_xref);
 
         if uses_component_instance {
-            let mut stmts = OxcVec::with_capacity_in(1, allocator);
+            let mut stmts = OxcVec::with_capacity_in(1, &allocator);
             stmts.push(OutputStatement::Return(Box::new_in(
                 ReturnStatement { value: track_body, source_span: None },
-                allocator,
+                &allocator,
             )));
 
             OutputExpression::Function(Box::new_in(
                 FunctionExpr { name: None, params, statements: stmts, source_span: None },
-                allocator,
+                &allocator,
             ))
         } else {
             OutputExpression::ArrowFunction(Box::new_in(
                 ArrowFunctionExpr {
                     params,
-                    body: ArrowFunctionBody::Expression(Box::new_in(track_body, allocator)),
+                    body: ArrowFunctionBody::Expression(Box::new_in(track_body, &allocator)),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         }
     };

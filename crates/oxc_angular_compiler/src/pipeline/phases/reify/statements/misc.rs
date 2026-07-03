@@ -62,15 +62,15 @@ pub fn create_listener_stmt_with_handler<'a>(
     handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // Event name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Handler function: function name($event) { ... } or function name() { ... }
-    let mut params = OxcVec::new_in(allocator);
+    let mut params = OxcVec::new_in(&allocator);
     if consumes_dollar_event {
         params.push(FnParam { name: Ident::from("$event") });
     }
@@ -82,7 +82,7 @@ pub fn create_listener_stmt_with_handler<'a>(
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
 
@@ -97,21 +97,21 @@ pub fn create_listener_stmt_with_handler<'a>(
                             name: Ident::from("i0"),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(target.resolver_instruction()),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     } else if use_capture {
         // If we need use_capture but no event_target, add null as placeholder
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -119,7 +119,7 @@ pub fn create_listener_stmt_with_handler<'a>(
     if use_capture {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -141,15 +141,15 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
     handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // Event name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Handler function: function name($event) { ... } or function name() { ... }
-    let mut params = OxcVec::new_in(allocator);
+    let mut params = OxcVec::new_in(&allocator);
     if consumes_dollar_event {
         params.push(FnParam { name: Ident::from("$event") });
     }
@@ -161,7 +161,7 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
 
@@ -176,15 +176,15 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
                             name: Ident::from("i0"),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(target.resolver_instruction()),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -200,16 +200,16 @@ pub fn create_two_way_listener_stmt<'a>(
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     handler_fn_name: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // Event name (typically "{property}Change")
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Handler function: function name($event) { ... }
     // Two-way listeners always consume $event since they need the new value
-    let mut params = OxcVec::new_in(allocator);
+    let mut params = OxcVec::new_in(&allocator);
     params.push(FnParam { name: Ident::from("$event") });
 
     let handler_fn = OutputExpression::Function(Box::new_in(
@@ -219,7 +219,7 @@ pub fn create_two_way_listener_stmt<'a>(
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
 
@@ -238,12 +238,12 @@ pub fn create_synthetic_host_listener_stmt<'a>(
     handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
-    let mut params = OxcVec::new_in(allocator);
+    let mut params = OxcVec::new_in(&allocator);
     if consumes_dollar_event {
         params.push(FnParam { name: Ident::from("$event") });
     }
@@ -254,7 +254,7 @@ pub fn create_synthetic_host_listener_stmt<'a>(
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
     create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_LISTENER, args)
@@ -276,7 +276,7 @@ pub fn create_animation_listener_stmt<'a>(
     handler_fn_name: Option<&Ident<'a>>,
     consumes_dollar_event: bool,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Build the full event name: "@{name}.{phase}"
     // AnimationKind::Enter maps to "start", AnimationKind::Leave maps to "done"
@@ -287,11 +287,11 @@ pub fn create_animation_listener_stmt<'a>(
     let full_name = allocator.alloc_str(&format!("@{}.{}", name.as_str(), phase_str));
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(full_name)), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Handler function: function name($event) { ... } or function name() { ... }
-    let mut params = OxcVec::new_in(allocator);
+    let mut params = OxcVec::new_in(&allocator);
     if consumes_dollar_event {
         params.push(FnParam { name: Ident::from("$event") });
     }
@@ -303,7 +303,7 @@ pub fn create_animation_listener_stmt<'a>(
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
 
@@ -319,7 +319,7 @@ pub fn create_animation_string_stmt<'a>(
     animation_kind: AnimationKind,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(value);
     let instruction = match animation_kind {
         AnimationKind::Enter => Identifiers::ANIMATION_ENTER,
@@ -337,13 +337,13 @@ pub fn create_animation_stmt<'a>(
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Animation name with @ prefix
     let full_name = allocator.alloc_str(&format!("@{}", name.as_str()));
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(full_name)), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
 
@@ -370,17 +370,17 @@ pub fn create_animation_op_stmt<'a>(
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     handler_fn_name: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Handler function: function name() { return expr; }
     let handler_fn = OutputExpression::Function(Box::new_in(
         FunctionExpr {
             name: handler_fn_name.cloned(),
-            params: OxcVec::new_in(allocator),
+            params: OxcVec::new_in(&allocator),
             statements: handler_stmts,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     args.push(handler_fn);
 
@@ -400,10 +400,10 @@ pub fn create_animation_binding_stmt<'a>(
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_PROPERTY, args)
@@ -415,7 +415,7 @@ pub fn create_animation_binding_stmt<'a>(
 /// value is written through the regular property instruction, and `ɵɵcontrol()`
 /// performs the form-control synchronization work separately.
 pub fn create_control_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::CONTROL, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(allocator, Identifiers::CONTROL, OxcVec::new_in(&allocator))
 }
 
 /// Creates an ɵɵprojectionDef() call statement from a pre-built R3 def expression.
@@ -426,7 +426,7 @@ pub fn create_projection_def_stmt_from_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
     def: Option<&OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     if let Some(def_expr) = def {
         args.push(def_expr.clone_in(allocator));
@@ -440,9 +440,9 @@ pub fn create_disable_bindings_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
-        allocator,
+        &allocator,
         Identifiers::DISABLE_BINDINGS,
-        OxcVec::new_in(allocator),
+        OxcVec::new_in(&allocator),
     )
 }
 
@@ -450,7 +450,7 @@ pub fn create_disable_bindings_stmt<'a>(
 pub fn create_enable_bindings_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::ENABLE_BINDINGS, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(allocator, Identifiers::ENABLE_BINDINGS, OxcVec::new_in(&allocator))
 }
 
 /// Creates an ɵɵpipe() call statement.
@@ -459,14 +459,14 @@ pub fn create_pipe_stmt<'a>(
     slot: u32,
     name: &Ident<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     create_instruction_call_stmt(allocator, Identifiers::PIPE, args)
 }

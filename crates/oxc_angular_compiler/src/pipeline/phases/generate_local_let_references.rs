@@ -92,11 +92,11 @@ pub fn generate_local_let_references(job: &mut ComponentCompilationJob<'_>) {
                     let store_let_expr = IrExpression::StoreLet(Box::new_in(
                         StoreLetExpr {
                             target: store_let.target,
-                            value: Box::new_in((*store_let.value).clone_in(allocator), allocator),
+                            value: Box::new_in((*store_let.value).clone_in(allocator), &allocator),
                             var_offset: None, // Assigned by var_counting phase
                             source_span: store_let.base.source_span.unwrap_or_default(),
                         },
-                        allocator,
+                        &allocator,
                     ));
 
                     // Use pre-allocated xref
@@ -110,7 +110,7 @@ pub fn generate_local_let_references(job: &mut ComponentCompilationJob<'_>) {
                         xref: var_xref,
                         kind: SemanticVariableKind::Identifier,
                         name: declared_name,
-                        initializer: Box::new_in(store_let_expr, allocator),
+                        initializer: Box::new_in(store_let_expr, &allocator),
                         flags: VariableFlags::NONE,
                         view: None,
                         local: true, // @let declarations are local to the view

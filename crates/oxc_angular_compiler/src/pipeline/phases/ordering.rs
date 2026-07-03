@@ -560,7 +560,7 @@ mod tests {
             host_listener,
             name: Ident::from(""),
             handler_expression: None,
-            handler_ops: AllocVec::new_in(allocator),
+            handler_ops: AllocVec::new_in(&allocator),
             handler_fn_name: None,
             consume_fn_name: None,
             is_animation_listener,

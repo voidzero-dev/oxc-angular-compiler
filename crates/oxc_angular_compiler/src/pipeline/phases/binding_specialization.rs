@@ -117,13 +117,13 @@ pub fn specialize_bindings(job: &mut ComponentCompilationJob<'_>) {
 
     // Process root view
     let root_non_bindable =
-        specialize_in_view(&mut job.root.update, allocator, &elements, mode, extended_controls);
+        specialize_in_view(&mut job.root.update, &allocator, &elements, mode, extended_controls);
     all_non_bindable.extend(root_non_bindable);
 
     // Process embedded views
     for view in job.views.values_mut() {
         let view_non_bindable =
-            specialize_in_view(&mut view.update, allocator, &elements, mode, extended_controls);
+            specialize_in_view(&mut view.update, &allocator, &elements, mode, extended_controls);
         all_non_bindable.extend(view_non_bindable);
     }
 
@@ -179,9 +179,9 @@ fn create_placeholder_expression<'a>(
 ) -> Box<'a, IrExpression<'a>> {
     let empty_expr = AngularExpression::Empty(Box::new_in(
         EmptyExpr { span: ParseSpan::new(0, 0), source_span: AbsoluteSourceSpan::new(0, 0) },
-        allocator,
+        &allocator,
     ));
-    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, allocator)), allocator)
+    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, &allocator)), &allocator)
 }
 
 /// Specializes bindings within a single view.

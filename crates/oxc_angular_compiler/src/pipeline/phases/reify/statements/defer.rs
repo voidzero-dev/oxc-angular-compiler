@@ -36,24 +36,24 @@ pub fn create_defer_stmt<'a>(
     placeholder_config: Option<u32>,
     flags: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Main slot
     if let Some(ms) = main_slot {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(ms as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number((slot + 1) as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -63,7 +63,7 @@ pub fn create_defer_stmt<'a>(
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -71,12 +71,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(ls) = loading_slot {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(ls as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -84,12 +84,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(ps) = placeholder_slot {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(ps as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -97,12 +97,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(es) = error_slot {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(es as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -110,12 +110,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(config_idx) = loading_config {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(config_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -123,12 +123,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(config_idx) = placeholder_config {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(config_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -142,20 +142,20 @@ pub fn create_defer_stmt<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::DEFER_ENABLE_TIMER_SCHEDULING),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -163,12 +163,12 @@ pub fn create_defer_stmt<'a>(
     if let Some(f) = flags {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(f as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -203,7 +203,7 @@ pub fn create_defer_on_stmt<'a>(
     delay: Option<f64>,
     options: Option<OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Build arguments based on trigger kind, matching Angular's reify.ts behavior
     match trigger {
@@ -215,7 +215,7 @@ pub fn create_defer_on_stmt<'a>(
             if let Some(d) = delay {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Number(d), source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
         }
@@ -231,11 +231,11 @@ pub fn create_defer_on_stmt<'a>(
                 args.push(match target_slot {
                     Some(slot) => OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                     None => OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Null, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                 });
 
@@ -246,13 +246,13 @@ pub fn create_defer_on_stmt<'a>(
                             value: LiteralValue::Number(view_steps as f64),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 } else if options.is_some() {
                     // Need to push null placeholder if options follow
                     args.push(OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Null, source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
 
@@ -269,11 +269,11 @@ pub fn create_defer_on_stmt<'a>(
                 args.push(match target_slot {
                     Some(slot) => OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                     None => OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Null, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                 });
 
@@ -284,7 +284,7 @@ pub fn create_defer_on_stmt<'a>(
                             value: LiteralValue::Number(view_steps as f64),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -360,7 +360,7 @@ pub fn create_defer_when_stmt<'a>(
     modifier: DeferOpModifierKind,
     condition: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(condition);
 
     let instruction = match modifier {

@@ -647,15 +647,15 @@ fn resolve_factory_dep_namespaces<'a>(
                 receiver: oxc_allocator::Box::new_in(
                     OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                         ReadVarExpr { name: namespace, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: name.clone(),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 }
@@ -684,15 +684,15 @@ fn resolve_host_directive_namespaces<'a>(
                 receiver: oxc_allocator::Box::new_in(
                     OutputExpression::ReadVar(oxc_allocator::Box::new_in(
                         ReadVarExpr { name: namespace, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: name.clone(),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
     }
 }
@@ -769,12 +769,12 @@ fn build_set_class_metadata_decls<'a>(
 
     let type_expr = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
         ReadVarExpr { name: Ident::from(class_name), source_span: None },
-        allocator,
+        &allocator,
     ));
     let class_metadata = R3ClassMetadata {
         r#type: type_expr,
         decorators: build_decorator_metadata_array(
-            allocator,
+            &allocator,
             &[decorator],
             Some(source),
             None,
@@ -782,7 +782,7 @@ fn build_set_class_metadata_decls<'a>(
             Some(string_consts),
         ),
         ctor_parameters: build_ctor_params_metadata(
-            allocator,
+            &allocator,
             class,
             None,
             namespace_registry,
@@ -790,7 +790,7 @@ fn build_set_class_metadata_decls<'a>(
             Some(source),
         ),
         prop_decorators: build_prop_decorators_metadata(
-            allocator,
+            &allocator,
             class,
             Some(source),
             namespace_registry,
@@ -2102,7 +2102,7 @@ fn transform_angular_file_jit(
             // Check if this is the Angular decorator that needs special text transformation
             if dec.span == angular_decorator.span {
                 let text = build_jit_decorator_text(
-                    allocator,
+                    &allocator,
                     source,
                     dec,
                     decorator_kind,
@@ -2556,7 +2556,7 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             if let Some(mut metadata) = extract_component_metadata(
-                allocator,
+                &allocator,
                 class,
                 implicit_standalone,
                 &import_map,
@@ -2621,7 +2621,7 @@ pub fn transform_angular_file(
                     // Pass the shared pool index to ensure unique constant names
                     // Pass the file-level namespace registry to ensure consistent namespace assignments
                     match compile_component_full(
-                        allocator,
+                        &allocator,
                         template,
                         &mut metadata,
                         path,
@@ -2678,7 +2678,7 @@ pub fn transform_angular_file(
                                     decorator_spans_to_remove.push(span);
                                 }
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
-                                    allocator,
+                                    &allocator,
                                     injectable_metadata,
                                     options.compilation_mode,
                                 ) {
@@ -2720,7 +2720,7 @@ pub fn transform_angular_file(
                                                 name: Ident::from(class_name.as_str()),
                                                 source_span: None,
                                             },
-                                            allocator,
+                                            &allocator,
                                         ),
                                     );
 
@@ -2733,7 +2733,7 @@ pub fn transform_angular_file(
                                     let class_metadata = R3ClassMetadata {
                                         r#type: type_expr,
                                         decorators: build_decorator_metadata_array(
-                                            allocator,
+                                            &allocator,
                                             &[decorator],
                                             Some(source),
                                             Some(template),
@@ -2741,7 +2741,7 @@ pub fn transform_angular_file(
                                             Some(&string_consts),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata(
-                                            allocator,
+                                            &allocator,
                                             class,
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
@@ -2749,7 +2749,7 @@ pub fn transform_angular_file(
                                             Some(source),
                                         ),
                                         prop_decorators: build_prop_decorators_metadata(
-                                            allocator,
+                                            &allocator,
                                             class,
                                             Some(source),
                                             &mut file_namespace_registry,
@@ -2780,12 +2780,12 @@ pub fn transform_angular_file(
                                         R3DeferPerComponentDependency<'_>,
                                     > = if compilation_result.has_defer_block {
                                         super::defer_resolver::build_defer_per_component_deps(
-                                            allocator,
+                                            &allocator,
                                             &metadata.deferred_imports,
                                             &import_map,
                                         )
                                     } else {
-                                        oxc_allocator::Vec::new_in(allocator)
+                                        oxc_allocator::Vec::new_in(&allocator)
                                     };
                                     let metadata_expr = match options.compilation_mode {
                                         crate::CompilationMode::Partial => {
@@ -2795,7 +2795,7 @@ pub fn transform_angular_file(
                                             // deps → sync ɵɵngDeclareClassMetadata; one
                                             // or more → async ɵɵngDeclareClassMetadataAsync.
                                             crate::partial::compile_component_declare_class_metadata(
-                                                allocator,
+                                                &allocator,
                                                 &class_metadata,
                                                 deferred_deps.as_slice(),
                                             )
@@ -2805,7 +2805,7 @@ pub fn transform_angular_file(
                                                 compile_class_metadata(allocator, &class_metadata)
                                             } else {
                                                 compile_component_class_metadata(
-                                                    allocator,
+                                                    &allocator,
                                                     &class_metadata,
                                                     Some(deferred_deps.as_slice()),
                                                 )
@@ -2885,7 +2885,7 @@ pub fn transform_angular_file(
                 // the directive and creating conflicting property definitions (like
                 // ɵfac getters) that interfere with the AOT-compiled assignments.
                 if let Some(mut directive_metadata) = extract_directive_metadata(
-                    allocator,
+                    &allocator,
                     class,
                     implicit_standalone,
                     Some(source),
@@ -2905,7 +2905,7 @@ pub fn transform_angular_file(
                     // so factory deps must use namespace-prefixed references (e.g., i1.Store).
                     if let Some(ref mut deps) = directive_metadata.deps {
                         resolve_factory_dep_namespaces(
-                            allocator,
+                            &allocator,
                             deps,
                             &import_map,
                             &mut file_namespace_registry,
@@ -2917,7 +2917,7 @@ pub fn transform_angular_file(
                     // must use namespace-prefixed references (e.g., i1.BrnTooltipTrigger) because the
                     // original named import may be elided and replaced by a namespace import.
                     resolve_host_directive_namespaces(
-                        allocator,
+                        &allocator,
                         &mut directive_metadata.host_directives,
                         &import_map,
                         &mut file_namespace_registry,
@@ -2926,7 +2926,7 @@ pub fn transform_angular_file(
                     // Compile directive and generate definitions
                     // Pass shared_pool_index to ensure unique constant names across the file
                     let definitions = generate_directive_definitions(
-                        allocator,
+                        &allocator,
                         &directive_metadata,
                         shared_pool_index,
                         options.compilation_mode,
@@ -2956,7 +2956,7 @@ pub fn transform_angular_file(
                             decorator_spans_to_remove.push(span);
                         }
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
-                            allocator,
+                            &allocator,
                             injectable_metadata,
                             options.compilation_mode,
                         ) {
@@ -2981,7 +2981,7 @@ pub fn transform_angular_file(
                     let decls_after_class = find_directive_decorator(&class.decorators)
                         .map(|decorator| {
                             build_set_class_metadata_decls(
-                                allocator,
+                                &allocator,
                                 class,
                                 &class_name,
                                 decorator,
@@ -3021,7 +3021,7 @@ pub fn transform_angular_file(
                     // Resolve namespace imports for pipe constructor deps
                     if let Some(ref mut deps) = pipe_metadata.deps {
                         resolve_factory_dep_namespaces(
-                            allocator,
+                            &allocator,
                             deps,
                             &import_map,
                             &mut file_namespace_registry,
@@ -3030,7 +3030,7 @@ pub fn transform_angular_file(
 
                     // Compile pipe and generate both ɵfac and ɵpipe definitions as external property assignments
                     if let Some(definition) = generate_full_pipe_definition_from_decorator(
-                        allocator,
+                        &allocator,
                         &pipe_metadata,
                         options.compilation_mode,
                     ) {
@@ -3054,7 +3054,7 @@ pub fn transform_angular_file(
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
-                                allocator,
+                                &allocator,
                                 injectable_metadata,
                                 options.compilation_mode,
                             ) {
@@ -3079,7 +3079,7 @@ pub fn transform_angular_file(
                         let decls_after_class = find_pipe_decorator(&class.decorators)
                             .map(|decorator| {
                                 build_set_class_metadata_decls(
-                                    allocator,
+                                    &allocator,
                                     class,
                                     &class_name,
                                     decorator,
@@ -3121,7 +3121,7 @@ pub fn transform_angular_file(
                     // Resolve namespace imports for NgModule constructor deps
                     if let Some(ref mut deps) = ng_module_metadata.deps {
                         resolve_factory_dep_namespaces(
-                            allocator,
+                            &allocator,
                             deps,
                             &import_map,
                             &mut file_namespace_registry,
@@ -3130,7 +3130,7 @@ pub fn transform_angular_file(
 
                     // Compile NgModule and generate all definitions as external property assignments
                     if let Some(definition) = generate_full_ng_module_definition(
-                        allocator,
+                        &allocator,
                         &ng_module_metadata,
                         options.compilation_mode,
                     ) {
@@ -3156,7 +3156,7 @@ pub fn transform_angular_file(
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
-                                allocator,
+                                &allocator,
                                 injectable_metadata,
                                 options.compilation_mode,
                             ) {
@@ -3190,7 +3190,7 @@ pub fn transform_angular_file(
                         // appended after the NgModule's external declarations.
                         if let Some(decorator) = find_ng_module_decorator(&class.decorators) {
                             let metadata = build_set_class_metadata_decls(
-                                allocator,
+                                &allocator,
                                 class,
                                 &class_name,
                                 decorator,
@@ -3268,7 +3268,7 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         let definition = generate_service_definition_from_decorator(
-                            allocator,
+                            &allocator,
                             &service_metadata,
                             type_argument_count,
                         );
@@ -3288,7 +3288,7 @@ pub fn transform_angular_file(
                         ));
 
                         let decls_after_class = build_set_class_metadata_decls(
-                            allocator,
+                            &allocator,
                             class,
                             &class_name,
                             service_decorator,
@@ -3327,7 +3327,7 @@ pub fn transform_angular_file(
                     // Resolve namespace imports for constructor deps.
                     if let Some(ref mut deps) = injectable_metadata.deps {
                         resolve_factory_dep_namespaces(
-                            allocator,
+                            &allocator,
                             deps,
                             &import_map,
                             &mut file_namespace_registry,
@@ -3336,7 +3336,7 @@ pub fn transform_angular_file(
 
                     // Compile injectable and generate definitions
                     if let Some(definition) = generate_injectable_definition_from_decorator(
-                        allocator,
+                        &allocator,
                         &injectable_metadata,
                         options.compilation_mode,
                     ) {
@@ -3362,7 +3362,7 @@ pub fn transform_angular_file(
                         let decls_after_class = find_injectable_decorator(&class.decorators)
                             .map(|decorator| {
                                 build_set_class_metadata_decls(
-                                    allocator,
+                                    &allocator,
                                     class,
                                     &class_name,
                                     decorator,
@@ -3702,7 +3702,7 @@ fn compile_component_full<'a>(
 
     // Stage 3-5: Ingest and compile
     // Build ingest options from metadata and transform options
-    let component_name_atom = Ident::from_in(metadata.class_name.as_str(), allocator);
+    let component_name_atom = Ident::from_in(metadata.class_name.as_str(), &allocator);
 
     // OXC is a single-file compiler, equivalent to Angular's local compilation mode.
     // In local compilation mode, Angular ALWAYS sets hasDirectiveDependencies=true,
@@ -3784,9 +3784,9 @@ fn compile_component_full<'a>(
 
     // Build relative paths for debug locations
     let relative_template_path =
-        if enable_debug_locations { Some(Ident::from_in(file_path, allocator)) } else { None };
+        if enable_debug_locations { Some(Ident::from_in(file_path, &allocator)) } else { None };
 
-    let relative_context_file_path = Some(Ident::from_in(file_path, allocator));
+    let relative_context_file_path = Some(Ident::from_in(file_path, &allocator));
 
     let ingest_options = IngestOptions {
         mode,
@@ -3808,7 +3808,7 @@ fn compile_component_full<'a>(
     };
 
     let mut job = ingest_component_with_options(
-        allocator,
+        &allocator,
         component_name_atom,
         r3_result.nodes,
         ingest_options,
@@ -3834,7 +3834,7 @@ fn compile_component_full<'a>(
     let content_queries_fn = if !content_queries.is_empty() {
         let fn_name = Some(metadata.class_name.as_str());
         Some(create_content_queries_function(
-            allocator,
+            &allocator,
             content_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
@@ -3847,7 +3847,7 @@ fn compile_component_full<'a>(
     let view_query_fn = if !view_queries.is_empty() {
         let fn_name = Some(metadata.class_name.as_str());
         Some(create_view_queries_function(
-            allocator,
+            &allocator,
             view_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
@@ -3864,7 +3864,7 @@ fn compile_component_full<'a>(
     // continue from where template compilation left off (avoiding duplicate names)
     let template_pool_index = job.pool.next_name_index();
     let host_binding_output = compile_component_host_bindings(
-        allocator,
+        &allocator,
         metadata,
         template_pool_index,
         options.angular_version,
@@ -3880,11 +3880,11 @@ fn compile_component_full<'a>(
                     host_binding_fn: output.result.host_binding_fn,
                     host_attrs: output.result.host_attrs,
                     host_vars: output.result.host_vars,
-                    declarations: OxcVec::new_in(allocator),
+                    declarations: OxcVec::new_in(&allocator),
                 };
                 (Some(result), Some(output.next_pool_index), declarations)
             }
-            None => (None, None, OxcVec::new_in(allocator)),
+            None => (None, None, OxcVec::new_in(&allocator)),
         };
 
     // Stage 7: Generate ɵcmp/ɵfac definitions
@@ -3892,7 +3892,7 @@ fn compile_component_full<'a>(
     // consistent namespace assignments between factory generation and import statements.
     // Pass the pre-pooled attrs_ref so the attrs entry uses the correct constant index
     let definitions = generate_component_definitions(
-        allocator,
+        &allocator,
         metadata,
         options,
         &mut job,
@@ -3940,14 +3940,14 @@ fn compile_component_full<'a>(
         // Create component type expression (reference to the class)
         let component_type = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         // Build HMR metadata
         let mut hmr_meta = HmrMetadata::new(
             component_type,
             metadata.class_name.clone(),
-            Ident::from_in(file_path, allocator),
+            Ident::from_in(file_path, &allocator),
         );
 
         // Add the @angular/core namespace dependency (i0)
@@ -3971,7 +3971,7 @@ fn compile_component_full<'a>(
         // Create component type expression (reference to the class)
         let component_type = OutputExpression::ReadVar(oxc_allocator::Box::new_in(
             ReadVarExpr { name: metadata.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         // Compute the 1-indexed line number of the class declaration from its byte offset
@@ -3988,7 +3988,7 @@ fn compile_component_full<'a>(
 
         // Build the debug info with the actual class declaration line number
         let debug_info = R3ClassDebugInfo::new(component_type, metadata.class_name.clone())
-            .with_file_path(Ident::from_in(file_path, allocator))
+            .with_file_path(Ident::from_in(file_path, &allocator))
             .with_line_number(class_line_number);
 
         // Compile to IIFE-wrapped expression
@@ -4074,7 +4074,7 @@ fn resolve_styles<'a>(
             if let Some(style_contents) = resources.styles.get(style_url.as_str()) {
                 // Add all resolved style contents to the metadata styles
                 for style in style_contents {
-                    metadata.styles.push(Ident::from_in(style.as_str(), allocator));
+                    metadata.styles.push(Ident::from_in(style.as_str(), &allocator));
                 }
             } else {
                 missing.push(style_url.to_string());
@@ -4152,7 +4152,7 @@ pub fn compile_component_template<'a>(
 
     // Stage 3-5: Ingest and compile
     use oxc_allocator::FromIn;
-    let component_name_atom = Ident::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, &allocator);
     let mut job = ingest_component(allocator, component_name_atom, r3_result.nodes);
 
     let compiled = compile_template(&mut job);
@@ -4174,7 +4174,7 @@ pub fn compile_template_to_js<'a>(
     file_path: &str,
 ) -> Result<String, Vec<OxcDiagnostic>> {
     compile_template_to_js_with_options(
-        allocator,
+        &allocator,
         template,
         component_name,
         file_path,
@@ -4274,9 +4274,9 @@ pub fn compile_template_to_js_with_options<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Ident::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, &allocator);
     let mut job = ingest_component_with_options(
-        allocator,
+        &allocator,
         component_name_atom,
         r3_result.nodes,
         ingest_options,
@@ -4292,7 +4292,7 @@ pub fn compile_template_to_js_with_options<'a>(
     // Build a list of all statements to emit:
     // 1. Declarations (child view functions, pooled constants)
     // 2. Main template function as a declaration
-    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
 
     // Add all declarations first (child view functions come before main template)
     for decl in compiled.declarations {
@@ -4310,7 +4310,7 @@ pub fn compile_template_to_js_with_options<'a>(
                 modifiers: StmtModifier::NONE,
                 source_span: compiled.template_fn.source_span,
             },
-            allocator,
+            &allocator,
         ));
         all_statements.push(main_fn_stmt);
     }
@@ -4319,7 +4319,7 @@ pub fn compile_template_to_js_with_options<'a>(
     let host_pool_starting_index = job.pool.next_name_index();
     if let Some(ref host_input) = options.host {
         if let Some(host_result) = compile_host_bindings_from_input(
-            allocator,
+            &allocator,
             host_input,
             component_name,
             options.selector.as_deref(),
@@ -4344,7 +4344,7 @@ pub fn compile_template_to_js_with_options<'a>(
                                 modifiers: StmtModifier::NONE,
                                 source_span: host_fn.source_span,
                             },
-                            allocator,
+                            &allocator,
                         ));
                     all_statements.push(host_fn_stmt);
                 }
@@ -4449,9 +4449,9 @@ pub fn compile_template_for_hmr<'a>(
     };
 
     // Stage 3-5: Ingest and compile
-    let component_name_atom = Ident::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, &allocator);
     let mut job = ingest_component_with_options(
-        allocator,
+        &allocator,
         component_name_atom,
         r3_result.nodes,
         ingest_options,
@@ -4465,7 +4465,7 @@ pub fn compile_template_for_hmr<'a>(
     let emitter = JsEmitter::new();
 
     // Emit the template function
-    let fn_expr = OutputExpression::Function(Box::new_in(compiled.template_fn, allocator));
+    let fn_expr = OutputExpression::Function(Box::new_in(compiled.template_fn, &allocator));
     let template_js = emitter.emit_expression(&fn_expr);
 
     // Emit the declarations (child view functions, pooled constants)
@@ -4488,7 +4488,7 @@ pub fn compile_template_for_hmr<'a>(
             FunctionExpr, LiteralArrayExpr, OutputExpression, OutputStatement, ReturnStatement,
         };
 
-        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
             const_entries.push(const_value_to_expression(allocator, const_value));
         }
@@ -4498,7 +4498,7 @@ pub fn compile_template_for_hmr<'a>(
             // in a function that runs initializers first and returns the array.
             // This matches what definition.rs does for the initial component definition.
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
-                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, allocator);
+                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
 
             for stmt in job.consts_initializers.drain(..) {
                 fn_stmts.push(stmt);
@@ -4508,26 +4508,26 @@ pub fn compile_template_for_hmr<'a>(
                 ReturnStatement {
                     value: OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                         LiteralArrayExpr { entries: const_entries, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
 
             OutputExpression::Function(oxc_allocator::Box::new_in(
                 FunctionExpr {
                     name: None,
-                    params: OxcVec::new_in(allocator),
+                    params: OxcVec::new_in(&allocator),
                     statements: fn_stmts,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         } else {
             OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                 LiteralArrayExpr { entries: const_entries, source_span: None },
-                allocator,
+                &allocator,
             ))
         };
 
@@ -4616,7 +4616,7 @@ fn compile_component_host_bindings<'a>(
     // Ingest and compile the host bindings with the pool starting index
     // This ensures constant names continue from where template compilation left off
     let mut job = ingest_host_binding_with_version(
-        allocator,
+        &allocator,
         input,
         pool_starting_index,
         angular_version,
@@ -4646,7 +4646,7 @@ fn convert_host_metadata_to_input<'a>(
     let empty_span = Span::empty(0);
 
     // Convert property bindings: "[class.active]" -> R3BoundAttribute
-    let mut properties: OxcVec<'a, R3BoundAttribute<'a>> = OxcVec::new_in(allocator);
+    let mut properties: OxcVec<'a, R3BoundAttribute<'a>> = OxcVec::new_in(&allocator);
 
     for (key, value) in host.properties.iter() {
         // Strip the brackets from the key: "[prop]" -> "prop"
@@ -4665,11 +4665,11 @@ fn convert_host_metadata_to_input<'a>(
         let parse_result = binding_parser.parse_binding(value_str, empty_span);
 
         properties.push(R3BoundAttribute {
-            name: Ident::from_in(final_name, allocator),
+            name: Ident::from_in(final_name, &allocator),
             binding_type,
             security_context: SecurityContext::None,
             value: parse_result.ast,
-            unit: unit.map(|u| Ident::from_in(u, allocator)),
+            unit: unit.map(|u| Ident::from_in(u, &allocator)),
             source_span: empty_span,
             key_span: empty_span,
             value_span: Some(empty_span),
@@ -4678,7 +4678,7 @@ fn convert_host_metadata_to_input<'a>(
     }
 
     // Convert event listeners: "(click)" -> R3BoundEvent
-    let mut events: OxcVec<'a, R3BoundEvent<'a>> = OxcVec::new_in(allocator);
+    let mut events: OxcVec<'a, R3BoundEvent<'a>> = OxcVec::new_in(&allocator);
 
     for (key, value) in host.listeners.iter() {
         // Strip the parentheses from the key: "(click)" -> "click"
@@ -4693,17 +4693,17 @@ fn convert_host_metadata_to_input<'a>(
         let (final_event_name, target) = parse_event_target(event_name);
 
         let (effective_name, event_type, phase) =
-            parse_legacy_animation_event(final_event_name, allocator);
+            parse_legacy_animation_event(final_event_name, &allocator);
 
         // Parse the handler expression
         let value_str = allocator.alloc_str(value.as_str());
         let parse_result = binding_parser.parse_event(value_str, empty_span);
 
         events.push(R3BoundEvent {
-            name: Ident::from_in(effective_name, allocator),
+            name: Ident::from_in(effective_name, &allocator),
             event_type,
             handler: parse_result.ast,
-            target: target.map(|t| Ident::from_in(t, allocator)),
+            target: target.map(|t| Ident::from_in(t, &allocator)),
             phase,
             source_span: empty_span,
             handler_span: empty_span,
@@ -4723,7 +4723,7 @@ fn convert_host_metadata_to_input<'a>(
                 value: crate::output::ast::LiteralValue::String(value.clone()),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         attributes.insert(key.clone(), expr);
     }
@@ -4737,7 +4737,7 @@ fn convert_host_metadata_to_input<'a>(
                 value: crate::output::ast::LiteralValue::String(style_attr.clone()),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         attributes.insert(Ident::from("style"), expr);
     }
@@ -4748,7 +4748,7 @@ fn convert_host_metadata_to_input<'a>(
                 value: crate::output::ast::LiteralValue::String(class_attr.clone()),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         attributes.insert(Ident::from("class"), expr);
     }
@@ -4824,7 +4824,7 @@ fn parse_legacy_animation_event<'a>(
     };
     let phase = phase_raw.map(|p| {
         let normalized = p.trim().to_lowercase();
-        Ident::from_in(normalized.as_str(), allocator)
+        Ident::from_in(normalized.as_str(), &allocator)
     });
     (trigger, ParsedEventType::LegacyAnimation, phase)
 }
@@ -4857,30 +4857,30 @@ fn convert_host_metadata_input_to_host_metadata<'a>(
 ) -> HostMetadata<'a> {
     use oxc_allocator::FromIn;
 
-    let mut properties: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
+    let mut properties: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(&allocator);
     for (k, v) in &input.properties {
         properties
-            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), &allocator), Ident::from_in(v.as_str(), &allocator)));
     }
 
-    let mut attributes: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
+    let mut attributes: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(&allocator);
     for (k, v) in &input.attributes {
         attributes
-            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), &allocator), Ident::from_in(v.as_str(), &allocator)));
     }
 
-    let mut listeners: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(allocator);
+    let mut listeners: OxcVec<'a, (Ident<'a>, Ident<'a>)> = OxcVec::new_in(&allocator);
     for (k, v) in &input.listeners {
         listeners
-            .push((Ident::from_in(k.as_str(), allocator), Ident::from_in(v.as_str(), allocator)));
+            .push((Ident::from_in(k.as_str(), &allocator), Ident::from_in(v.as_str(), &allocator)));
     }
 
     HostMetadata {
         properties,
         attributes,
         listeners,
-        class_attr: input.class_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
-        style_attr: input.style_attr.as_ref().map(|s| Ident::from_in(s.as_str(), allocator)),
+        class_attr: input.class_attr.as_ref().map(|s| Ident::from_in(s.as_str(), &allocator)),
+        style_attr: input.style_attr.as_ref().map(|s| Ident::from_in(s.as_str(), &allocator)),
     }
 }
 
@@ -4912,21 +4912,21 @@ fn pool_selector_attrs<'a>(
 
     // Build the attrs array: ["attrName", "attrValue", ...]
     let mut attr_entries: OxcVec<'a, OutputExpression<'a>> =
-        OxcVec::with_capacity_in(selector_attrs.len(), allocator);
+        OxcVec::with_capacity_in(selector_attrs.len(), &allocator);
     for attr in selector_attrs {
         attr_entries.push(OutputExpression::Literal(oxc_allocator::Box::new_in(
             LiteralExpr {
-                value: LiteralValue::String(Ident::from_in(attr.as_str(), allocator)),
+                value: LiteralValue::String(Ident::from_in(attr.as_str(), &allocator)),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
     // Create the attrs array literal
     let attrs_array = OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
         LiteralArrayExpr { entries: attr_entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Pool the attrs array using constantPool.getConstLiteral() with forceShared=true
@@ -4964,15 +4964,15 @@ fn compile_host_bindings_from_input<'a>(
     let host = convert_host_metadata_input_to_host_metadata(allocator, host_input);
 
     // Get component name and selector as atoms
-    let component_name_atom = Ident::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, &allocator);
     let component_selector =
-        selector.map(|s| Ident::from_in(s, allocator)).unwrap_or_else(|| Ident::from(""));
+        selector.map(|s| Ident::from_in(s, &allocator)).unwrap_or_else(|| Ident::from(""));
 
     // Convert to HostBindingInput and compile
     let input =
         convert_host_metadata_to_input(allocator, &host, component_name_atom, component_selector);
     let mut job = ingest_host_binding_with_version(
-        allocator,
+        &allocator,
         input,
         pool_starting_index,
         angular_version,
@@ -5028,7 +5028,7 @@ pub fn compile_host_bindings_for_linker(
     }
 
     let fn_js = result.host_binding_fn.map(|f| {
-        let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &allocator));
+        let expr = OutputExpression::Function(oxc_allocator::Box::new_in(f, &&allocator));
         emitter.emit_expression(&expr)
     })?;
 
@@ -5136,9 +5136,9 @@ pub fn compile_template_for_linker<'a>(
         legacy_optional_chaining: None,
     };
 
-    let component_name_atom = Ident::from_in(component_name, allocator);
+    let component_name_atom = Ident::from_in(component_name, &allocator);
     let mut job = ingest_component_with_options(
-        allocator,
+        &allocator,
         component_name_atom,
         r3_result.nodes,
         ingest_options,
@@ -5157,7 +5157,7 @@ pub fn compile_template_for_linker<'a>(
 
     // Emit consts array as JS expression
     let consts_js = if !job.consts.is_empty() {
-        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(allocator);
+        let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
             const_entries.push(const_value_to_expression(allocator, const_value));
         }
@@ -5165,7 +5165,7 @@ pub fn compile_template_for_linker<'a>(
         let consts_expr = if !job.consts_initializers.is_empty() {
             // Wrap in function with initializers
             let mut fn_stmts: OxcVec<'a, OutputStatement<'a>> =
-                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, allocator);
+                OxcVec::with_capacity_in(job.consts_initializers.len() + 1, &allocator);
             for stmt in job.consts_initializers.drain(..) {
                 fn_stmts.push(stmt);
             }
@@ -5176,25 +5176,25 @@ pub fn compile_template_for_linker<'a>(
                             entries: const_entries,
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
             OutputExpression::Function(oxc_allocator::Box::new_in(
                 FunctionExpr {
                     name: None,
-                    params: OxcVec::new_in(allocator),
+                    params: OxcVec::new_in(&allocator),
                     statements: fn_stmts,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))
         } else {
             OutputExpression::LiteralArray(oxc_allocator::Box::new_in(
                 crate::output::ast::LiteralArrayExpr { entries: const_entries, source_span: None },
-                allocator,
+                &allocator,
             ))
         };
         Some(emitter.emit_expression(&consts_expr))
@@ -5215,7 +5215,7 @@ pub fn compile_template_for_linker<'a>(
         .unwrap_or_else(|| format!("{component_name}_Template"));
 
     // Emit all declarations + main template function as JS code
-    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(allocator);
+    let mut all_statements: OxcVec<'a, OutputStatement<'a>> = OxcVec::new_in(&allocator);
 
     for decl in compiled.declarations {
         all_statements.push(decl);
@@ -5230,7 +5230,7 @@ pub fn compile_template_for_linker<'a>(
                 modifiers: StmtModifier::NONE,
                 source_span: compiled.template_fn.source_span,
             },
-            allocator,
+            &allocator,
         ));
         all_statements.push(main_fn_stmt);
     }

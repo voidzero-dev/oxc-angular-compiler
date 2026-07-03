@@ -34,7 +34,7 @@ pub fn compile_declare_factory_function<'a>(
 ) -> OutputExpression<'a> {
     let base = meta.base();
 
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_FACTORY));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
@@ -57,17 +57,17 @@ pub fn compile_declare_factory_function<'a>(
 
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
                 namespaced_prop(allocator, "i0", Identifiers::DECLARE_FACTORY),
-                allocator,
+                &allocator,
             ),
             args,
             // ngDeclare* calls are not @__PURE__ — upstream emits them as
@@ -76,7 +76,7 @@ pub fn compile_declare_factory_function<'a>(
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -101,19 +101,19 @@ fn compile_dependencies<'a>(
         R3FactoryDeps::Invalid => string_literal(allocator, "invalid"),
         R3FactoryDeps::None => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )),
         R3FactoryDeps::Valid(deps) if deps.iter().any(|d| d.type_only_invalid) => {
             string_literal(allocator, "invalid")
         }
         R3FactoryDeps::Valid(deps) => {
-            let mut entries = Vec::with_capacity_in(deps.len(), allocator);
+            let mut entries = Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 entries.push(compile_dependency(allocator, dep));
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
-                allocator,
+                &allocator,
             ))
         }
     }
@@ -132,13 +132,13 @@ fn compile_dependency<'a>(
     allocator: &'a Allocator,
     dep: &crate::factory::R3DependencyMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     let token_expr = match &dep.token {
         Some(token) => token.clone_in(allocator),
         None => OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )),
     };
     entries.push(LiteralMapEntry::new(Ident::from("token"), token_expr, false));
@@ -161,7 +161,7 @@ fn compile_dependency<'a>(
 
     OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -180,22 +180,22 @@ fn factory_target_expr<'a>(
 
     let factory_target_ref = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, "i0"), allocator),
+            receiver: Box::new_in(read_var(allocator, "i0"), &allocator),
             name: Ident::from(Identifiers::FACTORY_TARGET),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(factory_target_ref, allocator),
+            receiver: Box::new_in(factory_target_ref, &allocator),
             name: Ident::from(variant),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -204,7 +204,7 @@ fn factory_target_expr<'a>(
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -215,19 +215,19 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -244,7 +244,7 @@ fn bool_entry<'a>(allocator: &'a Allocator, key: &'static str) -> LiteralMapEntr
         Ident::from(key),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(true), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     )
