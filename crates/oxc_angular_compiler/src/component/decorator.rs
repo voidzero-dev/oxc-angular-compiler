@@ -989,6 +989,9 @@ fn extract_param_dependency<'a>(
                 } else {
                     let mut d = R3DependencyMetadata::new(token_name.clone());
                     d.token_source_module = Some(import_info.source_module.clone());
+                    // Carry the exported name so namespaced refs (`i1.X`) use the export
+                    // name, not the local alias, for aliased imports.
+                    d.token_imported_name = import_info.imported_name.clone();
                     // Always use namespace imports for DI tokens (has_named_import = false).
                     // Import elision removes @Inject(TOKEN) argument imports since they're
                     // only used in decorator positions that get compiled away.
