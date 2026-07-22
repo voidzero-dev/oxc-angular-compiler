@@ -797,6 +797,21 @@ mod let_declarations {
         let result = parse_and_humanize_no_ws("@let a = 1; @let b = 2;");
         assert_eq!(result, vec![let_decl("a"), let_decl("b")]);
     }
+
+    #[test]
+    fn should_parse_let_with_object_literal_value_and_newline_in_block() {
+        // Regression: when `@let` was followed by a newline (as prettier formats it), the
+        // declaration was misclassified as incomplete, so its value was never consumed. The
+        // object-literal braces in the value were then re-lexed as a stray block close,
+        // corrupting block nesting and surfacing as an "Unexpected closing tag" error.
+        let result = parse_and_humanize_no_ws(
+            "@if (cond) { @let\nlabel = value | translate: { section: id }; <button></button> }",
+        );
+        assert!(
+            result.iter().any(|n| n == &let_decl("label")),
+            "Expected a LetDeclaration named 'label', got {result:?}"
+        );
+    }
 }
 
 // ============================================================================
