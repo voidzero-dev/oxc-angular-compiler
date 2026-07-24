@@ -1603,6 +1603,27 @@ mod let_declarations {
         // Should also have LET_VALUE
         assert!(types.contains(&HtmlTokenType::LetValue));
     }
+
+    #[test]
+    fn should_tokenize_let_declaration_with_newline_before_name() {
+        // Angular allows any whitespace - including newlines - between `@let` and the
+        // declared name (it skips whitespace via `isNotWhitespace`). A newline there must
+        // still produce a complete declaration, not an incomplete one.
+        let result = tokenize("@let\nfoo = 123;");
+
+        let types: Vec<_> = result.tokens.iter().map(|t| t.token_type).collect();
+
+        assert!(types.contains(&HtmlTokenType::LetStart), "Should have LetStart, got {types:?}");
+        assert!(types.contains(&HtmlTokenType::LetValue), "Should have LetValue, got {types:?}");
+        assert!(types.contains(&HtmlTokenType::LetEnd), "Should have LetEnd, got {types:?}");
+        assert!(
+            !types.contains(&HtmlTokenType::IncompleteLet),
+            "Should not be treated as incomplete, got {types:?}"
+        );
+
+        let let_start = result.tokens.iter().find(|t| t.token_type == HtmlTokenType::LetStart);
+        assert_eq!(let_start.unwrap().value(), "foo");
+    }
 }
 
 // ============================================================================
