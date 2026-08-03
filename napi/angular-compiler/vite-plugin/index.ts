@@ -245,6 +245,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // Cache for resolved resources
   const resourceCache = new Map<string, string>()
 
+  // Preprocessor dependencies of each compiled style (Sass partials pulled in
+  // through `@use`/`@import`/`meta.load-css`, Less imports, ...), plus the
+  // reverse map from each dependency to the styles compiled from it, so that
+  // editing a shared partial invalidates and re-dispatches every component
+  // style built on top of it.
+  const styleDepsCache = new Map<string, string[]>()
+  const styleDepOwners = new Map<string, Set<string>>()
+
   // Component IDs (`filePath@ClassName`) queued for HMR delivery. Populated by
   // `handleHotUpdate` when an external resource or inline template/style change
   // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
@@ -336,6 +344,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             try {
               const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
               content = processed.code
+              styleDepsCache.set(
+                stylePath,
+                processed.deps ? Array.from(processed.deps, (dep) => normalizePath(dep)) : [],
+              )
             } catch (e) {
               console.warn(`Failed to preprocess style: ${stylePath}`, e)
             }
@@ -346,6 +358,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           continue
         }
       }
+
+      const normalizedStylePath = normalizePath(stylePath)
+      for (const dep of styleDepsCache.get(stylePath) ?? []) {
+        if (dep === normalizedStylePath) continue
+        dependencies.push(dep)
+        let owners = styleDepOwners.get(dep)
+        if (!owners) styleDepOwners.set(dep, (owners = new Set()))
+        owners.add(stylePath)
+      }
+
       styles[styleUrl] = [content]
     }
 
@@ -834,9 +856,27 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // Vite's default CSS HMR pipeline so PostCSS/Tailwind etc. still
         // process them.
         if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
+          // Shared preprocessor dependency (e.g. a Sass partial): rebuild every
+          // style compiled from it and HMR each owning component.
+          if (styleDepOwners.has(normalizedFile)) {
+            let handled = false
+            for (const stylePath of styleDepOwners.get(normalizedFile)!) {
+              resourceCache.delete(stylePath)
+              styleDepsCache.delete(stylePath)
+              const componentFile = resourceToComponent.get(normalizePath(stylePath))
+              if (componentFile && dispatchAllComponentsInFile(componentFile)) {
+                debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, componentFile)
+                handled = true
+              }
+            }
+            if (handled) {
+              return []
+            }
+          }
           if (resourceToComponent.has(normalizedFile)) {
             const componentFile = resourceToComponent.get(normalizedFile)!
             resourceCache.delete(normalizedFile)
+            styleDepsCache.delete(ctx.file)
             // resourceToComponent only tracks one owner per resource; if a
             // templateUrl/styleUrl is shared across multiple components in
             // the same file, only the registered owner receives HMR.
