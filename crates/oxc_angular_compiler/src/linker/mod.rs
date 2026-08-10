@@ -677,6 +677,24 @@ fn get_default_standalone_value(meta: &ObjectExpression<'_>) -> bool {
     true // If we can't determine the version, default to true (latest behavior)
 }
 
+/// Whether the declaration's `version` implies OnPush is the default change
+/// detection strategy. Angular v22 made OnPush the default; anything compiled
+/// against an earlier version meant `Eager`. The placeholder version used by dev
+/// builds tracks the newest behaviour.
+///
+/// Mirrors `hasOnPushByDefault` in the TS linker's `partial_component_linker_1.ts`.
+fn has_on_push_by_default(meta: &ObjectExpression<'_>) -> bool {
+    if let Some(version_str) = get_string_property(meta, "version") {
+        if version_str == "0.0.0-PLACEHOLDER" {
+            return true;
+        }
+        if let Ok(version) = semver::Version::parse(version_str) {
+            return version.major >= 22;
+        }
+    }
+    true // If we can't determine the version, default to true (latest behavior)
+}
+
 /// Extract the `deps` array from a factory metadata object and generate inject calls.
 ///
 /// The `target` parameter determines the inject function and flags:
@@ -2065,9 +2083,18 @@ fn link_component(
     if let Some(cd) = get_property_source(meta, "changeDetection", source) {
         if cd.contains("Eager") || cd.contains("Default") {
             parts.push("changeDetection: 1".to_string());
-        } else if cd.contains("OnPush") {
-            parts.push("changeDetection: 0".to_string());
         }
+        // OnPush is the emit-time default and is left out: the runtime derives
+        // `onPush = changeDetection !== Eager`, so an absent field already reads
+        // as OnPush. Matches the `meta.changeDetection !== OnPush` guard in
+        // `compileComponentFromMetadata`.
+    } else if !has_on_push_by_default(meta) {
+        // Omitted. Which strategy that meant depends on the version the library
+        // was compiled against, and the runtime reads an absent field as OnPush,
+        // so a pre-v22 declaration has to say Eager out loud. Without this a
+        // component silently switches from Eager to OnPush and stops re-rendering
+        // on anything that is not a signal or input change.
+        parts.push("changeDetection: 1".to_string());
     }
 
     let define_component =
@@ -2743,9 +2770,12 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
+        // OnPush is the emit-time default, so the TS compiler leaves it out
+        // (`meta.changeDetection !== OnPush` in `compileComponentFromMetadata`);
+        // the runtime infers it from the absent field.
         assert!(
-            result.code.contains("changeDetection: 0"),
-            "ChangeDetectionStrategy.OnPush should be 0, got:\n{}",
+            !result.code.contains("changeDetection"),
+            "ChangeDetectionStrategy.OnPush is the default and should not be emitted, got:\n{}",
             result.code
         );
     }
@@ -2766,6 +2796,73 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         assert!(
             result.code.contains("changeDetection: 1"),
             "ChangeDetectionStrategy.Eager should resolve to 1, got:\n{}",
+            result.code
+        );
+    }
+
+    // When a declaration omits `changeDetection`, the strategy it meant depends on
+    // the Angular version it was compiled with: v22 made OnPush the default, so
+    // anything older meant Eager. The TS linker resolves that with
+    // `hasOnPushByDefault = major >= 22 || version === PLACEHOLDER_VERSION`
+    // (partial_component_linker_1.ts). The runtime derives
+    // `onPush = changeDetection !== Eager`, so an omitted field reads as OnPush —
+    // which means a pre-v22 declaration has to emit `changeDetection: 1`
+    // explicitly, or the component silently switches strategy.
+
+    #[test]
+    fn test_link_component_pre_v22_without_change_detection_is_eager() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.14", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("changeDetection: 1"),
+            "A pre-v22 declaration without changeDetection means Eager, so it must be emitted explicitly, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v22_without_change_detection_stays_on_push() {
+        // v22+ made OnPush the default, and the runtime already infers OnPush from
+        // an absent field, so nothing should be emitted.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.0.7", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("changeDetection"),
+            "v22+ defaults to OnPush, which the runtime infers from an absent field, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_placeholder_version_without_change_detection_stays_on_push() {
+        // `0.0.0-PLACEHOLDER` is what Angular's own dev builds ship; the TS linker
+        // treats it as the newest behaviour.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "0.0.0-PLACEHOLDER", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("changeDetection"),
+            "The placeholder version tracks the newest behaviour (OnPush), got:\n{}",
             result.code
         );
     }
