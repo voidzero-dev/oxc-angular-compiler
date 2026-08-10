@@ -525,6 +525,11 @@ fn extract_forward_ref<'a>(expr: &Expression<'a>, source: &'a str) -> (&'a str, 
     if let Expression::CallExpression(call) = expr {
         let is_forward_ref = match &call.callee {
             Expression::Identifier(ident) => ident.name == "forwardRef",
+            // Angular's own fesm bundles reach core through a namespace import, so
+            // they ship `i0.forwardRef(...)` rather than a bare call. The TS linker
+            // matches on `callee.getSymbolName()`, which returns the property name
+            // for a member expression, so both forms have to unwrap here too.
+            Expression::StaticMemberExpression(member) => member.property.name == "forwardRef",
             _ => false,
         };
         if is_forward_ref {
@@ -4159,6 +4164,227 @@ MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "
         assert!(
             result.code.contains("providedIn: SomeModule"),
             "providedIn should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    // Angular's own fesm bundles reference core through the `i0` namespace import,
+    // so every forwardRef they ship is `i0.forwardRef(...)` rather than a bare
+    // `forwardRef(...)`. The TS linker matches on `callee.getSymbolName()`, which
+    // returns the property name for a member expression, so both forms unwrap.
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_class() {
+        // Mirrors `@angular/forms/signals`' InputValidityMonitor, whose root provider
+        // is declared as `useClass: i0.forwardRef(() => AnimationInputValidityMonitor)`.
+        // Leaving the wrapper in place emits `forwardRef(() => X).ɵfac(...)`, and
+        // `forwardRef` returns the arrow function it was handed — so `.ɵfac` is
+        // undefined and the provider throws the first time it is instantiated.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class InputValidityMonitor {}
+InputValidityMonitor.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: InputValidityMonitor, providedIn: 'root', useClass: i0.forwardRef(() => AnimationInputValidityMonitor) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("AnimationInputValidityMonitor.ɵfac(__ngFactoryType__)"),
+            "Should delegate to the unwrapped class's factory, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_provided_in() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, providedIn: i0.forwardRef(() => SomeModule) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("providedIn: SomeModule"),
+            "providedIn should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_existing() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useExisting: i0.forwardRef(() => OtherService) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("ɵɵinject(OtherService)"),
+            "useExisting should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_value() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useValue: i0.forwardRef(() => DEFAULT_CONFIG) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("DEFAULT_CONFIG"),
+            "useValue should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_class_with_deps() {
+        // `useClass` + `deps` takes the delegated-conditional-factory path, which
+        // instantiates via `new (useClass)(...)` rather than delegating to `ɵfac`.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: i0.forwardRef(() => OtherService), deps: [{ token: Dep1 }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("new (OtherService)"),
+            "useClass-with-deps should instantiate the unwrapped class, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_query_predicate_namespaced_forward_ref() {
+        // TS linker: `predicate = extractForwardRef(predicateExpr)` in
+        // partial_directive_linker_1.ts, so query predicates unwrap too.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", isStandalone: true, viewQueries: [{ propertyName: "child", first: true, predicate: i0.forwardRef(() => ChildDir), descendants: true }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Query predicate should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ChildDir"),
+            "Query predicate should reference the unwrapped type, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_old_style_pipes_namespaced_forward_ref() {
+        // v12–v13 partial declarations use a `pipes` object rather than the
+        // unified `dependencies` array — a separate extract_forward_ref call site.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", pipes: { "myPipe": i0.forwardRef(() => MyPipe) } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Old-style pipes should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: () => [MyPipe]"),
+            "forwardRef in pipes should force closure emit mode, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_factory_forward_ref_is_not_unwrapped() {
+        // Guard: the TS linker reads `useFactory` with `getOpaque()`, deliberately
+        // NOT `extractForwardRef` — a factory is already lazy, so unwrapping it
+        // would change evaluation order. Keep the wrapper.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useFactory: i0.forwardRef(() => makeService) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("forwardRef"),
+            "useFactory must keep its forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_non_forward_ref_member_call_is_untouched() {
+        // Guard against over-matching: only a callee *named* `forwardRef` unwraps.
+        // Any other member call is passed through verbatim.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useValue: config.getDefault(() => Fallback) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("config.getDefault(() => Fallback)"),
+            "Non-forwardRef call should pass through verbatim, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_dependency_namespaced_forward_ref() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", isStandalone: true, dependencies: [{ kind: "directive", type: i0.forwardRef(() => FooDir), selector: "foo" }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: () => [FooDir]"),
+            "Should wrap deps in closure when forwardRef detected, got:\n{}",
             result.code
         );
     }
