@@ -977,9 +977,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
           // A changed file can be BOTH a shared dep of one component's style
           // and another component's direct templateUrl/styleUrl — process both
-          // roles before returning (no early return above).
-          if (resourceToComponent.has(normalizedFile)) {
-            const componentFile = resourceToComponent.get(normalizedFile)!
+          // roles before returning (no early return above). Direct styles are
+          // also reachable via styleComponentOwners alone: once the last
+          // resourceToComponent owner switches styles, its prune removes the
+          // single-valued entry while the remaining shared-style owners stay.
+          if (resourceToComponent.has(normalizedFile) || styleComponentOwners.has(normalizedFile)) {
             // Stylesheets that only appear as transitive deps of other styles
             // (never used as a direct styleUrl) were already handled by the
             // shared-dep branch; skip them here to avoid a duplicate update.
@@ -999,9 +1001,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     handled = true
                   }
                 }
-              } else if (dispatchAllComponentsInFile(componentFile)) {
-                debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
-                handled = true
+              } else {
+                const componentFile = resourceToComponent.get(normalizedFile)
+                if (componentFile && dispatchAllComponentsInFile(componentFile)) {
+                  debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
+                  handled = true
+                }
               }
             }
           }

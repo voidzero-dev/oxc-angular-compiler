@@ -473,4 +473,54 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(updatedIds.some((id) => id.startsWith(firstComponentPath))).toBe(true)
     expect(updatedIds.some((id) => id.startsWith(secondComponentPath))).toBe(true)
   })
+
+  it('dispatches HMR to remaining owners when one owner switches styles', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Both components use the same root style directly.
+    const sharedStylePath = join(appDir, 'shared-root.component.scss')
+    const aComponentPath = join(appDir, 'owner-a.component.ts')
+    const bComponentPath = join(appDir, 'owner-b.component.ts')
+    const bNewStylePath = join(appDir, 'owner-b-other.component.scss')
+
+    writeFileSync(sharedStylePath, 'h1 { color: red; }')
+    writeFileSync(bNewStylePath, 'h2 { color: blue; }')
+    writeFileSync(aComponentPath, componentSource('app-owner-a', 'shared-root.component.scss'))
+    writeFileSync(bComponentPath, componentSource('app-owner-b', 'shared-root.component.scss'))
+
+    await transformComponent(
+      plugin,
+      componentSource('app-owner-a', 'shared-root.component.scss'),
+      aComponentPath,
+    )
+    await transformComponent(
+      plugin,
+      componentSource('app-owner-b', 'shared-root.component.scss'),
+      bComponentPath,
+    )
+
+    // B switches to a different style; its prune removes the single-valued
+    // resourceToComponent entry for the shared style.
+    writeFileSync(bComponentPath, componentSource('app-owner-b', 'owner-b-other.component.scss'))
+    await transformComponent(
+      plugin,
+      componentSource('app-owner-b', 'owner-b-other.component.scss'),
+      bComponentPath,
+    )
+
+    // Editing the shared root style must still update A (reachable via
+    // styleComponentOwners even though resourceToComponent no longer has it).
+    const result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(sharedStylePath, mockServer),
+    )
+    expect(result).toEqual([])
+
+    const updates = mockServer._wsMessages.filter(
+      (msg) => msg?.event === 'angular:component-update',
+    )
+    const updatedIds = updates.map((msg) => decodeURIComponent(msg.data.id))
+    expect(updatedIds.some((id) => id.startsWith(aComponentPath))).toBe(true)
+  })
 })
