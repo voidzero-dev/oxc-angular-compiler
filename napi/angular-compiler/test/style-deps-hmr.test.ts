@@ -73,6 +73,7 @@ function createMockServer() {
 
   return {
     watcher: {
+      add: vi.fn(),
       unwatch: vi.fn(),
       on: vi.fn(),
       emit: vi.fn(),
@@ -343,5 +344,61 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     const updatedIds = updates.map((msg) => decodeURIComponent(msg.data.id))
     expect(updatedIds.some((id) => id.startsWith(aComponentPath))).toBe(true)
     expect(updatedIds.some((id) => id.startsWith(bComponentPath))).toBe(true)
+  })
+
+  it('registers style deps with the watcher on transform', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    await transformComponent(
+      plugin,
+      componentSource('app-first', 'first.component.scss'),
+      firstComponentPath,
+    )
+
+    // The style and every preprocessor dep must be added to the watcher so
+    // edits reach handleHotUpdate even outside the dev-server root.
+    const added = mockServer.watcher.add.mock.calls.flat()
+    expect(added).toContain(join(appDir, 'first.component.scss'))
+    expect(added).toContain(sharedScssPath)
+  })
+
+  it('refreshes deps for a direct style that initially failed to preprocess', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Dedicated fixtures so this test never interferes with the shared ones.
+    const stylePath = join(appDir, 'broken.component.scss')
+    const partialPath = join(appDir, '_broken-partial.scss')
+    const componentPath = join(appDir, 'broken.component.ts')
+
+    writeFileSync(partialPath, 'h1 { color: red; }')
+    writeFileSync(stylePath, "@use './broken-missing';")
+    writeFileSync(componentPath, componentSource('app-broken', 'broken.component.scss'))
+
+    // Initial transform: the import is missing, so preprocessing fails and no
+    // deps are registered.
+    await transformComponent(
+      plugin,
+      componentSource('app-broken', 'broken.component.scss'),
+      componentPath,
+    )
+
+    // Developer fixes the style to import an existing partial.
+    writeFileSync(stylePath, "@use './broken-partial';")
+    let result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(stylePath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(1)
+
+    // The newly valid import must now be tracked: editing it dispatches.
+    result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(2)
   })
 })

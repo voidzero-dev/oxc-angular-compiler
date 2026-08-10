@@ -253,6 +253,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   const styleDepsCache = new Map<string, string[]>()
   const styleDepOwners = new Map<string, Set<string>>()
 
+  // Every file used as a direct `styleUrl` of some component (normalized
+  // paths). Tracked independently of `styleDepsCache`: a direct style that
+  // fails preprocessing never gets a deps-cache entry, yet must still be
+  // refreshed (and its now-valid imports registered) once the developer fixes
+  // it. Keys are normalized so lookups from `handleHotUpdate` match on
+  // Windows, where cache keys keep the platform-native separators.
+  const directStyleUrls = new Set<string>()
+
   // Record the preprocessor dependencies of a compiled style and rebuild the
   // reverse map (dep -> owning styles). Replaces any previous registration for
   // the style, so it is safe to call again whenever the style is (re)compiled
@@ -303,6 +311,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     try {
       const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
       registerStyleDeps(stylePath, processed.deps)
+      // A style edited via HMR can pick up new deps (possibly outside the
+      // dev-server root); register them with the watcher so their edits reach
+      // `handleHotUpdate`.
+      if (watchMode && viteServer && processed.deps) {
+        for (const dep of processed.deps) viteServer.watcher?.add?.(dep)
+      }
     } catch (e) {
       console.warn(`Failed to preprocess style: ${stylePath}`, e)
     }
@@ -388,6 +402,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     // Resolve styles
     for (const styleUrl of styleUrls) {
       const stylePath = resolve(dir, styleUrl)
+      // Register as a direct style regardless of preprocessing outcome, so the
+      // HMR refresh still runs for styles that initially failed to compile.
+      directStyleUrls.add(normalizePath(stylePath))
       dependencies.push(stylePath)
 
       let content = resourceCache.get(stylePath)
@@ -724,10 +741,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Track dependencies for resource cache invalidation and HMR.
           // We don't call addWatchFile (which would create modules in Vite's
-          // graph) or maintain a custom watcher — Vite's chokidar already
-          // sees these files via its normal HMR pipeline, and our
-          // `handleHotUpdate` hook below dispatches based on
-          // `resourceToComponent` membership.
+          // graph) or maintain a custom watcher — Vite's chokidar sees the
+          // root tree via its normal HMR pipeline, and our `handleHotUpdate`
+          // hook below dispatches based on `resourceToComponent` membership.
+          // Preprocessor deps can resolve outside the root (shared monorepo
+          // packages, configured include paths), so those are registered with
+          // the watcher explicitly below.
           if (watchMode && viteServer) {
             // Prune stale reverse mappings: if this component previously
             // referenced different resources (e.g., templateUrl was renamed),
@@ -744,6 +763,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
               resourceToComponent.set(normalizedDep, actualId)
+              // Watch the file so edits reach `handleHotUpdate` even when it
+              // lives outside the dev-server root.
+              viteServer.watcher?.add?.(dep)
             }
           }
 
@@ -935,9 +957,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           if (resourceToComponent.has(normalizedFile)) {
             const componentFile = resourceToComponent.get(normalizedFile)!
             // Stylesheets that only appear as transitive deps of other styles
-            // (never compiled as styles themselves) were already handled by the
+            // (never used as a direct styleUrl) were already handled by the
             // shared-dep branch; skip them here to avoid a duplicate update.
-            const isDirectStyle = styleDepsCache.has(normalizedFile)
+            const isDirectStyle = directStyleUrls.has(normalizedFile)
             if (!(handled && !isDirectStyle)) {
               resourceCache.delete(normalizedFile)
               // Refresh dependency registration only for actual styles — never
