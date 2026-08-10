@@ -261,6 +261,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // Windows, where cache keys keep the platform-native separators.
   const directStyleUrls = new Set<string>()
 
+  // Direct component owners of each compiled style (normalized style path →
+  // component files referencing it as a styleUrl). Unlike
+  // `resourceToComponent`, this is multi-valued: a style shared by several
+  // components must dispatch HMR to every one of them when the style or one of
+  // its preprocessor deps changes.
+  const styleComponentOwners = new Map<string, Set<string>>()
+
   // Record the preprocessor dependencies of a compiled style and rebuild the
   // reverse map (dep -> owning styles). Replaces any previous registration for
   // the style, so it is safe to call again whenever the style is (re)compiled
@@ -760,11 +767,23 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 resourceToComponent.delete(resource)
               }
             }
+            for (const [style, owners] of styleComponentOwners) {
+              if (owners.has(actualId) && !newDeps.has(style)) {
+                owners.delete(actualId)
+                if (owners.size === 0) styleComponentOwners.delete(style)
+              }
+            }
 
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
               resourceToComponent.set(normalizedDep, actualId)
+              // Every component that uses a style directly is an owner of it.
+              if (directStyleUrls.has(normalizedDep)) {
+                let owners = styleComponentOwners.get(normalizedDep)
+                if (!owners) styleComponentOwners.set(normalizedDep, (owners = new Set()))
+                owners.add(actualId)
+              }
               // Watch the file so edits reach `handleHotUpdate` even when it
               // lives outside the dev-server root.
               viteServer.watcher?.add?.(dep)
@@ -946,10 +965,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               // partial switched a nested `@use`/`@import`, the newly loaded
               // file must be tracked here too.
               await refreshStyleDeps(stylePath)
-              const componentFile = resourceToComponent.get(normalizePath(stylePath))
-              if (componentFile && dispatchAllComponentsInFile(componentFile)) {
-                debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, componentFile)
-                handled = true
+              // A style shared by several components updates every one of
+              // them (resourceToComponent is single-valued).
+              for (const owner of styleComponentOwners.get(normalizePath(stylePath)) ?? []) {
+                if (dispatchAllComponentsInFile(owner)) {
+                  debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, owner)
+                  handled = true
+                }
               }
             }
           }
@@ -964,15 +986,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const isDirectStyle = directStyleUrls.has(normalizedFile)
             if (!(handled && !isDirectStyle)) {
               resourceCache.delete(normalizedFile)
-              // Refresh dependency registration only for actual styles — never
-              // run HTML templates through the CSS preprocessor pipeline.
               if (isDirectStyle) {
+                // Refresh dependency registration only for actual styles —
+                // never run HTML templates through the CSS preprocessor
+                // pipeline.
                 await refreshStyleDeps(ctx.file)
-              }
-              // resourceToComponent only tracks one owner per resource; if a
-              // templateUrl/styleUrl is shared across multiple components in
-              // the same file, only the registered owner receives HMR.
-              if (dispatchAllComponentsInFile(componentFile)) {
+                // A style shared by several components updates every one of
+                // them (resourceToComponent is single-valued).
+                for (const owner of styleComponentOwners.get(normalizedFile) ?? []) {
+                  if (dispatchAllComponentsInFile(owner)) {
+                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                    handled = true
+                  }
+                }
+              } else if (dispatchAllComponentsInFile(componentFile)) {
                 debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
                 handled = true
               }

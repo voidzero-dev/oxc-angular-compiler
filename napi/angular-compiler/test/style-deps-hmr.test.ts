@@ -430,4 +430,47 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(result).toBe(ctx.modules)
     expect(result).toContain(globalModule)
   })
+
+  it('dispatches HMR to every component sharing a style that imports the changed partial', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Both components reference the same style file directly; it imports a
+    // partial that the dev edits.
+    const sharedStylePath = join(appDir, 'multi-owner.component.scss')
+    const partialPath = join(appDir, '_multi-owner-partial.scss')
+    const firstComponentPath = join(appDir, 'multi-a.component.ts')
+    const secondComponentPath = join(appDir, 'multi-b.component.ts')
+
+    writeFileSync(partialPath, 'h1 { color: red; }')
+    writeFileSync(sharedStylePath, "@use './multi-owner-partial';")
+    writeFileSync(firstComponentPath, componentSource('app-multi-a', 'multi-owner.component.scss'))
+    writeFileSync(secondComponentPath, componentSource('app-multi-b', 'multi-owner.component.scss'))
+
+    await transformComponent(
+      plugin,
+      componentSource('app-multi-a', 'multi-owner.component.scss'),
+      firstComponentPath,
+    )
+    await transformComponent(
+      plugin,
+      componentSource('app-multi-b', 'multi-owner.component.scss'),
+      secondComponentPath,
+    )
+
+    const result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+    expect(result).toEqual([])
+
+    // Every component that uses the shared style receives an update
+    // (previously only the last-transformed owner did).
+    const updates = mockServer._wsMessages.filter(
+      (msg) => msg?.event === 'angular:component-update',
+    )
+    const updatedIds = updates.map((msg) => decodeURIComponent(msg.data.id))
+    expect(updatedIds.some((id) => id.startsWith(firstComponentPath))).toBe(true)
+    expect(updatedIds.some((id) => id.startsWith(secondComponentPath))).toBe(true)
+  })
 })
