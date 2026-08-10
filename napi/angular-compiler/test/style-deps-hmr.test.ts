@@ -321,14 +321,15 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     writeFileSync(aComponentPath, componentSource('app-a', 'a.component.scss'))
     writeFileSync(bComponentPath, componentSource('app-b', 'shared.component.scss'))
 
-    await transformComponent(plugin, componentSource('app-a', 'a.component.scss'), aComponentPath)
-    // Transform B last so resourceToComponent[shared] maps to B (the direct
-    // styleUrl owner) rather than A (which only imports it).
     await transformComponent(
       plugin,
       componentSource('app-b', 'shared.component.scss'),
       bComponentPath,
     )
+    // Transform A last: its transitive dep on shared.component.scss must NOT
+    // clobber B's direct-owner mapping in resourceToComponent (which is
+    // single-owner). This order previously left B without updates.
+    await transformComponent(plugin, componentSource('app-a', 'a.component.scss'), aComponentPath)
 
     const result = await (plugin.handleHotUpdate as Function).call(
       plugin,
@@ -357,10 +358,14 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     )
 
     // The style and every preprocessor dep must be added to the watcher so
-    // edits reach handleHotUpdate even outside the dev-server root.
-    const added = mockServer.watcher.add.mock.calls.flat()
-    expect(added).toContain(join(appDir, 'first.component.scss'))
-    expect(added).toContain(sharedScssPath)
+    // edits reach handleHotUpdate even outside the dev-server root. Compare
+    // canonical paths: Sass resolves deps to long names on Windows while the
+    // temp dir may carry 8.3 short names (e.g. RUNNER~1).
+    const added = mockServer.watcher.add.mock.calls
+      .flat()
+      .map((p: string) => realpathSync.native(p))
+    expect(added).toContain(realpathSync.native(join(appDir, 'first.component.scss')))
+    expect(added).toContain(realpathSync.native(sharedScssPath))
   })
 
   it('refreshes deps for a direct style that initially failed to preprocess', async () => {

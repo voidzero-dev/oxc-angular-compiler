@@ -428,13 +428,15 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         }
       }
 
-      // Re-register each dep in `dependencies` (owner registration is already
-      // handled by `registerStyleDeps`), so the transform's resource tracking
-      // and prune loop see them.
+      // Watch each transitive dep (it may resolve outside the dev-server
+      // root, e.g. a shared monorepo package), but never register it in
+      // `resourceToComponent`: that map is single-owner per resource, and a
+      // transitive dep would clobber the direct styleUrl/templateUrl mapping
+      // of another component.
       const normalizedStylePath = normalizePath(stylePath)
       for (const dep of styleDepsCache.get(stylePath) ?? []) {
         if (dep === normalizedStylePath) continue
-        dependencies.push(dep)
+        if (watchMode && viteServer) viteServer.watcher?.add?.(dep)
       }
 
       styles[styleUrl] = [content]
