@@ -2,7 +2,9 @@
  * Tests for handleHotUpdate behavior (Issue #185).
  *
  * The plugin's handleHotUpdate hook must distinguish between:
- * 1. Component resource files (templates/styles) → handled by custom fs.watch, return []
+ * 1. Component resource files (templates/styles) → dispatch component HMR and
+ *    keep Vite's modules flowing (a resource can also be imported by a global
+ *    stylesheet, which must still hot-update)
  * 2. Non-component files (global CSS, etc.) → let Vite handle normally
  *
  * Previously, the plugin returned [] for ALL .css/.html files, which swallowed
@@ -591,8 +593,9 @@ describe('handleHotUpdate - Issue #185', () => {
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Component resources MUST be swallowed (return []) and dispatch HMR.
-    expect(result).toEqual([])
+    // Component HMR is dispatched, and Vite's modules are preserved for the
+    // default pipeline (e.g. a global stylesheet importing the same file).
+    expect(result).toEqual(mockModules)
     expect(mockServer._wsMessages).toContainEqual(
       expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
     )
@@ -605,12 +608,14 @@ describe('handleHotUpdate - Issue #185', () => {
 
     // The component's HTML template IS in resourceToComponent
     const componentHtmlFile = normalizePath(templatePath)
-    const ctx = createMockHmrContext(componentHtmlFile, [{ id: componentHtmlFile }], mockServer)
+    const mockModules = [{ id: componentHtmlFile }]
+    const ctx = createMockHmrContext(componentHtmlFile, mockModules, mockServer)
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Component templates MUST be swallowed (return []) and dispatch HMR.
-    expect(result).toEqual([])
+    // Component HMR is dispatched, and Vite's modules are preserved for the
+    // default pipeline.
+    expect(result).toEqual(mockModules)
     expect(mockServer._wsMessages).toContainEqual(
       expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
     )

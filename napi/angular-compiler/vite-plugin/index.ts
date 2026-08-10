@@ -978,10 +978,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               }
             }
           }
-          if (handled) {
-            return []
-          }
-          // Not a tracked component resource — let Vite handle it.
+          // Angular HMR (component updates) has been dispatched for any
+          // tracked resources. Modules still in Vite's graph — e.g. a global
+          // stylesheet that imports the same partial — must keep flowing
+          // through Vite's default pipeline; returning [] would drop them and
+          // leave that CSS stale.
           return ctx.modules
         }
 

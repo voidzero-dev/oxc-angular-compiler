@@ -98,11 +98,11 @@ function createMockServer() {
   }
 }
 
-function createMockHmrContext(file: string, server: any): HmrContext {
+function createMockHmrContext(file: string, server: any, modules: ModuleNode[] = []): HmrContext {
   return {
     file,
     timestamp: Date.now(),
-    modules: [{ id: file } as ModuleNode],
+    modules,
     read: async () => '',
     server,
   } as HmrContext
@@ -405,5 +405,29 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     )
     expect(result).toEqual([])
     expect(componentUpdateCount(mockServer)).toBe(2)
+  })
+
+  it('preserves Vite modules for partials also imported by global stylesheets', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    await transformComponent(
+      plugin,
+      componentSource('app-first', 'first.component.scss'),
+      firstComponentPath,
+    )
+
+    // Simulate the partial also being imported by a global stylesheet, which
+    // puts that stylesheet's module in Vite's HMR context.
+    const globalModule = { id: join(appDir, 'styles.scss') } as ModuleNode
+    const ctx = createMockHmrContext(sharedScssPath, mockServer, [globalModule])
+    const result = await (plugin.handleHotUpdate as Function).call(plugin, ctx)
+
+    // Component HMR is dispatched for the owning style...
+    expect(componentUpdateCount(mockServer)).toBe(1)
+    // ...and the global stylesheet's module survives for Vite's pipeline
+    // (previously the handled branch returned [], starving it).
+    expect(result).toBe(ctx.modules)
+    expect(result).toContain(globalModule)
   })
 })
