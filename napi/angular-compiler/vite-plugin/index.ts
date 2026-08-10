@@ -954,7 +954,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // resources (e.g. global stylesheets in main.ts) fall through to
         // Vite's default CSS HMR pipeline so PostCSS/Tailwind etc. still
         // process them.
-        if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
+        // Every Vite-supported stylesheet language (CSS, Sass/SCSS, Less,
+        // Stylus, PostCSS, SugarSS) plus HTML templates: preprocessCSS reports
+        // deps for all of them, and their partials must reach this branch.
+        if (/\.(html?|css|scss|sass|less|styl|stylus|pcss|postcss|sss)$/.test(ctx.file)) {
           let handled = false
           // Shared preprocessor dependency (e.g. a Sass partial): rebuild every
           // style compiled from it and HMR each owning component.

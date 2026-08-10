@@ -523,4 +523,31 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     const updatedIds = updates.map((msg) => decodeURIComponent(msg.data.id))
     expect(updatedIds.some((id) => id.startsWith(aComponentPath))).toBe(true)
   })
+
+  it('dispatches HMR for Stylus styles like other stylesheet languages', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // A .styl styleUrl: without the `stylus` package installed preprocessing
+    // fails, but the file is still tracked as a direct style — what matters
+    // here is that the HMR branch routes non-css/scss/sass/less extensions.
+    const stylePath = join(appDir, 'styl.component.styl')
+    const componentPath = join(appDir, 'styl.component.ts')
+
+    writeFileSync(stylePath, 'h1\n  color red')
+    writeFileSync(componentPath, componentSource('app-styl', 'styl.component.styl'))
+
+    await transformComponent(
+      plugin,
+      componentSource('app-styl', 'styl.component.styl'),
+      componentPath,
+    )
+
+    const result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(stylePath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(1)
+  })
 })
