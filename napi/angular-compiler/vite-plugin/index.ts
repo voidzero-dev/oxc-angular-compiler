@@ -279,23 +279,26 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     const fresh = deps ? Array.from(deps, (dep) => normalizePath(dep)) : []
 
     // Drop this style from its previously registered deps' owner sets.
-    for (const oldDep of styleDepsCache.get(stylePath) ?? []) {
+    for (const oldDep of styleDepsCache.get(normalizedStylePath) ?? []) {
       if (oldDep === normalizedStylePath) continue
       const owners = styleDepOwners.get(oldDep)
       if (owners) {
-        owners.delete(stylePath)
+        owners.delete(normalizedStylePath)
         if (owners.size === 0) styleDepOwners.delete(oldDep)
       }
     }
 
-    styleDepsCache.set(stylePath, fresh)
+    styleDepsCache.set(normalizedStylePath, fresh)
 
-    // Register this style as an owner of each fresh dep.
+    // Register this style as an owner of each fresh dep. Cache keys and owner
+    // values are normalized so lookups from handleHotUpdate (which receives
+    // normalized ctx.file paths) match on Windows, where path.resolve keeps
+    // backslashes.
     for (const dep of fresh) {
       if (dep === normalizedStylePath) continue
       let owners = styleDepOwners.get(dep)
       if (!owners) styleDepOwners.set(dep, (owners = new Set()))
-      owners.add(stylePath)
+      owners.add(normalizedStylePath)
     }
   }
 
@@ -390,14 +393,15 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       const templatePath = resolve(dir, templateUrl)
       dependencies.push(templatePath)
 
-      let content = resourceCache.get(templatePath)
+      const normalizedTemplatePath = normalizePath(templatePath)
+      let content = resourceCache.get(normalizedTemplatePath)
       if (!content) {
         try {
           content = await readFile(templatePath, 'utf-8')
           if (options.templateTransform) {
             content = options.templateTransform(content, templatePath)
           }
-          resourceCache.set(templatePath, content)
+          resourceCache.set(normalizedTemplatePath, content)
         } catch {
           console.warn(`Failed to read template: ${templatePath}`)
           continue
@@ -409,12 +413,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     // Resolve styles
     for (const styleUrl of styleUrls) {
       const stylePath = resolve(dir, styleUrl)
+      const normalizedStylePath = normalizePath(stylePath)
       // Register as a direct style regardless of preprocessing outcome, so the
       // HMR refresh still runs for styles that initially failed to compile.
-      directStyleUrls.add(normalizePath(stylePath))
+      directStyleUrls.add(normalizedStylePath)
       dependencies.push(stylePath)
 
-      let content = resourceCache.get(stylePath)
+      let content = resourceCache.get(normalizedStylePath)
       if (!content) {
         try {
           content = await readFile(stylePath, 'utf-8')
@@ -428,7 +433,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               console.warn(`Failed to preprocess style: ${stylePath}`, e)
             }
           }
-          resourceCache.set(stylePath, content)
+          resourceCache.set(normalizedStylePath, content)
         } catch {
           console.warn(`Failed to read style: ${stylePath}`)
           continue
@@ -440,8 +445,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       // `resourceToComponent`: that map is single-owner per resource, and a
       // transitive dep would clobber the direct styleUrl/templateUrl mapping
       // of another component.
-      const normalizedStylePath = normalizePath(stylePath)
-      for (const dep of styleDepsCache.get(stylePath) ?? []) {
+      for (const dep of styleDepsCache.get(normalizedStylePath) ?? []) {
         if (dep === normalizedStylePath) continue
         if (watchMode && viteServer) viteServer.watcher?.add?.(dep)
       }
