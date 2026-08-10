@@ -303,4 +303,45 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(result).toEqual([])
     expect(componentUpdateCount(mockServer)).toBe(3)
   })
+
+  it('dispatches HMR for a style that is both a shared dep and a direct styleUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // a.component.scss imports shared.component.scss; component B references
+    // shared.component.scss directly as its styleUrl.
+    const aStylePath = join(appDir, 'a.component.scss')
+    const sharedStylePath = join(appDir, 'shared.component.scss')
+    const aComponentPath = join(appDir, 'a.component.ts')
+    const bComponentPath = join(appDir, 'b.component.ts')
+
+    writeFileSync(aStylePath, "@use './shared.component';")
+    writeFileSync(sharedStylePath, 'h1 { color: red; }')
+    writeFileSync(aComponentPath, componentSource('app-a', 'a.component.scss'))
+    writeFileSync(bComponentPath, componentSource('app-b', 'shared.component.scss'))
+
+    await transformComponent(plugin, componentSource('app-a', 'a.component.scss'), aComponentPath)
+    // Transform B last so resourceToComponent[shared] maps to B (the direct
+    // styleUrl owner) rather than A (which only imports it).
+    await transformComponent(
+      plugin,
+      componentSource('app-b', 'shared.component.scss'),
+      bComponentPath,
+    )
+
+    const result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(sharedStylePath, mockServer),
+    )
+    expect(result).toEqual([])
+
+    // Both roles updated: A via the shared-dep branch, B via the
+    // direct-resource branch (previously the early return skipped B).
+    const updates = mockServer._wsMessages.filter(
+      (msg) => msg?.event === 'angular:component-update',
+    )
+    const updatedIds = updates.map((msg) => decodeURIComponent(msg.data.id))
+    expect(updatedIds.some((id) => id.startsWith(aComponentPath))).toBe(true)
+    expect(updatedIds.some((id) => id.startsWith(bComponentPath))).toBe(true)
+  })
 })

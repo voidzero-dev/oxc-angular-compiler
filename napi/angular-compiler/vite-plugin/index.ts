@@ -908,10 +908,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // Vite's default CSS HMR pipeline so PostCSS/Tailwind etc. still
         // process them.
         if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
+          let handled = false
           // Shared preprocessor dependency (e.g. a Sass partial): rebuild every
           // style compiled from it and HMR each owning component.
           if (styleDepOwners.has(normalizedFile)) {
-            let handled = false
             // Snapshot the owners: refreshStyleDeps mutates the owner sets via
             // registerStyleDeps, and a re-added style would otherwise be
             // visited again during live Set iteration.
@@ -928,24 +928,34 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 handled = true
               }
             }
-            if (handled) {
-              return []
-            }
           }
+          // A changed file can be BOTH a shared dep of one component's style
+          // and another component's direct templateUrl/styleUrl — process both
+          // roles before returning (no early return above).
           if (resourceToComponent.has(normalizedFile)) {
             const componentFile = resourceToComponent.get(normalizedFile)!
-            resourceCache.delete(normalizedFile)
-            // Re-read the style and refresh its dependency registration so a
-            // newly added / switched `@use`/`@import` is tracked: otherwise
-            // edits to the new partial would not dispatch component HMR.
-            await refreshStyleDeps(ctx.file)
-            // resourceToComponent only tracks one owner per resource; if a
-            // templateUrl/styleUrl is shared across multiple components in
-            // the same file, only the registered owner receives HMR.
-            if (dispatchAllComponentsInFile(componentFile)) {
-              debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
-              return []
+            // Stylesheets that only appear as transitive deps of other styles
+            // (never compiled as styles themselves) were already handled by the
+            // shared-dep branch; skip them here to avoid a duplicate update.
+            const isDirectStyle = styleDepsCache.has(normalizedFile)
+            if (!(handled && !isDirectStyle)) {
+              resourceCache.delete(normalizedFile)
+              // Refresh dependency registration only for actual styles — never
+              // run HTML templates through the CSS preprocessor pipeline.
+              if (isDirectStyle) {
+                await refreshStyleDeps(ctx.file)
+              }
+              // resourceToComponent only tracks one owner per resource; if a
+              // templateUrl/styleUrl is shared across multiple components in
+              // the same file, only the registered owner receives HMR.
+              if (dispatchAllComponentsInFile(componentFile)) {
+                debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
+                handled = true
+              }
             }
+          }
+          if (handled) {
+            return []
           }
           // Not a tracked component resource — let Vite handle it.
           return ctx.modules
