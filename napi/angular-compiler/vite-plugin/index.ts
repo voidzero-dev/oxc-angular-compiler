@@ -912,9 +912,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // style compiled from it and HMR each owning component.
           if (styleDepOwners.has(normalizedFile)) {
             let handled = false
-            for (const stylePath of styleDepOwners.get(normalizedFile)!) {
+            // Snapshot the owners: refreshStyleDeps mutates the owner sets via
+            // registerStyleDeps, and a re-added style would otherwise be
+            // visited again during live Set iteration.
+            for (const stylePath of Array.from(styleDepOwners.get(normalizedFile)!)) {
               resourceCache.delete(stylePath)
-              styleDepsCache.delete(stylePath)
+              // Rebuild the owning style's dependency registration: its dep
+              // list includes the edited partial transitively, and if that
+              // partial switched a nested `@use`/`@import`, the newly loaded
+              // file must be tracked here too.
+              await refreshStyleDeps(stylePath)
               const componentFile = resourceToComponent.get(normalizePath(stylePath))
               if (componentFile && dispatchAllComponentsInFile(componentFile)) {
                 debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, componentFile)

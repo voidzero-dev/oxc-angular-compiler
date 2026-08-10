@@ -252,4 +252,55 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(result).toEqual([])
     expect(componentUpdateCount(mockServer)).toBe(3)
   })
+
+  it('re-registers nested style deps when a partial switches its own imports via HMR', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // style -> partial -> nested import. Dedicated fixtures so this test never
+    // interferes with the shared ones.
+    const stylePath = join(appDir, 'nested.component.scss')
+    const partialPath = join(appDir, '_nested-a.scss')
+    const firstDepPath = join(appDir, '_nested-x.scss')
+    const secondDepPath = join(appDir, '_nested-y.scss')
+    const componentPath = join(appDir, 'nested.component.ts')
+
+    writeFileSync(firstDepPath, 'h1 { color: red; }')
+    writeFileSync(secondDepPath, 'h2 { color: green; }')
+    writeFileSync(partialPath, "@use './nested-x';")
+    writeFileSync(stylePath, "@use './nested-a';")
+    writeFileSync(componentPath, componentSource('app-nested', 'nested.component.scss'))
+
+    await transformComponent(
+      plugin,
+      componentSource('app-nested', 'nested.component.scss'),
+      componentPath,
+    )
+
+    // Sanity: the initially registered transitive dep is tracked.
+    let result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(firstDepPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(1)
+
+    // Dev edits the partial to import a different nested file; HMR rebuilds.
+    writeFileSync(partialPath, "@use './nested-y';")
+    result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(2)
+
+    // The newly imported nested file must now be registered as a dep: editing
+    // it dispatches a third update (previously it fell through to Vite).
+    result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(secondDepPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(3)
+  })
 })
