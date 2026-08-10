@@ -2083,11 +2083,15 @@ fn link_component(
     if let Some(cd) = get_property_source(meta, "changeDetection", source) {
         if cd.contains("Eager") || cd.contains("Default") {
             parts.push("changeDetection: 1".to_string());
+        } else if cd.contains("OnPush") {
+            // Emitted explicitly rather than left to the runtime default. The TS
+            // compiler omits OnPush here, but it ships with the runtime it targets;
+            // this linker does not know the consumer's version and supports back to
+            // v19. Pre-v22 runtimes compute `onPush = changeDetection === OnPush`,
+            // so an absent field reads as Default there and the component would
+            // silently lose OnPush. `0` is correct on both.
+            parts.push("changeDetection: 0".to_string());
         }
-        // OnPush is the emit-time default and is left out: the runtime derives
-        // `onPush = changeDetection !== Eager`, so an absent field already reads
-        // as OnPush. Matches the `meta.changeDetection !== OnPush` guard in
-        // `compileComponentFromMetadata`.
     } else if !has_on_push_by_default(meta) {
         // Omitted. Which strategy that meant depends on the version the library
         // was compiled against, and the runtime reads an absent field as OnPush,
@@ -2770,12 +2774,14 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
-        // OnPush is the emit-time default, so the TS compiler leaves it out
-        // (`meta.changeDetection !== OnPush` in `compileComponentFromMetadata`);
-        // the runtime infers it from the absent field.
+        // Emitted explicitly, even though the TS compiler omits OnPush. That
+        // compiler ships with the runtime it targets; this linker does not know
+        // the consumer's version and supports back to v19, where the runtime
+        // computes `onPush = changeDetection === OnPush` and so reads an absent
+        // field as Default. Omitting it would silently drop OnPush there.
         assert!(
-            !result.code.contains("changeDetection"),
-            "ChangeDetectionStrategy.OnPush is the default and should not be emitted, got:\n{}",
+            result.code.contains("changeDetection: 0"),
+            "ChangeDetectionStrategy.OnPush should be 0, got:\n{}",
             result.code
         );
     }
