@@ -158,6 +158,10 @@ async function transformComponent(plugin: Plugin, source: string, path: string) 
   await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, path)
 }
 
+function componentUpdateCount(server: any): number {
+  return server._wsMessages.filter((msg: any) => msg?.event === 'angular:component-update').length
+}
+
 describe('handleHotUpdate for transitive style dependencies', () => {
   it('dispatches HMR to every component whose style uses a changed Sass partial', async () => {
     const plugin = getAngularPlugin()
@@ -199,5 +203,53 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     const result = await (plugin.handleHotUpdate as Function).call(plugin, ctx)
 
     expect(result).toBe(ctx.modules)
+  })
+
+  it('re-registers style deps when a style file switches its imports via HMR', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Dedicated fixtures so this test never interferes with the shared ones.
+    const stylePath = join(appDir, 'switch.component.scss')
+    const firstDepPath = join(appDir, '_switch-shared.scss')
+    const secondDepPath = join(appDir, '_switch-other.scss')
+    const componentPath = join(appDir, 'switch.component.ts')
+
+    writeFileSync(firstDepPath, 'h1 { color: red; }')
+    writeFileSync(secondDepPath, 'h2 { color: green; }')
+    writeFileSync(stylePath, "@use './switch-shared';")
+    writeFileSync(componentPath, componentSource('app-switch', 'switch.component.scss'))
+
+    await transformComponent(
+      plugin,
+      componentSource('app-switch', 'switch.component.scss'),
+      componentPath,
+    )
+
+    // Sanity: the initially registered dep is tracked.
+    let result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(firstDepPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(1)
+
+    // Dev edits the style to import a different partial; HMR rebuilds it.
+    writeFileSync(stylePath, "@use './switch-other';")
+    result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(stylePath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(2)
+
+    // The newly imported partial must now be registered as a dep: editing it
+    // dispatches a third update (previously it fell through to Vite).
+    result = await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(secondDepPath, mockServer),
+    )
+    expect(result).toEqual([])
+    expect(componentUpdateCount(mockServer)).toBe(3)
   })
 })

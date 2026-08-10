@@ -253,6 +253,61 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   const styleDepsCache = new Map<string, string[]>()
   const styleDepOwners = new Map<string, Set<string>>()
 
+  // Record the preprocessor dependencies of a compiled style and rebuild the
+  // reverse map (dep -> owning styles). Replaces any previous registration for
+  // the style, so it is safe to call again whenever the style is (re)compiled
+  // with fresh deps — the initial transform, or HMR after the style file
+  // changed its `@use`/`@import` list. The style itself is never registered as
+  // its own dependency.
+  function registerStyleDeps(stylePath: string, deps: Iterable<string> | undefined): void {
+    const normalizedStylePath = normalizePath(stylePath)
+    const fresh = deps ? Array.from(deps, (dep) => normalizePath(dep)) : []
+
+    // Drop this style from its previously registered deps' owner sets.
+    for (const oldDep of styleDepsCache.get(stylePath) ?? []) {
+      if (oldDep === normalizedStylePath) continue
+      const owners = styleDepOwners.get(oldDep)
+      if (owners) {
+        owners.delete(stylePath)
+        if (owners.size === 0) styleDepOwners.delete(oldDep)
+      }
+    }
+
+    styleDepsCache.set(stylePath, fresh)
+
+    // Register this style as an owner of each fresh dep.
+    for (const dep of fresh) {
+      if (dep === normalizedStylePath) continue
+      let owners = styleDepOwners.get(dep)
+      if (!owners) styleDepOwners.set(dep, (owners = new Set()))
+      owners.add(stylePath)
+    }
+  }
+
+  // Re-read and re-preprocess a style file so its dependency registration in
+  // `styleDepsCache`/`styleDepOwners` reflects the current `@use`/`@import`
+  // set. Without this, a partial added or switched via HMR would never be
+  // registered, and edits to it would not dispatch component updates until a
+  // full reload or another component transform. Best-effort: on unreadable or
+  // transiently-empty files (truncate phase of an atomic write) the previous
+  // registration is kept.
+  async function refreshStyleDeps(stylePath: string): Promise<void> {
+    if (!resolvedConfig) return
+    let content: string
+    try {
+      content = await readFile(stylePath, 'utf-8')
+    } catch {
+      return
+    }
+    if (!content.trim()) return
+    try {
+      const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+      registerStyleDeps(stylePath, processed.deps)
+    } catch (e) {
+      console.warn(`Failed to preprocess style: ${stylePath}`, e)
+    }
+  }
+
   // Component IDs (`filePath@ClassName`) queued for HMR delivery. Populated by
   // `handleHotUpdate` when an external resource or inline template/style change
   // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
@@ -344,10 +399,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             try {
               const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
               content = processed.code
-              styleDepsCache.set(
-                stylePath,
-                processed.deps ? Array.from(processed.deps, (dep) => normalizePath(dep)) : [],
-              )
+              registerStyleDeps(stylePath, processed.deps)
             } catch (e) {
               console.warn(`Failed to preprocess style: ${stylePath}`, e)
             }
@@ -359,13 +411,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         }
       }
 
+      // Re-register each dep in `dependencies` (owner registration is already
+      // handled by `registerStyleDeps`), so the transform's resource tracking
+      // and prune loop see them.
       const normalizedStylePath = normalizePath(stylePath)
       for (const dep of styleDepsCache.get(stylePath) ?? []) {
         if (dep === normalizedStylePath) continue
         dependencies.push(dep)
-        let owners = styleDepOwners.get(dep)
-        if (!owners) styleDepOwners.set(dep, (owners = new Set()))
-        owners.add(stylePath)
       }
 
       styles[styleUrl] = [content]
@@ -876,7 +928,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           if (resourceToComponent.has(normalizedFile)) {
             const componentFile = resourceToComponent.get(normalizedFile)!
             resourceCache.delete(normalizedFile)
-            styleDepsCache.delete(ctx.file)
+            // Re-read the style and refresh its dependency registration so a
+            // newly added / switched `@use`/`@import` is tracked: otherwise
+            // edits to the new partial would not dispatch component HMR.
+            await refreshStyleDeps(ctx.file)
             // resourceToComponent only tracks one owner per resource; if a
             // templateUrl/styleUrl is shared across multiple components in
             // the same file, only the registered owner receives HMR.
