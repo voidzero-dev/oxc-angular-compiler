@@ -45,7 +45,9 @@ catalog:
   '@tailwindcss/vite': 4.3.3
   '@types/node': 24.1.0
   tsdown: 0.22.14
-  typescript: 7.0.2
+  # Stay on TypeScript 6 until Angular supports the native TS 7 API rewrite.
+  # Angular compiler-cli peers: typescript >=6.0 <6.1
+  typescript: 6.0.3
   vitest: 4.1.10
   oxfmt: 0.63.0
   vite: 8.2.1

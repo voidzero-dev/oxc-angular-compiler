@@ -8,5 +8,12 @@
     "**/__tests__/**",
     "**/test/**",
     "**/__fixtures__/**"
+  ],
+  "packageRules": [
+    {
+      "description": "Angular compiler-cli peers typescript >=6.0 <6.1; TS 7 is a native rewrite with a different public API",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    }
   ]
 }

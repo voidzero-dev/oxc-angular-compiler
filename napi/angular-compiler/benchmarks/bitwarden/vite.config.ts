@@ -88,7 +88,7 @@ export default defineConfig(({ mode }) => {
           silenceDeprecations: ['legacy-js-api', 'import'],
         },
       },
-      postcss: resolve(__dirname, 'postcss.config.cjs'),
+      postcss: resolve(__dirname, 'postcss.config.mjs'),
     },
 
     // Define process.env variables that bitwarden uses
