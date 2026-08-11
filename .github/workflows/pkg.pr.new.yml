@@ -1,25 +1,32 @@
 name: Publish to pkg.pr.new
 
-# Publishes a continuous preview release to https://pkg.pr.new whenever a
-# maintainer adds the `pkg.pr.new` label to a pull request (or via manual
-# dispatch). Requires the pkg.pr.new GitHub App to be installed on the repo:
+# Publishes a continuous preview release to https://pkg.pr.new on:
+# - every push to `main` (canary install of the latest main commit)
+# - when a maintainer adds the `pkg.pr.new` label to a pull request
+# - manual workflow_dispatch
+#
+# Requires the pkg.pr.new GitHub App to be installed on the repo:
 # https://github.com/apps/pkg-pr-new
 
 # One-shot per label by design (matches rolldown's PR preview): a preview is
 # built only when the `pkg.pr.new` label itself is added (the job guards check
 # the triggering label, github.event.label.name, NOT the full label set, so
 # adding any other label to an already-labeled PR does not rebuild).
-# `synchronize` is intentionally NOT subscribed, so later commits do not
+# `synchronize` is intentionally NOT subscribed, so later PR commits do not
 # rebuild — re-apply the label or use workflow_dispatch to refresh. This avoids
-# an 8-platform native build on every push.
+# an 8-platform native build on every PR push. Main-branch pushes always build.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
   pull_request:
     types: [labeled]
 
 permissions: {}
 
-# Cancel an in-flight preview when the label is re-applied on the same PR.
+# Cancel an in-flight preview when the label is re-applied on the same PR,
+# or when a newer main push supersedes a previous main publish.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -33,6 +40,7 @@ jobs:
     if: >
       github.repository == 'voidzero-dev/oxc-angular-compiler' &&
       (github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
     permissions:
       contents: read
@@ -43,6 +51,7 @@ jobs:
     if: >
       github.repository == 'voidzero-dev/oxc-angular-compiler' &&
       (github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event_name == 'pull_request' && github.event.label.name == 'pkg.pr.new'))
     needs: build
     runs-on: ubuntu-latest

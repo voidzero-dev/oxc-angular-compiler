@@ -2,8 +2,8 @@ name: Reusable Build
 
 # Builds the native NAPI bindings for every target and uploads them as
 # `bindings-<target>` artifacts. Called by both `release.yml` (tag releases)
-# and `pkg.pr.new.yml` (PR preview packages) so the build matrix lives in one
-# place.
+# and `pkg.pr.new.yml` (main canary + PR preview packages) so the build matrix
+# lives in one place.
 
 on:
   workflow_call:
