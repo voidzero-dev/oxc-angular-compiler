@@ -6851,6 +6851,69 @@ export class TestComponent {
     }
 
     #[test]
+    fn test_aliased_import_di_token_uses_exported_name_in_factory_and_ctor_params() {
+        // Regression for PR #375 / Codex review: aliased named imports used as DI
+        // tokens must emit the module export name for BOTH the factory inject path
+        // and setClassMetadata ctorParameters.
+        //
+        //   import { ExportedName as LocalAlias } from './svc';
+        //   constructor(x: LocalAlias) {}
+        //
+        // must produce `i1.ExportedName` (not `i1.LocalAlias`, which is undefined
+        // on the namespace object at runtime).
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component } from '@angular/core';
+import { ExportedName as LocalAlias } from './svc';
+
+@Component({
+    selector: 'app-x',
+    template: '',
+    standalone: true,
+})
+export class X {
+    constructor(x: LocalAlias) {}
+}
+"#;
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+
+        let result =
+            transform_angular_file(&allocator, "x.component.ts", source, Some(&options), None);
+
+        assert!(!result.has_errors(), "Transform should not have errors: {:?}", result.diagnostics);
+
+        // Namespace import for the service module
+        assert!(
+            result.code.contains("import * as i1 from './svc'"),
+            "Should generate namespace import for './svc', but got:\n{}",
+            result.code
+        );
+
+        // Factory inject AND setClassMetadata ctorParameters must use the export name
+        assert!(
+            result.code.contains("i1.ExportedName"),
+            "Factory and/or ctorParameters should use i1.ExportedName, but got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("i1.LocalAlias"),
+            "Must not emit i1.LocalAlias (undefined on namespace); got:\n{}",
+            result.code
+        );
+
+        // setClassMetadata ctorParameters type field specifically
+        let ctor_params_ok = result.code.contains("type: i1.ExportedName")
+            || result.code.contains("type:i1.ExportedName");
+        assert!(
+            ctor_params_ok,
+            "setClassMetadata ctorParameters should use type: i1.ExportedName, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
     fn test_directive_factory_deps_get_correct_namespace_resolution() {
         // Regression test for bug where resolve_factory_dep_namespaces() was NOT called
         // for @Directive constructor deps. This caused bare ReadVar references (e.g., Store)
