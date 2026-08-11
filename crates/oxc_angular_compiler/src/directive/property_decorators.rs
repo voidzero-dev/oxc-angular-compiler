@@ -103,18 +103,16 @@ fn try_unwrap_forward_ref<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression
         _ => return None,
     };
 
-    // Handle expression body: () => MyClass
-    if arrow.expression {
-        // For expression body, the statement is the expression wrapped in ExpressionStatement
-        let stmt = arrow.body.statements.first()?;
-        if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = stmt {
-            return Some(&expr_stmt.expression);
-        }
-    } else if arrow.body.statements.len() == 1 {
-        // Handle explicit return: () => { return MyClass; }
-        let stmt = arrow.body.statements.first()?;
-        if let oxc_ast::ast::Statement::ReturnStatement(ret) = stmt {
-            return ret.argument.as_ref();
+    // Expression body: () => MyClass
+    if let Some(expr) = arrow.get_expression() {
+        return Some(expr);
+    }
+    // Block body: () => { return MyClass; }
+    if let Some(body) = arrow.get_function_body() {
+        if body.statements.len() == 1 {
+            if let oxc_ast::ast::Statement::ReturnStatement(ret) = &body.statements[0] {
+                return ret.argument.as_ref();
+            }
         }
     }
 
@@ -1511,8 +1509,8 @@ mod tests {
                     ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
                 _ => None,

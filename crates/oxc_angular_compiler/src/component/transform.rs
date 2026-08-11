@@ -1871,8 +1871,8 @@ fn collect_parameter_property_names(
             Statement::ClassDeclaration(class_decl) => {
                 visit_class(class_decl, &mut names);
             }
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+            Statement::ExportDeclaration(export) => {
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class_decl) =
                     &export.declaration
                 {
                     visit_class(class_decl, &mut names);
@@ -1934,8 +1934,8 @@ fn remove_parameter_property_fields(
             Statement::ClassDeclaration(class_decl) => {
                 visit_class(class_decl, param_names);
             }
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class_decl)) =
+            Statement::ExportDeclaration(export) => {
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class_decl) =
                     &mut export.declaration
                 {
                     visit_class(class_decl, param_names);
@@ -2060,8 +2060,8 @@ fn transform_angular_file_jit(
                 }
                 _ => (None, 0, false, false),
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => {
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => {
                     (Some(class.as_ref()), export.span.start, true, false)
                 }
                 _ => (None, 0, false, false),
@@ -2213,8 +2213,8 @@ fn transform_angular_file_jit(
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -2523,8 +2523,8 @@ pub fn transform_angular_file(
                 }
                 _ => (None, 0),
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => {
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => {
                     (Some(class.as_ref()), export.span.start)
                 }
                 _ => (None, 0),

@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
-    BindingPattern, Declaration, ExportDefaultDeclarationKind, Statement, TSModuleDeclarationBody,
+    BindingPattern, Declaration, ExportDefaultDeclarationKind, Statement,
+    TSNamespaceDeclarationBody,
 };
 use oxc_parser::Parser;
 use oxc_resolver::{
@@ -387,16 +388,12 @@ impl CrossFileAnalyzer {
         exports: &mut FxHashMap<String, ExportInfo>,
     ) {
         match stmt {
+            // export class/function/const/interface/type Foo { ... }
+            Statement::ExportDeclaration(decl) => {
+                self.analyze_declaration(&decl.declaration, exports);
+            }
+            // Local named export: export { X, Y } / export type { X }
             Statement::ExportNamedDeclaration(decl) => {
-                // Handle declarations first (export interface/type/class/function/etc.)
-                // This includes `export interface User {}` which has export_kind.is_type() = true
-                // but has a declaration rather than specifiers
-                if let Some(declaration) = &decl.declaration {
-                    self.analyze_declaration(declaration, exports);
-                    return;
-                }
-
-                // export type { X } - type-only specifiers (no declaration)
                 if decl.export_kind.is_type() {
                     for spec in &decl.specifiers {
                         let name = spec.exported.name().to_string();
@@ -408,42 +405,46 @@ impl CrossFileAnalyzer {
                     return;
                 }
 
-                // Re-export: export { X } from './other'
-                if let Some(source) = &decl.source {
-                    for spec in &decl.specifiers {
-                        let exported_name = spec.exported.name().to_string();
-                        let local_name = spec.local.name().to_string();
-                        exports.insert(
-                            exported_name,
-                            ExportInfo {
-                                is_type_only: spec.export_kind.is_type(),
-                                re_export_source: Some((source.value.to_string(), local_name)),
-                            },
-                        );
-                    }
-                    return;
-                }
-
                 // Export specifiers without source: export { X, Y }
                 // These re-export local bindings - we need to check if the local
                 // binding is type-only. For now, mark as not type-only (conservative).
-                if !decl.specifiers.is_empty() && decl.declaration.is_none() {
+                for spec in &decl.specifiers {
+                    let name = spec.exported.name().to_string();
+                    exports.insert(
+                        name,
+                        ExportInfo {
+                            is_type_only: spec.export_kind.is_type(),
+                            re_export_source: None,
+                        },
+                    );
+                }
+            }
+            // Re-export: export { X } from './other' / export type { X } from './other'
+            Statement::ExportFromDeclaration(decl) => {
+                // Whole-statement `export type { ... } from` — type-only, no re-export chase
+                // (matches pre-split behavior where export_kind.is_type() short-circuited
+                // before looking at source).
+                if decl.export_kind.is_type() {
                     for spec in &decl.specifiers {
                         let name = spec.exported.name().to_string();
                         exports.insert(
                             name,
-                            ExportInfo {
-                                is_type_only: spec.export_kind.is_type(),
-                                re_export_source: None,
-                            },
+                            ExportInfo { is_type_only: true, re_export_source: None },
                         );
                     }
                     return;
                 }
 
-                // Inline declaration: export class/function/const/interface/type
-                if let Some(declaration) = &decl.declaration {
-                    self.analyze_declaration(declaration, exports);
+                for spec in &decl.specifiers {
+                    let exported_name = spec.exported.name().to_string();
+                    let local_name = spec.local.name().to_string();
+                    exports.insert(
+                        exported_name,
+                        ExportInfo {
+                            is_type_only: spec.export_kind.is_type(),
+                            re_export_source: Some((decl.source.value.to_string(), local_name)),
+                        },
+                    );
                 }
             }
             Statement::ExportDefaultDeclaration(decl) => {
@@ -480,15 +481,43 @@ impl CrossFileAnalyzer {
                     );
                 }
             }
-            // Handle ambient module declarations: declare module "foo" { export ... }
-            Statement::TSModuleDeclaration(module_decl) => {
-                if let Some(TSModuleDeclarationBody::TSModuleBlock(block)) = &module_decl.body {
+            // Ambient external module: declare module "foo" { export ... }
+            Statement::TSExternalModuleDeclaration(module_decl) => {
+                if let Some(block) = &module_decl.body {
                     for inner_stmt in &block.body {
                         self.analyze_statement(inner_stmt, exports);
                     }
                 }
             }
+            // namespace Foo { ... } / module Foo { ... } (and nested Foo.Bar)
+            Statement::TSNamespaceDeclaration(ns_decl) => {
+                self.analyze_namespace_body(&ns_decl.body, exports);
+            }
+            // declare global { ... }
+            Statement::TSGlobalDeclaration(global_decl) => {
+                for inner_stmt in &global_decl.body.body {
+                    self.analyze_statement(inner_stmt, exports);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// Walk a namespace body, recursing through nested `namespace A.B` forms.
+    fn analyze_namespace_body<'a>(
+        &self,
+        body: &TSNamespaceDeclarationBody<'a>,
+        exports: &mut FxHashMap<String, ExportInfo>,
+    ) {
+        match body {
+            TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+                for inner_stmt in &block.body {
+                    self.analyze_statement(inner_stmt, exports);
+                }
+            }
+            TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
+                self.analyze_namespace_body(&nested.body, exports);
+            }
         }
     }
 
@@ -545,18 +574,17 @@ impl CrossFileAnalyzer {
                     ExportInfo { is_type_only: false, re_export_source: None },
                 );
             }
-            Declaration::TSModuleDeclaration(d) => {
-                // Module declarations (namespaces) can have runtime value
-                use oxc_ast::ast::TSModuleDeclarationName;
-                if let TSModuleDeclarationName::Identifier(id) = &d.id {
-                    exports.insert(
-                        id.name.to_string(),
-                        ExportInfo { is_type_only: false, re_export_source: None },
-                    );
-                }
+            Declaration::TSNamespaceDeclaration(d) => {
+                // Namespaces can have runtime value; `id` is a BindingIdentifier
+                exports.insert(
+                    d.id.name.to_string(),
+                    ExportInfo { is_type_only: false, re_export_source: None },
+                );
             }
-            Declaration::TSImportEqualsDeclaration(_) | Declaration::TSGlobalDeclaration(_) => {
-                // Import equals and global declarations - skip
+            Declaration::TSExternalModuleDeclaration(_)
+            | Declaration::TSImportEqualsDeclaration(_)
+            | Declaration::TSGlobalDeclaration(_) => {
+                // External modules (string id), import equals, and global — skip
             }
         }
     }

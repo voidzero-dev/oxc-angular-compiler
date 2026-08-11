@@ -803,8 +803,8 @@ pub fn extract_component_urls_sync(source: String, filename: String) -> Componen
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -974,32 +974,28 @@ pub fn extract_top_level_declarations_sync(
                 _ => {}
             },
 
-            // Export named: export class Foo { ... }, export const foo = ...
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(decl) = &export.declaration {
-                    match decl {
-                        Declaration::ClassDeclaration(class) => {
-                            if let Some(id) = &class.id {
-                                names.push(id.name.to_string());
-                            }
-                        }
-                        Declaration::FunctionDeclaration(func) => {
-                            if let Some(id) = &func.id {
-                                names.push(id.name.to_string());
-                            }
-                        }
-                        Declaration::TSEnumDeclaration(enum_decl) => {
-                            names.push(enum_decl.id.name.to_string());
-                        }
-                        Declaration::VariableDeclaration(var_decl) => {
-                            for d in &var_decl.declarations {
-                                track_binding_pattern_names(&d.id, &mut names);
-                            }
-                        }
-                        _ => {}
+            // Export declaration: export class Foo { ... }, export const foo = ...
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => {
+                    if let Some(id) = &class.id {
+                        names.push(id.name.to_string());
                     }
                 }
-            }
+                Declaration::FunctionDeclaration(func) => {
+                    if let Some(id) = &func.id {
+                        names.push(id.name.to_string());
+                    }
+                }
+                Declaration::TSEnumDeclaration(enum_decl) => {
+                    names.push(enum_decl.id.name.to_string());
+                }
+                Declaration::VariableDeclaration(var_decl) => {
+                    for d in &var_decl.declarations {
+                        track_binding_pattern_names(&d.id, &mut names);
+                    }
+                }
+                _ => {}
+            },
 
             // Module declarations (imports)
             Statement::ImportDeclaration(import) => {
@@ -1258,8 +1254,8 @@ pub fn extract_pipe_metadata_sync(
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -1336,8 +1332,8 @@ pub fn compile_pipe_sync(
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -1569,8 +1565,8 @@ pub fn extract_component_metadata_sync(
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -1989,8 +1985,8 @@ pub fn compile_class_metadata_sync(
                 ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -2542,10 +2538,8 @@ pub fn extract_angular_component_by_ast(
             }
 
             // Handle export declarations that might contain classes
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
-                    &export.declaration
-                {
+            Statement::ExportDeclaration(export) => {
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration {
                     let is_target_class =
                         class.id.as_ref().is_some_and(|id| id.name.as_str() == class_name);
 

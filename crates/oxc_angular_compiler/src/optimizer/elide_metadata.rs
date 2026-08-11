@@ -128,7 +128,10 @@ impl ElideMetadataTransformer {
                     }
                 }
                 Expression::ArrowFunctionExpression(arrow) => {
-                    self.check_function_body_for_metadata(&arrow.body.statements, edits);
+                    if let Some(body) = arrow.get_function_body() {
+                        self.check_function_body_for_metadata(&body.statements, edits);
+                    }
+                    // Expression-body arrows have no statements to scan for metadata.
                 }
                 _ => {}
             }

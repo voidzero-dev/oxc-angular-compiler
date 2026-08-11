@@ -89,34 +89,32 @@ impl AdjustTypeScriptEnumsTransformer {
         &self,
         stmt: &'a Statement<'a>,
     ) -> Option<(&'a str, u32, u32, bool)> {
-        // Check for exported var declaration
-        if let Statement::ExportNamedDeclaration(export) = stmt {
-            if let Some(decl) = &export.declaration {
-                if let oxc_ast::ast::Declaration::VariableDeclaration(var_decl) = decl {
-                    // Must be `var` (TypeScript uses var for enums)
-                    if !matches!(var_decl.kind, oxc_ast::ast::VariableDeclarationKind::Var) {
-                        return None;
-                    }
+        // Check for exported var declaration (`export var X;`)
+        if let Statement::ExportDeclaration(export) = stmt {
+            if let oxc_ast::ast::Declaration::VariableDeclaration(var_decl) = &export.declaration {
+                // Must be `var` (TypeScript uses var for enums)
+                if !matches!(var_decl.kind, oxc_ast::ast::VariableDeclarationKind::Var) {
+                    return None;
+                }
 
-                    // Must have exactly one declaration with no initializer
-                    if var_decl.declarations.len() != 1 {
-                        return None;
-                    }
+                // Must have exactly one declaration with no initializer
+                if var_decl.declarations.len() != 1 {
+                    return None;
+                }
 
-                    let decl = &var_decl.declarations[0];
-                    if decl.init.is_some() {
-                        return None;
-                    }
+                let decl = &var_decl.declarations[0];
+                if decl.init.is_some() {
+                    return None;
+                }
 
-                    // Get the variable name
-                    if let BindingPattern::BindingIdentifier(ident) = &decl.id {
-                        return Some((
-                            ident.name.as_str(),
-                            export.span.start,
-                            export.span.end,
-                            true,
-                        ));
-                    }
+                // Get the variable name
+                if let BindingPattern::BindingIdentifier(ident) = &decl.id {
+                    return Some((
+                        ident.name.as_str(),
+                        export.span.start,
+                        export.span.end,
+                        true,
+                    ));
                 }
             }
             return None;

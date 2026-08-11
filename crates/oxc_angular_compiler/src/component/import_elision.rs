@@ -171,10 +171,8 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     Self::collect_computed_keys_from_class(class, result);
                 }
             }
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
-                    &export.declaration
-                {
+            Statement::ExportDeclaration(export) => {
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration {
                     Self::collect_computed_keys_from_class(class, result);
                 }
             }
@@ -403,10 +401,8 @@ impl<'a> ImportElisionAnalyzer<'a> {
                     );
                 }
             }
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
-                    &export.declaration
-                {
+            Statement::ExportDeclaration(export) => {
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration {
                     Self::collect_uses_from_class(
                         class,
                         ctor_param_decorator_uses,
@@ -629,20 +625,24 @@ impl<'a> ImportElisionAnalyzer<'a> {
             Expression::ArrowFunctionExpression(arrow) => {
                 // Arrow function bodies may contain value references, e.g.,
                 // `forwardRef(() => TagPickerComponent)` in Component imports.
-                for stmt in &arrow.body.statements {
-                    match stmt {
-                        Statement::ExpressionStatement(expr_stmt) => {
-                            Self::collect_value_uses_from_expr(
-                                &expr_stmt.expression,
-                                other_value_uses,
-                            );
-                        }
-                        Statement::ReturnStatement(ret) => {
-                            if let Some(arg) = &ret.argument {
-                                Self::collect_value_uses_from_expr(arg, other_value_uses);
+                if let Some(expr) = arrow.get_expression() {
+                    Self::collect_value_uses_from_expr(expr, other_value_uses);
+                } else if let Some(body) = arrow.get_function_body() {
+                    for stmt in &body.statements {
+                        match stmt {
+                            Statement::ExpressionStatement(expr_stmt) => {
+                                Self::collect_value_uses_from_expr(
+                                    &expr_stmt.expression,
+                                    other_value_uses,
+                                );
                             }
+                            Statement::ReturnStatement(ret) => {
+                                if let Some(arg) = &ret.argument {
+                                    Self::collect_value_uses_from_expr(arg, other_value_uses);
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
@@ -774,18 +774,20 @@ pub fn import_elision_edits<'a>(
         false
     });
 
-    // Check if there are type-only exports that need removal
-    let has_type_only_exports = program.body.iter().any(|stmt| {
-        if let Statement::ExportNamedDeclaration(export_decl) = stmt {
-            if export_decl.source.is_some() || export_decl.declaration.is_some() {
-                return export_decl.export_kind.is_type();
-            }
-            if export_decl.export_kind.is_type() {
-                return true;
-            }
-            return export_decl.specifiers.iter().any(|spec| spec.export_kind.is_type());
+    // Check if there are type-only exports that need removal.
+    // ExportDeclaration always has a declaration (export class/const/type Foo) — those are
+    // not elided here. Only ExportNamedDeclaration (local `{ }`) and ExportFromDeclaration
+    // (re-exports) carry type-only / per-specifier type elision.
+    let has_type_only_exports = program.body.iter().any(|stmt| match stmt {
+        Statement::ExportNamedDeclaration(export_decl) => {
+            export_decl.export_kind.is_type()
+                || export_decl.specifiers.iter().any(|spec| spec.export_kind.is_type())
         }
-        false
+        Statement::ExportFromDeclaration(export_decl) => {
+            export_decl.export_kind.is_type()
+                || export_decl.specifiers.iter().any(|spec| spec.export_kind.is_type())
+        }
+        _ => false,
     });
 
     if !analyzer.has_type_only_imports() && !has_empty_imports && !has_type_only_exports {
@@ -903,21 +905,32 @@ pub fn import_elision_edits<'a>(
         }
     }
 
-    // Process type-only export declarations
+    // Process type-only export declarations.
+    // Local `export { ... }` → ExportNamedDeclaration; re-exports → ExportFromDeclaration.
+    // `export class/const/...` is ExportDeclaration and is skipped (no type elision here).
     for stmt in &program.body {
-        let Statement::ExportNamedDeclaration(export_decl) = stmt else {
-            continue;
+        let (span_start, span_end, export_kind_is_type, specifiers, source_module) = match stmt {
+            Statement::ExportNamedDeclaration(export_decl) => (
+                export_decl.span.start,
+                export_decl.span.end,
+                export_decl.export_kind.is_type(),
+                &export_decl.specifiers,
+                None::<&str>,
+            ),
+            Statement::ExportFromDeclaration(export_decl) => (
+                export_decl.span.start,
+                export_decl.span.end,
+                export_decl.export_kind.is_type(),
+                &export_decl.specifiers,
+                Some(export_decl.source.value.as_str()),
+            ),
+            _ => continue,
         };
 
-        // Skip exports with declarations (e.g. `export class X {}`)
-        if export_decl.declaration.is_some() {
-            continue;
-        }
-
-        if export_decl.export_kind.is_type() {
+        if export_kind_is_type {
             // `export type { X }` or `export type { X } from './foo'` — remove entirely
-            let start = export_decl.span.start as usize;
-            let mut end = export_decl.span.end as usize;
+            let start = span_start as usize;
+            let mut end = span_end as usize;
             let bytes = source.as_bytes();
             while end < bytes.len() && (bytes[end] == b'\n' || bytes[end] == b'\r') {
                 end += 1;
@@ -928,14 +941,14 @@ pub fn import_elision_edits<'a>(
 
         // Check for individual type-only specifiers (`export { type X, Y }`)
         let (type_specs, value_specs): (Vec<_>, Vec<_>) =
-            export_decl.specifiers.iter().partition(|spec| spec.export_kind.is_type());
+            specifiers.iter().partition(|spec| spec.export_kind.is_type());
 
         if type_specs.is_empty() {
             continue;
         }
 
-        let start = export_decl.span.start as usize;
-        let mut end = export_decl.span.end as usize;
+        let start = span_start as usize;
+        let mut end = span_end as usize;
         let bytes = source.as_bytes();
         while end < bytes.len() && (bytes[end] == b'\n' || bytes[end] == b'\r') {
             end += 1;
@@ -961,14 +974,14 @@ pub fn import_elision_edits<'a>(
             new_export.push_str(&named_specifiers.join(", "));
             new_export.push_str(" }");
 
-            if let Some(source_lit) = &export_decl.source {
+            if let Some(source_mod) = source_module {
                 new_export.push_str(" from \"");
-                new_export.push_str(source_lit.value.as_str());
+                new_export.push_str(source_mod);
                 new_export.push('"');
             }
             new_export.push(';');
 
-            if end > export_decl.span.end as usize {
+            if end > span_end as usize {
                 new_export.push('\n');
             }
 

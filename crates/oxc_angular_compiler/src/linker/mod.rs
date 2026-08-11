@@ -202,10 +202,8 @@ fn walk_statement(stmt: &Statement<'_>, source: &str, filename: &str, edits: &mu
                 }
             }
         }
-        Statement::ExportNamedDeclaration(export_decl) => {
-            if let Some(ref decl) = export_decl.declaration {
-                walk_declaration(decl, source, filename, edits);
-            }
+        Statement::ExportDeclaration(export_decl) => {
+            walk_declaration(&export_decl.declaration, source, filename, edits);
         }
         Statement::ExportDefaultDeclaration(export_default) => match &export_default.declaration {
             oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class_decl) => {
@@ -323,8 +321,12 @@ fn walk_expression(expr: &Expression<'_>, source: &str, filename: &str, edits: &
             walk_expression(&paren.expression, source, filename, edits);
         }
         Expression::ArrowFunctionExpression(arrow) => {
-            for stmt in &arrow.body.statements {
-                walk_statement(stmt, source, filename, edits);
+            if let Some(body) = arrow.get_function_body() {
+                for stmt in &body.statements {
+                    walk_statement(stmt, source, filename, edits);
+                }
+            } else if let Some(expr) = arrow.get_expression() {
+                walk_expression(expr, source, filename, edits);
             }
         }
         Expression::FunctionExpression(func) => {
@@ -491,17 +493,14 @@ fn extract_function_return_source<'a>(expr: &Expression<'a>, source: &'a str) ->
             None
         }
         Expression::ArrowFunctionExpression(arrow) => {
-            if arrow.expression {
-                // Expression body: () => expr
-                if let Some(stmt) = arrow.body.statements.first() {
-                    if let Statement::ExpressionStatement(expr_stmt) = stmt {
-                        let span = expr_stmt.expression.span();
-                        return Some(&source[span.start as usize..span.end as usize]);
-                    }
-                }
-            } else {
-                // Block body: () => { return expr; }
-                for stmt in &arrow.body.statements {
+            // Expression body: () => expr
+            if let Some(expr) = arrow.get_expression() {
+                let span = expr.span();
+                return Some(&source[span.start as usize..span.end as usize]);
+            }
+            // Block body: () => { return expr; }
+            if let Some(body) = arrow.get_function_body() {
+                for stmt in &body.statements {
                     if let Statement::ReturnStatement(ret) = stmt {
                         if let Some(arg) = &ret.argument {
                             let span = arg.span();
@@ -1283,19 +1282,15 @@ fn link_class_metadata_async(
 
     // Extract the inner object expression from the arrow body.
     // The arrow has an expression body: (params) => ({...})
-    // In the AST, body.statements has a single ExpressionStatement,
-    // and the expression may be wrapped in a ParenthesizedExpression.
+    // The expression may be wrapped in a ParenthesizedExpression.
     let inner_obj: Option<&ObjectExpression<'_>> = resolve_metadata_arrow.and_then(|arrow| {
-        let stmt = arrow.body.statements.first()?;
-        if let Statement::ExpressionStatement(expr_stmt) = stmt {
-            let mut expr = &expr_stmt.expression;
-            // Unwrap parenthesized expression if present: ({...})
-            while let Expression::ParenthesizedExpression(paren) = expr {
-                expr = &paren.expression;
-            }
-            if let Expression::ObjectExpression(obj) = expr {
-                return Some(obj.as_ref());
-            }
+        let mut expr = arrow.get_expression()?;
+        // Unwrap parenthesized expression if present: ({...})
+        while let Expression::ParenthesizedExpression(paren) = expr {
+            expr = &paren.expression;
+        }
+        if let Expression::ObjectExpression(obj) = expr {
+            return Some(obj.as_ref());
         }
         None
     });

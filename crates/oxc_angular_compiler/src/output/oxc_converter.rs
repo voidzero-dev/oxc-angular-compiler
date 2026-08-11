@@ -441,29 +441,22 @@ fn convert_arrow_function_expression<'a>(
     }
 
     // Convert body
-    let body = if arrow.expression {
+    let body = if let Some(expr) = arrow.get_expression() {
         // Expression body: () => expr
-        let expr_body = arrow.body.statements.first()?;
-        if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = expr_body {
-            match convert_oxc_expression(allocator, &expr_stmt.expression, source_text) {
-                Some(converted) => {
-                    ArrowFunctionBody::Expression(Box::new_in(converted, &allocator))
-                }
-                None => {
-                    // Unsupported expression (e.g., await, yield, class) —
-                    // fall back to raw source for the entire arrow
-                    return make_raw_source(allocator, source_text, arrow.span);
-                }
+        match convert_oxc_expression(allocator, expr, source_text) {
+            Some(converted) => ArrowFunctionBody::Expression(Box::new_in(converted, &allocator)),
+            None => {
+                // Unsupported expression (e.g., await, yield, class) —
+                // fall back to raw source for the entire arrow
+                return make_raw_source(allocator, source_text, arrow.span);
             }
-        } else {
-            return None;
         }
-    } else {
+    } else if let Some(fn_body) = arrow.get_function_body() {
         // Block body: () => { ... }
         // If any statement cannot be converted, fall back to raw source to avoid
         // silently dropping statements (which corrupts the function body).
-        let mut statements = OxcVec::with_capacity_in(arrow.body.statements.len(), &allocator);
-        for stmt in &arrow.body.statements {
+        let mut statements = OxcVec::with_capacity_in(fn_body.statements.len(), &allocator);
+        for stmt in &fn_body.statements {
             match convert_statement(allocator, stmt, source_text) {
                 Some(output_stmt) => statements.push(output_stmt),
                 None => {
@@ -473,6 +466,8 @@ fn convert_arrow_function_expression<'a>(
             }
         }
         ArrowFunctionBody::Statements(statements)
+    } else {
+        return None;
     };
 
     Some(OutputExpression::ArrowFunction(Box::new_in(

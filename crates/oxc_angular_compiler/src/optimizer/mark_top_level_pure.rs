@@ -119,9 +119,9 @@ impl MarkTopLevelPureTransformer {
                 }
             }
 
-            // Export named: export const x = foo();
-            Statement::ExportNamedDeclaration(export) => {
-                if let Some(Declaration::VariableDeclaration(var_decl)) = &export.declaration {
+            // Export declaration: export const x = foo();
+            Statement::ExportDeclaration(export) => {
+                if let Declaration::VariableDeclaration(var_decl) = &export.declaration {
                     self.visit_variable_declaration(var_decl, source, edits);
                 }
             }

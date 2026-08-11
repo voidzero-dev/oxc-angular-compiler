@@ -436,19 +436,12 @@ fn extract_forward_ref_or_expression<'a>(
         if let Expression::Identifier(id) = &call.callee {
             if id.name == "forwardRef" {
                 if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.first() {
-                    // Get the body expression - arrow functions with expression bodies
-                    // store the expression as a single ExpressionStatement in body.statements
-                    if arrow.expression {
-                        if let Some(oxc_ast::ast::Statement::ExpressionStatement(expr_stmt)) =
-                            arrow.body.statements.first()
+                    // Expression body: forwardRef(() => X)
+                    if let Some(body_expr) = arrow.get_expression() {
+                        if let Some(expression) =
+                            convert_oxc_expression(&allocator, body_expr, source_text)
                         {
-                            if let Some(expression) = convert_oxc_expression(
-                                &allocator,
-                                &expr_stmt.expression,
-                                source_text,
-                            ) {
-                                return Some((expression, true));
-                            }
+                            return Some((expression, true));
                         }
                     }
                 }

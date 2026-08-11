@@ -579,8 +579,8 @@ mod tests {
                     ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
                 _ => None,

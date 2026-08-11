@@ -879,8 +879,8 @@ fn class_of<'a, 'src>(stmt: &'src Statement<'a>) -> Option<(&'src Class<'a>, u32
             }
             _ => None,
         },
-        Statement::ExportNamedDeclaration(export) => match &export.declaration {
-            Some(Declaration::ClassDeclaration(class)) => Some((class.as_ref(), export.span.start)),
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::ClassDeclaration(class) => Some((class.as_ref(), export.span.start)),
             _ => None,
         },
         _ => None,
@@ -1019,8 +1019,8 @@ fn collect_top_level_bindings<'a>(
     for stmt in &program.body {
         let var_decl = match stmt {
             Statement::VariableDeclaration(decl) => Some(decl.as_ref()),
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::VariableDeclaration(decl)) => Some(decl.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::VariableDeclaration(decl) => Some(decl.as_ref()),
                 _ => None,
             },
             _ => None,
@@ -1109,8 +1109,8 @@ fn collect_top_level_bindings<'a>(
         // identifiers across function-call boundaries.
         let func = match stmt {
             Statement::FunctionDeclaration(f) => Some(f.as_ref()),
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::FunctionDeclaration(f)) => Some(f.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::FunctionDeclaration(f) => Some(f.as_ref()),
                 _ => None,
             },
             Statement::ExportDefaultDeclaration(export) => match &export.declaration {
@@ -1296,9 +1296,9 @@ fn walk_class_eager_parts<'a>(
     out: &mut HashSet<SymbolId>,
     called: &mut HashSet<SymbolId>,
 ) {
-    // `super_class` evaluates at class-definition time, before the body
+    // Heritage (`extends`) evaluates at class-definition time, before the body
     // executes. Always walk it.
-    if let Some(super_expr) = &class.super_class {
+    if let Some(super_expr) = class.heritage_expression() {
         collect_expr_symbols(super_expr, semantic, out, called);
     }
     for element in &class.body.body {
@@ -2411,7 +2411,11 @@ fn index_fn_valued_binding<'a>(
                 let mut refs: HashSet<SymbolId> = HashSet::new();
                 let mut called: HashSet<SymbolId> = HashSet::new();
                 let mut visitor = FunctionBodyIdentVisitor::new(semantic, &mut refs, &mut called);
-                visitor.visit_function_body(&arrow.body);
+                if let Some(body) = arrow.get_function_body() {
+                    visitor.visit_function_body(body);
+                } else if let Some(expr) = arrow.get_expression() {
+                    visitor.visit_expression(expr);
+                }
                 walk_param_defaults(&arrow.params, semantic, &mut refs, &mut called);
                 fn_body_symbol_refs.insert(fn_symbol, refs);
                 fn_body_called_symbols.insert(fn_symbol, called);
@@ -2465,7 +2469,11 @@ fn index_local_fn_valued_binding<'a>(
         match cur {
             E::ArrowFunctionExpression(arrow) => {
                 let mut visitor = FunctionBodyIdentVisitor::new(semantic, refs, called);
-                visitor.visit_function_body(&arrow.body);
+                if let Some(body) = arrow.get_function_body() {
+                    visitor.visit_function_body(body);
+                } else if let Some(expr) = arrow.get_expression() {
+                    visitor.visit_expression(expr);
+                }
                 walk_param_defaults(&arrow.params, semantic, refs, called);
                 return true;
             }
@@ -2510,7 +2518,11 @@ fn walk_iife_callee_body<'a>(
         match cur {
             E::ArrowFunctionExpression(arrow) => {
                 let mut visitor = FunctionBodyIdentVisitor::new(semantic, out, called);
-                visitor.visit_function_body(&arrow.body);
+                if let Some(body) = arrow.get_function_body() {
+                    visitor.visit_function_body(body);
+                } else if let Some(expr) = arrow.get_expression() {
+                    visitor.visit_expression(expr);
+                }
                 // Parameter defaults evaluate at IIFE invocation time, before
                 // the body runs — symmetric with top-level function decls
                 // in `collect_top_level_bindings`.

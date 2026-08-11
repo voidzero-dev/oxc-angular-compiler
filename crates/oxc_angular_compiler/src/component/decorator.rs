@@ -253,7 +253,7 @@ pub fn extract_component_metadata<'a>(
     // See: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts:393
     // NOTE: This must be set BEFORE extract_constructor_deps because that function
     // uses this information to determine whether to use inherited factory pattern.
-    let has_superclass = class.super_class.is_some();
+    let has_superclass = class.heritage.is_some();
     metadata.uses_inheritance = has_superclass;
 
     // Extract constructor dependencies for factory generation
@@ -709,23 +709,18 @@ fn extract_forward_ref_directive_name<'a>(arg: Option<&Argument<'a>>) -> Option<
     match arg {
         // forwardRef(() => MyDirective)
         Argument::ArrowFunctionExpression(arrow) => {
-            // The body should be an identifier (the directive class)
-            let body = &arrow.body;
-
-            // Check if it's an expression body (single return expression)
-            // Arrow functions with expression body have their expression
-            // wrapped in the body. For `() => Directive`, the expression
-            // is the directive identifier.
-            if body.statements.is_empty() {
-                return None;
+            // Expression body: () => MyDirective
+            if let Some(Expression::Identifier(id)) = arrow.get_expression() {
+                return Some(id.name.clone().into());
             }
-            // For expression arrow functions, the parser puts it in
-            // an ExpressionStatement
-            if let Some(oxc_ast::ast::Statement::ExpressionStatement(stmt)) =
-                body.statements.first()
-            {
-                if let Expression::Identifier(id) = &stmt.expression {
-                    return Some(id.name.clone().into());
+            // Block body with single ExpressionStatement (parity with pre-0.144)
+            if let Some(body) = arrow.get_function_body() {
+                if let Some(oxc_ast::ast::Statement::ExpressionStatement(stmt)) =
+                    body.statements.first()
+                {
+                    if let Expression::Identifier(id) = &stmt.expression {
+                        return Some(id.name.clone().into());
+                    }
                 }
             }
             None
@@ -1199,8 +1194,8 @@ mod tests {
                     ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
                 _ => None,
@@ -3208,8 +3203,8 @@ mod tests {
                     ExportDefaultDeclarationKind::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
-                Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                    Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                     _ => None,
                 },
                 _ => None,

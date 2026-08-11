@@ -24,8 +24,8 @@ let TodoState = class TodoState {
 	static filter(state) {
 		return state.filter;
 	}
-	add(ctx, action) {	/* ... */}
-	toggle(ctx, action) {	/* ... */}
+	add(ctx, action) {/* ... */}
+	toggle(ctx, action) {/* ... */}
 };
 __decorate([Action(AddTodo)], TodoState.prototype, "add", null);
 __decorate([Action(ToggleTodo)], TodoState.prototype, "toggle", null);

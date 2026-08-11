@@ -561,8 +561,8 @@ mod tests {
 
         // Find the class
         let class = parser_ret.program.body.iter().find_map(|stmt| match stmt {
-            Statement::ExportNamedDeclaration(export) => match &export.declaration {
-                Some(Declaration::ClassDeclaration(class)) => Some(class.as_ref()),
+            Statement::ExportDeclaration(export) => match &export.declaration {
+                Declaration::ClassDeclaration(class) => Some(class.as_ref()),
                 _ => None,
             },
             _ => None,
