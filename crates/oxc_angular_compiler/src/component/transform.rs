@@ -519,25 +519,19 @@ pub fn build_import_map<'a>(
                         decl_is_type_only || spec.import_kind == ImportOrExportKind::Type;
 
                     // Check if we have a resolved path for this identifier
-                    let path_overridden =
-                        resolved_imports.and_then(|m| m.get(local_name.as_str())).is_some();
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone().into());
 
                     // `import { Foo as Bar }` → export name `Foo` for `i1.Foo` / @defer.
-                    // After `resolved_imports` rewrites the path to the file behind a
-                    // barrel, that export name is barrel-side only — drop it and use
-                    // the local binding against the resolved module.
+                    // Path rewrite via `resolved_imports` does not change the export
+                    // name on the target (still `Foo`); only an extended API could
+                    // supply a different target export after a barrel rename.
                     let imported_export_name = module_export_name_to_str(&spec.imported);
-                    let imported_name = if path_overridden {
-                        None
-                    } else {
-                        imported_export_name
-                            .filter(|exported| *exported != local_name.as_str())
-                            .map(|exported| Ident::from(allocator.alloc_str(exported)))
-                    };
+                    let imported_name = imported_export_name
+                        .filter(|exported| *exported != local_name.as_str())
+                        .map(|exported| Ident::from(allocator.alloc_str(exported)));
 
                     import_map.insert(
                         local_name,
@@ -6909,16 +6903,16 @@ export class X {
         );
     }
 
-    /// Barrel re-export rename + local alias + path rewrite: property access must
-    /// use the resolved module's export (local `Service`), not the barrel name.
+    /// Path rewrite keeps the specifier export name: `Foo as Bar` + resolve to
+    /// `./pkg` still emits `i1.Foo` (target exports `Foo`, not `Bar`).
     #[test]
-    fn test_resolved_imports_with_barrel_rename_and_local_alias() {
+    fn test_resolved_imports_path_only_keeps_export_name() {
         use std::collections::HashMap;
 
         let allocator = Allocator::default();
         let source = r#"
 import { Component } from '@angular/core';
-import { PublicService as Service } from './barrel';
+import { Foo as Bar } from '@pkg';
 
 @Component({
     selector: 'app-x',
@@ -6926,13 +6920,12 @@ import { PublicService as Service } from './barrel';
     standalone: true,
 })
 export class X {
-    constructor(x: Service) {}
+    constructor(x: Bar) {}
 }
 "#;
 
         let mut resolved = HashMap::new();
-        // Target file exports `Service`, not `PublicService`.
-        resolved.insert("Service".to_string(), "./service".to_string());
+        resolved.insert("Bar".to_string(), "./pkg".to_string());
 
         let mut options = TransformOptions::default();
         options.emit_class_metadata = true;
@@ -6943,19 +6936,18 @@ export class X {
 
         assert!(!result.has_errors(), "errors: {:?}", result.diagnostics);
         assert!(
-            result.code.contains("import * as i1 from './service'"),
+            result.code.contains("import * as i1 from './pkg'"),
             "namespace import should use resolved path; got:\n{}",
             result.code
         );
-        // Correct property on the resolved module is `Service` (target export / local name).
         assert!(
-            result.code.contains("i1.Service"),
-            "should use target/local name Service on resolved module; got:\n{}",
+            result.code.contains("i1.Foo"),
+            "should keep export name Foo after path rewrite; got:\n{}",
             result.code
         );
         assert!(
-            !result.code.contains("i1.PublicService"),
-            "must NOT use barrel export name PublicService after path rewrite; got:\n{}",
+            !result.code.contains("i1.Bar"),
+            "must not use local alias Bar on namespace; got:\n{}",
             result.code
         );
     }
