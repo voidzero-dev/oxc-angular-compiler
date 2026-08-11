@@ -519,19 +519,39 @@ pub fn build_import_map<'a>(
                         decl_is_type_only || spec.import_kind == ImportOrExportKind::Type;
 
                     // Check if we have a resolved path for this identifier
+                    let path_overridden =
+                        resolved_imports.and_then(|m| m.get(local_name.as_str())).is_some();
                     let source_module = resolved_imports
                         .and_then(|m| m.get(local_name.as_str()))
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone().into());
 
                     // Capture the original exported name when it differs from the
-                    // local binding (i.e., `import { Foo as Bar }`). This is used
-                    // when building `@defer` dependency resolvers so the dynamic
-                    // import chain references the original export, not the alias.
+                    // local binding (i.e., `import { Foo as Bar }`). Used so
+                    // namespace property access (`i1.X`) and `@defer` resolvers
+                    // reference the module export, not the local alias.
+                    //
+                    // IMPORTANT: when `resolved_imports` rewrites `source_module` to
+                    // the file behind a barrel, the original specifier's export name
+                    // still names the *barrel* export, not the target file's export.
+                    // Example:
+                    //   // service.ts: export class Service {}
+                    //   // barrel: export { Service as PublicService } from './service'
+                    //   import { PublicService as Service } from './barrel';
+                    //   resolved_imports: Service -> ./service
+                    // Emitting `i1.PublicService` against `./service` is wrong (that
+                    // file only has `Service`). Drop `imported_name` so we fall back
+                    // to the local binding — restoring pre-alias-fix behavior for
+                    // path-overridden imports. Callers that need the true target
+                    // export after multi-hop renames must extend `resolved_imports`.
                     let imported_export_name = module_export_name_to_str(&spec.imported);
-                    let imported_name = imported_export_name
-                        .filter(|exported| *exported != local_name.as_str())
-                        .map(|exported| Ident::from(allocator.alloc_str(exported)));
+                    let imported_name = if path_overridden {
+                        None
+                    } else {
+                        imported_export_name
+                            .filter(|exported| *exported != local_name.as_str())
+                            .map(|exported| Ident::from(allocator.alloc_str(exported)))
+                    };
 
                     import_map.insert(
                         local_name,
@@ -6909,6 +6929,67 @@ export class X {
         assert!(
             ctor_params_ok,
             "setClassMetadata ctorParameters should use type: i1.ExportedName, but got:\n{}",
+            result.code
+        );
+    }
+
+    /// Codex claim (PR #375): when `resolved_imports` rewrites the module path to the
+    /// file behind a barrel, `imported_name` still names the barrel export, not the
+    /// target file export.
+    ///
+    ///   // service.ts exports `Service`
+    ///   // barrel: export { Service as PublicService } from './service'
+    ///   import { PublicService as Service } from './barrel';
+    ///   resolved_imports: Service -> ./service
+    ///
+    /// Namespace is `import * as i1 from './service'`, which only has `.Service`.
+    /// Emitting `i1.PublicService` would be wrong.
+    #[test]
+    fn test_resolved_imports_with_barrel_rename_and_local_alias() {
+        use std::collections::HashMap;
+
+        let allocator = Allocator::default();
+        let source = r#"
+import { Component } from '@angular/core';
+import { PublicService as Service } from './barrel';
+
+@Component({
+    selector: 'app-x',
+    template: '',
+    standalone: true,
+})
+export class X {
+    constructor(x: Service) {}
+}
+"#;
+
+        let mut resolved = HashMap::new();
+        // Path rewritten to the file behind the barrel. That file exports `Service`,
+        // not `PublicService`.
+        resolved.insert("Service".to_string(), "./service".to_string());
+
+        let mut options = TransformOptions::default();
+        options.emit_class_metadata = true;
+        options.resolved_imports = Some(resolved);
+
+        let result =
+            transform_angular_file(&allocator, "x.component.ts", source, Some(&options), None);
+
+        assert!(!result.has_errors(), "errors: {:?}", result.diagnostics);
+        assert!(
+            result.code.contains("import * as i1 from './service'"),
+            "namespace import should use resolved path; got:\n{}",
+            result.code
+        );
+        // Correct property on the resolved module is `Service` (target export / local name).
+        assert!(
+            result.code.contains("i1.Service"),
+            "should use target/local name Service on resolved module; got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("i1.PublicService"),
+            "must NOT use barrel export name PublicService after path rewrite; got:\n{}",
             result.code
         );
     }
