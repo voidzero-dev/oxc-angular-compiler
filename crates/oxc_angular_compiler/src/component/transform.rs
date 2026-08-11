@@ -1872,8 +1872,7 @@ fn collect_parameter_property_names(
                 visit_class(class_decl, &mut names);
             }
             Statement::ExportDeclaration(export) => {
-                if let oxc_ast::ast::Declaration::ClassDeclaration(class_decl) =
-                    &export.declaration
+                if let oxc_ast::ast::Declaration::ClassDeclaration(class_decl) = &export.declaration
                 {
                     visit_class(class_decl, &mut names);
                 }
@@ -2524,9 +2523,7 @@ pub fn transform_angular_file(
                 _ => (None, 0),
             },
             Statement::ExportDeclaration(export) => match &export.declaration {
-                Declaration::ClassDeclaration(class) => {
-                    (Some(class.as_ref()), export.span.start)
-                }
+                Declaration::ClassDeclaration(class) => (Some(class.as_ref()), export.span.start),
                 _ => (None, 0),
             },
             _ => (None, 0),

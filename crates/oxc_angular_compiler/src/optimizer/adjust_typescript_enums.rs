@@ -109,12 +109,7 @@ impl AdjustTypeScriptEnumsTransformer {
 
                 // Get the variable name
                 if let BindingPattern::BindingIdentifier(ident) = &decl.id {
-                    return Some((
-                        ident.name.as_str(),
-                        export.span.start,
-                        export.span.end,
-                        true,
-                    ));
+                    return Some((ident.name.as_str(), export.span.start, export.span.end, true));
                 }
             }
             return None;
