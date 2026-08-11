@@ -314,7 +314,7 @@ fn serialize_attributes<'a>(
     allocator: &'a oxc_allocator::Allocator,
     attrs: &ElementAttributes<'a>,
 ) -> ConstValue<'a> {
-    let mut elements = OxcVec::new_in(allocator);
+    let mut elements = OxcVec::new_in(&allocator);
 
     // Add static attributes
     for (namespace, name, value) in &attrs.attributes {
@@ -339,7 +339,7 @@ fn serialize_attributes<'a>(
                             name: var_name.clone(),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     ));
                     elements.push(ConstValue::Expression(read_var));
                 }
@@ -362,7 +362,7 @@ fn serialize_attributes<'a>(
             let selector_elements = r3_selector_to_output_expr(allocator, first_selector);
             let selector_array = OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: selector_elements, source_span: None },
-                allocator,
+                &allocator,
             ));
             elements.push(ConstValue::Expression(selector_array));
         }
@@ -422,7 +422,7 @@ fn serialize_attributes_to_array_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
     attrs: &ElementAttributes<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries = OxcVec::new_in(allocator);
+    let mut entries = OxcVec::new_in(&allocator);
 
     // Add static attributes
     for (namespace, name, value) in &attrs.attributes {
@@ -433,23 +433,23 @@ fn serialize_attributes_to_array_expr<'a>(
                     value: LiteralValue::Number(AttributeMarker::NamespaceUri as i32 as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(ns.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         entries.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
         if let Some(val) = value {
             match val {
                 AttributeValue::String(s) => {
                     entries.push(OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::String(s.clone()), source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
                 AttributeValue::I18nVar(var_name) => {
@@ -459,7 +459,7 @@ fn serialize_attributes_to_array_expr<'a>(
                             name: var_name.clone(),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -480,14 +480,14 @@ fn serialize_attributes_to_array_expr<'a>(
                     value: LiteralValue::Number(AttributeMarker::ProjectAs as i32 as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
 
             // Add the parsed selector as an array
             let selector_elements = r3_selector_to_output_expr(allocator, first_selector);
             entries.push(OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: selector_elements, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -499,12 +499,12 @@ fn serialize_attributes_to_array_expr<'a>(
                 value: LiteralValue::Number(AttributeMarker::Classes as i32 as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
         for class in &attrs.classes {
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(class.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -516,17 +516,17 @@ fn serialize_attributes_to_array_expr<'a>(
                 value: LiteralValue::Number(AttributeMarker::Styles as i32 as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
         for (name, value) in &attrs.styles {
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
             if let Some(val) = value {
                 entries.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::String(val.clone()), source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
         }
@@ -539,12 +539,12 @@ fn serialize_attributes_to_array_expr<'a>(
                 value: LiteralValue::Number(AttributeMarker::Bindings as i32 as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
         for name in &attrs.bindings {
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -556,12 +556,12 @@ fn serialize_attributes_to_array_expr<'a>(
                 value: LiteralValue::Number(AttributeMarker::Template as i32 as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
         for name in &attrs.template {
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -573,19 +573,19 @@ fn serialize_attributes_to_array_expr<'a>(
                 value: LiteralValue::Number(AttributeMarker::I18n as i32 as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
         for name in &attrs.i18n {
             entries.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
 
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -760,7 +760,7 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
     // Second pass (2b): Assign const indices in collected order
     // This is where we actually call add_const, matching Angular's getConstIndex call order
     let mut element_const_indices: FxHashMap<XrefId, u32> = FxHashMap::default();
-    let mut projection_attrs: FxHashMap<XrefId, OutputExpression<'_>> = FxHashMap::default();
+    let mut projection_attrs: FxHashMap<XrefId, Ident<'_>> = FxHashMap::default();
 
     for xref_item in &xrefs_to_assign {
         match xref_item {
@@ -768,7 +768,21 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
                 if let Some(attrs) = all_element_attrs.get(xref) {
                     if !attrs.is_empty() {
                         let attr_array = serialize_attributes_to_array_expr(allocator, attrs);
-                        projection_attrs.insert(*xref, attr_array);
+                        // Angular v22 (rc.3+) pools projection attributes into the
+                        // shared const pool (`_cN`) instead of emitting them inline,
+                        // matching `getConstLiteral(attrArray, true)` in Angular's
+                        // const_collection.ts (angular/angular@2891f7e). This phase
+                        // runs after `generate_projection_def`, so the projectionDef
+                        // and ngContentSelectors consts are pooled first and the
+                        // projection attrs land at the next `_cN`, as in the goldens.
+                        let pooled = job.pool.get_const_literal(attr_array, true);
+                        let pooled_name = match pooled {
+                            OutputExpression::ReadVar(rv) => rv.name.clone(),
+                            _ => unreachable!(
+                                "ConstantPool::get_const_literal must return OutputExpression::ReadVar"
+                            ),
+                        };
+                        projection_attrs.insert(*xref, pooled_name);
                     }
                 }
             }
@@ -794,8 +808,17 @@ pub fn collect_element_consts(job: &mut ComponentCompilationJob<'_>) {
             for op in view.create.iter_mut() {
                 match op {
                     CreateOp::Projection(proj) => {
-                        if let Some(attrs) = projection_attrs.remove(&proj.xref) {
-                            proj.attributes = Some(attrs);
+                        // It's possible for multiple projection ops to reference the same xref
+                        // (e.g. across conditional branches). Avoid consuming the pooled attrs so
+                        // every matching projection op receives the same const reference.
+                        if let Some(pooled_name) = projection_attrs.get(&proj.xref) {
+                            proj.attributes = Some(OutputExpression::ReadVar(Box::new_in(
+                                crate::output::ast::ReadVarExpr {
+                                    name: pooled_name.clone(),
+                                    source_span: None,
+                                },
+                                &allocator,
+                            )));
                         }
                     }
                     CreateOp::ElementStart(elem) => {

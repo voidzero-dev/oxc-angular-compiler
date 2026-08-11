@@ -5,9 +5,26 @@
 //! finds all unresolved safe read expressions and converts them into the appropriate output AST
 //! reads, guarded by null checks.
 //!
+//! ## Optional-chaining semantics
+//!
+//! Since Angular v22, safe reads default to **native optional chaining** (`a?.b`),
+//! which yields `undefined`. Earlier versions (and projects that opt in via the
+//! `legacyOptionalChaining` compiler option) use the **legacy** `== null ? null`
+//! expansion, which yields `null`. The choice per compilation is resolved by
+//! [`ComponentCompilationJob::legacy_optional_chaining`].
+//!
+//! A single expression can opt back into legacy semantics on a modern target by
+//! wrapping it in the `$safeNavigationMigration(...)` magic function. The earlier
+//! `removeSafeNavigationMigration` phase converts that call into a
+//! [`IrExpression::SafeNavigationMigration`] wrapper whose subtree is visited with
+//! the [`VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION`] flag; this phase honors
+//! that flag (forcing the legacy expansion on the wrapped subtree) and unwraps the
+//! marker. Mirrors Angular's `removeSafeNavigationMigration` + `expandSafeReads`
+//! phases (`angular/angular@2896c93cc1`).
+//!
 //! ## Algorithm
 //!
-//! This phase performs two transformations:
+//! **Legacy** mode performs two transformations:
 //!
 //! 1. **Safe Transform**: Converts safe access expressions to `SafeTernaryExpr`
 //!    - `a?.b` → `SafeTernaryExpr { guard: a, expr: a.b }`
@@ -16,6 +33,12 @@
 //!
 //! 2. **Ternary Transform**: Converts `SafeTernaryExpr` to `ConditionalExpr`
 //!    - `SafeTernaryExpr { guard, expr }` → `(guard == null ? null : expr)`
+//!
+//! **Modern** mode instead rewrites each safe access into the equivalent resolved
+//! read flagged as optional, which reifies to native `?.`:
+//!    - `a?.b` → `ResolvedPropertyRead { receiver: a, name: b, optional: true }`
+//!    - `a?.[k]` → `ResolvedKeyedRead { receiver: a, key: k, optional: true }`
+//!    - `a?.()` → `ResolvedCall { receiver: a, optional: true }`
 //!
 //! ## Temporary Variables
 //!
@@ -54,7 +77,8 @@ use oxc_str::Ident;
 use crate::ir::expression::{
     AssignTemporaryExpr, IrExpression, ReadTemporaryExpr, ResolvedCallExpr, ResolvedKeyedReadExpr,
     ResolvedPropertyReadExpr, SafeTernaryExpr, VisitorContextFlag,
-    transform_expressions_in_create_op, transform_expressions_in_update_op,
+    transform_expressions_in_create_op, transform_expressions_in_expression,
+    transform_expressions_in_update_op,
 };
 use crate::ir::ops::XrefId;
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -95,6 +119,10 @@ impl<'a> SafeTransformContext<'a> {
 pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
 
+    // Resolve whether `?.` uses legacy (`== null ? null`) or modern (native `?.`)
+    // semantics for this compilation. Read before borrowing views mutably.
+    let legacy = job.legacy_optional_chaining();
+
     // Get the current xref counter value - we'll track allocations ourselves
     // and sync back at the end
     let starting_xref = job.allocate_xref_id().0;
@@ -104,12 +132,15 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
     for view in job.all_views_mut() {
         let ctx = SafeTransformContext { allocator, next_xref: xref_counter.clone() };
 
-        // Transform safe access expressions to SafeTernary
+        // Expand each safe access per the resolved mode, unwrapping any
+        // `$safeNavigationMigration(...)` wrapper as it is reached. Nodes inside a
+        // wrapper carry the `IN_SAFE_NAVIGATION_MIGRATION` flag and so expand under
+        // legacy null semantics regardless of the compilation default.
         for op in view.create.iter_mut() {
             transform_expressions_in_create_op(
                 op,
-                &|expr, _flags| {
-                    safe_transform(expr, &ctx);
+                &|expr, flags| {
+                    expand_safe_access(expr, &ctx, legacy, flags);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -117,12 +148,99 @@ pub fn expand_safe_reads(job: &mut ComponentCompilationJob<'_>) {
         for op in view.update.iter_mut() {
             transform_expressions_in_update_op(
                 op,
-                &|expr, _flags| {
-                    safe_transform(expr, &ctx);
+                &|expr, flags| {
+                    expand_safe_access(expr, &ctx, legacy, flags);
                 },
                 VisitorContextFlag::NONE,
             );
         }
+    }
+}
+
+/// Dispatch a single node to the legacy or modern safe-read expansion.
+///
+/// A `$safeNavigationMigration(...)` wrapper is unwrapped here: by the time this
+/// runs (post-order) its subtree has already been expanded under legacy null
+/// semantics via the [`VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION`] flag, so
+/// only the marker itself needs removing. Every other node uses legacy
+/// `== null ? null` semantics when the compilation is legacy *or* the node sits
+/// inside a migration wrapper; otherwise native optional chaining.
+///
+/// Mirrors Angular's `safeTransform` in `expand_safe_reads.ts`.
+fn expand_safe_access<'a>(
+    expr: &mut IrExpression<'a>,
+    ctx: &SafeTransformContext<'a>,
+    legacy: bool,
+    flags: VisitorContextFlag,
+) {
+    if let IrExpression::SafeNavigationMigration(m) = expr {
+        let inner = std::mem::replace(m.expr.as_mut(), make_placeholder(ctx.allocator));
+        *expr = inner;
+        return;
+    }
+
+    let use_null_semantics =
+        legacy || flags.contains(VisitorContextFlag::IN_SAFE_NAVIGATION_MIGRATION);
+    if use_null_semantics {
+        safe_transform(expr, ctx);
+    } else {
+        safe_transform_modern(expr, ctx);
+    }
+}
+
+/// Modern (Angular v22+) safe-read expansion: rewrite each safe access into the
+/// equivalent resolved read flagged as optional, which reifies to native `?.`.
+///
+/// Unlike the legacy expansion this needs no temporaries or ternary restructuring:
+/// each safe node becomes optional independently, and the post-order visitor has
+/// already converted any nested safe receivers.
+fn safe_transform_modern<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a>) {
+    let allocator = ctx.allocator;
+
+    match expr {
+        IrExpression::SafePropertyRead(p) => {
+            let receiver = std::mem::replace(p.receiver.as_mut(), make_placeholder(allocator));
+            let name = p.name.clone();
+            let source_span = p.source_span;
+            *expr = IrExpression::ResolvedPropertyRead(ArenaBox::new_in(
+                ResolvedPropertyReadExpr {
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    name,
+                    optional: true,
+                    source_span,
+                },
+                &allocator,
+            ));
+        }
+        IrExpression::SafeKeyedRead(k) => {
+            let receiver = std::mem::replace(k.receiver.as_mut(), make_placeholder(allocator));
+            let key = std::mem::replace(k.index.as_mut(), make_placeholder(allocator));
+            let source_span = k.source_span;
+            *expr = IrExpression::ResolvedKeyedRead(ArenaBox::new_in(
+                ResolvedKeyedReadExpr {
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    key: ArenaBox::new_in(key, &allocator),
+                    optional: true,
+                    source_span,
+                },
+                &allocator,
+            ));
+        }
+        IrExpression::SafeInvokeFunction(c) => {
+            let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
+            let args = std::mem::replace(&mut c.args, ArenaVec::new_in(&allocator));
+            let source_span = c.source_span;
+            *expr = IrExpression::ResolvedCall(ArenaBox::new_in(
+                ResolvedCallExpr {
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    args,
+                    optional: true,
+                    source_span,
+                },
+                &allocator,
+            ));
+        }
+        _ => {}
     }
 }
 
@@ -251,12 +369,12 @@ where
         // Create: (tmp = guard, body(tmp))
         let assign_temp = IrExpression::AssignTemporary(ArenaBox::new_in(
             AssignTemporaryExpr {
-                expr: ArenaBox::new_in(guard, allocator),
+                expr: ArenaBox::new_in(guard, &allocator),
                 xref,
                 name: None, // Name is resolved in a later phase
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         let read_temp = IrExpression::ReadTemporary(ArenaBox::new_in(
@@ -265,12 +383,12 @@ where
                 name: None, // Name is resolved in a later phase
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         SafeTernaryExpr {
-            guard: ArenaBox::new_in(assign_temp, allocator),
-            expr: ArenaBox::new_in(body(read_temp), allocator),
+            guard: ArenaBox::new_in(assign_temp, &allocator),
+            expr: ArenaBox::new_in(body(read_temp), &allocator),
             source_span: None,
         }
     } else {
@@ -278,8 +396,8 @@ where
         let guard_clone = guard.clone_in(allocator);
 
         SafeTernaryExpr {
-            guard: ArenaBox::new_in(guard, allocator),
-            expr: ArenaBox::new_in(body(guard_clone), allocator),
+            guard: ArenaBox::new_in(guard, &allocator),
+            expr: ArenaBox::new_in(body(guard_clone), &allocator),
             source_span: None,
         }
     }
@@ -334,7 +452,7 @@ fn has_safe_ternary_receiver(e: &IrExpression<'_>) -> bool {
 fn make_placeholder<'a>(allocator: &'a Allocator) -> IrExpression<'a> {
     IrExpression::Empty(ArenaBox::new_in(
         crate::ir::expression::EmptyExpr { source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -359,7 +477,7 @@ fn extract_access_info<'a>(
         }
         IrExpression::SafeInvokeFunction(c) => {
             let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
-            let mut args = ArenaVec::with_capacity_in(c.args.len(), allocator);
+            let mut args = ArenaVec::with_capacity_in(c.args.len(), &allocator);
             for arg in c.args.iter() {
                 args.push(arg.clone_in(allocator));
             }
@@ -380,7 +498,7 @@ fn extract_access_info<'a>(
         }
         IrExpression::ResolvedCall(c) => {
             let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
-            let mut args = ArenaVec::with_capacity_in(c.args.len(), allocator);
+            let mut args = ArenaVec::with_capacity_in(c.args.len(), &allocator);
             for arg in c.args.iter() {
                 args.push(arg.clone_in(allocator));
             }
@@ -400,26 +518,35 @@ fn create_access_expr<'a>(
         AccessInfo::PropertyRead { name, source_span } => {
             IrExpression::ResolvedPropertyRead(ArenaBox::new_in(
                 ResolvedPropertyReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
                     name,
+                    // Legacy expansion produces a plain read inside the `== null ? null`
+                    // ternary, not native optional chaining.
+                    optional: false,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AccessInfo::KeyedRead { key, source_span } => {
             IrExpression::ResolvedKeyedRead(ArenaBox::new_in(
                 ResolvedKeyedReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
-                    key: ArenaBox::new_in(key, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    key: ArenaBox::new_in(key, &allocator),
+                    optional: false,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AccessInfo::Call { args, source_span } => IrExpression::ResolvedCall(ArenaBox::new_in(
-            ResolvedCallExpr { receiver: ArenaBox::new_in(receiver, allocator), args, source_span },
-            allocator,
+            ResolvedCallExpr {
+                receiver: ArenaBox::new_in(receiver, &allocator),
+                args,
+                optional: false,
+                source_span,
+            },
+            &allocator,
         )),
     }
 }
@@ -476,7 +603,7 @@ fn modify_deepest_safe_ternary<'a>(
     let old_expr = std::mem::replace(deepest.expr.as_mut(), make_placeholder(allocator));
 
     // Replace with the new expression
-    deepest.expr = ArenaBox::new_in(new_expr, allocator);
+    deepest.expr = ArenaBox::new_in(new_expr, &allocator);
 
     old_expr
 }
@@ -512,7 +639,7 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
     }
 
     // Extract access info from the expression
-    let Some((info, mut receiver, is_safe)) = extract_access_info(expr, allocator) else {
+    let Some((info, mut receiver, is_safe)) = extract_access_info(expr, &allocator) else {
         return;
     };
 
@@ -522,24 +649,24 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
         // We use a placeholder to get the old expr out
         let placeholder = IrExpression::Empty(ArenaBox::new_in(
             crate::ir::expression::EmptyExpr { source_span: None },
-            allocator,
+            &allocator,
         ));
-        let dst_expr = modify_deepest_safe_ternary(&mut receiver, placeholder, allocator);
+        let dst_expr = modify_deepest_safe_ternary(&mut receiver, placeholder, &allocator);
 
         if is_safe {
             // Safe access: wrap in a new SafeTernary
             let st = safe_ternary_with_temporary(
                 dst_expr,
-                |r| create_access_expr(r, info, allocator),
+                |r| create_access_expr(r, info, &allocator),
                 ctx,
             );
-            let new_inner = IrExpression::SafeTernary(ArenaBox::new_in(st, allocator));
+            let new_inner = IrExpression::SafeTernary(ArenaBox::new_in(st, &allocator));
             // Put the new SafeTernary back into the deepest slot
-            modify_deepest_safe_ternary(&mut receiver, new_inner, allocator);
+            modify_deepest_safe_ternary(&mut receiver, new_inner, &allocator);
         } else {
             // Unsafe access: just add the access to dst.expr
-            let new_access = create_access_expr(dst_expr, info, allocator);
-            modify_deepest_safe_ternary(&mut receiver, new_access, allocator);
+            let new_access = create_access_expr(dst_expr, info, &allocator);
+            modify_deepest_safe_ternary(&mut receiver, new_access, &allocator);
         }
 
         // Return the receiver (the outer SafeTernary)
@@ -548,8 +675,8 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
         // No SafeTernary in receiver, and this is a safe access - create new SafeTernary
         // (We know is_safe is true here because of the early return above)
         let st =
-            safe_ternary_with_temporary(receiver, |r| create_access_expr(r, info, allocator), ctx);
-        *expr = IrExpression::SafeTernary(ArenaBox::new_in(st, allocator));
+            safe_ternary_with_temporary(receiver, |r| create_access_expr(r, info, &allocator), ctx);
+        *expr = IrExpression::SafeTernary(ArenaBox::new_in(st, &allocator));
     }
 }
 
@@ -559,17 +686,20 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
 pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
 
+    let legacy = job.legacy_optional_chaining();
+
     // Get the current xref counter value
     let starting_xref = job.allocate_xref_id().0;
     let xref_counter = RefCell::new(starting_xref);
     let ctx = SafeTransformContext { allocator, next_xref: xref_counter };
 
-    // Transform safe access expressions to SafeTernary
+    // Expand each safe access per the resolved mode, unwrapping any
+    // `$safeNavigationMigration(...)` wrapper as it is reached.
     for op in job.root.create.iter_mut() {
         transform_expressions_in_create_op(
             op,
-            &|expr, _flags| {
-                safe_transform(expr, &ctx);
+            &|expr, flags| {
+                expand_safe_access(expr, &ctx, legacy, flags);
             },
             VisitorContextFlag::NONE,
         );
@@ -577,8 +707,8 @@ pub fn expand_safe_reads_for_host(job: &mut HostBindingCompilationJob<'_>) {
     for op in job.root.update.iter_mut() {
         transform_expressions_in_update_op(
             op,
-            &|expr, _flags| {
-                safe_transform(expr, &ctx);
+            &|expr, flags| {
+                expand_safe_access(expr, &ctx, legacy, flags);
             },
             VisitorContextFlag::NONE,
         );

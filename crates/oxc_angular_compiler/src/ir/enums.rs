@@ -264,6 +264,9 @@ pub enum ExpressionKind {
     ArrowFunction,
     /// Parenthesized expression.
     Parenthesized,
+    /// `$safeNavigationMigration(...)` wrapper marking its subtree for legacy
+    /// safe-read semantics (removed by `expandSafeReads`).
+    SafeNavigationMigration,
 }
 
 /// Flags for semantic variables.

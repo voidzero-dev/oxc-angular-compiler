@@ -52,7 +52,7 @@ pub fn compile_pipe_from_metadata<'a>(
     // Create the expression: ɵɵdefinePipe(definitionMap)
     let expression = create_define_pipe_call(allocator, definition_map);
 
-    PipeCompileResult { expression, statements: Vec::new_in(allocator) }
+    PipeCompileResult { expression, statements: Vec::new_in(&allocator) }
 }
 
 /// Builds the definition map for the pipe.
@@ -60,7 +60,7 @@ fn build_definition_map<'a>(
     allocator: &'a Allocator,
     metadata: &R3PipeMetadata<'a>,
 ) -> Vec<'a, LiteralMapEntry<'a>> {
-    let mut entries = Vec::new_in(allocator);
+    let mut entries = Vec::new_in(&allocator);
 
     // name: literal(metadata.pipeName ?? metadata.name)
     let pipe_name = metadata.pipe_name.clone().unwrap_or_else(|| metadata.name.clone());
@@ -68,7 +68,7 @@ fn build_definition_map<'a>(
         Ident::from("name"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(pipe_name), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -85,7 +85,7 @@ fn build_definition_map<'a>(
         Ident::from("pure"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(metadata.pure), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -96,7 +96,7 @@ fn build_definition_map<'a>(
             Ident::from("standalone"),
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -116,36 +116,36 @@ fn create_define_pipe_call<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(Identifiers::DEFINE_PIPE),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create the literal map expression
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: definition_map, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Create the function call
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(define_pipe_fn, allocator),
+            fn_expr: Box::new_in(define_pipe_fn, &allocator),
             args,
             pure: true, // definePipe is a pure function
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -160,7 +160,7 @@ mod tests {
         let name = Ident::from("TestPipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestPipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadata {
@@ -190,7 +190,7 @@ mod tests {
         let name = Ident::from("ImpurePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ImpurePipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadata {
@@ -217,7 +217,7 @@ mod tests {
         let name = Ident::from("StandalonePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("StandalonePipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         // Standalone = true means DON'T include standalone in output (it's the default)
@@ -245,7 +245,7 @@ mod tests {
         let name = Ident::from("NonStandalonePipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("NonStandalonePipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         // Non-standalone pipes should include standalone: false

@@ -183,7 +183,10 @@ fn process_update_ops_for_view(
                         target: conversion.target,
                         context: conversion.i18n_context,
                         handle: i18n_attrs.handle,
-                        expression: oxc_allocator::Box::new_in(expr.clone_in(allocator), allocator),
+                        expression: oxc_allocator::Box::new_in(
+                            expr.clone_in(allocator),
+                            &allocator,
+                        ),
                         resolution_time: I18nParamResolutionTime::Creation,
                         usage: I18nExpressionFor::I18nAttribute,
                         name: conversion.name.clone(),

@@ -198,3 +198,53 @@ describe('Linker transform filter matching', () => {
     expect(matches('src/app/app.component.ts')).toBe(false)
   })
 })
+
+/**
+ * Angular's own FESM bundles reach core through a namespace import, so every
+ * forwardRef they ship is `i0.forwardRef(...)` rather than a bare call. The TS
+ * linker matches on `callee.getSymbolName()`, which returns the property name
+ * for a member expression, so both forms must unwrap.
+ *
+ * Verbatim shape from `@angular/forms/fesm2022/signals.mjs`. Leaving the wrapper
+ * in place emits `forwardRef(() => X).ɵfac(t)`; `forwardRef` returns the arrow
+ * function it was handed, so `.ɵfac` is undefined and the provider throws the
+ * first time it is instantiated — which is every `[formField]` render.
+ */
+const NAMESPACED_FORWARD_REF_INJECTABLE = `
+import * as i0 from '@angular/core';
+
+class InputValidityMonitor {
+  static ɵfac = i0.ɵɵngDeclareFactory({
+    minVersion: "12.0.0",
+    version: "22.0.7",
+    ngImport: i0,
+    type: InputValidityMonitor,
+    deps: [],
+    target: i0.ɵɵFactoryTarget.Injectable
+  });
+  static ɵprov = i0.ɵɵngDeclareInjectable({
+    minVersion: "12.0.0",
+    version: "22.0.7",
+    ngImport: i0,
+    type: InputValidityMonitor,
+    providedIn: 'root',
+    useClass: i0.forwardRef(() => AnimationInputValidityMonitor)
+  });
+}
+class AnimationInputValidityMonitor extends InputValidityMonitor {}
+export { InputValidityMonitor };
+`
+
+describe('linker: namespaced forwardRef', () => {
+  it('unwraps `i0.forwardRef()` in useClass so the factory delegates to a real class', () => {
+    const result = linkAngularPackageSync(
+      NAMESPACED_FORWARD_REF_INJECTABLE,
+      '/node_modules/@angular/forms/fesm2022/signals.mjs',
+    )
+
+    expect(result.linked).toBe(true)
+    expect(result.code).toContain('AnimationInputValidityMonitor.ɵfac(__ngFactoryType__)')
+    // `forwardRef(...).ɵfac` is always a TypeError — the wrapper returns the arrow function.
+    expect(result.code).not.toMatch(/forwardRef\(\(\)\s*=>\s*\w+\)\.ɵfac/)
+  })
+})

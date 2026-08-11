@@ -1,6 +1,6 @@
 {
   "name": "shadow_css_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/shadow_css_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/shadow_css/shadow_css_spec.ts",
   "test_groups": [
     {
       "name": "ShadowCss",
@@ -15,7 +15,7 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {c} */ b {c}",
+                  "input": "/* b {} */ b {}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": " b[contenta] {c}",
@@ -38,12 +38,26 @@
               ]
             },
             {
+              "name": "should preserve internal newlines from multiline comments",
+              "path": "ShadowCss/comments/should preserve internal newlines from multiline comments",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": "/* b {}\n */ b {}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": "\n b[contenta] {}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
               "name": "should remove multiple inline comments without adding extra lines",
               "path": "ShadowCss/comments/should remove multiple inline comments without adding extra lines",
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {c} */ b {c} /* a {c} */ a {c}",
+                  "input": "/* b {} */ b {} /* a {} */ a {}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": " b[contenta] {c}  a[contenta] {c}",
@@ -57,18 +71,18 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "b {c} /*# sourceMappingURL=data:x */",
+                  "input": "b {} /*# sourceMappingURL=data:x */",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": "b[contenta] {c} /*# sourceMappingURL=data:x */",
+                  "expected": "b[contenta] {} /*# sourceMappingURL=data:x */",
                   "normalized": false
                 },
                 {
                   "type": "ShimCss",
-                  "input": "b {c}/* #sourceMappingURL=data:x */",
+                  "input": "b {}/* #sourceMappingURL=data:x */",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": "b[contenta] {c}/* #sourceMappingURL=data:x */",
+                  "expected": "b[contenta] {}/* #sourceMappingURL=data:x */",
                   "normalized": false
                 }
               ]
@@ -79,7 +93,7 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* comment 1 */ /* comment 2 */ b {c}",
+                  "input": "/* comment 1 */ /* comment 2 */ b {}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": "  b[contenta] {c}",
@@ -933,11 +947,6 @@
               "normalized": false
             }
           ]
-        },
-        {
-          "name": "should handle ::shadow",
-          "path": "ShadowCss/should handle ::shadow",
-          "assertions": []
         },
         {
           "name": "should leave calc() unchanged",

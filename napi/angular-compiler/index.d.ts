@@ -768,6 +768,17 @@ export interface TransformOptions {
    * When not set, assumes latest Angular version (v19+ behavior).
    */
   angularVersion?: AngularVersion
+  /**
+   * Override for the `legacyOptionalChaining` Angular compiler option
+   * (`angularCompilerOptions.legacyOptionalChaining` in `tsconfig.json`).
+   *
+   * Controls the safe-navigation operator (`?.`) in template expressions.
+   * When `true`, always emits the legacy `== null ? null` form; when `false`,
+   * emits native optional chaining (yielding `undefined`). When unset, the
+   * default is derived from `angularVersion` (legacy for < v22, modern for
+   * >= v22, legacy when the version is unknown).
+   */
+  legacyOptionalChaining?: boolean
   /** The CSS selector that identifies this component in a template. */
   selector?: string
   /**

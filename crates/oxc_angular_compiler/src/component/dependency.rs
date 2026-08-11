@@ -266,7 +266,7 @@ pub fn compile_inject_dependencies<'a>(
     target: FactoryTarget,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OxcVec<'a, OutputExpression<'a>> {
-    let mut args = OxcVec::with_capacity_in(deps.len(), allocator);
+    let mut args = OxcVec::with_capacity_in(deps.len(), &allocator);
 
     for (index, dep) in deps.iter().enumerate() {
         args.push(compile_inject_dependency(allocator, dep, target, index, namespace_registry));
@@ -363,7 +363,7 @@ fn create_token_expression<'a>(
             // allows using `DIALOG_DATA` directly instead of `i1.DIALOG_DATA`
             return OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: token_name.clone(), source_span: None },
-                allocator,
+                &allocator,
             ));
         }
 
@@ -374,21 +374,21 @@ fn create_token_expression<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: namespace, source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: token_name.clone(),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     } else {
         // Local dependency - use bare token name
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: token_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 }
@@ -400,21 +400,21 @@ fn create_invalid_factory_dep_call<'a>(
 ) -> OutputExpression<'a> {
     let fn_expr = create_angular_fn_ref(allocator, Identifiers::INVALID_FACTORY_DEP);
 
-    let mut args = OxcVec::with_capacity_in(1, allocator);
+    let mut args = OxcVec::with_capacity_in(1, &allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(index as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -425,22 +425,22 @@ fn create_inject_attribute_call<'a>(
 ) -> OutputExpression<'a> {
     let fn_expr = create_angular_fn_ref(allocator, Identifiers::INJECT_ATTRIBUTE);
 
-    let mut args = OxcVec::with_capacity_in(1, allocator);
+    let mut args = OxcVec::with_capacity_in(1, &allocator);
     // Attribute name is passed as a string literal
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(attr_name), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -457,7 +457,7 @@ fn create_inject_call_with_expr<'a>(
     let fn_expr = create_angular_fn_ref(allocator, fn_name);
 
     let capacity = if flags.is_some() { 2 } else { 1 };
-    let mut args = OxcVec::with_capacity_in(capacity, allocator);
+    let mut args = OxcVec::with_capacity_in(capacity, &allocator);
 
     // Token expression (may be a variable reference or namespaced property access)
     args.push(token_expr);
@@ -465,19 +465,19 @@ fn create_inject_call_with_expr<'a>(
     if let Some(flags_value) = flags {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(flags_value as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -491,15 +491,15 @@ fn create_angular_fn_ref<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(fn_name),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 

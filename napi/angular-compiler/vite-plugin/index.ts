@@ -43,6 +43,7 @@ import {
   locateTemplateInArgs,
   locateTemplateStringFor,
 } from './utils/decorator-fields.js'
+import { injectDtsDeclarations } from './utils/dts.js'
 
 /**
  * Plugin options for the Angular Vite plugin.
@@ -244,6 +245,93 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // Cache for resolved resources
   const resourceCache = new Map<string, string>()
 
+  // Preprocessor dependencies of each compiled style (Sass partials pulled in
+  // through `@use`/`@import`/`meta.load-css`, Less imports, ...), plus the
+  // reverse map from each dependency to the styles compiled from it, so that
+  // editing a shared partial invalidates and re-dispatches every component
+  // style built on top of it.
+  const styleDepsCache = new Map<string, string[]>()
+  const styleDepOwners = new Map<string, Set<string>>()
+
+  // Every file used as a direct `styleUrl` of some component (normalized
+  // paths). Tracked independently of `styleDepsCache`: a direct style that
+  // fails preprocessing never gets a deps-cache entry, yet must still be
+  // refreshed (and its now-valid imports registered) once the developer fixes
+  // it. Keys are normalized so lookups from `handleHotUpdate` match on
+  // Windows, where cache keys keep the platform-native separators.
+  const directStyleUrls = new Set<string>()
+
+  // Direct component owners of each compiled style (normalized style path →
+  // component files referencing it as a styleUrl). Unlike
+  // `resourceToComponent`, this is multi-valued: a style shared by several
+  // components must dispatch HMR to every one of them when the style or one of
+  // its preprocessor deps changes.
+  const styleComponentOwners = new Map<string, Set<string>>()
+
+  // Record the preprocessor dependencies of a compiled style and rebuild the
+  // reverse map (dep -> owning styles). Replaces any previous registration for
+  // the style, so it is safe to call again whenever the style is (re)compiled
+  // with fresh deps — the initial transform, or HMR after the style file
+  // changed its `@use`/`@import` list. The style itself is never registered as
+  // its own dependency.
+  function registerStyleDeps(stylePath: string, deps: Iterable<string> | undefined): void {
+    const normalizedStylePath = normalizePath(stylePath)
+    const fresh = deps ? Array.from(deps, (dep) => normalizePath(dep)) : []
+
+    // Drop this style from its previously registered deps' owner sets.
+    for (const oldDep of styleDepsCache.get(normalizedStylePath) ?? []) {
+      if (oldDep === normalizedStylePath) continue
+      const owners = styleDepOwners.get(oldDep)
+      if (owners) {
+        owners.delete(normalizedStylePath)
+        if (owners.size === 0) styleDepOwners.delete(oldDep)
+      }
+    }
+
+    styleDepsCache.set(normalizedStylePath, fresh)
+
+    // Register this style as an owner of each fresh dep. Cache keys and owner
+    // values are normalized so lookups from handleHotUpdate (which receives
+    // normalized ctx.file paths) match on Windows, where path.resolve keeps
+    // backslashes.
+    for (const dep of fresh) {
+      if (dep === normalizedStylePath) continue
+      let owners = styleDepOwners.get(dep)
+      if (!owners) styleDepOwners.set(dep, (owners = new Set()))
+      owners.add(normalizedStylePath)
+    }
+  }
+
+  // Re-read and re-preprocess a style file so its dependency registration in
+  // `styleDepsCache`/`styleDepOwners` reflects the current `@use`/`@import`
+  // set. Without this, a partial added or switched via HMR would never be
+  // registered, and edits to it would not dispatch component updates until a
+  // full reload or another component transform. Best-effort: on unreadable or
+  // transiently-empty files (truncate phase of an atomic write) the previous
+  // registration is kept.
+  async function refreshStyleDeps(stylePath: string): Promise<void> {
+    if (!resolvedConfig) return
+    let content: string
+    try {
+      content = await readFile(stylePath, 'utf-8')
+    } catch {
+      return
+    }
+    if (!content.trim()) return
+    try {
+      const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
+      registerStyleDeps(stylePath, processed.deps)
+      // A style edited via HMR can pick up new deps (possibly outside the
+      // dev-server root); register them with the watcher so their edits reach
+      // `handleHotUpdate`.
+      if (watchMode && viteServer && processed.deps) {
+        for (const dep of processed.deps) viteServer.watcher?.add?.(dep)
+      }
+    } catch (e) {
+      console.warn(`Failed to preprocess style: ${stylePath}`, e)
+    }
+  }
+
   // Component IDs (`filePath@ClassName`) queued for HMR delivery. Populated by
   // `handleHotUpdate` when an external resource or inline template/style change
   // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
@@ -260,6 +348,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // before and after a save, we know only the template / styles changed and
   // can dispatch an HMR update instead of a full reload.
   const componentMetadataCache = new Map<string, string>()
+
+  // Angular Ivy `.d.ts` static member declarations collected across the build,
+  // keyed by module id. Populated during `transform` in `compilationMode:
+  // 'partial'` (library) builds and consumed by `dtsPlugin`'s `generateBundle`
+  // to augment the declaration files a separate dts generator emits.
+  //
+  // Keyed by module (not class name) so `vite build --watch` rebuilds can evict
+  // a module's prior declarations before re-transforming it. Otherwise removing
+  // a decorator — which makes the quick decorator check early-return, skipping
+  // the transform entirely — would leave the old `ɵfac`/`ɵcmp` entries in place
+  // and `generateBundle` would re-inject Ivy metadata into a now-plain class.
+  const collectedDtsDeclarations = new Map<string, Array<{ className: string; members: string }>>()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -293,14 +393,15 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       const templatePath = resolve(dir, templateUrl)
       dependencies.push(templatePath)
 
-      let content = resourceCache.get(templatePath)
+      const normalizedTemplatePath = normalizePath(templatePath)
+      let content = resourceCache.get(normalizedTemplatePath)
       if (!content) {
         try {
           content = await readFile(templatePath, 'utf-8')
           if (options.templateTransform) {
             content = options.templateTransform(content, templatePath)
           }
-          resourceCache.set(templatePath, content)
+          resourceCache.set(normalizedTemplatePath, content)
         } catch {
           console.warn(`Failed to read template: ${templatePath}`)
           continue
@@ -312,9 +413,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     // Resolve styles
     for (const styleUrl of styleUrls) {
       const stylePath = resolve(dir, styleUrl)
+      const normalizedStylePath = normalizePath(stylePath)
+      // Register as a direct style regardless of preprocessing outcome, so the
+      // HMR refresh still runs for styles that initially failed to compile.
+      directStyleUrls.add(normalizedStylePath)
       dependencies.push(stylePath)
 
-      let content = resourceCache.get(stylePath)
+      let content = resourceCache.get(normalizedStylePath)
       if (!content) {
         try {
           content = await readFile(stylePath, 'utf-8')
@@ -323,16 +428,28 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             try {
               const processed = await preprocessCSS(content, stylePath, resolvedConfig as any)
               content = processed.code
+              registerStyleDeps(stylePath, processed.deps)
             } catch (e) {
               console.warn(`Failed to preprocess style: ${stylePath}`, e)
             }
           }
-          resourceCache.set(stylePath, content)
+          resourceCache.set(normalizedStylePath, content)
         } catch {
           console.warn(`Failed to read style: ${stylePath}`)
           continue
         }
       }
+
+      // Watch each transitive dep (it may resolve outside the dev-server
+      // root, e.g. a shared monorepo package), but never register it in
+      // `resourceToComponent`: that map is single-owner per resource, and a
+      // transitive dep would clobber the direct styleUrl/templateUrl mapping
+      // of another component.
+      for (const dep of styleDepsCache.get(normalizedStylePath) ?? []) {
+        if (dep === normalizedStylePath) continue
+        if (watchMode && viteServer) viteServer.watcher?.add?.(dep)
+      }
+
       styles[styleUrl] = [content]
     }
 
@@ -601,14 +718,23 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             return
           }
 
+          // Library builds: evict any declarations this module contributed on a
+          // previous (watch) pass before re-deriving them below. Done ahead of
+          // the decorator early-return so a class that just lost its decorator
+          // doesn't keep stale Ivy metadata in the regenerated `.d.ts`.
+          if (pluginOptions.compilationMode === 'partial') {
+            collectedDtsDeclarations.delete(id)
+          }
+
           // Quick check for Angular decorators - avoids parsing files without them
-          // OXC handles @Component, @Directive, @NgModule, @Injectable, and @Pipe
+          // OXC handles @Component, @Directive, @NgModule, @Injectable, @Pipe, @Service
           const hasAngularDecorator =
             code.includes('@Component') ||
             code.includes('@Directive') ||
             code.includes('@NgModule') ||
             code.includes('@Injectable') ||
-            code.includes('@Pipe')
+            code.includes('@Pipe') ||
+            code.includes('@Service')
           if (!hasAngularDecorator) {
             return
           }
@@ -628,10 +754,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
           // Track dependencies for resource cache invalidation and HMR.
           // We don't call addWatchFile (which would create modules in Vite's
-          // graph) or maintain a custom watcher — Vite's chokidar already
-          // sees these files via its normal HMR pipeline, and our
-          // `handleHotUpdate` hook below dispatches based on
-          // `resourceToComponent` membership.
+          // graph) or maintain a custom watcher — Vite's chokidar sees the
+          // root tree via its normal HMR pipeline, and our `handleHotUpdate`
+          // hook below dispatches based on `resourceToComponent` membership.
+          // Preprocessor deps can resolve outside the root (shared monorepo
+          // packages, configured include paths), so those are registered with
+          // the watcher explicitly below.
           if (watchMode && viteServer) {
             // Prune stale reverse mappings: if this component previously
             // referenced different resources (e.g., templateUrl was renamed),
@@ -643,11 +771,26 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 resourceToComponent.delete(resource)
               }
             }
+            for (const [style, owners] of styleComponentOwners) {
+              if (owners.has(actualId) && !newDeps.has(style)) {
+                owners.delete(actualId)
+                if (owners.size === 0) styleComponentOwners.delete(style)
+              }
+            }
 
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
               resourceToComponent.set(normalizedDep, actualId)
+              // Every component that uses a style directly is an owner of it.
+              if (directStyleUrls.has(normalizedDep)) {
+                let owners = styleComponentOwners.get(normalizedDep)
+                if (!owners) styleComponentOwners.set(normalizedDep, (owners = new Set()))
+                owners.add(actualId)
+              }
+              // Watch the file so edits reach `handleHotUpdate` even when it
+              // lives outside the dev-server root.
+              viteServer.watcher?.add?.(dep)
             }
           }
 
@@ -670,6 +813,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
           for (const warning of result.warnings) {
             this.warn(warning.message)
+          }
+
+          // Library builds: stash the Ivy `.d.ts` member declarations for this
+          // file so `dtsPlugin` can splice them into the emitted declarations.
+          if (pluginOptions.compilationMode === 'partial' && result.dtsDeclarations.length > 0) {
+            collectedDtsDeclarations.set(
+              id,
+              result.dtsDeclarations.map((decl) => ({
+                className: decl.className,
+                members: decl.members,
+              })),
+            )
           }
 
           // Track component IDs for HMR — one entry per @Component class.
@@ -799,19 +954,74 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // resources (e.g. global stylesheets in main.ts) fall through to
         // Vite's default CSS HMR pipeline so PostCSS/Tailwind etc. still
         // process them.
-        if (/\.(html?|css|scss|sass|less)$/.test(ctx.file)) {
-          if (resourceToComponent.has(normalizedFile)) {
-            const componentFile = resourceToComponent.get(normalizedFile)!
-            resourceCache.delete(normalizedFile)
-            // resourceToComponent only tracks one owner per resource; if a
-            // templateUrl/styleUrl is shared across multiple components in
-            // the same file, only the registered owner receives HMR.
-            if (dispatchAllComponentsInFile(componentFile)) {
-              debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
-              return []
+        // Every Vite-supported stylesheet language (CSS, Sass/SCSS, Less,
+        // Stylus, PostCSS, SugarSS) plus HTML templates: preprocessCSS reports
+        // deps for all of them, and their partials must reach this branch.
+        if (/\.(html?|css|scss|sass|less|styl|stylus|pcss|postcss|sss)$/.test(ctx.file)) {
+          let handled = false
+          // Shared preprocessor dependency (e.g. a Sass partial): rebuild every
+          // style compiled from it and HMR each owning component.
+          if (styleDepOwners.has(normalizedFile)) {
+            // Snapshot the owners: refreshStyleDeps mutates the owner sets via
+            // registerStyleDeps, and a re-added style would otherwise be
+            // visited again during live Set iteration.
+            for (const stylePath of Array.from(styleDepOwners.get(normalizedFile)!)) {
+              resourceCache.delete(stylePath)
+              // Rebuild the owning style's dependency registration: its dep
+              // list includes the edited partial transitively, and if that
+              // partial switched a nested `@use`/`@import`, the newly loaded
+              // file must be tracked here too.
+              await refreshStyleDeps(stylePath)
+              // A style shared by several components updates every one of
+              // them (resourceToComponent is single-valued).
+              for (const owner of styleComponentOwners.get(normalizePath(stylePath)) ?? []) {
+                if (dispatchAllComponentsInFile(owner)) {
+                  debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, owner)
+                  handled = true
+                }
+              }
             }
           }
-          // Not a tracked component resource — let Vite handle it.
+          // A changed file can be BOTH a shared dep of one component's style
+          // and another component's direct templateUrl/styleUrl — process both
+          // roles before returning (no early return above). Direct styles are
+          // also reachable via styleComponentOwners alone: once the last
+          // resourceToComponent owner switches styles, its prune removes the
+          // single-valued entry while the remaining shared-style owners stay.
+          if (resourceToComponent.has(normalizedFile) || styleComponentOwners.has(normalizedFile)) {
+            // Stylesheets that only appear as transitive deps of other styles
+            // (never used as a direct styleUrl) were already handled by the
+            // shared-dep branch; skip them here to avoid a duplicate update.
+            const isDirectStyle = directStyleUrls.has(normalizedFile)
+            if (!(handled && !isDirectStyle)) {
+              resourceCache.delete(normalizedFile)
+              if (isDirectStyle) {
+                // Refresh dependency registration only for actual styles —
+                // never run HTML templates through the CSS preprocessor
+                // pipeline.
+                await refreshStyleDeps(ctx.file)
+                // A style shared by several components updates every one of
+                // them (resourceToComponent is single-valued).
+                for (const owner of styleComponentOwners.get(normalizedFile) ?? []) {
+                  if (dispatchAllComponentsInFile(owner)) {
+                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                    handled = true
+                  }
+                }
+              } else {
+                const componentFile = resourceToComponent.get(normalizedFile)
+                if (componentFile && dispatchAllComponentsInFile(componentFile)) {
+                  debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
+                  handled = true
+                }
+              }
+            }
+          }
+          // Angular HMR (component updates) has been dispatched for any
+          // tracked resources. Modules still in Vite's graph — e.g. a global
+          // stylesheet that imports the same partial — must keep flowing
+          // through Vite's default pipeline; returning [] would drop them and
+          // leave that CSS stale.
           return ctx.modules
         }
 
@@ -933,6 +1143,58 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   /**
    * Plugin to encapsulate component styles.
    */
+  /**
+   * Augment library `.d.ts` files with Angular's Ivy type declarations.
+   *
+   * Vite/Rolldown don't emit declarations themselves — a separate dts
+   * generator (rolldown-plugin-dts, vite-plugin-dts, tsdown, `tsc`) produces
+   * the base `.d.ts`. This plugin runs after them (`enforce: 'post'`) and
+   * splices the static `ɵfac`/`ɵcmp`/… members collected during `transform`
+   * into the matching classes so consumers get full template type-checking.
+   *
+   * Only active in `compilationMode: 'partial'` (library) builds; app builds
+   * collect nothing, so this is a no-op there.
+   */
+  function dtsPlugin(): Plugin {
+    return {
+      name: '@oxc-angular/vite-dts',
+      enforce: 'post',
+      generateBundle(_outputOptions, bundle) {
+        if (pluginOptions.compilationMode !== 'partial') return
+        if (collectedDtsDeclarations.size === 0) return
+
+        // Flatten every module's declarations into a class-name-keyed list.
+        // A library publishes one class per name; if names ever collide the
+        // last module wins, matching the previous (class-name-keyed) behavior.
+        const byClassName = new Map<string, string>()
+        for (const moduleDecls of collectedDtsDeclarations.values()) {
+          for (const decl of moduleDecls) {
+            byClassName.set(decl.className, decl.members)
+          }
+        }
+        const declarations = Array.from(byClassName, ([className, members]) => ({
+          className,
+          members,
+        }))
+
+        for (const file of Object.values(bundle)) {
+          if (file.type !== 'asset') continue
+          if (!file.fileName.endsWith('.d.ts')) continue
+
+          const source =
+            typeof file.source === 'string'
+              ? file.source
+              : Buffer.from(file.source).toString('utf-8')
+
+          const augmented = injectDtsDeclarations(source, declarations)
+          if (augmented !== source) {
+            file.source = augmented
+          }
+        }
+      },
+    }
+  }
+
   function stylesPlugin(): Plugin {
     return {
       name: '@oxc-angular/vite-styles',
@@ -965,6 +1227,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   return [
     angularPlugin(),
     stylesPlugin(),
+    dtsPlugin(),
     angularLinkerPlugin(),
     pluginOptions.jit &&
       jitPlugin({

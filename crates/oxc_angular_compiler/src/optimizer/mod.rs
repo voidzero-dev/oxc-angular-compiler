@@ -119,7 +119,7 @@ pub fn optimize(
     let parser_result = Parser::new(allocator, code, source_type).parse();
 
     // If parsing failed, return original code
-    if parser_result.panicked || !parser_result.errors.is_empty() {
+    if parser_result.panicked || !parser_result.diagnostics.is_empty() {
         return OptimizeResult { code: code.to_string(), map: None };
     }
 

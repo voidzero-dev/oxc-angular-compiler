@@ -1,0 +1,57 @@
+{
+  "name": "inline_comment_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/ml_parser/inline_comment_spec.ts",
+  "test_groups": [
+    {
+      "name": "Inline comments in attributes",
+      "groups": [],
+      "tests": [
+        {
+          "name": "should ignore single line comments between attributes",
+          "path": "Inline comments in attributes/should ignore single line comments between attributes",
+          "assertions": []
+        },
+        {
+          "name": "should ignore single line comments between inputs and outputs",
+          "path": "Inline comments in attributes/should ignore single line comments between inputs and outputs",
+          "assertions": []
+        },
+        {
+          "name": "should ignore single line comments at the end of tag",
+          "path": "Inline comments in attributes/should ignore single line comments at the end of tag",
+          "assertions": []
+        },
+        {
+          "name": "should handle commented out attribute",
+          "path": "Inline comments in attributes/should handle commented out attribute",
+          "assertions": []
+        },
+        {
+          "name": "should comment an attribute with a // on a new line",
+          "path": "Inline comments in attributes/should comment an attribute with a // on a new line",
+          "assertions": []
+        },
+        {
+          "name": "should ignore multi-line comments between attributes",
+          "path": "Inline comments in attributes/should ignore multi-line comments between attributes",
+          "assertions": []
+        },
+        {
+          "name": "should ignore multi-line comments at the end of tag",
+          "path": "Inline comments in attributes/should ignore multi-line comments at the end of tag",
+          "assertions": []
+        },
+        {
+          "name": "should handle * inside multi-line comments",
+          "path": "Inline comments in attributes/should handle * inside multi-line comments",
+          "assertions": []
+        },
+        {
+          "name": "should maintain correct source spans with comments",
+          "path": "Inline comments in attributes/should maintain correct source spans with comments",
+          "assertions": []
+        }
+      ]
+    }
+  ]
+}

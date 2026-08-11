@@ -170,7 +170,7 @@ mod tests {
         let name = Ident::from("TestPipe");
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestPipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3PipeMetadataBuilder::new(name.clone(), type_expr)
@@ -194,9 +194,9 @@ mod tests {
                     value: LiteralValue::String(Ident::from("MyService")),
                     source_span: None,
                 },
-                &allocator,
+                &&allocator,
             )),
-            &allocator,
+            &&allocator,
         );
 
         let dep = R3DependencyMetadata::new(token);

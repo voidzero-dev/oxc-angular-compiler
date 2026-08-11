@@ -1,6 +1,6 @@
 {
   "name": "dom_element_schema_registry_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/schema/dom_element_schema_registry_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/schema/dom_element_schema_registry_spec.ts",
   "test_groups": [
     {
       "name": "DOMElementSchema",
@@ -17,6 +17,27 @@
             {
               "name": "should support <ng-content>",
               "path": "DOMElementSchema/Angular custom elements/should support <ng-content>",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "Custom XML / XHTML namespaces",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should support elements with custom namespaces",
+              "path": "DOMElementSchema/Custom XML / XHTML namespaces/should support elements with custom namespaces",
+              "assertions": []
+            },
+            {
+              "name": "should support properties on custom namespaced elements",
+              "path": "DOMElementSchema/Custom XML / XHTML namespaces/should support properties on custom namespaced elements",
+              "assertions": []
+            },
+            {
+              "name": "should return correct security contexts for custom namespaced elements",
+              "path": "DOMElementSchema/Custom XML / XHTML namespaces/should return correct security contexts for custom namespaced elements",
               "assertions": []
             }
           ]

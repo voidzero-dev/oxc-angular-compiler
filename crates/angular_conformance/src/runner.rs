@@ -75,7 +75,7 @@ impl ConformanceRunner {
             // Write to JSON file
             let fixture_path = fixtures_dir.join(format!("{spec_name}.json"));
             let json = serde_json::to_string_pretty(&suite).expect("Failed to serialize");
-            fs::write(&fixture_path, json).expect("Failed to write fixture");
+            fs::write(&fixture_path, format!("{json}\n")).expect("Failed to write fixture");
 
             if self.options.debug {
                 println!("  Written to: {}", fixture_path.display());

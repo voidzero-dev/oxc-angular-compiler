@@ -123,6 +123,9 @@ fn expression_contains_dollar_event<'a>(
 ) -> bool {
     match expr {
         IrExpression::LexicalRead(lexical) => lexical.name.as_str() == DOLLAR_EVENT,
+        IrExpression::SafeNavigationMigration(m) => {
+            expression_contains_dollar_event(&m.expr, expressions)
+        }
         IrExpression::SafeTernary(st) => {
             expression_contains_dollar_event(&st.guard, expressions)
                 || expression_contains_dollar_event(&st.expr, expressions)

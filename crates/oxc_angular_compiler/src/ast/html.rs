@@ -524,9 +524,9 @@ mod tests {
             name: Ident::from("span"),
             component_prefix: None,
             component_tag_name: None,
-            attrs: Vec::new_in(&allocator),
-            directives: Vec::new_in(&allocator),
-            children: Vec::new_in(&allocator),
+            attrs: Vec::new_in(&&allocator),
+            directives: Vec::new_in(&&allocator),
+            children: Vec::new_in(&&allocator),
             span: Span::default(),
             start_span: Span::default(),
             end_span: None,
@@ -539,9 +539,9 @@ mod tests {
             name: Ident::from("p"),
             component_prefix: None,
             component_tag_name: None,
-            attrs: Vec::new_in(&allocator),
-            directives: Vec::new_in(&allocator),
-            children: Vec::new_in(&allocator),
+            attrs: Vec::new_in(&&allocator),
+            directives: Vec::new_in(&&allocator),
+            children: Vec::new_in(&&allocator),
             span: Span::default(),
             start_span: Span::default(),
             end_span: None,
@@ -550,16 +550,16 @@ mod tests {
             is_component: false,
         };
 
-        let mut children = Vec::new_in(&allocator);
-        children.push(HtmlNode::Element(Box::new_in(child1, &allocator)));
-        children.push(HtmlNode::Element(Box::new_in(child2, &allocator)));
+        let mut children = Vec::new_in(&&allocator);
+        children.push(HtmlNode::Element(Box::new_in(child1, &&allocator)));
+        children.push(HtmlNode::Element(Box::new_in(child2, &&allocator)));
 
         let root = HtmlElement {
             name: Ident::from("div"),
             component_prefix: None,
             component_tag_name: None,
-            attrs: Vec::new_in(&allocator),
-            directives: Vec::new_in(&allocator),
+            attrs: Vec::new_in(&&allocator),
+            directives: Vec::new_in(&&allocator),
             children,
             span: Span::default(),
             start_span: Span::default(),
@@ -569,8 +569,8 @@ mod tests {
             is_component: false,
         };
 
-        let mut nodes = Vec::new_in(&allocator);
-        nodes.push(HtmlNode::Element(Box::new_in(root, &allocator)));
+        let mut nodes = Vec::new_in(&&allocator);
+        nodes.push(HtmlNode::Element(Box::new_in(root, &&allocator)));
 
         let mut counter = ElementCounter { count: 0 };
         visit_all(&mut counter, &nodes);
@@ -586,11 +586,11 @@ mod tests {
             value: Ident::from("Hello"),
             span: Span::default(),
             full_start: None,
-            tokens: Vec::new_in(&allocator),
+            tokens: Vec::new_in(&&allocator),
         };
 
-        let mut nodes = Vec::new_in(&allocator);
-        nodes.push(HtmlNode::Text(Box::new_in(text, &allocator)));
+        let mut nodes = Vec::new_in(&&allocator);
+        nodes.push(HtmlNode::Text(Box::new_in(text, &&allocator)));
 
         let mut visited = 0;
         traverse_all(&nodes, |_node| {

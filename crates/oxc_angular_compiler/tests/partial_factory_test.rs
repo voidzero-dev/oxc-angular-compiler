@@ -17,7 +17,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -45,7 +45,7 @@ fn emit(expr: &OutputExpression<'_>) -> String {
 #[test]
 fn simple_injectable_factory_with_one_dep() {
     let allocator = Allocator::default();
-    let mut deps = Vec::new_in(&allocator);
+    let mut deps = Vec::new_in(&&allocator);
     deps.push(R3DependencyMetadata::simple(read_var(&allocator, "HttpClient")));
 
     let meta =
@@ -83,7 +83,7 @@ fn factory_with_type_only_invalid_dep_coerces_to_invalid() {
     // Matches full-mode behavior at factory/compiler.rs:143 — any constructor
     // param resolving to a type-only import poisons the whole factory.
     let allocator = Allocator::default();
-    let mut deps = Vec::new_in(&allocator);
+    let mut deps = Vec::new_in(&&allocator);
     let mut poisoned = R3DependencyMetadata::simple(read_var(&allocator, "TypeOnlyToken"));
     poisoned.type_only_invalid = true;
     deps.push(poisoned);
@@ -99,7 +99,7 @@ fn factory_with_type_only_invalid_dep_coerces_to_invalid() {
 #[test]
 fn factory_with_flag_deps_emits_only_set_flags() {
     let allocator = Allocator::default();
-    let mut deps = Vec::new_in(&allocator);
+    let mut deps = Vec::new_in(&&allocator);
     let mut dep = R3DependencyMetadata::simple(read_var(&allocator, "ParentService"));
     dep.optional = true;
     dep.skip_self = true;
@@ -175,7 +175,7 @@ fn round_trip_through_linker_to_full_factory() {
     use oxc_angular_compiler::link;
 
     let allocator = Allocator::default();
-    let mut deps = Vec::new_in(&allocator);
+    let mut deps = Vec::new_in(&&allocator);
     deps.push(R3DependencyMetadata::simple(read_var(&allocator, "HttpClient")));
 
     let meta =

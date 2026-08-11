@@ -33,11 +33,11 @@ pub fn collapse_singleton_interpolations(job: &mut ComponentCompilationJob<'_>) 
     let allocator = job.allocator;
 
     // Process root view
-    collapse_in_view(&mut job.root.update, allocator);
+    collapse_in_view(&mut job.root.update, &allocator);
 
     // Process embedded views
     for view in job.views.values_mut() {
-        collapse_in_view(&mut view.update, allocator);
+        collapse_in_view(&mut view.update, &allocator);
     }
 }
 
@@ -62,10 +62,10 @@ fn try_collapse_interpolation<'a>(
                     && interp.strings.iter().all(|s| s.as_str().is_empty())
                 {
                     // Clone the inner expression and replace
-                    let cloned_inner = clone_angular_expression(&interp.expressions[0], allocator);
+                    let cloned_inner = clone_angular_expression(&interp.expressions[0], &allocator);
                     *expr = Box::new_in(
-                        IrExpression::Ast(Box::new_in(cloned_inner, allocator)),
-                        allocator,
+                        IrExpression::Ast(Box::new_in(cloned_inner, &allocator)),
+                        &allocator,
                     );
                 }
             }
@@ -78,7 +78,7 @@ fn try_collapse_interpolation<'a>(
             {
                 // Clone the inner IR expression and replace
                 let cloned_inner = interp.expressions[0].clone_in(allocator);
-                *expr = Box::new_in(cloned_inner, allocator);
+                *expr = Box::new_in(cloned_inner, &allocator);
             }
         }
         _ => {}
@@ -95,16 +95,16 @@ fn collapse_in_view<'a>(
     while cursor.move_next() {
         match cursor.current_mut() {
             Some(UpdateOp::Attribute(attr)) => {
-                try_collapse_interpolation(&mut attr.expression, allocator);
+                try_collapse_interpolation(&mut attr.expression, &allocator);
             }
             Some(UpdateOp::StyleProp(style)) => {
-                try_collapse_interpolation(&mut style.expression, allocator);
+                try_collapse_interpolation(&mut style.expression, &allocator);
             }
             Some(UpdateOp::StyleMap(style)) => {
-                try_collapse_interpolation(&mut style.expression, allocator);
+                try_collapse_interpolation(&mut style.expression, &allocator);
             }
             Some(UpdateOp::ClassMap(class)) => {
-                try_collapse_interpolation(&mut class.expression, allocator);
+                try_collapse_interpolation(&mut class.expression, &allocator);
             }
             _ => {}
         }
@@ -115,5 +115,5 @@ fn collapse_in_view<'a>(
 ///
 /// Host version - only processes the root unit (no embedded views).
 pub fn collapse_singleton_interpolations_for_host(job: &mut HostBindingCompilationJob<'_>) {
-    collapse_in_view(&mut job.root.update, job.allocator);
+    collapse_in_view(&mut job.root.update, &job.allocator);
 }

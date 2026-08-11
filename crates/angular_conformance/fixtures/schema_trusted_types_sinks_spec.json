@@ -1,6 +1,6 @@
 {
   "name": "trusted_types_sinks_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/schema/trusted_types_sinks_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/schema/trusted_types_sinks_spec.ts",
   "test_groups": [
     {
       "name": "isTrustedTypesSink",

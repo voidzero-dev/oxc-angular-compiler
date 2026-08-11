@@ -62,8 +62,8 @@ pub fn resolve_names(job: &mut ComponentCompilationJob<'_>) {
         let expressions = unsafe { &*expression_store_ptr };
 
         // Process create ops with their own scope (no update scope merged in)
-        process_lexical_scope_create(root_xref, &mut view.create, None, allocator, expressions);
-        process_lexical_scope_update(root_xref, &mut view.update, None, allocator, expressions);
+        process_lexical_scope_create(root_xref, &mut view.create, None, &allocator, expressions);
+        process_lexical_scope_update(root_xref, &mut view.update, None, &allocator, expressions);
     }
 
     // Verify no LexicalRead expressions remain after resolution.
@@ -213,7 +213,7 @@ fn process_lexical_scope_create<'a>(
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
-                                allocator,
+                                &allocator,
                                 expressions,
                             );
                         },
@@ -227,7 +227,7 @@ fn process_lexical_scope_create<'a>(
                         &handler_scope,
                         root_xref,
                         current_saved_view.as_ref(),
-                        allocator,
+                        &allocator,
                         expressions,
                     );
                 }
@@ -245,7 +245,7 @@ fn process_lexical_scope_create<'a>(
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
-                                allocator,
+                                &allocator,
                                 expressions,
                             );
                         },
@@ -266,7 +266,7 @@ fn process_lexical_scope_create<'a>(
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
-                                allocator,
+                                &allocator,
                                 expressions,
                             );
                         },
@@ -287,7 +287,7 @@ fn process_lexical_scope_create<'a>(
                                 &handler_scope,
                                 root_xref,
                                 current_saved_view.as_ref(),
-                                allocator,
+                                &allocator,
                                 expressions,
                             );
                         },
@@ -310,7 +310,7 @@ fn process_lexical_scope_create<'a>(
                             &scope,
                             root_xref,
                             current_saved_view.as_ref(),
-                            allocator,
+                            &allocator,
                             expressions,
                         );
                     },
@@ -375,7 +375,7 @@ fn process_lexical_scope_update<'a>(
                     &scope,
                     root_xref,
                     current_saved_view.as_ref(),
-                    allocator,
+                    &allocator,
                     expressions,
                 );
             },
@@ -408,7 +408,7 @@ fn resolve_expression<'a>(
                 // Leave name as None so the naming phase can assign the proper suffixed name
                 *expr = IrExpression::ReadVariable(Box::new_in(
                     ReadVariableExpr { xref, name: None, source_span: lexical.source_span },
-                    allocator,
+                    &allocator,
                 ));
             } else {
                 // Not in scope - access from component context (root view)
@@ -423,14 +423,15 @@ fn resolve_expression<'a>(
                             receiver: Box::new_in(
                                 IrExpression::Context(Box::new_in(
                                     ContextExpr { view: root_xref, source_span: None },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             ),
                             name: lexical.name.clone(),
+                            optional: false,
                             source_span: lexical.source_span,
                         },
-                        allocator,
+                        &allocator,
                     ));
                 }
             }
@@ -451,9 +452,9 @@ fn resolve_expression<'a>(
                                     name: None,
                                     source_span: None,
                                 },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ));
                     }
                 }
@@ -465,7 +466,7 @@ fn resolve_expression<'a>(
             // as ExpressionRef. This handles nested property reads like `todo.done`
             // where the receiver `todo` needs to be resolved to a variable.
             if let Some(resolved) =
-                resolve_angular_expression(ast_expr.as_ref(), scope, root_xref, allocator)
+                resolve_angular_expression(ast_expr.as_ref(), scope, root_xref, &allocator)
             {
                 *expr = resolved;
                 return;
@@ -489,7 +490,7 @@ fn resolve_expression<'a>(
                         // Leave name as None so the naming phase can assign the proper suffixed name
                         *expr = IrExpression::ReadVariable(Box::new_in(
                             ReadVariableExpr { xref, name: None, source_span },
-                            allocator,
+                            &allocator,
                         ));
                         return;
                     }
@@ -514,14 +515,15 @@ fn resolve_expression<'a>(
                             receiver: Box::new_in(
                                 IrExpression::Context(Box::new_in(
                                     ContextExpr { view: root_xref, source_span: None },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             ),
                             name: name.clone(),
+                            optional: false,
                             source_span,
                         },
-                        allocator,
+                        &allocator,
                     ));
                     return;
                 }
@@ -531,7 +533,7 @@ fn resolve_expression<'a>(
             if matches!(ast_expr.as_ref(), AngularExpression::ImplicitReceiver(_)) {
                 *expr = IrExpression::Context(Box::new_in(
                     ContextExpr { view: root_xref, source_span: None },
-                    allocator,
+                    &allocator,
                 ));
             }
         }
@@ -542,7 +544,7 @@ fn resolve_expression<'a>(
 
             // Try to resolve the expression tree recursively
             if let Some(resolved) =
-                resolve_angular_expression(stored_expr, scope, root_xref, allocator)
+                resolve_angular_expression(stored_expr, scope, root_xref, &allocator)
             {
                 *expr = resolved;
             }
@@ -558,7 +560,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -572,11 +574,11 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             for arg in call.args.iter_mut() {
-                resolve_expression(arg, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(arg, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
@@ -586,7 +588,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -597,7 +599,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -605,7 +607,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -616,7 +618,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -624,7 +626,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -638,7 +640,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -646,7 +648,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -657,7 +659,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -671,7 +673,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -679,7 +681,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -687,7 +689,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -699,7 +701,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -711,7 +713,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -719,7 +721,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -731,11 +733,11 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             for arg in safe.args.iter_mut() {
-                resolve_expression(arg, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(arg, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
@@ -746,7 +748,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
             resolve_expression(
@@ -754,7 +756,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -762,28 +764,28 @@ fn resolve_expression<'a>(
         // Literal map (object literal) - resolve all values
         IrExpression::LiteralMap(map) => {
             for value in map.values.iter_mut() {
-                resolve_expression(value, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(value, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
         // Derived literal map (object literal with some resolved values) - resolve all values
         IrExpression::DerivedLiteralMap(map) => {
             for value in map.values.iter_mut() {
-                resolve_expression(value, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(value, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
         // Literal array - resolve all entries
         IrExpression::LiteralArray(arr) => {
             for elem in arr.elements.iter_mut() {
-                resolve_expression(elem, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(elem, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
         // Derived literal array - resolve all entries
         IrExpression::DerivedLiteralArray(arr) => {
             for entry in arr.entries.iter_mut() {
-                resolve_expression(entry, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(entry, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
@@ -794,7 +796,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -806,7 +808,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -818,7 +820,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -830,7 +832,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -842,7 +844,7 @@ fn resolve_expression<'a>(
                 scope,
                 root_xref,
                 saved_view,
-                allocator,
+                &allocator,
                 expressions,
             );
         }
@@ -851,7 +853,7 @@ fn resolve_expression<'a>(
         // - resolve each inner expression so LexicalRead refs to @let vars and pipe args are resolved
         IrExpression::ResolvedTemplateLiteral(tl) => {
             for expr in tl.expressions.iter_mut() {
-                resolve_expression(expr, scope, root_xref, saved_view, allocator, expressions);
+                resolve_expression(expr, scope, root_xref, saved_view, &allocator, expressions);
             }
         }
 
@@ -900,7 +902,7 @@ fn resolve_angular_expression<'a>(
                         // Found in scope - return ReadVariable
                         return Some(IrExpression::ReadVariable(Box::new_in(
                             ReadVariableExpr { xref, name: None, source_span },
-                            allocator,
+                            &allocator,
                         )));
                     }
                 }
@@ -932,29 +934,31 @@ fn resolve_angular_expression<'a>(
                         receiver: Box::new_in(
                             IrExpression::Context(Box::new_in(
                                 ContextExpr { view: root_xref, source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ),
                         name: name.clone(),
+                        optional: false,
                         source_span,
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 // This is a nested property read like item.name
                 // Try to resolve the receiver first
                 if let Some(resolved_receiver) =
-                    resolve_angular_expression(&prop_read.receiver, scope, root_xref, allocator)
+                    resolve_angular_expression(&prop_read.receiver, scope, root_xref, &allocator)
                 {
                     // Receiver was resolved - create ResolvedPropertyRead
                     Some(IrExpression::ResolvedPropertyRead(Box::new_in(
                         ResolvedPropertyReadExpr {
-                            receiver: Box::new_in(resolved_receiver, allocator),
+                            receiver: Box::new_in(resolved_receiver, &allocator),
                             name: prop_read.name.clone(),
+                            optional: false,
                             source_span: Some(prop_read.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )))
                 } else {
                     // Receiver couldn't be resolved - keep as-is
@@ -967,30 +971,30 @@ fn resolve_angular_expression<'a>(
             // ImplicitReceiver by itself becomes Context
             Some(IrExpression::Context(Box::new_in(
                 ContextExpr { view: root_xref, source_span: None },
-                allocator,
+                &allocator,
             )))
         }
 
         AngularExpression::Call(call) => {
             // Resolve the receiver
             let resolved_receiver =
-                resolve_angular_expression(&call.receiver, scope, root_xref, allocator);
+                resolve_angular_expression(&call.receiver, scope, root_xref, &allocator);
 
             // Resolve each argument
-            let mut resolved_args = oxc_allocator::Vec::new_in(allocator);
+            let mut resolved_args = oxc_allocator::Vec::new_in(&allocator);
             let mut any_arg_resolved = false;
 
             for arg in call.args.iter() {
                 if let Some(resolved_arg) =
-                    resolve_angular_expression(arg, scope, root_xref, allocator)
+                    resolve_angular_expression(arg, scope, root_xref, &allocator)
                 {
                     resolved_args.push(resolved_arg);
                     any_arg_resolved = true;
                 } else {
                     // Keep the original argument wrapped as Ast
                     resolved_args.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(arg, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(arg, &allocator),
+                        &allocator,
                     )));
                 }
             }
@@ -1000,18 +1004,19 @@ fn resolve_angular_expression<'a>(
                 let receiver = resolved_receiver.unwrap_or_else(|| {
                     // Keep original receiver wrapped as Ast
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&call.receiver, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(&call.receiver, &allocator),
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::ResolvedCall(Box::new_in(
                     ResolvedCallExpr {
-                        receiver: Box::new_in(receiver, allocator),
+                        receiver: Box::new_in(receiver, &allocator),
                         args: resolved_args,
+                        optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1021,32 +1026,36 @@ fn resolve_angular_expression<'a>(
         AngularExpression::KeyedRead(keyed) => {
             // Resolve receiver for keyed reads like item[0]
             let resolved_receiver =
-                resolve_angular_expression(&keyed.receiver, scope, root_xref, allocator);
+                resolve_angular_expression(&keyed.receiver, scope, root_xref, &allocator);
             // Also try to resolve the key expression
-            let resolved_key = resolve_angular_expression(&keyed.key, scope, root_xref, allocator);
+            let resolved_key = resolve_angular_expression(&keyed.key, scope, root_xref, &allocator);
 
             if resolved_receiver.is_some() || resolved_key.is_some() {
                 // At least one part was resolved, create a ResolvedKeyedRead
                 let receiver = resolved_receiver.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&keyed.receiver, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(
+                            &keyed.receiver,
+                            &allocator,
+                        ),
+                        &allocator,
                     ))
                 });
                 let key = resolved_key.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&keyed.key, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(&keyed.key, &allocator),
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::ResolvedKeyedRead(Box::new_in(
                     ResolvedKeyedReadExpr {
-                        receiver: Box::new_in(receiver, allocator),
-                        key: Box::new_in(key, allocator),
+                        receiver: Box::new_in(receiver, &allocator),
+                        key: Box::new_in(key, &allocator),
+                        optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1056,15 +1065,15 @@ fn resolve_angular_expression<'a>(
         AngularExpression::SafePropertyRead(safe) => {
             // Resolve receiver for safe property reads like item?.name
             if let Some(resolved_receiver) =
-                resolve_angular_expression(&safe.receiver, scope, root_xref, allocator)
+                resolve_angular_expression(&safe.receiver, scope, root_xref, &allocator)
             {
                 Some(IrExpression::ResolvedSafePropertyRead(Box::new_in(
                     ResolvedSafePropertyReadExpr {
-                        receiver: Box::new_in(resolved_receiver, allocator),
+                        receiver: Box::new_in(resolved_receiver, &allocator),
                         name: safe.name.clone(),
                         source_span: Some(safe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1075,35 +1084,35 @@ fn resolve_angular_expression<'a>(
             // Handle binary expressions, especially assignments in event handlers
             // like `todo.done = $event`
             let resolved_left =
-                resolve_angular_expression(&binary.left, scope, root_xref, allocator);
+                resolve_angular_expression(&binary.left, scope, root_xref, &allocator);
             let resolved_right =
-                resolve_angular_expression(&binary.right, scope, root_xref, allocator);
+                resolve_angular_expression(&binary.right, scope, root_xref, &allocator);
 
             if resolved_left.is_some() || resolved_right.is_some() {
                 // At least one side was resolved, create a ResolvedBinary
                 let left = resolved_left.unwrap_or_else(|| {
                     // Wrap original left expression as Ast
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&binary.left, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(&binary.left, &allocator),
+                        &allocator,
                     ))
                 });
                 let right = resolved_right.unwrap_or_else(|| {
                     // Wrap original right expression as Ast
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&binary.right, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(&binary.right, &allocator),
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::ResolvedBinary(Box::new_in(
                     crate::ir::expression::ResolvedBinaryExpr {
                         operator: binary.operation,
-                        left: Box::new_in(left, allocator),
-                        right: Box::new_in(right, allocator),
+                        left: Box::new_in(left, &allocator),
+                        right: Box::new_in(right, &allocator),
                         source_span: Some(binary.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1115,34 +1124,34 @@ fn resolve_angular_expression<'a>(
             // This is similar to ImplicitReceiver but explicit.
             Some(IrExpression::Context(Box::new_in(
                 ContextExpr { view: root_xref, source_span: None },
-                allocator,
+                &allocator,
             )))
         }
 
         AngularExpression::TemplateLiteral(tl) => {
             // Handle template literal expressions like `class {{ item.name }}`
             // Need to resolve any variable references in the expressions
-            let mut resolved_exprs = oxc_allocator::Vec::new_in(allocator);
+            let mut resolved_exprs = oxc_allocator::Vec::new_in(&allocator);
             let mut any_resolved = false;
 
             for expr in tl.expressions.iter() {
                 if let Some(resolved) =
-                    resolve_angular_expression(expr, scope, root_xref, allocator)
+                    resolve_angular_expression(expr, scope, root_xref, &allocator)
                 {
                     resolved_exprs.push(resolved);
                     any_resolved = true;
                 } else {
                     // Keep the original expression wrapped as Ast
                     resolved_exprs.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(expr, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(expr, &allocator),
+                        &allocator,
                     )));
                 }
             }
 
             if any_resolved {
                 // Create a ResolvedTemplateLiteral with the resolved expressions
-                let mut elements = oxc_allocator::Vec::new_in(allocator);
+                let mut elements = oxc_allocator::Vec::new_in(&allocator);
                 for elem in tl.elements.iter() {
                     elements.push(crate::ir::expression::IrTemplateLiteralElement {
                         text: elem.text.clone(),
@@ -1156,7 +1165,7 @@ fn resolve_angular_expression<'a>(
                         expressions: resolved_exprs,
                         source_span: Some(tl.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1166,40 +1175,46 @@ fn resolve_angular_expression<'a>(
         AngularExpression::Conditional(cond) => {
             // Handle conditional (ternary) expressions
             let resolved_condition =
-                resolve_angular_expression(&cond.condition, scope, root_xref, allocator);
+                resolve_angular_expression(&cond.condition, scope, root_xref, &allocator);
             let resolved_true =
-                resolve_angular_expression(&cond.true_exp, scope, root_xref, allocator);
+                resolve_angular_expression(&cond.true_exp, scope, root_xref, &allocator);
             let resolved_false =
-                resolve_angular_expression(&cond.false_exp, scope, root_xref, allocator);
+                resolve_angular_expression(&cond.false_exp, scope, root_xref, &allocator);
 
             if resolved_condition.is_some() || resolved_true.is_some() || resolved_false.is_some() {
                 let condition = resolved_condition.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&cond.condition, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(
+                            &cond.condition,
+                            &allocator,
+                        ),
+                        &allocator,
                     ))
                 });
                 let true_expr = resolved_true.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&cond.true_exp, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(&cond.true_exp, &allocator),
+                        &allocator,
                     ))
                 });
                 let false_expr = resolved_false.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&cond.false_exp, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(
+                            &cond.false_exp,
+                            &allocator,
+                        ),
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::Ternary(Box::new_in(
                     crate::ir::expression::TernaryExpr {
-                        condition: Box::new_in(condition, allocator),
-                        true_expr: Box::new_in(true_expr, allocator),
-                        false_expr: Box::new_in(false_expr, allocator),
+                        condition: Box::new_in(condition, &allocator),
+                        true_expr: Box::new_in(true_expr, &allocator),
+                        false_expr: Box::new_in(false_expr, &allocator),
                         source_span: Some(cond.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1208,20 +1223,20 @@ fn resolve_angular_expression<'a>(
 
         AngularExpression::LiteralMap(map) => {
             // Handle object literals - need to resolve variable references in values
-            let mut resolved_values = oxc_allocator::Vec::new_in(allocator);
+            let mut resolved_values = oxc_allocator::Vec::new_in(&allocator);
             let mut any_resolved = false;
 
             for value in map.values.iter() {
                 if let Some(resolved) =
-                    resolve_angular_expression(value, scope, root_xref, allocator)
+                    resolve_angular_expression(value, scope, root_xref, &allocator)
                 {
                     resolved_values.push(resolved);
                     any_resolved = true;
                 } else {
                     // Keep the original value wrapped as Ast
                     resolved_values.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(value, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(value, &allocator),
+                        &allocator,
                     )));
                 }
             }
@@ -1229,9 +1244,9 @@ fn resolve_angular_expression<'a>(
             if any_resolved {
                 use crate::ast::expression::LiteralMapKey;
                 // Create a DerivedLiteralMap with the resolved values
-                let mut keys = oxc_allocator::Vec::new_in(allocator);
-                let mut quoted = oxc_allocator::Vec::new_in(allocator);
-                let mut spreads = oxc_allocator::Vec::new_in(allocator);
+                let mut keys = oxc_allocator::Vec::new_in(&allocator);
+                let mut quoted = oxc_allocator::Vec::new_in(&allocator);
+                let mut spreads = oxc_allocator::Vec::new_in(&allocator);
                 for key in map.keys.iter() {
                     match key {
                         LiteralMapKey::Property(prop) => {
@@ -1255,7 +1270,7 @@ fn resolve_angular_expression<'a>(
                         spreads,
                         source_span: Some(map.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1264,8 +1279,8 @@ fn resolve_angular_expression<'a>(
 
         AngularExpression::LiteralArray(arr) => {
             // Handle array literals - need to resolve variable references in entries
-            let mut resolved_entries = oxc_allocator::Vec::new_in(allocator);
-            let mut spreads = oxc_allocator::Vec::new_in(allocator);
+            let mut resolved_entries = oxc_allocator::Vec::new_in(&allocator);
+            let mut spreads = oxc_allocator::Vec::new_in(&allocator);
             let mut any_resolved = false;
 
             for entry in arr.expressions.iter() {
@@ -1276,14 +1291,14 @@ fn resolve_angular_expression<'a>(
                     entry
                 };
                 if let Some(resolved) =
-                    resolve_angular_expression(inner, scope, root_xref, allocator)
+                    resolve_angular_expression(inner, scope, root_xref, &allocator)
                 {
                     resolved_entries.push(resolved);
                     any_resolved = true;
                 } else {
                     resolved_entries.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(inner, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(inner, &allocator),
+                        &allocator,
                     )));
                 }
                 spreads.push(is_spread);
@@ -1296,7 +1311,7 @@ fn resolve_angular_expression<'a>(
                         spreads,
                         source_span: Some(arr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1307,14 +1322,14 @@ fn resolve_angular_expression<'a>(
             // Handle prefix not expressions (!expr) - need to resolve variable references
             // in the operand. This is critical for expressions like `!bold` in listeners.
             if let Some(resolved) =
-                resolve_angular_expression(&prefix_not.expression, scope, root_xref, allocator)
+                resolve_angular_expression(&prefix_not.expression, scope, root_xref, &allocator)
             {
                 Some(IrExpression::Not(Box::new_in(
                     crate::ir::expression::NotExpr {
-                        expr: Box::new_in(resolved, allocator),
+                        expr: Box::new_in(resolved, &allocator),
                         source_span: Some(prefix_not.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1324,7 +1339,7 @@ fn resolve_angular_expression<'a>(
         AngularExpression::Unary(unary) => {
             // Handle unary expressions (+expr or -expr) - need to resolve variable references
             if let Some(resolved) =
-                resolve_angular_expression(&unary.expr, scope, root_xref, allocator)
+                resolve_angular_expression(&unary.expr, scope, root_xref, &allocator)
             {
                 Some(IrExpression::Unary(Box::new_in(
                     crate::ir::expression::UnaryExpr {
@@ -1336,10 +1351,10 @@ fn resolve_angular_expression<'a>(
                                 crate::ir::expression::IrUnaryOperator::Minus
                             }
                         },
-                        expr: Box::new_in(resolved, allocator),
+                        expr: Box::new_in(resolved, &allocator),
                         source_span: Some(unary.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1349,14 +1364,14 @@ fn resolve_angular_expression<'a>(
         AngularExpression::TypeofExpression(typeof_expr) => {
             // Handle typeof expressions - need to resolve variable references
             if let Some(resolved) =
-                resolve_angular_expression(&typeof_expr.expression, scope, root_xref, allocator)
+                resolve_angular_expression(&typeof_expr.expression, scope, root_xref, &allocator)
             {
                 Some(IrExpression::Typeof(Box::new_in(
                     crate::ir::expression::TypeofExpr {
-                        expr: Box::new_in(resolved, allocator),
+                        expr: Box::new_in(resolved, &allocator),
                         source_span: Some(typeof_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1366,14 +1381,14 @@ fn resolve_angular_expression<'a>(
         AngularExpression::VoidExpression(void_expr) => {
             // Handle void expressions - need to resolve variable references
             if let Some(resolved) =
-                resolve_angular_expression(&void_expr.expression, scope, root_xref, allocator)
+                resolve_angular_expression(&void_expr.expression, scope, root_xref, &allocator)
             {
                 Some(IrExpression::Void(Box::new_in(
                     crate::ir::expression::VoidExpr {
-                        expr: Box::new_in(resolved, allocator),
+                        expr: Box::new_in(resolved, &allocator),
                         source_span: Some(void_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1383,13 +1398,13 @@ fn resolve_angular_expression<'a>(
         AngularExpression::NonNullAssert(nna) => {
             // Handle non-null assertion expressions (expr!) - need to resolve variable references
             // NonNullAssert expressions are wrapped in Ast since IrExpression doesn't have this variant
-            resolve_angular_expression(&nna.expression, scope, root_xref, allocator)
+            resolve_angular_expression(&nna.expression, scope, root_xref, &allocator)
         }
 
         AngularExpression::ParenthesizedExpression(paren) => {
             // Handle parenthesized expressions - need to resolve variable references
             // within the inner expression
-            resolve_angular_expression(&paren.expression, scope, root_xref, allocator)
+            resolve_angular_expression(&paren.expression, scope, root_xref, &allocator)
         }
 
         AngularExpression::Chain(chain) => {
@@ -1397,7 +1412,7 @@ fn resolve_angular_expression<'a>(
             // Chain is not directly supported in IrExpression, so we need to handle it specially
             let mut any_resolved = false;
             for expr in chain.expressions.iter() {
-                if resolve_angular_expression(expr, scope, root_xref, allocator).is_some() {
+                if resolve_angular_expression(expr, scope, root_xref, &allocator).is_some() {
                     any_resolved = true;
                     break;
                 }
@@ -1417,21 +1432,22 @@ fn resolve_angular_expression<'a>(
         AngularExpression::SafeCall(safe_call) => {
             // Handle safe function calls (fn?.()) - need to resolve receiver and arguments
             let resolved_receiver =
-                resolve_angular_expression(&safe_call.receiver, scope, root_xref, allocator);
+                resolve_angular_expression(&safe_call.receiver, scope, root_xref, &allocator);
 
-            let mut resolved_args = oxc_allocator::Vec::new_in(allocator);
+            let mut resolved_args = oxc_allocator::Vec::new_in(&allocator);
             let mut any_arg_resolved = false;
 
             for arg in safe_call.args.iter() {
-                if let Some(resolved) = resolve_angular_expression(arg, scope, root_xref, allocator)
+                if let Some(resolved) =
+                    resolve_angular_expression(arg, scope, root_xref, &allocator)
                 {
                     resolved_args.push(resolved);
                     any_arg_resolved = true;
                 } else {
                     // Keep the original argument wrapped as Ast
                     resolved_args.push(IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(arg, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(arg, &allocator),
+                        &allocator,
                     )));
                 }
             }
@@ -1441,19 +1457,19 @@ fn resolve_angular_expression<'a>(
                     IrExpression::Ast(Box::new_in(
                         crate::ir::expression::clone_angular_expression(
                             &safe_call.receiver,
-                            allocator,
+                            &allocator,
                         ),
-                        allocator,
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::SafeInvokeFunction(Box::new_in(
                     crate::ir::expression::SafeInvokeFunctionExpr {
-                        receiver: Box::new_in(receiver, allocator),
+                        receiver: Box::new_in(receiver, &allocator),
                         args: resolved_args,
                         source_span: Some(safe_call.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1463,34 +1479,37 @@ fn resolve_angular_expression<'a>(
         AngularExpression::SafeKeyedRead(safe_keyed) => {
             // Handle safe keyed read (obj?.[key]) - need to resolve receiver and key
             let resolved_receiver =
-                resolve_angular_expression(&safe_keyed.receiver, scope, root_xref, allocator);
+                resolve_angular_expression(&safe_keyed.receiver, scope, root_xref, &allocator);
             let resolved_key =
-                resolve_angular_expression(&safe_keyed.key, scope, root_xref, allocator);
+                resolve_angular_expression(&safe_keyed.key, scope, root_xref, &allocator);
 
             if resolved_receiver.is_some() || resolved_key.is_some() {
                 let receiver = resolved_receiver.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
                         crate::ir::expression::clone_angular_expression(
                             &safe_keyed.receiver,
-                            allocator,
+                            &allocator,
                         ),
-                        allocator,
+                        &allocator,
                     ))
                 });
                 let key = resolved_key.unwrap_or_else(|| {
                     IrExpression::Ast(Box::new_in(
-                        crate::ir::expression::clone_angular_expression(&safe_keyed.key, allocator),
-                        allocator,
+                        crate::ir::expression::clone_angular_expression(
+                            &safe_keyed.key,
+                            &allocator,
+                        ),
+                        &allocator,
                     ))
                 });
 
                 Some(IrExpression::SafeKeyedRead(Box::new_in(
                     crate::ir::expression::SafeKeyedReadExpr {
-                        receiver: Box::new_in(receiver, allocator),
-                        index: Box::new_in(key, allocator),
+                        receiver: Box::new_in(receiver, &allocator),
+                        index: Box::new_in(key, &allocator),
                         source_span: Some(safe_keyed.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )))
             } else {
                 None
@@ -1514,8 +1533,8 @@ pub fn resolve_names_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let expressions = unsafe { &*expression_store_ptr };
 
     // Process create ops with their own scope (no update scope merged in)
-    process_lexical_scope_create(root_xref, &mut job.root.create, None, allocator, expressions);
-    process_lexical_scope_update(root_xref, &mut job.root.update, None, allocator, expressions);
+    process_lexical_scope_create(root_xref, &mut job.root.create, None, &allocator, expressions);
+    process_lexical_scope_update(root_xref, &mut job.root.update, None, &allocator, expressions);
 
     // Verify no LexicalRead expressions remain after resolution.
     verify_no_lexical_reads_remain_for_host(job);

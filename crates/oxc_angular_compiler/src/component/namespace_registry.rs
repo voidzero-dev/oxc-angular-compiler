@@ -38,7 +38,7 @@ impl<'a> NamespaceRegistry<'a> {
         }
 
         // Assign new alias
-        let alias = Ident::from_in(format!("i{}", self.next_index).as_str(), self.allocator);
+        let alias = Ident::from_in(format!("i{}", self.next_index).as_str(), &self.allocator);
         self.next_index += 1;
         self.modules.insert(module_path.clone(), alias.clone());
         alias

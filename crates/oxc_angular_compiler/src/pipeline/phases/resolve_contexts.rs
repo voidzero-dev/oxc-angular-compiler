@@ -55,7 +55,7 @@ pub fn resolve_contexts(job: &mut ComponentCompilationJob<'_>) {
                 // and the allocator keeps the data alive.
                 let arrow_fn = unsafe { &mut **fn_ptr };
                 process_lexical_scope_update_vec(
-                    allocator,
+                    &allocator,
                     view_xref,
                     is_root,
                     &mut arrow_fn.ops,
@@ -111,7 +111,7 @@ fn process_lexical_scope_create<'a>(
             CreateOp::Listener(listener) => {
                 // Process listener handler_ops and handler_expression with their own scope
                 process_listener_handler_ops(
-                    allocator,
+                    &allocator,
                     view_xref,
                     is_root,
                     &mut listener.handler_ops,
@@ -122,7 +122,7 @@ fn process_lexical_scope_create<'a>(
             CreateOp::TwoWayListener(listener) => {
                 // TwoWayListener has no handler_expression
                 process_listener_handler_ops(
-                    allocator,
+                    &allocator,
                     view_xref,
                     is_root,
                     &mut listener.handler_ops,
@@ -133,7 +133,7 @@ fn process_lexical_scope_create<'a>(
             CreateOp::AnimationListener(listener) => {
                 // AnimationListener has no handler_expression
                 process_listener_handler_ops(
-                    allocator,
+                    &allocator,
                     view_xref,
                     is_root,
                     &mut listener.handler_ops,
@@ -144,7 +144,7 @@ fn process_lexical_scope_create<'a>(
             CreateOp::Animation(animation) => {
                 // Animation has no handler_expression
                 process_listener_handler_ops(
-                    allocator,
+                    &allocator,
                     view_xref,
                     is_root,
                     &mut animation.handler_ops,
@@ -159,7 +159,7 @@ fn process_lexical_scope_create<'a>(
                 //     if (op.trackByOps !== null) { processLexicalScope(view, op.trackByOps); }
                 if let Some(ref mut track_by_ops) = repeater.track_by_ops {
                     process_lexical_scope_update_vec(
-                        allocator,
+                        &allocator,
                         view_xref,
                         is_root,
                         track_by_ops,
@@ -375,7 +375,7 @@ fn transform_context_expr<'a>(
                 // Ancestor view's context - replace with ReadVariableExpr
                 *expr = IrExpression::ReadVariable(oxc_allocator::Box::new_in(
                     ReadVariableExpr { xref: *var_xref, name: None, source_span: None },
-                    allocator,
+                    &allocator,
                 ));
             }
             None => {

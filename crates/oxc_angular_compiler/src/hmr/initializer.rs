@@ -46,13 +46,13 @@ pub fn compile_hmr_initializer<'a>(
             // Use the assigned_name (e.g., "i0") as a variable reference
             read_var(allocator, &dep.assigned_name)
         }),
-        allocator,
+        &allocator,
     );
 
     // Build local dependencies array
     let locals: Vec<'a, OutputExpression<'a>> = Vec::from_iter_in(
         meta.local_dependencies.iter().map(|l| l.runtime_representation.clone_in(allocator)),
-        allocator,
+        &allocator,
     );
 
     // m.default
@@ -60,7 +60,7 @@ pub fn compile_hmr_initializer<'a>(
 
     // i0.ɵɵreplaceMetadata(Comp, m.default, [...namespaces], [...locals], import.meta, id)
     let replace_call = invoke_fn(
-        allocator,
+        &allocator,
         read_prop(allocator, read_var(allocator, "i0"), Identifiers::REPLACE_METADATA),
         vec![
             meta.component_type.clone_in(allocator),
@@ -75,25 +75,25 @@ pub fn compile_hmr_initializer<'a>(
     // (m) => m.default && ɵɵreplaceMetadata(...)
     let replace_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Ident::from(module_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(module_name) }], &allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(allocator, BinaryOperator::And, default_read, replace_call),
-                allocator,
+                &allocator,
             )),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // i0.ɵɵgetReplaceMetadataURL(id, timestamp, import.meta.url)
     let url = invoke_fn(
-        allocator,
+        &allocator,
         read_prop(allocator, read_var(allocator, "i0"), Identifiers::GET_REPLACE_METADATA_URL),
         vec![
             read_var(allocator, id_name),
             read_var(allocator, timestamp_name),
             read_prop(
-                allocator,
+                &allocator,
                 read_prop(allocator, read_var(allocator, "import"), "meta"),
                 "url",
             ),
@@ -103,11 +103,11 @@ pub fn compile_hmr_initializer<'a>(
     // import(/* @vite-ignore */ url).then((m) => ...)
     let dynamic_import = OutputExpression::DynamicImport(Box::new_in(
         DynamicImportExpr {
-            url: DynamicImportUrl::Expression(Box::new_in(url, allocator)),
+            url: DynamicImportUrl::Expression(Box::new_in(url, &allocator)),
             url_comment: Some(Ident::from("@vite-ignore")),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     let import_then_call =
@@ -117,47 +117,47 @@ pub fn compile_hmr_initializer<'a>(
     let import_callback = OutputStatement::DeclareFunction(Box::new_in(
         DeclareFunctionStmt {
             name: Ident::from(allocator.alloc_str(&import_callback_name)),
-            params: Vec::from_iter_in([FnParam { name: Ident::from(timestamp_name) }], allocator),
-            statements: Vec::from_iter_in([expr_stmt(allocator, import_then_call)], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(timestamp_name) }], &allocator),
+            statements: Vec::from_iter_in([expr_stmt(allocator, import_then_call)], &allocator),
             modifiers: StmtModifier::FINAL,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // (d) => d.id === id && Cmp_HmrLoad(d.timestamp)
     let update_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], &allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(
-                    allocator,
+                    &allocator,
                     BinaryOperator::And,
                     binary_op(
-                        allocator,
+                        &allocator,
                         BinaryOperator::Identical,
                         read_prop(allocator, read_var(allocator, data_name), "id"),
                         read_var(allocator, id_name),
                     ),
                     invoke_fn(
-                        allocator,
+                        &allocator,
                         read_var(allocator, &import_callback_name),
                         vec![read_prop(allocator, read_var(allocator, data_name), "timestamp")],
                     ),
                 ),
-                allocator,
+                &allocator,
             )),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Cmp_HmrLoad(Date.now())
     let initial_call = invoke_fn(
-        allocator,
+        &allocator,
         read_var(allocator, &import_callback_name),
         vec![invoke_fn(
-            allocator,
+            &allocator,
             read_prop(allocator, read_var(allocator, "Date"), "now"),
             vec![],
         )],
@@ -169,7 +169,7 @@ pub fn compile_hmr_initializer<'a>(
 
     // import.meta.hot.on('angular:component-update', updateCallback)
     let hot_listener = invoke_fn(
-        allocator,
+        &allocator,
         read_prop(allocator, hot_read.clone_in(allocator), "on"),
         vec![literal_str(allocator, "angular:component-update"), update_callback],
     );
@@ -178,33 +178,33 @@ pub fn compile_hmr_initializer<'a>(
     // Handles the angular:invalidate event sent when HMR fails
     let invalidate_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], allocator),
+            params: Vec::from_iter_in([FnParam { name: Ident::from(data_name) }], &allocator),
             body: ArrowFunctionBody::Expression(Box::new_in(
                 binary_op(
-                    allocator,
+                    &allocator,
                     BinaryOperator::And,
                     binary_op(
-                        allocator,
+                        &allocator,
                         BinaryOperator::Identical,
                         read_prop(allocator, read_var(allocator, data_name), "id"),
                         read_var(allocator, id_name),
                     ),
                     invoke_fn(
-                        allocator,
+                        &allocator,
                         read_prop(allocator, read_var(allocator, "location"), "reload"),
                         vec![],
                     ),
                 ),
-                allocator,
+                &allocator,
             )),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // import.meta.hot.on('angular:invalidate', invalidateCallback)
     let invalidate_listener = invoke_fn(
-        allocator,
+        &allocator,
         read_prop(allocator, hot_read.clone_in(allocator), "on"),
         vec![literal_str(allocator, "angular:invalidate"), invalidate_callback],
     );
@@ -226,33 +226,33 @@ pub fn compile_hmr_initializer<'a>(
     // The empty callback means we handle updates via custom events, not accept() itself
     let empty_callback = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::new_in(allocator),
-            body: ArrowFunctionBody::Statements(Vec::new_in(allocator)),
+            params: Vec::new_in(&allocator),
+            body: ArrowFunctionBody::Statements(Vec::new_in(&allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     let hot_accept = invoke_fn(
-        allocator,
+        &allocator,
         read_prop(allocator, hot_read.clone_in(allocator), "accept"),
         vec![empty_callback],
     );
 
     // ngDevMode && import.meta.hot && import.meta.hot.accept(() => {})
     let guarded_accept = dev_only_guarded(
-        allocator,
+        &allocator,
         binary_op(allocator, BinaryOperator::And, hot_read.clone_in(allocator), hot_accept),
     );
 
     // ngDevMode && import.meta.hot && import.meta.hot.on('angular:component-update', ...)
     let guarded_listener = dev_only_guarded(
-        allocator,
+        &allocator,
         binary_op(allocator, BinaryOperator::And, hot_read.clone_in(allocator), hot_listener),
     );
 
     // ngDevMode && import.meta.hot && import.meta.hot.on('angular:invalidate', ...)
     let guarded_invalidate_listener = dev_only_guarded(
-        allocator,
+        &allocator,
         binary_op(allocator, BinaryOperator::And, hot_read, invalidate_listener),
     );
 
@@ -266,16 +266,16 @@ pub fn compile_hmr_initializer<'a>(
             expr_stmt(allocator, guarded_listener),
             expr_stmt(allocator, guarded_invalidate_listener),
         ],
-        allocator,
+        &allocator,
     );
 
     let iife = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::new_in(allocator),
+            params: Vec::new_in(&allocator),
             body: ArrowFunctionBody::Statements(body),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Call the IIFE
@@ -316,14 +316,14 @@ pub fn compile_hmr_update_callback<'a>(
     let namespaces_param = "ɵɵnamespaces";
 
     // Build function parameters: [className, ɵɵnamespaces, ...locals]
-    let mut params: Vec<'a, FnParam<'a>> = Vec::new_in(allocator);
+    let mut params: Vec<'a, FnParam<'a>> = Vec::new_in(&allocator);
     params.push(FnParam { name: meta.class_name.clone() });
     params.push(FnParam { name: Ident::from(namespaces_param) });
     for local in &meta.local_dependencies {
         params.push(FnParam { name: local.name.clone() });
     }
 
-    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
 
     // Declare variables that read out the individual namespaces
     // const i0 = ɵɵnamespaces[0];
@@ -331,12 +331,12 @@ pub fn compile_hmr_update_callback<'a>(
     for (i, dep) in meta.namespace_dependencies.iter().enumerate() {
         let namespace_read = OutputExpression::ReadKey(Box::new_in(
             ReadKeyExpr {
-                receiver: Box::new_in(read_var(allocator, namespaces_param), allocator),
-                index: Box::new_in(literal_num(allocator, i as f64), allocator),
+                receiver: Box::new_in(read_var(allocator, namespaces_param), &allocator),
+                index: Box::new_in(literal_num(allocator, i as f64), &allocator),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         body.push(var_decl(allocator, dep.assigned_name.as_str(), namespace_read, true));
     }
@@ -350,10 +350,10 @@ pub fn compile_hmr_update_callback<'a>(
     for def in definitions {
         if let Some(initializer) = def.initializer {
             let assignment = binary_op(
-                allocator,
+                &allocator,
                 BinaryOperator::Assign,
                 read_prop(
-                    allocator,
+                    &allocator,
                     read_var(allocator, meta.class_name.as_str()),
                     def.name.as_str(),
                 ),
@@ -378,7 +378,7 @@ pub fn compile_hmr_update_callback<'a>(
             modifiers: StmtModifier::FINAL,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -390,7 +390,7 @@ pub fn compile_hmr_update_callback<'a>(
 fn read_var<'a>(allocator: &'a Allocator, name: &str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(allocator.alloc_str(name)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -402,12 +402,12 @@ fn read_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(receiver, allocator),
+            receiver: Box::new_in(receiver, &allocator),
             name: Ident::from(allocator.alloc_str(name)),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -419,13 +419,13 @@ fn invoke_fn<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
-            args: Vec::from_iter_in(args, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
+            args: Vec::from_iter_in(args, &allocator),
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -436,7 +436,7 @@ fn literal_str<'a>(allocator: &'a Allocator, value: &str) -> OutputExpression<'a
             value: LiteralValue::String(Ident::from(allocator.alloc_str(value))),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -444,7 +444,7 @@ fn literal_str<'a>(allocator: &'a Allocator, value: &str) -> OutputExpression<'a
 fn literal_num<'a>(allocator: &'a Allocator, value: f64) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -455,7 +455,7 @@ fn literal_arr<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -469,11 +469,11 @@ fn binary_op<'a>(
     OutputExpression::BinaryOperator(Box::new_in(
         BinaryOperatorExpr {
             operator: op,
-            lhs: Box::new_in(lhs, allocator),
-            rhs: Box::new_in(rhs, allocator),
+            lhs: Box::new_in(lhs, &allocator),
+            rhs: Box::new_in(rhs, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -493,7 +493,7 @@ fn var_decl<'a>(
             source_span: None,
             leading_comment: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -501,7 +501,7 @@ fn var_decl<'a>(
 fn expr_stmt<'a>(allocator: &'a Allocator, expr: OutputExpression<'a>) -> OutputStatement<'a> {
     OutputStatement::Expression(Box::new_in(
         ExpressionStatement { expr, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -524,15 +524,15 @@ fn dev_only_guarded<'a>(
     // typeof ngDevMode
     let typeof_guard = OutputExpression::Typeof(Box::new_in(
         TypeofExpr {
-            expr: Box::new_in(guard_var.clone_in(allocator), allocator),
+            expr: Box::new_in(guard_var.clone_in(allocator), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // typeof ngDevMode === "undefined"
     let guard_not_defined = binary_op(
-        allocator,
+        &allocator,
         BinaryOperator::Identical,
         typeof_guard,
         literal_str(allocator, "undefined"),

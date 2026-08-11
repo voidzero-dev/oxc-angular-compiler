@@ -112,7 +112,7 @@ impl<'a> InjectableMetadata<'a> {
 
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: self.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         let mut builder =
@@ -172,7 +172,7 @@ fn clone_r3_deps<'a>(
     allocator: &'a Allocator,
     deps: &[R3DependencyMetadata<'a>],
 ) -> Vec<'a, R3DependencyMetadata<'a>> {
-    let mut result = Vec::with_capacity_in(deps.len(), allocator);
+    let mut result = Vec::with_capacity_in(deps.len(), &allocator);
     for dep in deps {
         result.push(R3DependencyMetadata {
             token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
@@ -191,7 +191,7 @@ fn convert_deps_to_r3<'a>(
     allocator: &'a Allocator,
     deps: &[DependencyMetadata<'a>],
 ) -> oxc_allocator::Vec<'a, crate::factory::R3DependencyMetadata<'a>> {
-    let mut result = oxc_allocator::Vec::new_in(allocator);
+    let mut result = oxc_allocator::Vec::new_in(&allocator);
     for dep in deps {
         result.push(crate::factory::R3DependencyMetadata {
             token: Some(dep.token.clone_in(allocator)),
@@ -443,7 +443,7 @@ fn extract_forward_ref_or_expression<'a>(
                             arrow.body.statements.first()
                         {
                             if let Some(expression) = convert_oxc_expression(
-                                allocator,
+                                &allocator,
                                 &expr_stmt.expression,
                                 source_text,
                             ) {
@@ -463,7 +463,7 @@ fn extract_deps_from_config<'a>(
     config_obj: &'a oxc_ast::ast::ObjectExpression<'a>,
     source_text: Option<&'a str>,
 ) -> Vec<'a, DependencyMetadata<'a>> {
-    let mut deps = Vec::new_in(allocator);
+    let mut deps = Vec::new_in(&allocator);
 
     for prop in &config_obj.properties {
         if let ObjectPropertyKind::ObjectProperty(prop) = prop {
@@ -546,7 +546,7 @@ pub fn extract_constructor_deps<'a>(
 
     // Get the constructor's parameters
     let params = &constructor.value.params;
-    let mut deps = Vec::with_capacity_in(params.items.len(), allocator);
+    let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
         let dep = extract_param_dependency(allocator, param, source_text);
@@ -612,7 +612,7 @@ fn extract_param_dependency<'a>(
                     value: crate::output::ast::LiteralValue::String(attr_name),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ))),
             attribute_name_type: token, // The type annotation
             host,
@@ -675,7 +675,7 @@ fn extract_param_token<'a>(
 
         return Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: type_name, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 

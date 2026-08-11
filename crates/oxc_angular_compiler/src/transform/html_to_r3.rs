@@ -177,16 +177,16 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Creates a new HTML to R3 transformer.
     pub fn new(allocator: &'a Allocator, source_text: &'a str, options: TransformOptions) -> Self {
         let comment_nodes =
-            if options.collect_comment_nodes { Some(Vec::new_in(allocator)) } else { None };
+            if options.collect_comment_nodes { Some(Vec::new_in(&allocator)) } else { None };
 
         Self {
             allocator,
             source_text,
             binding_parser: BindingParser::new(allocator),
             errors: std::vec::Vec::new(),
-            styles: Vec::new_in(allocator),
-            style_urls: Vec::new_in(allocator),
-            ng_content_selectors: Vec::new_in(allocator),
+            styles: Vec::new_in(&allocator),
+            style_urls: Vec::new_in(&allocator),
+            ng_content_selectors: Vec::new_in(&allocator),
             comment_nodes,
             processed_nodes: FxHashSet::default(),
             namespace_stack: std::vec::Vec::new(),
@@ -222,7 +222,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Visits a list of sibling nodes, handling connected blocks.
     fn visit_siblings(&mut self, siblings: &[HtmlNode<'a>]) -> Vec<'a, R3Node<'a>> {
-        let mut result = Vec::new_in(self.allocator);
+        let mut result = Vec::new_in(&self.allocator);
 
         for (index, node) in siblings.iter().enumerate() {
             // Skip nodes that were already processed as connected blocks
@@ -287,9 +287,9 @@ impl<'a> HtmlToR3Transform<'a> {
                     };
                     // Reconstruct the @let text with semicolon
                     let reconstructed = format!("@let {} = {};", decl.name.as_str(), value_text);
-                    let text_value = Ident::from_in(reconstructed.as_str(), self.allocator);
+                    let text_value = Ident::from_in(reconstructed.as_str(), &self.allocator);
                     let r3_text = R3Text { value: text_value, source_span: decl.span };
-                    return Some(R3Node::Text(Box::new_in(r3_text, self.allocator)));
+                    return Some(R3Node::Text(Box::new_in(r3_text, &self.allocator)));
                 }
                 self.visit_let_declaration(decl)
             }
@@ -309,22 +309,49 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Classify special elements the way upstream `template_preparser.ts` does.
-        // It computes `nodeName = ast.name.toLowerCase()` — the FULL (lower-cased)
-        // node name *including* any namespace prefix — and then compares it against:
+        // Determine whether this element node is actually a selectorless COMPONENT
+        // BEFORE any preparser special-element handling. Upstream splits the two
+        // paths:
+        //   * `visitElement`   calls `preparseElement` (script/style/link strip)
+        //   * `visitComponent` does NOT call `preparseElement` at all — it only
+        //     validates the resolved HOST tag (`component.tagName`) against
+        //     `UNSUPPORTED_SELECTORLESS_TAGS` later.
+        // So a bare selectorless component whose CLASS name collides with a special
+        // HTML tag (e.g. `<Script></Script>`, `tagName === null`) must be kept as
+        // an R3Component, not dropped as if it were a real `<script>` element.
+        // The parser-produced `is_component` marker is the authoritative discriminator
+        // (set true ONLY when the lexer tokenized a `ComponentOpenStart`, which
+        // requires selectorless mode). It correctly distinguishes a bare component
+        // `<MyCmp>` from an uppercase NORMAL element like `<IFRAME>` / `<OBJECT>`
+        // (identical at this node otherwise), which a leading-character casing
+        // heuristic would conflate. In the default (selectorless-off) pipeline the
+        // real compiler uses, no component is ever produced, so an uppercase tag
+        // stays a normal element and its security-context / i18n trusted-types
+        // lookups route through its own name (lowercased internally) — e.g.
+        // `<IFRAME [src]>` -> `iframe|src` -> RESOURCE_URL, matching upstream
+        // v21.2.7 `parseTemplate(html, url, {})`.
+        let is_component = element.is_component;
+
+        // Classify special HTML elements the way upstream `template_preparser.ts`
+        // does — Element path ONLY (`visitElement` → `preparseElement`). Skipped
+        // entirely for selectorless components (`visitComponent` never preparses).
+        // Upstream computes `nodeName = ast.name.toLowerCase()` — the FULL
+        // (lower-cased) node name *including* any namespace prefix — and then
+        // compares it against:
         //   - SCRIPT_ELEMENT = 'script'  (singular string, NOT a set)
         //   - STYLE_ELEMENT  = 'style'
         //   - LINK_ELEMENT   = 'link'
-        // (v21.2.7 template_preparser.ts:18,45,49-53). Because the comparison uses the
-        // FULL node name, only the un-namespaced `<script>` / `<style>` / `<link>` are
-        // classified as SCRIPT / STYLE / STYLESHEET and dropped; an explicitly
-        // namespaced `<svg:script>` (stored `:svg:script`) does NOT equal 'script', so
-        // it stays `PreparsedElementType.OTHER` and is KEPT as an element. This is the
-        // real XSS sink for an SVGScriptElement, whose `href`/`xlink:href` is sanitized
-        // as a RESOURCE_URL (see dom_security_schema). (NOTE: angular/angular MAIN later
-        // changed SCRIPT_ELEMENT to a Set including ':svg:script' via commit 90494cd909,
-        // which DOES strip it — but that is POST-v21.2.7 and is not our pinned version.)
-        // All matches are case-insensitive.
+        // (v21.2.7 template_preparser.ts:18,45,49-53). Because the comparison uses
+        // the FULL node name, only the un-namespaced `<script>` / `<style>` /
+        // `<link>` are classified as SCRIPT / STYLE / STYLESHEET and dropped; an
+        // explicitly namespaced `<svg:script>` (stored `:svg:script`) does NOT equal
+        // 'script', so it stays `PreparsedElementType.OTHER` and is KEPT as an
+        // element. This is the real XSS sink for an SVGScriptElement, whose
+        // `href`/`xlink:href` is sanitized as a RESOURCE_URL (see
+        // dom_security_schema). (NOTE: angular/angular MAIN later changed
+        // SCRIPT_ELEMENT to a Set including ':svg:script' via commit 90494cd909,
+        // which DOES strip it — but that is POST-v21.2.7 and is not our pinned
+        // version.) All matches are case-insensitive.
         let lower_name = raw_name.to_ascii_lowercase();
         // Namespace-stripped local name with original case, used for the structural
         // element checks below (ng-content / ng-template / ng-container). Upstream
@@ -335,46 +362,34 @@ impl<'a> HtmlToR3Transform<'a> {
         // STYLE/LINK checks above, which deliberately compare the FULL node name.
         let (_, raw_local_name) = split_ns_name(raw_name);
 
-        // Check for special elements. Upstream compares the FULL lower-cased node
-        // name against SCRIPT_ELEMENT='script', so plain `<script>` is dropped but a
+        // Preparser special-element handling is Element-only. Selectorless
+        // components keep going; unsupported HOST tags are rejected later via
+        // UNSUPPORTED_SELECTORLESS_TAGS on the resolved host tag (not the class
+        // name). Upstream compares the FULL lower-cased node name against
+        // SCRIPT_ELEMENT='script', so plain `<script>` is dropped but a
         // namespaced `:svg:script` is kept (v21.2.7 template_preparser.ts:45,51).
-        if lower_name == "script" {
-            return None;
-        }
-        if lower_name == "style" {
-            // Extract style content
-            if let Some(content) = self.get_text_content(element) {
-                self.styles.push(content);
-            }
-            return None;
-        }
-        if lower_name == "link" {
-            // Collect stylesheet URLs
-            if let Some(href) = self.get_stylesheet_href(element) {
-                self.style_urls.push(href);
-            }
-            // Filter out <link rel="stylesheet"> inside ngNonBindable elements
-            if self.non_bindable_depth > 0 && self.is_stylesheet_link(element) {
+        if !is_component {
+            if lower_name == "script" {
                 return None;
             }
+            if lower_name == "style" {
+                // Extract style content
+                if let Some(content) = self.get_text_content(element) {
+                    self.styles.push(content);
+                }
+                return None;
+            }
+            if lower_name == "link" {
+                // Collect stylesheet URLs
+                if let Some(href) = self.get_stylesheet_href(element) {
+                    self.style_urls.push(href);
+                }
+                // Filter out <link rel="stylesheet"> inside ngNonBindable elements
+                if self.non_bindable_depth > 0 && self.is_stylesheet_link(element) {
+                    return None;
+                }
+            }
         }
-
-        // Determine whether this element node is actually a selectorless COMPONENT.
-        // The parser stores a selectorless component as an `HtmlElement` whose `name`
-        // is the component CLASS name and whose resolved host tag is carried
-        // separately in `component_prefix` / `component_tag_name`. The discriminator
-        // is the parser-produced `is_component` marker — set true ONLY when the lexer
-        // tokenized a `ComponentOpenStart`, which requires selectorless mode to be
-        // enabled. This is the authoritative source of truth: it correctly
-        // distinguishes a bare component `<MyCmp>` from an uppercase NORMAL element
-        // like `<IFRAME>` / `<OBJECT>` (identical at this node otherwise), which a
-        // leading-character casing heuristic would conflate. In the default
-        // (selectorless-off) pipeline the real compiler uses, no component is ever
-        // produced, so an uppercase tag stays a normal element and its
-        // security-context / i18n trusted-types lookups route through its own name
-        // (lowercased internally) — e.g. `<IFRAME [src]>` -> `iframe|src` ->
-        // RESOURCE_URL, matching upstream v21.2.7 `parseTemplate(html, url, {})`.
-        let is_component = element.is_component;
 
         // Resolve the host tag name (upstream `component.tagName`) up-front, BEFORE
         // attribute categorization, so the security-context and i18n trusted-types
@@ -543,7 +558,7 @@ impl<'a> HtmlToR3Transform<'a> {
             // Element has its own i18n attribute - parse it as a Message with message string
             let instance_id = self.allocate_i18n_message_instance_id();
             Some(parse_i18n_meta_with_message(
-                self.allocator,
+                &self.allocator,
                 attr.value.as_str(),
                 instance_id,
                 &i18n_message_string,
@@ -610,7 +625,7 @@ impl<'a> HtmlToR3Transform<'a> {
             // However, i18n/i18n-* attributes are excluded because Angular's I18nMetaVisitor
             // strips them from element.attrs before r3_template_transform runs.
             let mut content_attributes: Vec<'a, R3TextAttribute<'a>> =
-                Vec::with_capacity_in(element.attrs.len(), self.allocator);
+                Vec::with_capacity_in(element.attrs.len(), &self.allocator);
             for attr in &element.attrs {
                 let name = attr.name.as_str();
                 if name == "i18n" || name.starts_with("i18n-") {
@@ -636,7 +651,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 end_source_span: element.end_span,
                 i18n: None,
             };
-            let mut result = R3Node::Content(Box::new_in(content, self.allocator));
+            let mut result = R3Node::Content(Box::new_in(content, &self.allocator));
 
             // Wrap in template if has structural directive (*ngIf, etc.)
             // Reference: r3_template_transform.ts lines 266-277
@@ -656,7 +671,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 inputs,
                 outputs,
                 directives,
-                template_attrs: Vec::new_in(self.allocator),
+                template_attrs: Vec::new_in(&self.allocator),
                 children,
                 references,
                 variables,
@@ -666,7 +681,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 end_source_span: element.end_span,
                 i18n: i18n_meta,
             };
-            let mut result = R3Node::Template(Box::new_in(template, self.allocator));
+            let mut result = R3Node::Template(Box::new_in(template, &self.allocator));
 
             // Wrap in another template if has structural directive (*ngIf, etc.)
             if let Some(template_attr_info) = template_attr {
@@ -733,11 +748,11 @@ impl<'a> HtmlToR3Transform<'a> {
             let full_name = match &tag_name {
                 Some(tag) if tag.starts_with(':') => {
                     // Namespace format: "MyComp:svg:rect" (tag_name already has :prefix:)
-                    Ident::from_in(&format!("{}{}", element.name, tag), self.allocator)
+                    Ident::from_in(&format!("{}{}", element.name, tag), &self.allocator)
                 }
                 Some(tag) => {
                     // Simple format: "MyComp:div"
-                    Ident::from_in(&format!("{}:{}", element.name, tag), self.allocator)
+                    Ident::from_in(&format!("{}:{}", element.name, tag), &self.allocator)
                 }
                 None => element.name,
             };
@@ -759,7 +774,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 end_source_span: element.end_span,
                 i18n: i18n_meta,
             };
-            R3Node::Component(Box::new_in(r3_component, self.allocator))
+            R3Node::Component(Box::new_in(r3_component, &self.allocator))
         } else {
             // Regular element
             let r3_element = R3Element {
@@ -777,7 +792,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 is_void: self.is_void_element(element.name.as_str()),
                 i18n: i18n_meta,
             };
-            R3Node::Element(Box::new_in(r3_element, self.allocator))
+            R3Node::Element(Box::new_in(r3_element, &self.allocator))
         };
 
         // Wrap in template if has structural directive
@@ -873,7 +888,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span: component.end_span,
             i18n: None,
         };
-        let mut result = R3Node::Component(Box::new_in(r3_component, self.allocator));
+        let mut result = R3Node::Component(Box::new_in(r3_component, &self.allocator));
 
         // Wrap in template if has structural directive
         if let Some(template_attr_info) = template_attr {
@@ -962,7 +977,7 @@ impl<'a> HtmlToR3Transform<'a> {
             && Self::namespace_from_prefix(prefix).is_some()
         {
             let qualified = format!(":{prefix}:{local}");
-            return Ident::from_in(&qualified, self.allocator);
+            return Ident::from_in(&qualified, &self.allocator);
         }
 
         let ns = match namespace {
@@ -971,7 +986,7 @@ impl<'a> HtmlToR3Transform<'a> {
             ElementNamespace::Html => return name,
         };
         let qualified = format!(":{ns}:{name_str}");
-        Ident::from_in(&qualified, self.allocator)
+        Ident::from_in(&qualified, &self.allocator)
     }
 
     /// Transforms HTML directives to R3 directives.
@@ -981,7 +996,7 @@ impl<'a> HtmlToR3Transform<'a> {
         html_directives: &[HtmlDirective<'a>],
         element_name: &str,
     ) -> Vec<'a, R3Directive<'a>> {
-        let mut directives = Vec::new_in(self.allocator);
+        let mut directives = Vec::new_in(&self.allocator);
         let mut seen_directives: FxHashSet<&str> = FxHashSet::default();
 
         for html_dir in html_directives {
@@ -1001,10 +1016,10 @@ impl<'a> HtmlToR3Transform<'a> {
             seen_directives.insert(directive_name);
 
             // Parse directive attributes similar to element attributes
-            let mut attributes = Vec::new_in(self.allocator);
-            let mut inputs = Vec::new_in(self.allocator);
-            let mut outputs = Vec::new_in(self.allocator);
-            let mut references = Vec::new_in(self.allocator);
+            let mut attributes = Vec::new_in(&self.allocator);
+            let mut inputs = Vec::new_in(&self.allocator);
+            let mut outputs = Vec::new_in(&self.allocator);
+            let mut references = Vec::new_in(&self.allocator);
             let mut seen_reference_names: FxHashSet<&str> = FxHashSet::default();
             let mut invalid = false;
 
@@ -1058,8 +1073,8 @@ impl<'a> HtmlToR3Transform<'a> {
                     } else {
                         seen_reference_names.insert(ref_name);
                         references.push(R3Reference {
-                            name: Ident::from_in(ref_name, self.allocator),
-                            value: Ident::from_in("", self.allocator),
+                            name: Ident::from_in(ref_name, &self.allocator),
+                            value: Ident::from_in("", &self.allocator),
                             source_span: attr.span,
                             key_span: attr.name_span,
                             value_span: None,
@@ -1101,7 +1116,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 self.binding_parser.parse_binding(attr_value, value_span);
 
                             inputs.push(R3BoundAttribute {
-                                name: Ident::from_in(prop_name, self.allocator),
+                                name: Ident::from_in(prop_name, &self.allocator),
                                 binding_type,
                                 value: parse_result.ast,
                                 unit: None,
@@ -1119,7 +1134,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 self.binding_parser.parse_event(attr_value, value_span);
 
                             outputs.push(R3BoundEvent {
-                                name: Ident::from_in(rest, self.allocator),
+                                name: Ident::from_in(rest, &self.allocator),
                                 handler: parse_result.ast,
                                 target: None,
                                 event_type: ParsedEventType::Regular,
@@ -1136,7 +1151,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 self.binding_parser.parse_binding(attr_value, value_span);
 
                             inputs.push(R3BoundAttribute {
-                                name: Ident::from_in(rest, self.allocator),
+                                name: Ident::from_in(rest, &self.allocator),
                                 binding_type: BindingType::TwoWay,
                                 value: parse_result.ast,
                                 unit: None,
@@ -1149,7 +1164,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
                             // Two-way binding also creates an output event
                             let event_name =
-                                Ident::from_in(&format!("{rest}Change"), self.allocator);
+                                Ident::from_in(&format!("{rest}Change"), &self.allocator);
                             let event_parse_result =
                                 self.binding_parser.parse_event(attr_value, value_span);
 
@@ -1175,7 +1190,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 self.binding_parser.parse_binding(value_str, value_span);
 
                             inputs.push(R3BoundAttribute {
-                                name: Ident::from_in(rest, self.allocator),
+                                name: Ident::from_in(rest, &self.allocator),
                                 binding_type: BindingType::LegacyAnimation,
                                 value: parse_result.ast,
                                 unit: None,
@@ -1202,7 +1217,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     let parse_result = self.binding_parser.parse_binding(value_str, value_span);
 
                     inputs.push(R3BoundAttribute {
-                        name: Ident::from_in(prop_name, self.allocator),
+                        name: Ident::from_in(prop_name, &self.allocator),
                         binding_type: BindingType::TwoWay,
                         value: parse_result.ast,
                         unit: None,
@@ -1214,7 +1229,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     });
 
                     // Two-way binding also creates an output event
-                    let event_name = Ident::from_in(&format!("{prop_name}Change"), self.allocator);
+                    let event_name = Ident::from_in(&format!("{prop_name}Change"), &self.allocator);
                     let event_value_str = self.allocator.alloc_str(attr_value);
                     let event_parse_result =
                         self.binding_parser.parse_event(event_value_str, value_span);
@@ -1273,7 +1288,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     let parse_result = self.binding_parser.parse_binding(value_str, value_span);
 
                     inputs.push(R3BoundAttribute {
-                        name: Ident::from_in(prop_name, self.allocator),
+                        name: Ident::from_in(prop_name, &self.allocator),
                         binding_type: BindingType::Property,
                         value: parse_result.ast,
                         unit: None,
@@ -1298,7 +1313,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         let parse_result = self.binding_parser.parse_event(value_str, value_span);
 
                         outputs.push(R3BoundEvent {
-                            name: Ident::from_in(event_name, self.allocator),
+                            name: Ident::from_in(event_name, &self.allocator),
                             handler: parse_result.ast,
                             target: None,
                             event_type: ParsedEventType::Regular,
@@ -1403,33 +1418,33 @@ impl<'a> HtmlToR3Transform<'a> {
         let icu_type_upper = expansion.expansion_type.as_str().to_uppercase();
         let base_name = format!("VAR_{icu_type_upper}");
         let expression_placeholder =
-            Ident::from_in(&self.generate_unique_icu_placeholder(&base_name), self.allocator);
-        let icu_placeholder_name = Ident::from_in("ICU", self.allocator);
+            Ident::from_in(&self.generate_unique_icu_placeholder(&base_name), &self.allocator);
+        let icu_placeholder_name = Ident::from_in("ICU", &self.allocator);
 
         // Create the I18nIcu for the i18n metadata
         // The cases are empty here since they're parsed separately into R3Icu.placeholders
         let i18n_icu = I18nIcu {
             expression: expansion.switch_value,
             icu_type: expansion.expansion_type,
-            cases: HashMap::new_in(self.allocator),
+            cases: HashMap::new_in(&self.allocator),
             source_span: expansion.span,
             expression_placeholder: Some(expression_placeholder),
         };
 
         // Create the IcuPlaceholder wrapping the ICU
         let i18n_icu_placeholder = I18nIcuPlaceholder {
-            value: Box::new_in(i18n_icu, self.allocator),
+            value: Box::new_in(i18n_icu, &self.allocator),
             name: icu_placeholder_name,
             source_span: expansion.span,
         };
 
         // Create the Message containing the single IcuPlaceholder
-        let mut nodes = Vec::new_in(self.allocator);
+        let mut nodes = Vec::new_in(&self.allocator);
         nodes.push(I18nNode::IcuPlaceholder(i18n_icu_placeholder));
 
         // Serialize the message string for goog.getMsg and $localize
         let message_string_str = serialize_i18n_nodes(&nodes);
-        let message_string = Ident::from_in(&*message_string_str, self.allocator);
+        let message_string = Ident::from_in(&*message_string_str, &self.allocator);
 
         let i18n_message = I18nMessage {
             instance_id: self.allocate_i18n_message_instance_id(),
@@ -1438,12 +1453,12 @@ impl<'a> HtmlToR3Transform<'a> {
             description: Ident::from(""),
             custom_id: Ident::from(""),
             id: Ident::from(""),
-            legacy_ids: Vec::new_in(self.allocator),
+            legacy_ids: Vec::new_in(&self.allocator),
             message_string,
         };
 
         // Create variable for the switch value (using VAR_* placeholder name)
-        let mut vars = Vec::new_in(self.allocator);
+        let mut vars = Vec::new_in(&self.allocator);
         let switch_value_str = expansion.switch_value.as_str();
         let switch_value_span = expansion.switch_value_span;
 
@@ -1455,7 +1470,7 @@ impl<'a> HtmlToR3Transform<'a> {
         // This matches Angular's visitExpansion behavior where nested ICUs are visited first,
         // and their VAR_* placeholders are added before the outer ICU's VAR_*.
         // Ported from Angular's i18n_parser.ts:137-159
-        let mut placeholders = Vec::new_in(self.allocator);
+        let mut placeholders = Vec::new_in(&self.allocator);
         for case in &expansion.cases {
             self.extract_placeholders_from_nodes(&case.expansion, &mut placeholders, &mut vars);
         }
@@ -1477,7 +1492,7 @@ impl<'a> HtmlToR3Transform<'a> {
             i18n: Some(I18nMeta::Message(i18n_message)),
         };
 
-        Some(R3Node::Icu(Box::new_in(icu, self.allocator)))
+        Some(R3Node::Icu(Box::new_in(icu, &self.allocator)))
     }
 
     /// Extracts placeholders and nested ICU vars from expansion case nodes.
@@ -1516,7 +1531,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     let icu_type_upper = nested_expansion.expansion_type.as_str().to_uppercase();
                     let base_name = format!("VAR_{icu_type_upper}");
                     let unique_name = self.generate_unique_icu_placeholder(&base_name);
-                    let var_placeholder_name = Ident::from_in(&unique_name, self.allocator);
+                    let var_placeholder_name = Ident::from_in(&unique_name, &self.allocator);
 
                     // Recursively extract from nested expansion cases FIRST.
                     // This ensures placeholders and further nested ICU vars are processed
@@ -1592,7 +1607,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     let value_str = self.allocator.alloc_str(expr_content);
                     let parse_result = self.binding_parser.parse_binding(value_str, interp_span);
 
-                    let placeholder_key = Ident::from_in(interpolation, self.allocator);
+                    let placeholder_key = Ident::from_in(interpolation, &self.allocator);
                     let bound_text = R3BoundText {
                         value: parse_result.ast,
                         source_span: interp_span,
@@ -1652,7 +1667,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 if let Some(expr) = self.parse_interpolation_from_tokens(text) {
                     let bound_text =
                         R3BoundText { value: expr, source_span: text.span, i18n: i18n_meta };
-                    return Some(R3Node::BoundText(Box::new_in(bound_text, self.allocator)));
+                    return Some(R3Node::BoundText(Box::new_in(bound_text, &self.allocator)));
                 }
             } else {
                 // No entities - use the simple path with decoded text
@@ -1667,7 +1682,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 if let Some(expr) = self.parse_interpolation(interpolation_text, text.span) {
                     let bound_text =
                         R3BoundText { value: expr, source_span: text.span, i18n: i18n_meta };
-                    return Some(R3Node::BoundText(Box::new_in(bound_text, self.allocator)));
+                    return Some(R3Node::BoundText(Box::new_in(bound_text, &self.allocator)));
                 }
             }
         }
@@ -1675,12 +1690,12 @@ impl<'a> HtmlToR3Transform<'a> {
         // Static text - use value with ngsp replaced
         let value_atom = if has_ngsp {
             let value_no_ngsp = value_str.replace(NGSP_UNICODE, " ");
-            Ident::from_in(&value_no_ngsp, self.allocator)
+            Ident::from_in(&value_no_ngsp, &self.allocator)
         } else {
             text.value
         };
         let r3_text = R3Text { value: value_atom, source_span: text.span };
-        Some(R3Node::Text(Box::new_in(r3_text, self.allocator)))
+        Some(R3Node::Text(Box::new_in(r3_text, &self.allocator)))
     }
 
     /// Visits a comment node.
@@ -1706,7 +1721,7 @@ impl<'a> HtmlToR3Transform<'a> {
     /// but since our visitor returns a single node, we create a wrapper template
     /// containing all the text nodes and children.
     fn visit_block_as_text(&mut self, block: &HtmlBlock<'a>) -> Option<R3Node<'a>> {
-        let mut nodes = Vec::new_in(self.allocator);
+        let mut nodes = Vec::new_in(&self.allocator);
 
         // Get the text for the block's start source span (e.g., "@if (condition) {")
         let start_text = if block.start_span.start < block.start_span.end
@@ -1723,7 +1738,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 value: Ident::from(self.allocator.alloc_str(start_text)),
                 source_span: block.start_span,
             },
-            self.allocator,
+            &self.allocator,
         )));
 
         // Visit children recursively (they're also in ngNonBindable context)
@@ -1747,7 +1762,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     value: Ident::from(self.allocator.alloc_str(end_text)),
                     source_span: end_span,
                 },
-                self.allocator,
+                &self.allocator,
             )));
         }
 
@@ -1757,21 +1772,21 @@ impl<'a> HtmlToR3Transform<'a> {
         Some(R3Node::Template(Box::new_in(
             R3Template {
                 tag_name: None,
-                attributes: Vec::new_in(self.allocator),
-                inputs: Vec::new_in(self.allocator),
-                outputs: Vec::new_in(self.allocator),
-                directives: Vec::new_in(self.allocator),
-                template_attrs: Vec::new_in(self.allocator),
+                attributes: Vec::new_in(&self.allocator),
+                inputs: Vec::new_in(&self.allocator),
+                outputs: Vec::new_in(&self.allocator),
+                directives: Vec::new_in(&self.allocator),
+                template_attrs: Vec::new_in(&self.allocator),
                 children: nodes,
-                references: Vec::new_in(self.allocator),
-                variables: Vec::new_in(self.allocator),
+                references: Vec::new_in(&self.allocator),
+                variables: Vec::new_in(&self.allocator),
                 source_span: block.span,
                 start_source_span: block.start_span,
                 end_source_span: block.end_span,
                 i18n: None,
                 is_self_closing: false,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 
@@ -1779,7 +1794,7 @@ impl<'a> HtmlToR3Transform<'a> {
     /// This is the correct implementation matching TypeScript's NonBindableVisitor.visitBlock().
     /// TypeScript returns [startText, ...children, endText].flat(Infinity).
     fn visit_block_as_text_flat(&mut self, block: &HtmlBlock<'a>) -> Vec<'a, R3Node<'a>> {
-        let mut nodes = Vec::new_in(self.allocator);
+        let mut nodes = Vec::new_in(&self.allocator);
 
         // Get the text for the block's start source span (e.g., "@defer (when condition) {")
         let start_text = if block.start_span.start < block.start_span.end
@@ -1796,7 +1811,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 value: Ident::from(self.allocator.alloc_str(start_text)),
                 source_span: block.start_span,
             },
-            self.allocator,
+            &self.allocator,
         )));
 
         // Visit children recursively - they are also in ngNonBindable context
@@ -1821,7 +1836,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     value: Ident::from(self.allocator.alloc_str(end_text)),
                     source_span: end_span,
                 },
-                self.allocator,
+                &self.allocator,
             )));
         }
 
@@ -1892,7 +1907,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: block.span,
                         name_span: block.name_span,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )))
             }
             BlockType::For => {
@@ -1934,7 +1949,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: block.span,
                         name_span: block.name_span,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )))
             }
             BlockType::Switch => self.visit_switch_block(block),
@@ -1948,7 +1963,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: block.span,
                         name_span: block.name_span,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )))
             }
             BlockType::Defer => {
@@ -1993,7 +2008,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         source_span: block.span,
                         name_span: block.name_span,
                     },
-                    self.allocator,
+                    &self.allocator,
                 )))
             }
         }
@@ -2082,7 +2097,7 @@ impl<'a> HtmlToR3Transform<'a> {
             name_span: decl.name_span,
             value_span: decl.value_span,
         };
-        Some(R3Node::LetDeclaration(Box::new_in(r3_decl, self.allocator)))
+        Some(R3Node::LetDeclaration(Box::new_in(r3_decl, &self.allocator)))
     }
 
     /// Creates an i18n BlockPlaceholder for a control flow block when inside an i18n context.
@@ -2108,29 +2123,29 @@ impl<'a> HtmlToR3Transform<'a> {
         self.block_placeholder_counter += 1;
 
         let start_name = if count == 0 {
-            Ident::from_in(format!("START_BLOCK_{block_upper}").as_str(), self.allocator)
+            Ident::from_in(format!("START_BLOCK_{block_upper}").as_str(), &self.allocator)
         } else {
-            Ident::from_in(format!("START_BLOCK_{block_upper}_{count}").as_str(), self.allocator)
+            Ident::from_in(format!("START_BLOCK_{block_upper}_{count}").as_str(), &self.allocator)
         };
 
         let close_name = if count == 0 {
-            Ident::from_in(format!("CLOSE_BLOCK_{block_upper}").as_str(), self.allocator)
+            Ident::from_in(format!("CLOSE_BLOCK_{block_upper}").as_str(), &self.allocator)
         } else {
-            Ident::from_in(format!("CLOSE_BLOCK_{block_upper}_{count}").as_str(), self.allocator)
+            Ident::from_in(format!("CLOSE_BLOCK_{block_upper}_{count}").as_str(), &self.allocator)
         };
 
         // Convert parameters to Atom vec
-        let mut params = Vec::new_in(self.allocator);
+        let mut params = Vec::new_in(&self.allocator);
         for p in parameters {
             params.push(*p);
         }
 
         let placeholder = I18nBlockPlaceholder {
-            name: Ident::from_in(block_name, self.allocator),
+            name: Ident::from_in(block_name, &self.allocator),
             parameters: params,
             start_name,
             close_name,
-            children: Vec::new_in(self.allocator),
+            children: Vec::new_in(&self.allocator),
             source_span,
             start_source_span: Some(start_source_span),
             end_source_span,
@@ -2145,11 +2160,11 @@ impl<'a> HtmlToR3Transform<'a> {
         block: &HtmlBlock<'a>,
         connected_blocks: &[&HtmlBlock<'a>],
     ) -> Option<R3Node<'a>> {
-        let mut branches = Vec::new_in(self.allocator);
+        let mut branches = Vec::new_in(&self.allocator);
 
         // Parse the main @if branch parameters (condition and optional "as" alias)
         let main_params = parse_conditional_params(
-            self.allocator,
+            &self.allocator,
             &block.parameters,
             &self.binding_parser,
             block.start_span,
@@ -2220,7 +2235,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 BlockType::ElseIf => {
                     // Parse @else if parameters (condition and optional "as" alias)
                     let params = parse_conditional_params(
-                        self.allocator,
+                        &self.allocator,
                         &connected.parameters,
                         &self.binding_parser,
                         connected.start_span,
@@ -2358,7 +2373,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span,
             name_span: block.name_span,
         };
-        Some(R3Node::IfBlock(Box::new_in(if_block, self.allocator)))
+        Some(R3Node::IfBlock(Box::new_in(if_block, &self.allocator)))
     }
 
     /// Visits a @for block with connected @empty block.
@@ -2372,7 +2387,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // Parse loop parameters using the control flow parser
         let params = parse_for_loop_parameters(
-            self.allocator,
+            &self.allocator,
             &block.parameters,
             &self.binding_parser,
             block.start_span,
@@ -2512,7 +2527,7 @@ impl<'a> HtmlToR3Transform<'a> {
             name_span: block.name_span,
             i18n,
         };
-        Some(R3Node::ForLoopBlock(Box::new_in(for_block, self.allocator)))
+        Some(R3Node::ForLoopBlock(Box::new_in(for_block, &self.allocator)))
     }
 
     /// Visits a @switch block.
@@ -2538,8 +2553,8 @@ impl<'a> HtmlToR3Transform<'a> {
             self.binding_parser.parse_binding("", block.span).ast
         };
 
-        let mut groups = Vec::new_in(self.allocator);
-        let mut unknown_blocks = Vec::new_in(self.allocator);
+        let mut groups = Vec::new_in(&self.allocator);
+        let mut unknown_blocks = Vec::new_in(&self.allocator);
         let mut collected_cases: std::vec::Vec<R3SwitchBlockCase<'a>> = std::vec::Vec::new();
         let mut first_case_start: Option<Span> = None;
         let mut has_default = false;
@@ -2675,6 +2690,19 @@ impl<'a> HtmlToR3Transform<'a> {
                 });
                 continue;
             }
+
+            // The `@default never;` exhaustive marker must be the last case in the
+            // switch. Any recognized @case/@default that follows it is an error
+            // (reference: r3_control_flow.ts reports this for every block once the
+            // exhaustive check has been seen). A second `@default never;` is rejected
+            // in its own branch above.
+            if exhaustive_check.is_some() {
+                self.report_error(
+                    "@default block with \"never\" parameter must be the last case in a switch",
+                    child_block.span,
+                );
+            }
+
             if is_case && child_block.parameters.len() > 1 {
                 self.report_error(
                     "@case block must have exactly one parameter",
@@ -2731,7 +2759,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 };
 
             // Move collected cases into allocator vector
-            let mut cases = Vec::new_in(self.allocator);
+            let mut cases = Vec::new_in(&self.allocator);
             for case in collected_cases.drain(..) {
                 cases.push(case);
             }
@@ -2774,7 +2802,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span: block.end_span,
             name_span: block.name_span,
         };
-        Some(R3Node::SwitchBlock(Box::new_in(switch_block, self.allocator)))
+        Some(R3Node::SwitchBlock(Box::new_in(switch_block, &self.allocator)))
     }
 
     /// Visits a @defer block with connected @placeholder, @loading, @error blocks.
@@ -3065,7 +3093,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span,
             i18n,
         };
-        Some(R3Node::DeferredBlock(Box::new_in(defer_block, self.allocator)))
+        Some(R3Node::DeferredBlock(Box::new_in(defer_block, &self.allocator)))
     }
 
     /// Visits all children of a node (uses sibling-aware traversal).
@@ -3089,11 +3117,11 @@ impl<'a> HtmlToR3Transform<'a> {
         Vec<'a, R3Variable<'a>>,       // Variables
         Option<TemplateAttrInfo<'a>>,  // Template attribute info
     ) {
-        let mut attributes = Vec::new_in(self.allocator);
-        let mut inputs = Vec::new_in(self.allocator);
-        let mut outputs = Vec::new_in(self.allocator);
-        let mut references = Vec::new_in(self.allocator);
-        let mut variables = Vec::new_in(self.allocator);
+        let mut attributes = Vec::new_in(&self.allocator);
+        let mut inputs = Vec::new_in(&self.allocator);
+        let mut outputs = Vec::new_in(&self.allocator);
+        let mut references = Vec::new_in(&self.allocator);
+        let mut variables = Vec::new_in(&self.allocator);
         let mut template_attr_info: Option<TemplateAttrInfo<'a>> = None;
 
         // First pass: collect i18n-* attribute metadata
@@ -3154,9 +3182,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
         for attr in attrs {
             let raw_name = attr.name.as_str();
-            // Normalize name early (case-insensitive data- prefix stripping)
-            // This must happen before ANY binding syntax checks
-            let name = self.normalize_attribute_name(raw_name);
+            // Angular v22 removed the `data-` prefix normalization: binding syntax
+            // (`bind-`, `on-`, `bindon-`, `ref-`, `let-`, `*`, `@`) is matched against
+            // the raw attribute name, so e.g. `data-ref-a` is a plain text attribute.
+            let name = raw_name;
 
             // Skip i18n-* attributes early - they are metadata for other attributes, not bindings.
             // In Angular's TypeScript compiler, these are filtered out by I18nMetaVisitor before
@@ -3395,18 +3424,10 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Normalizes an attribute name by stripping the data- prefix (case-insensitive).
     /// This matches TypeScript's behavior: /^data-/i.test(attrName) ? attrName.substring(5) : attrName
-    fn normalize_attribute_name<'b>(&self, name: &'b str) -> &'b str {
-        // Case-insensitive data- prefix stripping
-        if name.len() > 5 && name[..5].eq_ignore_ascii_case("data-") { &name[5..] } else { name }
-    }
-
-    /// Parses a binding prefix from an attribute name.
-    /// Handles the data- prefix as per Angular's normalization:
-    /// `data-bind-*`, `data-on-*`, `data-ref-*`, `data-let-*`, `data-bindon-*`
+    /// Parses a binding prefix (`bind-`, `let-`, `ref-`, `on-`, `bindon-`) from an
+    /// attribute name. Angular v22 matches these against the raw name; a `data-`
+    /// prefix is no longer stripped, so `data-on-x` is not an event binding.
     fn parse_binding_prefix<'b>(&self, name: &'b str) -> Option<(BindingPrefix, &'b str)> {
-        // Strip data- prefix if present (case-insensitive)
-        let name = self.normalize_attribute_name(name);
-
         for (prefix, kind) in BIND_NAME_PREFIXES {
             if let Some(rest) = name.strip_prefix(prefix) {
                 return Some((*kind, rest));
@@ -3792,12 +3813,12 @@ impl<'a> HtmlToR3Transform<'a> {
             self.get_node_i18n(&node).map(|meta| meta.clone_in(self.allocator))
         };
 
-        let mut children = Vec::new_in(self.allocator);
+        let mut children = Vec::new_in(&self.allocator);
         children.push(node);
 
-        let mut attributes = Vec::new_in(self.allocator);
-        let mut inputs = Vec::new_in(self.allocator);
-        let mut variables = Vec::new_in(self.allocator);
+        let mut attributes = Vec::new_in(&self.allocator);
+        let mut inputs = Vec::new_in(&self.allocator);
+        let mut variables = Vec::new_in(&self.allocator);
 
         // Extract the directive name (strip the * prefix)
         let directive_name: &str =
@@ -4010,7 +4031,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // The directive-related attributes go into template_attrs
         // The hoisted element attributes become the template's main attributes
-        let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(self.allocator);
+        let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(&self.allocator);
         for attr in attributes {
             template_attrs.push(R3TemplateAttr::Text(attr));
         }
@@ -4023,10 +4044,10 @@ impl<'a> HtmlToR3Transform<'a> {
             attributes: hoisted_attributes,
             inputs: hoisted_inputs,
             outputs: hoisted_outputs,
-            directives: Vec::new_in(self.allocator),
+            directives: Vec::new_in(&self.allocator),
             template_attrs,
             children,
-            references: Vec::new_in(self.allocator),
+            references: Vec::new_in(&self.allocator),
             variables,
             is_self_closing: false,
             source_span: element.span,
@@ -4034,7 +4055,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span: element.end_span,
             i18n,
         };
-        R3Node::Template(Box::new_in(template, self.allocator))
+        R3Node::Template(Box::new_in(template, &self.allocator))
     }
 
     /// Wraps a component node in a template for structural directives.
@@ -4059,12 +4080,12 @@ impl<'a> HtmlToR3Transform<'a> {
             self.get_node_i18n(&node).map(|meta| meta.clone_in(self.allocator))
         };
 
-        let mut children = Vec::new_in(self.allocator);
+        let mut children = Vec::new_in(&self.allocator);
         children.push(node);
 
-        let mut attributes = Vec::new_in(self.allocator);
-        let mut inputs = Vec::new_in(self.allocator);
-        let mut variables = Vec::new_in(self.allocator);
+        let mut attributes = Vec::new_in(&self.allocator);
+        let mut inputs = Vec::new_in(&self.allocator);
+        let mut variables = Vec::new_in(&self.allocator);
 
         // Extract the directive name (strip the * prefix)
         let directive_name: &str =
@@ -4244,7 +4265,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let (hoisted_attributes, hoisted_inputs, hoisted_outputs) =
             self.get_hoisted_attrs_from_node(&children[0]);
 
-        let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(self.allocator);
+        let mut template_attrs: Vec<'a, R3TemplateAttr<'a>> = Vec::new_in(&self.allocator);
         for attr in attributes {
             template_attrs.push(R3TemplateAttr::Text(attr));
         }
@@ -4257,10 +4278,10 @@ impl<'a> HtmlToR3Transform<'a> {
             attributes: hoisted_attributes,
             inputs: hoisted_inputs,
             outputs: hoisted_outputs,
-            directives: Vec::new_in(self.allocator),
+            directives: Vec::new_in(&self.allocator),
             template_attrs,
             children,
-            references: Vec::new_in(self.allocator),
+            references: Vec::new_in(&self.allocator),
             variables,
             is_self_closing: false,
             source_span: component.span,
@@ -4268,7 +4289,7 @@ impl<'a> HtmlToR3Transform<'a> {
             end_source_span: component.end_span,
             i18n,
         };
-        R3Node::Template(Box::new_in(template, self.allocator))
+        R3Node::Template(Box::new_in(template, &self.allocator))
     }
 
     /// Filters out animation attributes (those starting with "animate.").
@@ -4277,7 +4298,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &self,
         attributes: &Vec<'a, R3TextAttribute<'a>>,
     ) -> Vec<'a, R3TextAttribute<'a>> {
-        let mut result = Vec::new_in(self.allocator);
+        let mut result = Vec::new_in(&self.allocator);
         for attr in attributes {
             if !attr.name.as_str().starts_with("animate.") {
                 result.push(R3TextAttribute {
@@ -4299,7 +4320,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &self,
         inputs: &Vec<'a, R3BoundAttribute<'a>>,
     ) -> Vec<'a, R3BoundAttribute<'a>> {
-        let mut result = Vec::new_in(self.allocator);
+        let mut result = Vec::new_in(&self.allocator);
         for input in inputs {
             if input.binding_type != BindingType::Animation {
                 result.push(R3BoundAttribute {
@@ -4380,7 +4401,7 @@ impl<'a> HtmlToR3Transform<'a> {
         };
 
         // Create TagPlaceholder
-        let mut placeholder_attrs = HashMap::new_in(self.allocator);
+        let mut placeholder_attrs = HashMap::new_in(&self.allocator);
         for (k, v) in attrs {
             placeholder_attrs.insert(
                 Ident::from(self.allocator.alloc_str(&k)),
@@ -4393,7 +4414,7 @@ impl<'a> HtmlToR3Transform<'a> {
             attrs: placeholder_attrs,
             start_name: Ident::from(self.allocator.alloc_str(&start_name)),
             close_name: Ident::from(self.allocator.alloc_str(&close_name)),
-            children: Vec::new_in(self.allocator),
+            children: Vec::new_in(&self.allocator),
             is_void,
             source_span: element.span,
             start_source_span: Some(element.start_span),
@@ -4433,7 +4454,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let close_name = self.i18n_placeholder_registry.get_close_tag_placeholder_name(tag_name);
 
         // Create TagPlaceholder
-        let mut placeholder_attrs = HashMap::new_in(self.allocator);
+        let mut placeholder_attrs = HashMap::new_in(&self.allocator);
         for (k, v) in attrs {
             placeholder_attrs.insert(
                 Ident::from(self.allocator.alloc_str(&k)),
@@ -4446,7 +4467,7 @@ impl<'a> HtmlToR3Transform<'a> {
             attrs: placeholder_attrs,
             start_name: Ident::from(self.allocator.alloc_str(&start_name)),
             close_name: Ident::from(self.allocator.alloc_str(&close_name)),
-            children: Vec::new_in(self.allocator),
+            children: Vec::new_in(&self.allocator),
             is_void,
             source_span: component.span,
             start_source_span: Some(component.start_span),
@@ -4469,16 +4490,16 @@ impl<'a> HtmlToR3Transform<'a> {
                 (attrs, inputs, outputs)
             }
             _ => (
-                Vec::new_in(self.allocator),
-                Vec::new_in(self.allocator),
-                Vec::new_in(self.allocator),
+                Vec::new_in(&self.allocator),
+                Vec::new_in(&self.allocator),
+                Vec::new_in(&self.allocator),
             ),
         }
     }
 
     /// Creates a shallow copy of bound events.
     fn copy_bound_events(&self, events: &Vec<'a, R3BoundEvent<'a>>) -> Vec<'a, R3BoundEvent<'a>> {
-        let mut result = Vec::new_in(self.allocator);
+        let mut result = Vec::new_in(&self.allocator);
         for event in events {
             result.push(R3BoundEvent {
                 name: event.name,
@@ -4546,7 +4567,7 @@ impl<'a> HtmlToR3Transform<'a> {
         text: &str,
         span: Span,
     ) -> I18nMeta<'a> {
-        let mut children = Vec::new_in(self.allocator);
+        let mut children = Vec::new_in(&self.allocator);
         let mut current_pos = 0;
 
         // Find all interpolations {{ expr }}
@@ -4557,7 +4578,7 @@ impl<'a> HtmlToR3Transform<'a> {
             if start > 0 {
                 let text_before = &text[current_pos..abs_start];
                 if !text_before.is_empty() {
-                    let text_atom = Ident::from_in(text_before, self.allocator);
+                    let text_atom = Ident::from_in(text_before, &self.allocator);
                     children.push(I18nNode::Text(I18nText { value: text_atom, source_span: span }));
                 }
             }
@@ -4571,8 +4592,8 @@ impl<'a> HtmlToR3Transform<'a> {
                     // Generate placeholder name using the i18n placeholder registry
                     let placeholder_name =
                         self.i18n_placeholder_registry.get_placeholder_name("INTERPOLATION", expr);
-                    let name_atom = Ident::from_in(&placeholder_name, self.allocator);
-                    let value_atom = Ident::from_in(expr, self.allocator);
+                    let name_atom = Ident::from_in(&placeholder_name, &self.allocator);
+                    let value_atom = Ident::from_in(expr, &self.allocator);
 
                     children.push(I18nNode::Placeholder(I18nPlaceholder {
                         value: value_atom,
@@ -4592,7 +4613,7 @@ impl<'a> HtmlToR3Transform<'a> {
         if current_pos < text.len() {
             let remaining = &text[current_pos..];
             if !remaining.is_empty() {
-                let text_atom = Ident::from_in(remaining, self.allocator);
+                let text_atom = Ident::from_in(remaining, &self.allocator);
                 children.push(I18nNode::Text(I18nText { value: text_atom, source_span: span }));
             }
         }
@@ -4628,8 +4649,8 @@ impl<'a> HtmlToR3Transform<'a> {
         use crate::ast::expression::Interpolation;
         use crate::parser::html::NGSP_UNICODE;
 
-        let mut strings = Vec::new_in(self.allocator);
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut strings = Vec::new_in(&self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
 
         // Helper to accumulate text/entity content before committing to strings array.
         // The invariant we maintain: strings.len() == expressions.len() after processing text/entity,
@@ -4655,7 +4676,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     if token.parts.len() >= 3 {
                         // Before adding an expression, commit the current string buffer
                         // (even if empty, we need a string before each expression)
-                        strings.push(Ident::from_in(current_string.as_str(), self.allocator));
+                        strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
                         current_string.clear();
 
                         let start_marker = &token.parts[0];
@@ -4699,13 +4720,13 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Commit the trailing string (after the last expression)
-        strings.push(Ident::from_in(current_string.as_str(), self.allocator));
+        strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
 
         // Create the Interpolation expression
         let span = ParseSpan::new(0, text.span.end - text.span.start);
         let source_span = AbsoluteSourceSpan { start: text.span.start, end: text.span.end };
         let interpolation = Interpolation { span, source_span, strings, expressions };
-        Some(AngularExpression::Interpolation(Box::new_in(interpolation, self.allocator)))
+        Some(AngularExpression::Interpolation(Box::new_in(interpolation, &self.allocator)))
     }
 
     /// Parses interpolation from attribute tokens, using token spans for correct source positions.
@@ -4720,8 +4741,8 @@ impl<'a> HtmlToR3Transform<'a> {
 
         let tokens = attr.value_tokens.as_ref()?;
 
-        let mut strings = Vec::new_in(self.allocator);
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut strings = Vec::new_in(&self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
 
         // Helper to accumulate text/entity content before committing to strings array.
         // The invariant we maintain: strings.len() == expressions.len() after processing text/entity,
@@ -4747,7 +4768,7 @@ impl<'a> HtmlToR3Transform<'a> {
                     if token.parts.len() >= 3 {
                         // Before adding an expression, commit the current string buffer
                         // (even if empty, we need a string before each expression)
-                        strings.push(Ident::from_in(current_string.as_str(), self.allocator));
+                        strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
                         current_string.clear();
 
                         let start_marker = &token.parts[0];
@@ -4788,13 +4809,13 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Commit the trailing string (after the last expression)
-        strings.push(Ident::from_in(current_string.as_str(), self.allocator));
+        strings.push(Ident::from_in(current_string.as_str(), &self.allocator));
 
         // Create the Interpolation expression
         let span = ParseSpan::new(0, value_span.size());
         let source_span = AbsoluteSourceSpan { start: value_span.start, end: value_span.end };
         let interpolation = Interpolation { span, source_span, strings, expressions };
-        Some(AngularExpression::Interpolation(Box::new_in(interpolation, self.allocator)))
+        Some(AngularExpression::Interpolation(Box::new_in(interpolation, &self.allocator)))
     }
 
     /// Creates a bound attribute from an attribute with interpolation value.
@@ -4876,7 +4897,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 span: ParseSpan::new(0, span.size()),
                 source_span: AbsoluteSourceSpan::new(span.start, span.end),
             },
-            self.allocator,
+            &self.allocator,
         ))
     }
 
@@ -5085,13 +5106,13 @@ fn parse_i18n_meta_with_message<'a>(
 
     I18nMeta::Message(I18nMessage {
         instance_id,
-        nodes: Vec::new_in(allocator),
-        meaning: Ident::from_in(meaning, allocator),
-        description: Ident::from_in(description, allocator),
-        custom_id: Ident::from_in(custom_id, allocator),
+        nodes: Vec::new_in(&allocator),
+        meaning: Ident::from_in(meaning, &allocator),
+        description: Ident::from_in(description, &allocator),
+        custom_id: Ident::from_in(custom_id, &allocator),
         id: Ident::from(""),
-        legacy_ids: Vec::new_in(allocator),
-        message_string: Ident::from_in(message_string, allocator),
+        legacy_ids: Vec::new_in(&allocator),
+        message_string: Ident::from_in(message_string, &allocator),
     })
 }
 

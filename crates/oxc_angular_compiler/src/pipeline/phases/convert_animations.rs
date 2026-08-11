@@ -136,17 +136,17 @@ pub fn convert_animations(job: &mut ComponentCompilationJob<'_>) {
                     AnimationBindingKind::Value => {
                         // Create handler_ops with a return statement containing the expression
                         // This matches Angular's createAnimationOp which wraps expression in ReturnStatement
-                        let mut handler_ops = OxcVec::new_in(allocator);
+                        let mut handler_ops = OxcVec::new_in(&allocator);
 
                         // Create a WrappedIrNode to hold the IR expression
                         let wrapped_expr = OutputExpression::WrappedIrNode(Box::new_in(
                             WrappedIrExpr { node: expression, source_span },
-                            allocator,
+                            &allocator,
                         ));
 
                         let return_stmt = OutputStatement::Return(Box::new_in(
                             ReturnStatement { value: wrapped_expr, source_span: None },
-                            allocator,
+                            &allocator,
                         ));
 
                         handler_ops.push(UpdateOp::Statement(StatementOp {
@@ -262,9 +262,9 @@ fn create_placeholder_expression<'a>(
 ) -> Box<'a, IrExpression<'a>> {
     let empty_expr = AngularExpression::Empty(Box::new_in(
         EmptyExpr { span: ParseSpan::new(0, 0), source_span: AbsoluteSourceSpan::new(0, 0) },
-        allocator,
+        &allocator,
     ));
-    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, allocator)), allocator)
+    Box::new_in(IrExpression::Ast(Box::new_in(empty_expr, &allocator)), &allocator)
 }
 
 /// Converts animation bindings for host binding compilation.

@@ -511,7 +511,7 @@ pub fn extract_input_metadata<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
 ) -> Vec<'a, R3InputMetadata<'a>> {
-    let mut inputs = Vec::new_in(allocator);
+    let mut inputs = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
@@ -662,7 +662,7 @@ pub fn extract_output_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
-    let mut outputs = Vec::new_in(allocator);
+    let mut outputs = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
@@ -796,7 +796,7 @@ fn parse_query_config<'a>(
     match first_arg {
         // @ViewChild('refName') - string selector
         Argument::StringLiteral(lit) => {
-            let mut selectors = Vec::new_in(allocator);
+            let mut selectors = Vec::new_in(&allocator);
             selectors.push(lit.value.clone().into());
             config.predicate = Some(QueryPredicate::Selectors(selectors));
         }
@@ -963,7 +963,7 @@ fn try_parse_signal_query<'a>(
     let predicate = match predicate_arg {
         // String selector: viewChild('myRef')
         Argument::StringLiteral(lit) => {
-            let mut selectors = oxc_allocator::Vec::new_in(allocator);
+            let mut selectors = oxc_allocator::Vec::new_in(&allocator);
             selectors.push(lit.value.clone().into());
             QueryPredicate::Selectors(selectors)
         }
@@ -1047,9 +1047,9 @@ pub fn extract_view_queries<'a>(
     // 3. @ViewChildren decorator queries
     //
     // See: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts
-    let mut signal_queries = Vec::new_in(allocator);
-    let mut view_child_queries = Vec::new_in(allocator);
-    let mut view_children_queries = Vec::new_in(allocator);
+    let mut signal_queries = Vec::new_in(&allocator);
+    let mut view_child_queries = Vec::new_in(&allocator);
+    let mut view_children_queries = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
@@ -1154,7 +1154,7 @@ pub fn extract_view_queries<'a>(
     }
 
     // Concatenate in Angular's order: signals first, then ViewChild, then ViewChildren
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     result.extend(signal_queries);
     result.extend(view_child_queries);
     result.extend(view_children_queries);
@@ -1190,9 +1190,9 @@ pub fn extract_content_queries<'a>(
     // 3. @ContentChildren decorator queries
     //
     // See: packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts
-    let mut signal_queries = Vec::new_in(allocator);
-    let mut content_child_queries = Vec::new_in(allocator);
-    let mut content_children_queries = Vec::new_in(allocator);
+    let mut signal_queries = Vec::new_in(&allocator);
+    let mut content_child_queries = Vec::new_in(&allocator);
+    let mut content_children_queries = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
@@ -1234,7 +1234,7 @@ pub fn extract_content_queries<'a>(
                 {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         let config = parse_query_config(
-                            allocator,
+                            &allocator,
                             decorator,
                             "ContentChildren",
                             source_text,
@@ -1281,7 +1281,7 @@ pub fn extract_content_queries<'a>(
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
                         let config = parse_query_config(
-                            allocator,
+                            &allocator,
                             decorator,
                             "ContentChildren",
                             source_text,
@@ -1306,7 +1306,7 @@ pub fn extract_content_queries<'a>(
     }
 
     // Concatenate in Angular's order: signals first, then ContentChild, then ContentChildren
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     result.extend(signal_queries);
     result.extend(content_child_queries);
     result.extend(content_children_queries);
@@ -1335,7 +1335,7 @@ pub fn extract_host_bindings<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
-    let mut bindings = Vec::new_in(allocator);
+    let mut bindings = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         let (decorators, property_name) = match element {
@@ -1407,7 +1407,7 @@ pub fn extract_host_listeners<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>, Vec<'a, Ident<'a>>)> {
-    let mut listeners = Vec::new_in(allocator);
+    let mut listeners = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         // Handle both MethodDefinition and PropertyDefinition (for arrow function handlers)
@@ -1448,7 +1448,7 @@ fn parse_host_listener_config<'a>(
     allocator: &'a Allocator,
     decorator: &'a Decorator<'a>,
 ) -> (Option<Ident<'a>>, Vec<'a, Ident<'a>>) {
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
 
     let Expression::CallExpression(call) = &decorator.expression else {
         return (None, args);

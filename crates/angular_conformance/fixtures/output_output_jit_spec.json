@@ -1,6 +1,6 @@
 {
   "name": "output_jit_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/output/output_jit_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/output/output_jit_spec.ts",
   "test_groups": [
     {
       "name": "Output JIT",

@@ -139,7 +139,7 @@ impl<'a> WhitespaceVisitor<'a> {
 
     /// Visit and transform a list of nodes, providing sibling context.
     pub fn visit_all(&mut self, nodes: &[HtmlNode<'a>]) -> Vec<'a, HtmlNode<'a>> {
-        let mut result = Vec::with_capacity_in(nodes.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(nodes.len(), &self.allocator);
 
         for (i, node) in nodes.iter().enumerate() {
             let context = SiblingContext {
@@ -170,7 +170,7 @@ impl<'a> WhitespaceVisitor<'a> {
             HtmlNode::ExpansionCase(case) => self.visit_expansion_case(case),
             HtmlNode::Comment(comment) => Some(HtmlNode::Comment(Box::new_in(
                 HtmlComment { value: comment.value.clone(), span: comment.span },
-                self.allocator,
+                &self.allocator,
             ))),
             HtmlNode::Attribute(attr) => {
                 // Filter out ngPreserveWhitespaces attribute
@@ -179,17 +179,17 @@ impl<'a> WhitespaceVisitor<'a> {
                 } else {
                     Some(HtmlNode::Attribute(Box::new_in(
                         self.clone_attribute(attr),
-                        self.allocator,
+                        &self.allocator,
                     )))
                 }
             }
             HtmlNode::BlockParameter(param) => Some(HtmlNode::BlockParameter(Box::new_in(
                 self.clone_block_parameter(param),
-                self.allocator,
+                &self.allocator,
             ))),
             HtmlNode::LetDeclaration(decl) => Some(HtmlNode::LetDeclaration(Box::new_in(
                 self.clone_let_declaration(decl),
-                self.allocator,
+                &self.allocator,
             ))),
         }
     }
@@ -211,9 +211,9 @@ impl<'a> WhitespaceVisitor<'a> {
         &self,
         tokens: &Vec<'a, InterpolatedToken<'a>>,
     ) -> Vec<'a, InterpolatedToken<'a>> {
-        let mut result = Vec::with_capacity_in(tokens.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(tokens.len(), &self.allocator);
         for token in tokens.iter() {
-            let mut parts = Vec::with_capacity_in(token.parts.len(), self.allocator);
+            let mut parts = Vec::with_capacity_in(token.parts.len(), &self.allocator);
             for part in token.parts.iter() {
                 parts.push(part.clone());
             }
@@ -247,7 +247,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 span: ParseSpan { start: 0, end: 0 },
                 source_span: AbsoluteSourceSpan { start: 0, end: 0 },
             },
-            self.allocator,
+            &self.allocator,
         ));
 
         HtmlLetDeclaration {
@@ -264,7 +264,7 @@ impl<'a> WhitespaceVisitor<'a> {
         &self,
         directives: &Vec<'a, HtmlDirective<'a>>,
     ) -> Vec<'a, HtmlDirective<'a>> {
-        let mut result = Vec::with_capacity_in(directives.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(directives.len(), &self.allocator);
         for dir in directives.iter() {
             result.push(self.clone_directive(dir));
         }
@@ -273,7 +273,7 @@ impl<'a> WhitespaceVisitor<'a> {
 
     /// Clone a directive into the allocator.
     fn clone_directive(&self, dir: &HtmlDirective<'a>) -> HtmlDirective<'a> {
-        let mut attrs = Vec::with_capacity_in(dir.attrs.len(), self.allocator);
+        let mut attrs = Vec::with_capacity_in(dir.attrs.len(), &self.allocator);
         for attr in dir.attrs.iter() {
             attrs.push(self.clone_attribute(attr));
         }
@@ -292,7 +292,7 @@ impl<'a> WhitespaceVisitor<'a> {
         &self,
         params: &Vec<'a, HtmlBlockParameter<'a>>,
     ) -> Vec<'a, HtmlBlockParameter<'a>> {
-        let mut result = Vec::with_capacity_in(params.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(params.len(), &self.allocator);
         for param in params.iter() {
             result.push(self.clone_block_parameter(param));
         }
@@ -301,7 +301,7 @@ impl<'a> WhitespaceVisitor<'a> {
 
     /// Clone attributes into the allocator.
     fn clone_attributes(&self, attrs: &Vec<'a, HtmlAttribute<'a>>) -> Vec<'a, HtmlAttribute<'a>> {
-        let mut result = Vec::with_capacity_in(attrs.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(attrs.len(), &self.allocator);
         for attr in attrs.iter() {
             result.push(self.clone_attribute(attr));
         }
@@ -310,7 +310,7 @@ impl<'a> WhitespaceVisitor<'a> {
 
     /// Clone children (nodes) into the allocator without transformation.
     fn clone_children(&self, children: &Vec<'a, HtmlNode<'a>>) -> Vec<'a, HtmlNode<'a>> {
-        let mut result = Vec::with_capacity_in(children.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(children.len(), &self.allocator);
         for child in children.iter() {
             result.push(self.clone_node(child));
         }
@@ -327,38 +327,39 @@ impl<'a> WhitespaceVisitor<'a> {
                     full_start: text.full_start,
                     tokens: self.clone_tokens(&text.tokens),
                 },
-                self.allocator,
+                &self.allocator,
             )),
             HtmlNode::Element(el) => {
-                HtmlNode::Element(Box::new_in(self.clone_element_shallow(el), self.allocator))
+                HtmlNode::Element(Box::new_in(self.clone_element_shallow(el), &self.allocator))
             }
-            HtmlNode::Component(comp) => {
-                HtmlNode::Component(Box::new_in(self.clone_component_shallow(comp), self.allocator))
-            }
+            HtmlNode::Component(comp) => HtmlNode::Component(Box::new_in(
+                self.clone_component_shallow(comp),
+                &self.allocator,
+            )),
             HtmlNode::Comment(c) => HtmlNode::Comment(Box::new_in(
                 HtmlComment { value: c.value.clone(), span: c.span },
-                self.allocator,
+                &self.allocator,
             )),
             HtmlNode::Attribute(attr) => {
-                HtmlNode::Attribute(Box::new_in(self.clone_attribute(attr), self.allocator))
+                HtmlNode::Attribute(Box::new_in(self.clone_attribute(attr), &self.allocator))
             }
             HtmlNode::Block(block) => {
-                HtmlNode::Block(Box::new_in(self.clone_block_shallow(block), self.allocator))
+                HtmlNode::Block(Box::new_in(self.clone_block_shallow(block), &self.allocator))
             }
             HtmlNode::BlockParameter(param) => HtmlNode::BlockParameter(Box::new_in(
                 self.clone_block_parameter(param),
-                self.allocator,
+                &self.allocator,
             )),
             HtmlNode::LetDeclaration(decl) => HtmlNode::LetDeclaration(Box::new_in(
                 self.clone_let_declaration(decl),
-                self.allocator,
+                &self.allocator,
             )),
             HtmlNode::Expansion(exp) => {
-                HtmlNode::Expansion(Box::new_in(self.clone_expansion_shallow(exp), self.allocator))
+                HtmlNode::Expansion(Box::new_in(self.clone_expansion_shallow(exp), &self.allocator))
             }
             HtmlNode::ExpansionCase(case) => HtmlNode::ExpansionCase(Box::new_in(
                 self.clone_expansion_case_shallow(case),
-                self.allocator,
+                &self.allocator,
             )),
         }
     }
@@ -413,7 +414,7 @@ impl<'a> WhitespaceVisitor<'a> {
 
     /// Clone an expansion (including cases).
     fn clone_expansion_shallow(&self, exp: &HtmlExpansion<'a>) -> HtmlExpansion<'a> {
-        let mut cases = Vec::with_capacity_in(exp.cases.len(), self.allocator);
+        let mut cases = Vec::with_capacity_in(exp.cases.len(), &self.allocator);
         for case in exp.cases.iter() {
             cases.push(self.clone_expansion_case_shallow(case));
         }
@@ -458,7 +459,7 @@ impl<'a> WhitespaceVisitor<'a> {
                     full_start: text.full_start,
                     tokens: self.clone_tokens(&text.tokens),
                 },
-                self.allocator,
+                &self.allocator,
             )));
         }
 
@@ -474,7 +475,7 @@ impl<'a> WhitespaceVisitor<'a> {
             // Process tokens
             let tokens = self.process_tokens(&text.tokens, context);
 
-            let value_atom = Ident::from_in(value.as_str(), self.allocator);
+            let value_atom = Ident::from_in(value.as_str(), &self.allocator);
             Some(HtmlNode::Text(Box::new_in(
                 HtmlText {
                     value: value_atom,
@@ -482,7 +483,7 @@ impl<'a> WhitespaceVisitor<'a> {
                     full_start: text.full_start,
                     tokens,
                 },
-                self.allocator,
+                &self.allocator,
             )))
         } else {
             // Remove whitespace-only text node
@@ -496,7 +497,7 @@ impl<'a> WhitespaceVisitor<'a> {
         tokens: &Vec<'a, InterpolatedToken<'a>>,
         context: &SiblingContext<'a, '_>,
     ) -> Vec<'a, InterpolatedToken<'a>> {
-        let mut result = Vec::with_capacity_in(tokens.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(tokens.len(), &self.allocator);
         let token_count = tokens.len();
 
         for (i, token) in tokens.iter().enumerate() {
@@ -514,8 +515,8 @@ impl<'a> WhitespaceVisitor<'a> {
                     }
                 }
 
-                let mut parts = Vec::with_capacity_in(1, self.allocator);
-                parts.push(Ident::from_in(processed.as_str(), self.allocator));
+                let mut parts = Vec::with_capacity_in(1, &self.allocator);
+                parts.push(Ident::from_in(processed.as_str(), &self.allocator));
 
                 result.push(InterpolatedToken {
                     token_type: token.token_type,
@@ -524,7 +525,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 });
             } else {
                 // Clone non-text tokens
-                let mut parts = Vec::with_capacity_in(token.parts.len(), self.allocator);
+                let mut parts = Vec::with_capacity_in(token.parts.len(), &self.allocator);
                 for part in token.parts.iter() {
                     parts.push(part.clone());
                 }
@@ -573,7 +574,7 @@ impl<'a> WhitespaceVisitor<'a> {
                     is_void: element.is_void,
                     is_component: element.is_component,
                 },
-                self.allocator,
+                &self.allocator,
             )));
         }
 
@@ -595,7 +596,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 is_void: element.is_void,
                 is_component: element.is_component,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 
@@ -618,7 +619,7 @@ impl<'a> WhitespaceVisitor<'a> {
                     start_span: component.start_span,
                     end_span: component.end_span,
                 },
-                self.allocator,
+                &self.allocator,
             )));
         }
 
@@ -638,7 +639,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 start_span: component.start_span,
                 end_span: component.end_span,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 
@@ -647,7 +648,7 @@ impl<'a> WhitespaceVisitor<'a> {
         &self,
         attrs: &Vec<'a, HtmlAttribute<'a>>,
     ) -> Vec<'a, HtmlAttribute<'a>> {
-        let mut result = Vec::with_capacity_in(attrs.len(), self.allocator);
+        let mut result = Vec::with_capacity_in(attrs.len(), &self.allocator);
         for attr in attrs.iter() {
             if attr.name.as_str() != PRESERVE_WS_ATTR_NAME {
                 result.push(self.clone_attribute(attr));
@@ -671,7 +672,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 start_span: block.start_span,
                 end_span: block.end_span,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 
@@ -680,7 +681,7 @@ impl<'a> WhitespaceVisitor<'a> {
         self.icu_expansion_depth += 1;
 
         // Visit cases (process whitespace in expansion content)
-        let mut cases = Vec::with_capacity_in(expansion.cases.len(), self.allocator);
+        let mut cases = Vec::with_capacity_in(expansion.cases.len(), &self.allocator);
         for case in expansion.cases.iter() {
             // Visit the expansion nodes within this case
             let visited_expansion = self.visit_all(&case.expansion);
@@ -704,7 +705,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 switch_value_span: expansion.switch_value_span,
                 in_i18n_block: expansion.in_i18n_block,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 
@@ -720,7 +721,7 @@ impl<'a> WhitespaceVisitor<'a> {
                 value_span: case.value_span,
                 expansion_span: case.expansion_span,
             },
-            self.allocator,
+            &self.allocator,
         )))
     }
 }

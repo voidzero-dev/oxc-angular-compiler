@@ -1111,9 +1111,9 @@ class MyComponent implements OnInit, OnDestroy {
         let source_type = SourceType::ts();
         let parser_ret = Parser::new(&allocator, &filtered, source_type).parse();
         assert!(
-            parser_ret.errors.is_empty(),
+            parser_ret.diagnostics.is_empty(),
             "Filtered source should be valid TypeScript: {:?}",
-            parser_ret.errors
+            parser_ret.diagnostics
         );
     }
 
@@ -1168,12 +1168,12 @@ class AppComponent implements OnInit, OnDestroy {
         let allocator = Allocator::default();
         let source_type = SourceType::ts();
         let parser_ret = Parser::new(&allocator, &filtered, source_type).parse();
-        if !parser_ret.errors.is_empty() {
-            for err in &parser_ret.errors {
+        if !parser_ret.diagnostics.is_empty() {
+            for err in &parser_ret.diagnostics {
                 eprintln!("Parse error: {:?}", err);
             }
         }
-        assert!(parser_ret.errors.is_empty(), "Filtered source should be valid TypeScript");
+        assert!(parser_ret.diagnostics.is_empty(), "Filtered source should be valid TypeScript");
 
         // Check that type-only imports are removed from the right places
         let import_lines: Vec<_> =

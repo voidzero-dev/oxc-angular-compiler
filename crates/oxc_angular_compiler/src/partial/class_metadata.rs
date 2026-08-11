@@ -47,7 +47,7 @@ pub fn compile_declare_class_metadata<'a>(
     allocator: &'a Allocator,
     meta: &R3ClassMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_CLASS_METADATA));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
@@ -75,23 +75,23 @@ pub fn compile_declare_class_metadata<'a>(
 
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
                 namespaced_prop(allocator, "i0", Identifiers::DECLARE_CLASS_METADATA),
-                allocator,
+                &allocator,
             ),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -132,7 +132,7 @@ pub fn compile_declare_class_metadata_async<'a>(
     dependencies: &[R3DeferPerComponentDependency<'a>],
 ) -> OutputExpression<'a> {
     // resolveMetadata callback body: { decorators, ctorParameters, propDecorators }
-    let mut callback_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut callback_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
     callback_entries.push(LiteralMapEntry::new(
         Ident::from("decorators"),
         meta.decorators.clone_in(allocator),
@@ -156,30 +156,30 @@ pub fn compile_declare_class_metadata_async<'a>(
     ));
     let callback_body = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: callback_entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // resolveMetadata callback params: one per deferred dep, using the
     // local param_name (which shadows the static import so bundlers can
     // tree-shake the eager binding).
-    let mut params = Vec::new_in(allocator);
+    let mut params = Vec::new_in(&allocator);
     for dep in dependencies {
         params.push(FnParam { name: dep.param_name.clone() });
     }
     let resolve_metadata = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
             params,
-            body: ArrowFunctionBody::Expression(Box::new_in(callback_body, allocator)),
+            body: ArrowFunctionBody::Expression(Box::new_in(callback_body, &allocator)),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // resolveDeferredDeps arrow — reused from the full-mode emitter; same
     // shape in both modes.
     let resolve_deferred_deps = compile_component_metadata_async_resolver(allocator, dependencies);
 
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_CLASS_METADATA_ASYNC));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
     entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
@@ -193,23 +193,23 @@ pub fn compile_declare_class_metadata_async<'a>(
 
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
                 namespaced_prop(allocator, "i0", Identifiers::DECLARE_CLASS_METADATA_ASYNC),
-                allocator,
+                &allocator,
             ),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -233,7 +233,7 @@ pub fn compile_component_declare_class_metadata<'a>(
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -244,19 +244,19 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -271,6 +271,6 @@ fn string_entry<'a>(
 fn null_lit<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Null, source_span: None },
-        allocator,
+        &allocator,
     ))
 }

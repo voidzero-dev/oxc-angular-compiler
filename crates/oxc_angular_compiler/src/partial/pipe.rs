@@ -42,7 +42,7 @@ pub fn compile_declare_pipe_from_metadata<'a>(
     allocator: &'a Allocator,
     meta: &R3PipeMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_PIPE));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
@@ -68,7 +68,7 @@ pub fn compile_declare_pipe_from_metadata<'a>(
         Ident::from("name"),
         OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(pipe_name.clone()), source_span: None },
-            allocator,
+            &allocator,
         )),
         false,
     ));
@@ -84,24 +84,24 @@ pub fn compile_declare_pipe_from_metadata<'a>(
 
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
                 namespaced_prop(allocator, "i0", Identifiers::DECLARE_PIPE),
-                allocator,
+                &allocator,
             ),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -143,9 +143,9 @@ fn clone_constructor_deps<'a>(
         // inheritance today, so we default to the safe-and-correct empty
         // form. An inheriting pipe still gets a working factory (plain
         // `new`), just without the inherited-factory optimization.
-        None => R3FactoryDeps::Valid(Vec::new_in(allocator)),
+        None => R3FactoryDeps::Valid(Vec::new_in(&allocator)),
         Some(deps) => {
-            let mut out = Vec::with_capacity_in(deps.len(), allocator);
+            let mut out = Vec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 // pipe::R3DependencyMetadata and factory::R3DependencyMetadata
                 // are structurally similar but distinct types. Convert.
@@ -173,7 +173,7 @@ fn clone_constructor_deps<'a>(
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -184,19 +184,19 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -211,6 +211,6 @@ fn string_entry<'a>(
 fn bool_literal<'a>(allocator: &'a Allocator, value: bool) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Boolean(value), source_span: None },
-        allocator,
+        &allocator,
     ))
 }

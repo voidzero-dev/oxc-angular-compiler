@@ -127,11 +127,15 @@ impl SpecExtractor {
         let file_name =
             spec_path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
 
-        TestSuite {
-            name: file_name,
-            file_path: spec_path.to_string_lossy().to_string(),
-            test_groups: root_group.groups,
-        }
+        // Store a repo-relative path so fixtures are reproducible across machines
+        // (absolute paths would leak the generating developer's home directory).
+        let file_path = spec_path
+            .strip_prefix(project_root::get_project_root().unwrap_or_default())
+            .unwrap_or(spec_path)
+            .to_string_lossy()
+            .to_string();
+
+        TestSuite { name: file_name, file_path, test_groups: root_group.groups }
     }
 }
 

@@ -174,7 +174,7 @@ fn serialize_local_refs_to_const_value<'a>(
     allocator: &'a oxc_allocator::Allocator,
     refs: &[(Ident<'a>, Ident<'a>)],
 ) -> ConstValue<'a> {
-    let mut entries = OxcVec::with_capacity_in(refs.len() * 2, allocator);
+    let mut entries = OxcVec::with_capacity_in(refs.len() * 2, &allocator);
 
     for (name, target) in refs {
         // Add name

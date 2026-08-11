@@ -118,7 +118,7 @@ impl<'a> ServiceMetadata<'a> {
     ) -> R3ServiceMetadata<'a> {
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: self.class_name.clone(), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         let factory = self.factory.and_then(|src| parse_factory_expression(allocator, src));
@@ -166,7 +166,7 @@ fn parse_factory_expression<'a>(
     // Wrap the expression so the parser treats it as a standalone module.
     let wrapped = allocator.alloc_str(&format!("({});", src));
     let parser_ret = Parser::new(allocator, wrapped, SourceType::ts()).parse();
-    if !parser_ret.errors.is_empty() {
+    if !parser_ret.diagnostics.is_empty() {
         return None;
     }
     let stmt = parser_ret.program.body.first()?;

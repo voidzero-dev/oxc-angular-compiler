@@ -865,6 +865,53 @@ export class Parent {}
     );
 }
 
+/// The `@default never;` exhaustive marker must be the last case in a `@switch`
+/// (Angular v22). A `@case`/`@default` that appears after it is a diagnostic.
+#[test]
+fn test_switch_default_never_must_be_last() {
+    let allocator = Allocator::default();
+    let ordering_msg = "must be the last case in a switch";
+
+    // Exhaustive check followed by a @case -> diagnostic.
+    let bad = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @default never; @case (1) {} }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", bad, None, None);
+    assert!(
+        result.has_errors(),
+        "A @case after `@default never;` must be a diagnostic. Output:\n{}",
+        result.code
+    );
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "Expected a 'must be the last case' diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+
+    // Exhaustive check as the last case (after a case with a body) -> no ordering error.
+    let good = r#"
+import { Component } from '@angular/core';
+@Component({
+    selector: 'app-x',
+    template: '@switch (x) { @case (1) {x} @default never; }',
+    standalone: true,
+})
+export class X { x = 1; }
+"#;
+    let result = transform_angular_file(&allocator, "x.component.ts", good, None, None);
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains(ordering_msg)),
+        "`@default never;` as the last case should not report the ordering diagnostic. Got: {:?}",
+        result.diagnostics
+    );
+}
+
 #[test]
 #[should_panic(
     expected = "Cannot specify additional `hydrate` triggers if `hydrate never` is present"
@@ -2038,6 +2085,259 @@ fn test_pipe_in_binary_with_safe_property_read() {
     insta::assert_snapshot!("pipe_in_binary_with_safe_property_read", js);
 }
 
+// ----------------------------------------------------------------------------
+// legacyOptionalChaining (Angular v22+): native `?.` vs legacy `== null ? null`
+// See issue #317 and angular/angular@2896c93cc1.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_safe_navigation_modern_interpolation_v22() {
+    // Angular v22+ emits native optional chaining, which yields `undefined`.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.name"), "expected native optional chaining, got:\n{js}");
+    assert!(!js.contains("== null"), "modern mode must not emit the legacy null ternary:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_chain_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.address?.city}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.user?.address?.city"), "expected chained native `?.`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_modern_mixed_chain_v22() {
+    // Only the safe steps become optional; the plain `.b` stays a normal read.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{a?.b.c?.d}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.a?.b.c?.d"), "expected mixed optional/plain chain, got:\n{js}");
+}
+
+#[test]
+fn test_safe_call_modern_v22() {
+    let js = compile_template_to_js_with_version(
+        r"<div>{{getData?.()}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.getData?.()"), "expected native optional call, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_legacy_on_v21() {
+    // Pre-v22 keeps the legacy `== null ? null` expansion.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{user?.name}}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 0)),
+    );
+    assert!(js.contains("== null"), "v21 must use the legacy null ternary, got:\n{js}");
+    assert!(!js.contains("ctx.user?.name"), "v21 must not emit native optional chaining:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_migration_forces_legacy_on_v22() {
+    // The `$safeNavigationMigration(...)` magic function opts a subtree back into
+    // legacy null semantics even on a modern (v22) target, and is stripped from
+    // the output.
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ $safeNavigationMigration(user?.name) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("== null"), "wrapped subtree must use the legacy null ternary, got:\n{js}");
+    assert!(
+        !js.contains("$safeNavigationMigration"),
+        "the migration wrapper must be stripped from the output:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_property_bindings_v22() {
+    // CX-47617: when an element has several property bindings, the reify phase
+    // chains them into a single `ɵɵproperty(a)(b)` call. The chaining phase
+    // clones the arguments of every binding after the first, and that clone used
+    // to hard-code `optional: false`, silently dropping the `?.` guard on all but
+    // the first binding. Under Angular v22 (native optional chaining) this emitted
+    // e.g. `ctx.c.d` instead of `ctx.c?.d`, crashing at runtime when `c` is nullish.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.d" [tooltip]="e?.f"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.a?.b"), "first binding must keep `?.`, got:\n{js}");
+    assert!(js.contains("ctx.c?.d"), "second (chained) binding must keep `?.`, got:\n{js}");
+    assert!(js.contains("ctx.e?.f"), "third (chained) binding must keep `?.`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_keyed_and_call_bindings_v22() {
+    // Same chaining-clone bug for SafeKeyedRead (`?.[k]`) and SafeCall (`?.()`)
+    // in later bindings of a chain.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.[k]" [tooltip]="fn?.()"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.c?.[ctx.k]"), "chained keyed read must keep `?.[`, got:\n{js}");
+    assert!(js.contains("ctx.fn?.()"), "chained safe call must keep `?.()`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_attr_class_style_v22() {
+    // The chaining-clone bug affected every chainable binding instruction, not
+    // just ɵɵproperty. Verify attribute, class and style bindings keep `?.` on
+    // their chained (non-first) argument.
+    for (tpl, instr) in [
+        (r#"<div [attr.a]="w?.x" [attr.b]="y?.z"></div>"#, "attribute"),
+        (r#"<div [class.a]="w?.x" [class.b]="y?.z"></div>"#, "class"),
+        (r#"<div [style.a]="w?.x" [style.b]="y?.z"></div>"#, "style"),
+    ] {
+        let js = compile_template_to_js_with_version(
+            tpl,
+            "TestComponent",
+            Some(AngularVersion::new(22, 0, 0)),
+        );
+        assert!(js.contains("ctx.w?.x"), "{instr}: first binding must keep `?.`, got:\n{js}");
+        assert!(js.contains("ctx.y?.z"), "{instr}: chained binding must keep `?.`, got:\n{js}");
+    }
+}
+
+#[test]
+fn test_safe_navigation_preserved_when_nested_in_chained_binding_v22() {
+    // `?.` buried inside a larger expression (under `!`, in a binary, chained,
+    // or in a ternary branch) on a chained binding must survive the recursive
+    // clone.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="!c?.d" [tooltip]="e?.f?.g" [alt]="h ? i?.j : k?.l"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("!ctx.c?.d"), "`?.` under `!` on chained binding must survive, got:\n{js}");
+    assert!(js.contains("ctx.e?.f?.g"), "chained `?.` on chained binding must survive, got:\n{js}");
+    assert!(
+        js.contains("ctx.i?.j"),
+        "`?.` in ternary branch on chained binding must survive, got:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.k?.l"),
+        "`?.` in ternary branch on chained binding must survive, got:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_host_property_bindings_v22() {
+    // CX-47617: host property bindings go through the same `chain_for_host` ->
+    // `clone_expression` path as template bindings. Multiple host `[prop]`
+    // bindings chain into `ɵɵhostProperty(a)(b)`, and the chained (non-first)
+    // ones must keep their `?.` guard under Angular v22.
+    use oxc_angular_compiler::{HostMetadataInput, compile_template_to_js_with_options};
+
+    let allocator = Allocator::default();
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 0, 0)),
+        host: Some(HostMetadataInput {
+            properties: vec![
+                ("[title]".to_string(), "a?.b".to_string()),
+                ("[id]".to_string(), "c?.d".to_string()),
+                ("[lang]".to_string(), "e?.f".to_string()),
+            ],
+            attributes: vec![],
+            listeners: vec![],
+            class_attr: None,
+            style_attr: None,
+        }),
+        selector: Some("my-comp".to_string()),
+        ..Default::default()
+    };
+
+    let output = compile_template_to_js_with_options(
+        &allocator,
+        "<p>hi</p>",
+        "MyComponent",
+        "test.ts",
+        &options,
+    )
+    .expect("compilation should succeed");
+    let code = &output.code;
+
+    assert!(code.contains("ctx.a?.b"), "first host binding must keep `?.`, got:\n{code}");
+    assert!(
+        code.contains("ctx.c?.d"),
+        "second (chained) host binding must keep `?.`, got:\n{code}"
+    );
+    assert!(code.contains("ctx.e?.f"), "third (chained) host binding must keep `?.`, got:\n{code}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_bindings_legacy_v21() {
+    // Older Angular (< v22) uses the legacy `== null ? null` expansion instead of
+    // native `?.`. The guard there is a structural ternary, not the `optional`
+    // flag, so the chaining-clone bug never affected legacy output. This test
+    // pins that: every chained binding — not just the first — must keep its own
+    // null-guard ternary in v21, and the fix must not perturb legacy codegen.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.d" [tooltip]="e?.f"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 0)),
+    );
+    assert!(!js.contains("?."), "v21 must not emit native optional chaining, got:\n{js}");
+    for (recv, member) in [("ctx.a", "ctx.a.b"), ("ctx.c", "ctx.c.d"), ("ctx.e", "ctx.e.f")] {
+        assert!(
+            js.contains(&format!("({recv} == null)? null: {member}")),
+            "each chained binding must keep its legacy null guard; missing for {member}, got:\n{js}"
+        );
+    }
+}
+
+#[test]
+fn test_two_way_binding_writeback_target_is_never_optional_v22() {
+    // Guard against "helpfully" preserving `?.` when cloning a two-way binding's
+    // write-back assignment target. `a?.b = $event` is a JS SyntaxError (an
+    // optional chain is not a legal assignment target), so the LHS of the
+    // `|| (target = value)` clause must stay a plain member access even when the
+    // bound expression uses safe navigation under Angular v22.
+    let js = compile_template_to_js_with_version(
+        r#"<input [(ngModel)]="a?.b">"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    // The twoWayBindingSet argument keeps its `?.` (it is only read, never assigned)...
+    assert!(js.contains("ɵɵtwoWayBindingSet(ctx.a?.b"), "read side should keep `?.`, got:\n{js}");
+    // ...but the write-back assignment target must be a plain, assignable read.
+    assert!(js.contains("ctx.a.b = $event"), "write-back LHS must be non-optional, got:\n{js}");
+    assert!(
+        !js.contains("a?.b = $event"),
+        "must not emit an illegal optional-chain LHS, got:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_migration_ignores_qualified_call() {
+    // Only the *unqualified* `$safeNavigationMigration(...)` helper is magic. A
+    // method named `$safeNavigationMigration` on some object is a legitimate call
+    // and must be preserved (matching Angular, which keys on a bare lexical read).
+    let js = compile_template_to_js_with_version(
+        r"<div>{{ svc.$safeNavigationMigration(user) }}</div>",
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(
+        js.contains("$safeNavigationMigration"),
+        "a qualified `svc.$safeNavigationMigration(...)` call must not be stripped, got:\n{js}"
+    );
+}
+
 // ============================================================================
 // Event Modifier Tests
 // ============================================================================
@@ -3136,7 +3436,12 @@ export class MatMiniFabButton {
     let mut templates = std::collections::HashMap::new();
     templates.insert("button.html".to_string(), button_template.to_string());
 
-    let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
+    // Both components also declare `styleUrl: 'fab.css'`; provide it so the
+    // fixture stays fully resolved now that missing resources are hard errors.
+    let mut styles = std::collections::HashMap::new();
+    styles.insert("fab.css".to_string(), vec![".fab {}".to_string()]);
+
+    let resources = ResolvedResources { templates, styles };
 
     let result = transform_angular_file(&allocator, "fab.ts", source, None, Some(&resources));
 
@@ -6081,6 +6386,48 @@ export class LoginFormComponent {
             "v{version:?}: should chain — `None` defaults to assume-latest, \
              v21.0.4+ has `typeof <fn>` return. Output:\n{code}"
         );
+    }
+}
+
+/// The control instructions (`ɵɵcontrolCreate()` / `ɵɵcontrol()`) for a
+/// two-way `[(ngModel)]` were added in Angular v22
+/// (`supports_extended_control_properties`); v21 only emitted control
+/// instructions for `[formField]`. Pre-v22 targets must therefore emit only the
+/// `ɵɵtwoWayProperty` for `[(ngModel)]`, while v22+ — and `None`, which assumes
+/// latest — also emit the paired control instructions.
+#[test]
+fn test_ng_model_control_instructions_obey_angular_version_gate() {
+    let template = r#"<input [(ngModel)]="name">"#;
+
+    // Pre-v22: no control instructions, just the two-way property.
+    for version in [
+        AngularVersion::new(19, 0, 0),
+        AngularVersion::new(20, 0, 0),
+        AngularVersion::new(21, 2, 0),
+    ] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", Some(version));
+        assert!(
+            code.contains("ɵɵtwoWayProperty("),
+            "v{version:?}: expected ɵɵtwoWayProperty. Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: must NOT emit ɵɵcontrolCreate (v22+ only). Output:\n{code}"
+        );
+        assert!(
+            !code.contains("ɵɵcontrol("),
+            "v{version:?}: must NOT emit ɵɵcontrol (v22+ only). Output:\n{code}"
+        );
+    }
+
+    // v22+ and `None` (assume latest): emit the paired control instructions.
+    for version in [Some(AngularVersion::new(22, 0, 0)), None] {
+        let code = compile_template_to_js_with_version(template, "TestComponent", version);
+        assert!(
+            code.contains("ɵɵcontrolCreate("),
+            "v{version:?}: expected ɵɵcontrolCreate. Output:\n{code}"
+        );
+        assert!(code.contains("ɵɵcontrol("), "v{version:?}: expected ɵɵcontrol. Output:\n{code}");
     }
 }
 
@@ -11139,6 +11486,59 @@ export class TestComponent {}
     let token_pos = result.code.find("const TOKEN").unwrap();
     let class_pos = result.code.find("class TestComponent").unwrap();
     assert!(token_pos < class_pos, "Order should be preserved.\nCode:\n{}", result.code);
+}
+
+/// A third-party `@Service` decorator (NOT imported from `@angular/core`) must
+/// not trigger hoisting. `Service` is a common name in non-Angular DI
+/// frameworks, and reordering such a class's referenced declarations would
+/// change that class's runtime evaluation order. The hoist filter verifies the
+/// `@Service` import resolves to `@angular/core` before acting. (PR #360 review)
+#[test]
+fn third_party_service_decorator_does_not_hoist_referenced_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Service } from './di';
+@Service(CONFIG)
+export class MyService {}
+const CONFIG = { name: 'svc' };
+"#;
+    let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    // The const must stay where the author wrote it — after the class.
+    let config_pos = result.code.find("const CONFIG").expect("CONFIG missing");
+    let class_pos = result.code.find("class MyService").expect("class missing");
+    assert!(
+        class_pos < config_pos,
+        "Third-party @Service must NOT hoist `const CONFIG` above the class. \
+         class@{class_pos} config@{config_pos}\nCode:\n{}",
+        result.code
+    );
+}
+
+/// The companion to the above: a genuine `@angular/core` `@Service` whose
+/// metadata references a later-declared const still hoists it, so the
+/// import-aware gate does not regress real Angular services.
+#[test]
+fn angular_core_service_decorator_hoists_referenced_const() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Service } from '@angular/core';
+@Service({ autoProvided: FLAG })
+export class MyService {}
+const FLAG = false;
+"#;
+    let result = transform_angular_file(&allocator, "my.service.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let flag_pos = result.code.find("const FLAG").expect("FLAG missing");
+    let class_pos = result.code.find("class MyService").expect("class missing");
+    assert!(
+        flag_pos < class_pos,
+        "@angular/core @Service must hoist `const FLAG` above the class. \
+         flag@{flag_pos} class@{class_pos}\nCode:\n{}",
+        result.code
+    );
 }
 
 /// When two bindings from the *same*

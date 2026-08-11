@@ -138,6 +138,16 @@ pub struct TransformOptions {
     /// When not set, assumes latest Angular version (v19+ behavior).
     pub angular_version: Option<AngularVersion>,
 
+    /// Override for the `legacyOptionalChaining` Angular compiler option
+    /// (`angularCompilerOptions.legacyOptionalChaining` in `tsconfig.json`).
+    ///
+    /// Controls the safe-navigation operator (`?.`) in template expressions.
+    /// When `true`, always emits the legacy `== null ? null` form; when `false`,
+    /// emits native optional chaining (yielding `undefined`). When unset, the
+    /// default is derived from `angularVersion` (legacy for < v22, modern for
+    /// >= v22, legacy when the version is unknown).
+    pub legacy_optional_chaining: Option<bool>,
+
     // Component metadata fields for full compilation testing
     // These mirror Angular's @Component decorator options.
     /// The CSS selector that identifies this component in a template.
@@ -229,6 +239,7 @@ impl From<TransformOptions> for RustTransformOptions {
             advanced_optimizations: options.advanced_optimizations.unwrap_or(false),
             i18n_use_external_ids: options.i18n_use_external_ids.unwrap_or(true),
             angular_version: options.angular_version.map(Into::into),
+            legacy_optional_chaining: options.legacy_optional_chaining,
             // Component metadata overrides
             selector: options.selector,
             standalone: options.standalone,
@@ -284,11 +295,13 @@ fn parse_view_encapsulation(s: &str) -> Option<RustViewEncapsulation> {
 
 /// Parse a ChangeDetectionStrategy string to the Rust enum.
 ///
-/// Valid values: "Default", "OnPush"
+/// Valid values: "OnPush", "Eager", and "Default" (the pre-v22 spelling of
+/// "Eager", kept distinct so partial emit preserves the author's member).
 fn parse_change_detection_strategy(s: &str) -> Option<RustChangeDetectionStrategy> {
     match s {
-        "Default" => Some(RustChangeDetectionStrategy::Default),
         "OnPush" => Some(RustChangeDetectionStrategy::OnPush),
+        "Eager" => Some(RustChangeDetectionStrategy::Eager),
+        "Default" => Some(RustChangeDetectionStrategy::Default),
         _ => None,
     }
 }
@@ -1349,7 +1362,7 @@ pub fn compile_pipe_sync(
 
                 let type_expr = OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: metadata.class_name, source_span: None },
-                    &allocator,
+                    &&allocator,
                 ));
 
                 // Build R3PipeMetadata
@@ -1581,10 +1594,14 @@ pub fn extract_component_metadata_sync(
                 }
                 .to_string();
 
-                // Convert change detection to string
+                // Convert change detection to string. `None` (unspecified) maps
+                // to "" so it round-trips back to `None` via
+                // `parse_change_detection_strategy` on the HMR re-compile.
                 let change_detection = match metadata.change_detection {
-                    RustChangeDetection::Default => "Default",
-                    RustChangeDetection::OnPush => "OnPush",
+                    Some(RustChangeDetection::OnPush) => "OnPush",
+                    Some(RustChangeDetection::Eager) => "Eager",
+                    Some(RustChangeDetection::Default) => "Default",
+                    None => "",
                 }
                 .to_string();
 
@@ -1860,7 +1877,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     // Create type expression for the injector class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Build the metadata
@@ -1872,7 +1889,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
     if let Some(providers_str) = &input.providers {
         let providers_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(providers_str.as_str()), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         builder = builder.providers(providers_expr);
     }
@@ -1882,7 +1899,7 @@ pub fn compile_injector_sync(input: InjectorCompileInput) -> InjectorNapiCompile
         for import_name in imports {
             let import_expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from(import_name.as_str()), source_span: None },
-                &allocator,
+                &&allocator,
             ));
             builder = builder.add_import(import_expr);
         }
@@ -2010,7 +2027,7 @@ pub fn compile_class_metadata_sync(
     // Build the class type expression
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(class_name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Build decorators array: [{ type: DecoratorClass, args: [...] }]
@@ -2231,7 +2248,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
     // Create type expression for the class
     let type_expr = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(input.name.as_str()), source_span: None },
-        &allocator,
+        &&allocator,
     ));
 
     // Parse deps_kind and build deps
@@ -2240,14 +2257,14 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
         Some("None") => R3FactoryDeps::None,
         Some("Valid") | None => {
             // Build valid dependencies
-            let mut dep_list = AllocVec::new_in(&allocator);
+            let mut dep_list = AllocVec::new_in(&&allocator);
             if let Some(deps) = &input.deps {
                 for dep in deps {
                     // Use ReadVarExpr for token since WrappedNodeExpr cannot be emitted
                     let token = dep.token.as_ref().map(|t| {
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from(t.as_str()), source_span: None },
-                            &allocator,
+                            &&allocator,
                         ))
                     });
 
@@ -2255,7 +2272,7 @@ fn compile_factory_impl(input: FactoryCompileInput) -> FactoryNapiCompileResult 
                     let attribute_name_type = dep.attribute_name_type.as_ref().map(|a| {
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from(a.as_str()), source_span: None },
-                            &allocator,
+                            &&allocator,
                         ))
                     });
 

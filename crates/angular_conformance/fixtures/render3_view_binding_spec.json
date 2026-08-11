@@ -1,6 +1,6 @@
 {
   "name": "binding_spec.ts",
-  "file_path": "/Users/brooklyn/workspace/github/oxc-angular-compiler/crates/oxc_angular_compiler/angular/packages/compiler/test/render3/view/binding_spec.ts",
+  "file_path": "crates/oxc_angular_compiler/angular/packages/compiler/test/render3/view/binding_spec.ts",
   "test_groups": [
     {
       "name": "findMatchingDirectivesAndPipes",
@@ -277,6 +277,52 @@
             {
               "name": "should check whether a referenced directive exists",
               "path": "t2 binding/selectorless/should check whether a referenced directive exists",
+              "assertions": []
+            }
+          ]
+        },
+        {
+          "name": "directive de-duplication",
+          "groups": [],
+          "tests": [
+            {
+              "name": "should give precedence to the template-matched directive over a host-directive-based match",
+              "path": "t2 binding/directive de-duplication/should give precedence to the template-matched directive over a host-directive-based match",
+              "assertions": []
+            },
+            {
+              "name": "should de-duplicate directives that match multiple times as host directives",
+              "path": "t2 binding/directive de-duplication/should de-duplicate directives that match multiple times as host directives",
+              "assertions": []
+            },
+            {
+              "name": "should merge the `inputs` of duplicated host directives",
+              "path": "t2 binding/directive de-duplication/should merge the `inputs` of duplicated host directives",
+              "assertions": []
+            },
+            {
+              "name": "should merge the `outputs` of duplicated host directives",
+              "path": "t2 binding/directive de-duplication/should merge the `outputs` of duplicated host directives",
+              "assertions": []
+            },
+            {
+              "name": "should capture conflicting input bindings in host directives",
+              "path": "t2 binding/directive de-duplication/should capture conflicting input bindings in host directives",
+              "assertions": []
+            },
+            {
+              "name": "should not capture conflicting input bindings if they are equivalent",
+              "path": "t2 binding/directive de-duplication/should not capture conflicting input bindings if they are equivalent",
+              "assertions": []
+            },
+            {
+              "name": "should capture conflicting output bindings in host directives",
+              "path": "t2 binding/directive de-duplication/should capture conflicting output bindings in host directives",
+              "assertions": []
+            },
+            {
+              "name": "should not capture conflicting output bindings if they are equivalent",
+              "path": "t2 binding/directive de-duplication/should not capture conflicting output bindings if they are equivalent",
               "assertions": []
             }
           ]

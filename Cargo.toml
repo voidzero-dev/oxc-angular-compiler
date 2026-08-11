@@ -87,19 +87,19 @@ multiple_crate_versions = "allow"
 
 [workspace.dependencies]
 # External oxc crates from crates.io
-oxc_allocator = "0.133"
-oxc_ast = "0.133"
-oxc_ast_visit = "0.133"
-oxc_diagnostics = "0.133"
-oxc_napi = "0.133"
-oxc_parser = "0.133"
-oxc_semantic = "0.133"
-oxc_span = "0.133"
-oxc_syntax = "0.133"
-oxc_sourcemap = "7.0.0"
-oxc_str = "0.133"
-oxc_transformer = "0.133"
-oxc_codegen = "0.133"
+oxc_allocator = "0.140"
+oxc_ast = "0.140"
+oxc_ast_visit = "0.140"
+oxc_diagnostics = "0.140"
+oxc_napi = "0.140"
+oxc_parser = "0.140"
+oxc_semantic = "0.140"
+oxc_span = "0.140"
+oxc_syntax = "0.140"
+oxc_sourcemap = "8.0.0"
+oxc_str = "0.140"
+oxc_transformer = "0.140"
+oxc_codegen = "0.140"
 
 # Internal
 oxc_angular_compiler = { path = "crates/oxc_angular_compiler" }
@@ -118,7 +118,7 @@ serde_json = "1"
 # Other dependencies
 insta = "1.43.2"
 lazy-regex = "3.5.1"
-miette = { package = "oxc-miette", version = "2.7.0", features = ["fancy-no-syscall"] }
+miette = { package = "oxc-miette", version = "3.0.0", features = ["fancy-no-syscall"] }
 mimalloc-safe = "0.1.56"
 pico-args = "0.5.0"
 project-root = "0.2.2"

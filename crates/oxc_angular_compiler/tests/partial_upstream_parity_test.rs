@@ -272,3 +272,35 @@ export class MyService {}
         "ClassMetadata decorators array should reference the decorator class. Got:\n{code}"
     );
 }
+
+// ============================================================================
+// ChangeDetection parity (Angular v22 `Eager` / `OnPush`)
+// ============================================================================
+
+#[test]
+fn change_detection_partial_emit_matches_upstream() {
+    // Angular's partial compiler emits the symbolic enum member whenever
+    // `changeDetection` is specified (partial/component.ts:109-118). The
+    // version-dependent "omit the default" rule is applied later — at link /
+    // full-compile time, against the consuming app's Angular version — so the
+    // partial declaration must preserve the author's strategy verbatim.
+    let allocator = Allocator::default();
+    for (strategy, expected) in [
+        ("Eager", "changeDetection:i0.ChangeDetectionStrategy.Eager"),
+        ("OnPush", "changeDetection:i0.ChangeDetectionStrategy.OnPush"),
+        // `Default` must be preserved as-is, not normalized to `Eager`: a
+        // partial lib built for a pre-v22 Angular has no `Eager` member.
+        ("Default", "changeDetection:i0.ChangeDetectionStrategy.Default"),
+    ] {
+        let source = format!(
+            "import {{ Component, ChangeDetectionStrategy }} from '@angular/core';\n\
+             @Component({{ selector: 'app-x', template: '<div></div>', standalone: false, changeDetection: ChangeDetectionStrategy.{strategy} }})\n\
+             export class X {{}}\n"
+        );
+        let code = compile_partial(&allocator, "x.component.ts", &source);
+        assert!(
+            contains_collapsed(&code, expected),
+            "partial changeDetection for {strategy} should match upstream's symbolic emit. Got:\n{code}"
+        );
+    }
+}

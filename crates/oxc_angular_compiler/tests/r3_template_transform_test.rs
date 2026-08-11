@@ -3329,6 +3329,133 @@ mod selectorless_unsupported_tag_r3 {
 }
 
 // ============================================================================
+// Selectorless components whose CLASS name collides with special HTML tags
+// (`Script` / `Style` / `Link`) must NOT be dropped by the preparser path.
+//
+// Upstream splits the two visitors:
+//   * `visitElement`   → calls `preparseElement` (strips script/style/link)
+//   * `visitComponent` → never calls `preparseElement`; only validates the
+//     resolved HOST tag (`component.tagName`) against UNSUPPORTED_SELECTORLESS_TAGS
+//
+// A bare selectorless component `<Script></Script>` has `tagName === null` and
+// must be emitted as an R3Component. Real lowercase HTML `<script>`/`<style>`
+// elements are still stripped. Host-tag syntax `<MyComp:script>` still errors
+// via UNSUPPORTED_SELECTORLESS_TAGS (covered above).
+// ============================================================================
+mod selectorless_special_element_preparser_r3 {
+    use oxc_allocator::Allocator;
+    use oxc_angular_compiler::ast::r3::R3Node;
+    use oxc_angular_compiler::parser::html::HtmlParser;
+    use oxc_angular_compiler::transform::html_to_r3::{HtmlToR3Transform, TransformOptions};
+
+    /// Parses with selectorless ON and returns the transformed R3 result.
+    fn transform_selectorless(html: &str) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let allocator = Allocator::default();
+        let parser = HtmlParser::with_selectorless(&allocator, html, "test.html");
+        let html_result = parser.parse();
+        assert!(
+            html_result.errors.is_empty(),
+            "HTML parse errors for '{html}': {:?}",
+            html_result.errors.iter().map(|e| e.msg.clone()).collect::<Vec<_>>()
+        );
+
+        let transformer = HtmlToR3Transform::new(
+            &allocator,
+            html,
+            TransformOptions { collect_comment_nodes: false },
+        );
+        let r3 = transformer.transform(&html_result.nodes);
+
+        fn collect_components<'a>(nodes: &[R3Node<'a>], out: &mut Vec<String>) {
+            for node in nodes {
+                match node {
+                    R3Node::Component(c) => out.push(c.component_name.to_string()),
+                    R3Node::Element(e) => collect_components(&e.children, out),
+                    R3Node::Template(t) => collect_components(&t.children, out),
+                    _ => {}
+                }
+            }
+        }
+        fn collect_elements<'a>(nodes: &[R3Node<'a>], out: &mut Vec<String>) {
+            for node in nodes {
+                match node {
+                    R3Node::Element(e) => {
+                        out.push(e.name.to_string());
+                        collect_elements(&e.children, out);
+                    }
+                    R3Node::Component(c) => collect_elements(&c.children, out),
+                    R3Node::Template(t) => collect_elements(&t.children, out),
+                    _ => {}
+                }
+            }
+        }
+
+        let mut components = Vec::new();
+        let mut elements = Vec::new();
+        collect_components(&r3.nodes, &mut components);
+        collect_elements(&r3.nodes, &mut elements);
+        let styles: Vec<String> = r3.styles.iter().map(|s| s.to_string()).collect();
+        (components, elements, styles)
+    }
+
+    #[test]
+    fn bare_script_class_component_is_kept() {
+        // `<Script></Script>` is a selectorless component (class name "Script"),
+        // NOT a real HTML script element — must be emitted as R3Component.
+        let (components, elements, styles) = transform_selectorless("<Script></Script>");
+        assert_eq!(components, vec!["Script".to_string()]);
+        assert!(elements.is_empty(), "expected no Element nodes, got {elements:?}");
+        assert!(styles.is_empty(), "expected no extracted styles, got {styles:?}");
+    }
+
+    #[test]
+    fn bare_style_class_component_is_kept() {
+        let (components, elements, styles) = transform_selectorless("<Style></Style>");
+        assert_eq!(components, vec!["Style".to_string()]);
+        assert!(elements.is_empty(), "expected no Element nodes, got {elements:?}");
+        // Must NOT extract class-name Style as a stylesheet.
+        assert!(styles.is_empty(), "expected no extracted styles, got {styles:?}");
+    }
+
+    #[test]
+    fn bare_link_class_component_is_kept() {
+        // `link` is a void element in HTML; use self-closing form so the parser
+        // doesn't emit an unexpected-closing-tag error for `</Link>`.
+        let (components, elements, _styles) = transform_selectorless("<Link/>");
+        assert_eq!(components, vec!["Link".to_string()]);
+        assert!(elements.is_empty(), "expected no Element nodes, got {elements:?}");
+    }
+
+    #[test]
+    fn real_lowercase_script_element_is_stripped() {
+        // Real HTML `<script>` is still dropped by the Element preparser path.
+        let (components, elements, styles) =
+            transform_selectorless("<script>evil()</script><div>after</div>");
+        assert!(components.is_empty(), "expected no components, got {components:?}");
+        assert_eq!(elements, vec!["div".to_string()]);
+        assert!(styles.is_empty());
+    }
+
+    #[test]
+    fn real_lowercase_style_element_is_extracted() {
+        let (components, elements, styles) =
+            transform_selectorless("<style>.x{}</style><div>after</div>");
+        assert!(components.is_empty(), "expected no components, got {components:?}");
+        assert_eq!(elements, vec!["div".to_string()]);
+        assert_eq!(styles, vec![".x{}".to_string()]);
+    }
+
+    #[test]
+    fn mixed_script_component_and_real_script() {
+        // Component kept, real script stripped, following div kept.
+        let (components, elements, _) =
+            transform_selectorless("<Script></Script><script>x</script><div>y</div>");
+        assert_eq!(components, vec!["Script".to_string()]);
+        assert_eq!(elements, vec!["div".to_string()]);
+    }
+}
+
+// ============================================================================
 // FINDING 1 [HIGH, SECURITY]: selectorless-component HOST TAG is threaded into
 // the bound-attribute security-context lookup AND the i18n trusted-types sink
 // check, matching upstream v21.2.7.

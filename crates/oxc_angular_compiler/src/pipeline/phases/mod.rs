@@ -58,6 +58,7 @@ mod reify;
 mod remove_empty_bindings;
 mod remove_i18n_contexts;
 mod remove_illegal_let_references;
+mod remove_safe_navigation_migration;
 mod remove_unused_i18n_attrs;
 mod resolve_contexts;
 mod resolve_defer_deps_fns;
@@ -106,7 +107,7 @@ pub struct Phase {
     pub name: &'static str,
 }
 
-/// All 66 transformation phases in order.
+/// All 67 transformation phases in order.
 ///
 /// This is the exact ordering from Angular's `emit.ts`.
 pub static PHASES: &[Phase] = &[
@@ -300,6 +301,13 @@ pub static PHASES: &[Phase] = &[
         run: any_cast::delete_any_casts,
         run_host: Some(any_cast::delete_any_casts_for_host),
         name: "deleteAnyCasts",
+    },
+    // Phase 27b: removeSafeNavigationMigration (Both)
+    Phase {
+        kind: CompilationJobKind::Both,
+        run: remove_safe_navigation_migration::remove_safe_navigation_migration,
+        run_host: Some(remove_safe_navigation_migration::remove_safe_navigation_migration_for_host),
+        name: "removeSafeNavigationMigration",
     },
     // Phase 28: resolveDollarEvent (Both)
     Phase {

@@ -1234,6 +1234,17 @@ impl<'a> HtmlLexer<'a> {
         // Skip whitespace before {
         self.skip_whitespace();
 
+        // v22: `@default never;` (optionally `@default never(expr);`) is a switch
+        // exhaustive check terminated by `;` rather than a `{ ... }` body. Emit
+        // BlockOpenEnd + BlockClose so it parses as an empty, self-closed block.
+        if !params_unclosed && name == "default never" && self.peek() == ';' {
+            let semi = self.index;
+            self.advance(); // consume ;
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockOpenEnd, semi, self.index));
+            self.tokens.push(HtmlToken::empty(HtmlTokenType::BlockClose, self.index, self.index));
+            return;
+        }
+
         // Expect { to end the block header
         if !params_unclosed && self.peek() == '{' {
             let brace_start = self.index;
@@ -1266,8 +1277,12 @@ impl<'a> HtmlLexer<'a> {
         for _ in 0..4 {
             self.advance();
         }
-        // Skip whitespace (but not newlines for detecting invalid @let)
-        while self.peek() == ' ' || self.peek() == '\t' {
+        // Skip whitespace after `@let`, including newlines. Angular consumes all
+        // whitespace between `@let` and the declared name, so `@let\nfoo = ...;` is a
+        // valid declaration. Stopping at a newline here misclassified it as incomplete,
+        // leaving the value (and any object-literal braces in it) to be re-lexed as
+        // block content, which corrupted block nesting.
+        while chars::is_whitespace(self.peek()) {
             self.advance();
         }
 
