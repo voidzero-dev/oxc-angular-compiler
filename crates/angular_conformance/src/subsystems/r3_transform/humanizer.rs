@@ -544,8 +544,10 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
     ) {
         if self.mode == HumanizeMode::SourceSpans {
             // Source spans mode: [LetDeclaration, sourceSpan, name, value]
-            // The source span includes the trailing semicolon (Angular v22).
+            // v21.2.7 fixtures: the humanized source span does not include the
+            // trailing semicolon (Angular later changed this in v22).
             let source_span = self.span_text(&decl.source_span);
+            let source_span = source_span.trim_end_matches(';').to_string();
             let name = self.span_text(&decl.name_span);
             let value = self.span_text(&decl.value_span);
             self.result.push(vec!["LetDeclaration".to_string(), source_span, name, value]);

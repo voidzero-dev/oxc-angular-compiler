@@ -15,7 +15,7 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {} */ b {}",
+                  "input": "/* b {c} */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": " b[contenta] {c}",
@@ -57,7 +57,7 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {} */ b {} /* a {} */ a {}",
+                  "input": "/* b {c} */ b {c} /* a {c} */ a {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": " b[contenta] {c}  a[contenta] {c}",
@@ -93,7 +93,7 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* comment 1 */ /* comment 2 */ b {}",
+                  "input": "/* comment 1 */ /* comment 2 */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
                   "expected": "  b[contenta] {c}",
