@@ -112,7 +112,7 @@ impl<'a> R3QueryMetadata<'a> {
         Self {
             property_name,
             first: false,
-            predicate: QueryPredicate::Selectors(Vec::new_in(allocator)),
+            predicate: QueryPredicate::Selectors(Vec::new_in(&allocator)),
             descendants: true,
             emit_distinct_changes_only: true,
             read: None,
@@ -147,9 +147,9 @@ impl<'a> R3HostMetadata<'a> {
     /// Create a new empty host metadata.
     pub fn new(allocator: &'a Allocator) -> Self {
         Self {
-            attributes: Vec::new_in(allocator),
-            listeners: Vec::new_in(allocator),
-            properties: Vec::new_in(allocator),
+            attributes: Vec::new_in(&allocator),
+            listeners: Vec::new_in(&allocator),
+            properties: Vec::new_in(&allocator),
             style_attr: None,
             class_attr: None,
         }
@@ -282,18 +282,18 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
             type_argument_count: 0,
             deps: None,
             selector: None,
-            queries: Vec::new_in(allocator),
-            view_queries: Vec::new_in(allocator),
+            queries: Vec::new_in(&allocator),
+            view_queries: Vec::new_in(&allocator),
             host: R3HostMetadata::new(allocator),
             uses_on_changes: false,
-            inputs: Vec::new_in(allocator),
-            outputs: Vec::new_in(allocator),
+            inputs: Vec::new_in(&allocator),
+            outputs: Vec::new_in(&allocator),
             uses_inheritance: false,
-            export_as: Vec::new_in(allocator),
+            export_as: Vec::new_in(&allocator),
             providers: None,
             is_standalone: true, // Default to standalone in modern Angular
             is_signal: false,
-            host_directives: Vec::new_in(allocator),
+            host_directives: Vec::new_in(&allocator),
         }
     }
 

@@ -214,7 +214,7 @@ pub fn parse_conditional_params<'a>(
     // Parse the condition expression
     // For conditional blocks, the expression is the full first parameter, so offset is 0
     let expression = Some(parse_expression_to_ast_with_source(
-        allocator,
+        &allocator,
         binding_parser,
         expr_str,
         first_param.span,
@@ -395,7 +395,7 @@ pub fn parse_for_loop_parameters<'a>(
     let raw_expression_alloc = allocator.alloc_str(raw_expression_str);
     let expression_offset = expr_str.rfind(raw_expression_str).map(|pos| pos as u32).unwrap_or(0);
     let expression = parse_expression_to_ast_with_source(
-        allocator,
+        &allocator,
         binding_parser,
         raw_expression_alloc,
         expression_param.span,
@@ -423,7 +423,7 @@ pub fn parse_for_loop_parameters<'a>(
                     param_str.rfind(track_expr_str).map(|pos| pos as u32).unwrap_or(0);
 
                 let track_expression = parse_expression_to_ast_with_source(
-                    allocator,
+                    &allocator,
                     binding_parser,
                     track_expr_str,
                     param.span,
@@ -457,7 +457,7 @@ pub fn parse_for_loop_parameters<'a>(
                 param.span.start + let_prefix + let_assignments.len() as u32,
             );
             parse_let_parameter(
-                allocator,
+                &allocator,
                 let_assignments,
                 assignments_span,
                 &item_name_owned,
@@ -599,7 +599,7 @@ fn create_default_context_variables<'a>(
     allocator: &'a Allocator,
     block_start_span: Span,
 ) -> Vec<'a, R3Variable<'a>> {
-    let mut vars = Vec::with_capacity_in(ALLOWED_FOR_LOOP_LET_VARIABLES.len(), allocator);
+    let mut vars = Vec::with_capacity_in(ALLOWED_FOR_LOOP_LET_VARIABLES.len(), &allocator);
 
     // Empty span at the end of the block start - both start and end are the same position
     let empty_span = Span::new(block_start_span.end, block_start_span.end);
@@ -639,7 +639,7 @@ fn create_empty_ast_with_source<'a>(allocator: &'a Allocator, span: Span) -> AST
                 span: ParseSpan { start: span.start, end: span.end },
                 source_span: AbsoluteSourceSpan::new(span.start, span.end),
             },
-            allocator,
+            &allocator,
         )),
         source: None,
         location: Ident::from(""),
@@ -892,7 +892,7 @@ pub fn parse_defer_triggers<'a>(
         // Reference: r3_deferred_blocks.ts lines 279-295
         if is_when_pattern(expr) {
             parse_when_trigger_from_expr(
-                allocator,
+                &allocator,
                 binding_parser,
                 expr,
                 span,
@@ -903,7 +903,7 @@ pub fn parse_defer_triggers<'a>(
             );
         } else if is_on_pattern(expr) {
             parse_on_trigger_from_expr(
-                allocator,
+                &allocator,
                 expr,
                 span,
                 None,
@@ -915,7 +915,7 @@ pub fn parse_defer_triggers<'a>(
         } else if is_prefetch_when_pattern(expr) {
             let prefetch_span = Some(Span::new(span.start, span.start + 8)); // "prefetch"
             parse_when_trigger_from_expr(
-                allocator,
+                &allocator,
                 binding_parser,
                 expr,
                 span,
@@ -927,7 +927,7 @@ pub fn parse_defer_triggers<'a>(
         } else if is_prefetch_on_pattern(expr) {
             let prefetch_span = Some(Span::new(span.start, span.start + 8)); // "prefetch"
             parse_on_trigger_from_expr(
-                allocator,
+                &allocator,
                 expr,
                 span,
                 prefetch_span,
@@ -939,7 +939,7 @@ pub fn parse_defer_triggers<'a>(
         } else if is_hydrate_when_pattern(expr) {
             let hydrate_span = Some(Span::new(span.start, span.start + 7)); // "hydrate"
             parse_when_trigger_from_expr(
-                allocator,
+                &allocator,
                 binding_parser,
                 expr,
                 span,
@@ -951,7 +951,7 @@ pub fn parse_defer_triggers<'a>(
         } else if is_hydrate_on_pattern(expr) {
             let hydrate_span = Some(Span::new(span.start, span.start + 7)); // "hydrate"
             parse_on_trigger_from_expr(
-                allocator,
+                &allocator,
                 expr,
                 span,
                 None,
@@ -1047,7 +1047,7 @@ fn parse_when_trigger_from_expr<'a>(
             // (including prefetch/hydrate/when keywords) to the end
             let full_source_span = span;
             parse_when_trigger(
-                allocator,
+                &allocator,
                 binding_parser,
                 condition_str,
                 Span::new(span.start + start_idx as u32, span.end),
@@ -1090,7 +1090,7 @@ fn parse_on_trigger_from_expr<'a>(
             // The full span starts from the beginning (including prefetch/hydrate/on keywords)
             let full_source_span_start = span.start;
             parse_on_triggers(
-                allocator,
+                &allocator,
                 triggers_str,
                 triggers_span,
                 full_source_span_start,
@@ -1254,7 +1254,7 @@ fn parse_on_triggers<'a>(
 
         // Parse individual trigger
         parse_single_on_trigger(
-            allocator,
+            &allocator,
             trigger_part,
             trigger_span,
             source_span,
@@ -1600,8 +1600,8 @@ fn extract_viewport_trigger_and_options<'a>(
         let LiteralMap { span: map_span, source_span: map_source_span, keys, values } = map.unbox();
 
         // Second pass: filter out the trigger key
-        let mut filtered_keys = Vec::new_in(allocator);
-        let mut filtered_values = Vec::new_in(allocator);
+        let mut filtered_keys = Vec::new_in(&allocator);
+        let mut filtered_values = Vec::new_in(&allocator);
 
         for (idx, (key, value)) in keys.into_iter().zip(values.into_iter()).enumerate() {
             if idx != trigger_idx {
@@ -1632,7 +1632,7 @@ fn extract_viewport_trigger_and_options<'a>(
                 keys: filtered_keys,
                 values: filtered_values,
             },
-            allocator,
+            &allocator,
         )));
 
         ViewportTriggerResult { reference: trigger_ref, options, errors }

@@ -101,7 +101,7 @@ pub(super) fn build_defer_per_component_deps<'a>(
     deferred_imports: &[Ident<'a>],
     import_map: &ImportMap<'a>,
 ) -> oxc_allocator::Vec<'a, R3DeferPerComponentDependency<'a>> {
-    let mut deps = oxc_allocator::Vec::new_in(allocator);
+    let mut deps = oxc_allocator::Vec::new_in(&allocator);
     for local_name in deferred_imports {
         let Some(info) = import_map.get(local_name) else { continue };
         if !info.is_named_import || info.is_type_only {

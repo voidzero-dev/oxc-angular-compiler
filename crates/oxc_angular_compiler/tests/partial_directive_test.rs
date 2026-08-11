@@ -18,7 +18,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -169,10 +169,10 @@ fn host_directive_with_forward_ref_wraps_directive() {
     let hd = R3HostDirectiveMetadata {
         directive: read_var(&allocator, "FwdHostDir"),
         is_forward_reference: true,
-        inputs: Vec::new_in(&allocator),
-        outputs: Vec::new_in(&allocator),
+        inputs: Vec::new_in(&&allocator),
+        outputs: Vec::new_in(&&allocator),
     };
-    let mut host_dirs = Vec::new_in(&allocator);
+    let mut host_dirs = Vec::new_in(&&allocator);
     host_dirs.push(hd);
 
     let meta = R3DirectiveMetadataBuilder::new(&allocator)
@@ -200,24 +200,24 @@ fn host_directive_with_forward_ref_wraps_directive() {
         type_argument_count: 0,
         deps: None::<Vec<'_, FacDep<'_>>>,
         selector: Some(Ident::from("[hostingDir]")),
-        queries: Vec::new_in(&allocator),
-        view_queries: Vec::new_in(&allocator),
+        queries: Vec::new_in(&&allocator),
+        view_queries: Vec::new_in(&&allocator),
         host: R3HostMetadata::new(&allocator),
         uses_on_changes: false,
-        inputs: Vec::new_in(&allocator),
-        outputs: Vec::new_in(&allocator),
+        inputs: Vec::new_in(&&allocator),
+        outputs: Vec::new_in(&&allocator),
         uses_inheritance: false,
-        export_as: Vec::new_in(&allocator),
+        export_as: Vec::new_in(&&allocator),
         providers: None,
         is_standalone: true,
         is_signal: false,
         host_directives: {
-            let mut v = Vec::new_in(&allocator);
+            let mut v = Vec::new_in(&&allocator);
             v.push(R3HostDirectiveMetadata {
                 directive: read_var(&allocator, "FwdHostDir"),
                 is_forward_reference: true,
-                inputs: Vec::new_in(&allocator),
-                outputs: Vec::new_in(&allocator),
+                inputs: Vec::new_in(&&allocator),
+                outputs: Vec::new_in(&&allocator),
             });
             v
         },
@@ -233,7 +233,7 @@ fn host_directive_with_forward_ref_wraps_directive() {
 #[test]
 fn outputs_emitted_as_object_map() {
     let allocator = Allocator::default();
-    let mut outputs = Vec::new_in(&allocator);
+    let mut outputs = Vec::new_in(&&allocator);
     outputs.push((Ident::from("valueChange"), Ident::from("valueChange")));
     outputs.push((Ident::from("internalEvent"), Ident::from("publicEvent")));
 
@@ -245,18 +245,18 @@ fn outputs_emitted_as_object_map() {
         type_argument_count: 0,
         deps: None::<Vec<'_, FacDep<'_>>>,
         selector: Some(Ident::from("[myDir]")),
-        queries: Vec::new_in(&allocator),
-        view_queries: Vec::new_in(&allocator),
+        queries: Vec::new_in(&&allocator),
+        view_queries: Vec::new_in(&&allocator),
         host: R3HostMetadata::new(&allocator),
         uses_on_changes: false,
-        inputs: Vec::new_in(&allocator),
+        inputs: Vec::new_in(&&allocator),
         outputs,
         uses_inheritance: false,
-        export_as: Vec::new_in(&allocator),
+        export_as: Vec::new_in(&&allocator),
         providers: None,
         is_standalone: true,
         is_signal: false,
-        host_directives: Vec::new_in(&allocator),
+        host_directives: Vec::new_in(&&allocator),
     };
     let expr = compile_declare_directive_from_metadata(&allocator, &meta);
     let js = emit(&expr);
@@ -289,18 +289,18 @@ fn directive_uses_inheritance_and_on_changes() {
         type_argument_count: 0,
         deps: None::<Vec<'_, FacDep<'_>>>,
         selector: Some(Ident::from("[inheritingDir]")),
-        queries: Vec::new_in(&allocator),
-        view_queries: Vec::new_in(&allocator),
+        queries: Vec::new_in(&&allocator),
+        view_queries: Vec::new_in(&&allocator),
         host: R3HostMetadata::new(&allocator),
         uses_on_changes: true,
-        inputs: Vec::new_in(&allocator),
-        outputs: Vec::new_in(&allocator),
+        inputs: Vec::new_in(&&allocator),
+        outputs: Vec::new_in(&&allocator),
         uses_inheritance: true,
-        export_as: Vec::new_in(&allocator),
+        export_as: Vec::new_in(&&allocator),
         providers: None,
         is_standalone: true,
         is_signal: false,
-        host_directives: Vec::new_in(&allocator),
+        host_directives: Vec::new_in(&&allocator),
     };
     let expr = compile_declare_directive_from_metadata(&allocator, &manual);
     let js = emit(&expr);
@@ -313,7 +313,7 @@ fn directive_export_as_emitted_as_string_array() {
     let allocator = Allocator::default();
     use oxc_angular_compiler::directive::R3DirectiveMetadata;
     use oxc_angular_compiler::factory::R3DependencyMetadata as FacDep;
-    let mut export_as = Vec::new_in(&allocator);
+    let mut export_as = Vec::new_in(&&allocator);
     export_as.push(Ident::from("alias1"));
     export_as.push(Ident::from("alias2"));
     let meta = R3DirectiveMetadata {
@@ -322,18 +322,18 @@ fn directive_export_as_emitted_as_string_array() {
         type_argument_count: 0,
         deps: None::<Vec<'_, FacDep<'_>>>,
         selector: Some(Ident::from("[myDir]")),
-        queries: Vec::new_in(&allocator),
-        view_queries: Vec::new_in(&allocator),
+        queries: Vec::new_in(&&allocator),
+        view_queries: Vec::new_in(&&allocator),
         host: R3HostMetadata::new(&allocator),
         uses_on_changes: false,
-        inputs: Vec::new_in(&allocator),
-        outputs: Vec::new_in(&allocator),
+        inputs: Vec::new_in(&&allocator),
+        outputs: Vec::new_in(&&allocator),
         uses_inheritance: false,
         export_as,
         providers: None,
         is_standalone: true,
         is_signal: false,
-        host_directives: Vec::new_in(&allocator),
+        host_directives: Vec::new_in(&&allocator),
     };
     let expr = compile_declare_directive_from_metadata(&allocator, &meta);
     let js = emit(&expr);

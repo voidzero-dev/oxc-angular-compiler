@@ -314,17 +314,17 @@ impl<'a> Parser<'a> {
         let source_span = span.to_absolute(absolute_offset);
 
         let value = match input {
-            Some(s) => LiteralValue::String(Ident::from_in(s, self.allocator)),
+            Some(s) => LiteralValue::String(Ident::from_in(s, &self.allocator)),
             None => LiteralValue::Null,
         };
 
         let literal = LiteralPrimitive { span, source_span, value };
-        let ast = AngularExpression::LiteralPrimitive(Box::new_in(literal, self.allocator));
+        let ast = AngularExpression::LiteralPrimitive(Box::new_in(literal, &self.allocator));
 
         ASTWithSource {
             ast,
-            source: input.map(|s| Ident::from_in(s, self.allocator)),
-            location: Ident::from_in(location, self.allocator),
+            source: input.map(|s| Ident::from_in(s, &self.allocator)),
+            location: Ident::from_in(location, &self.allocator),
             absolute_offset,
         }
     }
@@ -472,7 +472,7 @@ impl<'a> Parser<'a> {
         mut self,
         template_key: TemplateBindingIdentifier<'a>,
     ) -> TemplateBindingParseResult<'a> {
-        let mut bindings = Vec::new_in(self.allocator);
+        let mut bindings = Vec::new_in(&self.allocator);
         let mut errors = std::vec::Vec::new();
         let warnings = std::vec::Vec::new();
 
@@ -512,8 +512,8 @@ impl<'a> Parser<'a> {
             } else {
                 Some(ASTWithSource {
                     ast: value,
-                    source: Some(Ident::from_in(value_source, self.allocator)),
-                    location: Ident::from_in("", self.allocator),
+                    source: Some(Ident::from_in(value_source, &self.allocator)),
+                    location: Ident::from_in("", &self.allocator),
                     absolute_offset: self.absolute_offset + start,
                 })
             };
@@ -597,7 +597,7 @@ impl<'a> Parser<'a> {
         end: u32,
     ) -> TemplateBindingIdentifier<'a> {
         TemplateBindingIdentifier {
-            source: Ident::from_in(source, self.allocator),
+            source: Ident::from_in(source, &self.allocator),
             span: AbsoluteSourceSpan::new(start, end),
         }
     }
@@ -747,8 +747,8 @@ impl<'a> Parser<'a> {
         let value_source = &self.source[expr_start as usize..value_end as usize];
         let ast_with_source = ASTWithSource {
             ast: value,
-            source: Some(Ident::from_in(value_source, self.allocator)),
-            location: Ident::from_in("", self.allocator),
+            source: Some(Ident::from_in(value_source, &self.allocator)),
+            location: Ident::from_in("", &self.allocator),
             absolute_offset: self.absolute_offset + expr_start,
         };
 
@@ -822,7 +822,7 @@ impl<'a> Parser<'a> {
                     self.advance();
 
                     // Parse pipe arguments (stop at `;`, `,`, or `as`)
-                    let mut args = Vec::new_in(self.allocator);
+                    let mut args = Vec::new_in(&self.allocator);
                     while self.optional_character(':') {
                         // Check for terminators
                         if self
@@ -856,7 +856,7 @@ impl<'a> Parser<'a> {
                         args,
                         pipe_type: BindingPipeType::ReferencedByName,
                     };
-                    result = AngularExpression::BindingPipe(Box::new_in(pipe, self.allocator));
+                    result = AngularExpression::BindingPipe(Box::new_in(pipe, &self.allocator));
                 } else {
                     self.error("expected identifier or keyword");
                     break;
@@ -979,8 +979,8 @@ impl<'a> Parser<'a> {
         let start_len = start_delimiter.len();
         let end_len = end_delimiter.len();
 
-        let mut strings = Vec::new_in(self.allocator);
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut strings = Vec::new_in(&self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
 
         let mut current_pos = 0;
 
@@ -996,13 +996,13 @@ impl<'a> Parser<'a> {
                 {
                     // Add text before the interpolation
                     let text = &self.source[current_pos..abs_start];
-                    strings.push(Ident::from_in(text, self.allocator));
+                    strings.push(Ident::from_in(text, &self.allocator));
 
                     let expr_text = &self.source[expr_start..expr_start + end_idx];
 
                     // Parse the expression
                     let expr_parser = Parser::with_offset(
-                        self.allocator,
+                        &self.allocator,
                         expr_text,
                         self.absolute_offset + expr_start as u32,
                     );
@@ -1016,13 +1016,13 @@ impl<'a> Parser<'a> {
                     // Treat the {{ and everything after as literal text
                     // by adding all remaining text to strings and exiting
                     let text = &self.source[current_pos..];
-                    strings.push(Ident::from_in(text, self.allocator));
+                    strings.push(Ident::from_in(text, &self.allocator));
                     break;
                 }
             } else {
                 // No more interpolations - add remaining text and exit
                 let text = &self.source[current_pos..];
-                strings.push(Ident::from_in(text, self.allocator));
+                strings.push(Ident::from_in(text, &self.allocator));
                 break;
             }
         }
@@ -1031,7 +1031,7 @@ impl<'a> Parser<'a> {
         // all input including the last "}}"), we still need to add the trailing string.
         // This ensures strings.len() == expressions.len() + 1 for proper interleaving.
         if !expressions.is_empty() && strings.len() == expressions.len() {
-            strings.push(Ident::from_in("", self.allocator));
+            strings.push(Ident::from_in("", &self.allocator));
         }
 
         if expressions.is_empty() {
@@ -1041,7 +1041,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(0, self.source.len() as u32);
         let source_span = span.to_absolute(self.absolute_offset);
         let interpolation = Interpolation { span, source_span, strings, expressions };
-        let ast = AngularExpression::Interpolation(Box::new_in(interpolation, self.allocator));
+        let ast = AngularExpression::Interpolation(Box::new_in(interpolation, &self.allocator));
 
         Some(ParseResult { ast, errors: self.errors })
     }
@@ -1334,7 +1334,7 @@ impl<'a> Parser<'a> {
 
     /// Parses a chain of expressions.
     fn parse_chain(&mut self) -> AngularExpression<'a> {
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
         let start = self.peek().map(|t| t.index).unwrap_or(0);
 
         loop {
@@ -1381,7 +1381,7 @@ impl<'a> Parser<'a> {
             let source_span = span.to_absolute(self.absolute_offset);
             return AngularExpression::Empty(Box::new_in(
                 EmptyExpr { span, source_span },
-                self.allocator,
+                &self.allocator,
             ));
         }
 
@@ -1389,7 +1389,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let chain = Chain { span, source_span, expressions };
-        AngularExpression::Chain(Box::new_in(chain, self.allocator))
+        AngularExpression::Chain(Box::new_in(chain, &self.allocator))
     }
 
     /// Parses an expression.
@@ -1414,14 +1414,14 @@ impl<'a> Parser<'a> {
                 let empty_source_span = empty_span.to_absolute(self.absolute_offset);
                 let true_exp = AngularExpression::Empty(Box::new_in(
                     EmptyExpr { span: empty_span, source_span: empty_source_span },
-                    self.allocator,
+                    &self.allocator,
                 ));
                 let false_exp = AngularExpression::Empty(Box::new_in(
                     EmptyExpr { span: empty_span, source_span: empty_source_span },
-                    self.allocator,
+                    &self.allocator,
                 ));
                 let cond = Conditional { span, source_span, condition, true_exp, false_exp };
-                return AngularExpression::Conditional(Box::new_in(cond, self.allocator));
+                return AngularExpression::Conditional(Box::new_in(cond, &self.allocator));
             }
 
             let true_exp = self.parse_pipe();
@@ -1438,7 +1438,7 @@ impl<'a> Parser<'a> {
                 let empty_source_span = empty_span.to_absolute(self.absolute_offset);
                 AngularExpression::Empty(Box::new_in(
                     EmptyExpr { span: empty_span, source_span: empty_source_span },
-                    self.allocator,
+                    &self.allocator,
                 ))
             };
 
@@ -1446,7 +1446,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let cond = Conditional { span, source_span, condition, true_exp, false_exp };
-            return AngularExpression::Conditional(Box::new_in(cond, self.allocator));
+            return AngularExpression::Conditional(Box::new_in(cond, &self.allocator));
         }
 
         condition
@@ -1469,7 +1469,7 @@ impl<'a> Parser<'a> {
                 left,
                 right,
             };
-            left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+            left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
         }
 
         left
@@ -1486,7 +1486,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let binary = Binary { span, source_span, operation: BinaryOperator::Or, left, right };
-            left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+            left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
         }
 
         left
@@ -1503,7 +1503,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let binary = Binary { span, source_span, operation: BinaryOperator::And, left, right };
-            left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+            left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
         }
 
         left
@@ -1533,7 +1533,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let binary = Binary { span, source_span, operation, left, right };
-                left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             } else {
                 break;
             }
@@ -1570,7 +1570,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let binary = Binary { span, source_span, operation, left, right };
-                left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             } else {
                 break;
             }
@@ -1618,7 +1618,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let binary = Binary { span, source_span, operation, left, right };
-                left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             } else {
                 break;
             }
@@ -1649,7 +1649,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let binary = Binary { span, source_span, operation, left, right };
-                left = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                left = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             } else {
                 break;
             }
@@ -1690,7 +1690,7 @@ impl<'a> Parser<'a> {
             let source_span = span.to_absolute(self.absolute_offset);
             let binary =
                 Binary { span, source_span, operation: BinaryOperator::Power, left: result, right };
-            result = AngularExpression::Binary(Box::new_in(binary, self.allocator));
+            result = AngularExpression::Binary(Box::new_in(binary, &self.allocator));
         }
 
         result
@@ -1706,7 +1706,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let unary = Unary { span, source_span, operator: UnaryOperator::Plus, expr };
-            return AngularExpression::Unary(Box::new_in(unary, self.allocator));
+            return AngularExpression::Unary(Box::new_in(unary, &self.allocator));
         }
 
         if self.optional_operator("-") {
@@ -1715,7 +1715,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let unary = Unary { span, source_span, operator: UnaryOperator::Minus, expr };
-            return AngularExpression::Unary(Box::new_in(unary, self.allocator));
+            return AngularExpression::Unary(Box::new_in(unary, &self.allocator));
         }
 
         if self.optional_operator("!") {
@@ -1724,7 +1724,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let prefix_not = PrefixNot { span, source_span, expression };
-            return AngularExpression::PrefixNot(Box::new_in(prefix_not, self.allocator));
+            return AngularExpression::PrefixNot(Box::new_in(prefix_not, &self.allocator));
         }
 
         // Handle typeof keyword
@@ -1734,7 +1734,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let typeof_expr = TypeofExpression { span, source_span, expression };
-            return AngularExpression::TypeofExpression(Box::new_in(typeof_expr, self.allocator));
+            return AngularExpression::TypeofExpression(Box::new_in(typeof_expr, &self.allocator));
         }
 
         // Handle void keyword
@@ -1744,7 +1744,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let void_expr = VoidExpression { span, source_span, expression };
-            return AngularExpression::VoidExpression(Box::new_in(void_expr, self.allocator));
+            return AngularExpression::VoidExpression(Box::new_in(void_expr, &self.allocator));
         }
 
         self.parse_call_chain()
@@ -1779,7 +1779,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let assert = NonNullAssert { span, source_span, expression: result };
-                result = AngularExpression::NonNullAssert(Box::new_in(assert, self.allocator));
+                result = AngularExpression::NonNullAssert(Box::new_in(assert, &self.allocator));
             } else if let Some(token) = self.peek() {
                 // Handle tagged template literals: tag`template`
                 // Only NoSubstitutionTemplate and TemplateHead can start a tagged template
@@ -1837,7 +1837,7 @@ impl<'a> Parser<'a> {
                         left: result,
                         right,
                     };
-                    return AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                    return AngularExpression::Binary(Box::new_in(binary, &self.allocator));
                 }
             }
         }
@@ -1865,7 +1865,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(start, end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let name_span = source_span;
-                let empty_name = Ident::from_in("", self.allocator);
+                let empty_name = Ident::from_in("", &self.allocator);
                 if safe {
                     let read = SafePropertyRead {
                         span,
@@ -1874,11 +1874,11 @@ impl<'a> Parser<'a> {
                         receiver,
                         name: empty_name,
                     };
-                    return AngularExpression::SafePropertyRead(Box::new_in(read, self.allocator));
+                    return AngularExpression::SafePropertyRead(Box::new_in(read, &self.allocator));
                 }
                 let read =
                     PropertyRead { span, source_span, name_span, receiver, name: empty_name };
-                return AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
+                return AngularExpression::PropertyRead(Box::new_in(read, &self.allocator));
             }
 
             if token.is_identifier() || token.is_keyword() {
@@ -1910,12 +1910,12 @@ impl<'a> Parser<'a> {
                             self.error("The '?.' operator cannot be used in the assignment");
                             return AngularExpression::Empty(Box::new_in(
                                 EmptyExpr { span, source_span },
-                                self.allocator,
+                                &self.allocator,
                             ));
                         }
                     }
                     let read = SafePropertyRead { span, source_span, name_span, receiver, name };
-                    return AngularExpression::SafePropertyRead(Box::new_in(read, self.allocator));
+                    return AngularExpression::SafePropertyRead(Box::new_in(read, &self.allocator));
                 }
 
                 // Check for assignment operator (in action mode only)
@@ -1935,7 +1935,7 @@ impl<'a> Parser<'a> {
                             PropertyRead { span, source_span, name_span, receiver, name };
                         let left = AngularExpression::PropertyRead(Box::new_in(
                             property_read,
-                            self.allocator,
+                            &self.allocator,
                         ));
 
                         // Consume the assignment operator
@@ -1961,11 +1961,11 @@ impl<'a> Parser<'a> {
                             left,
                             right,
                         };
-                        return AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                        return AngularExpression::Binary(Box::new_in(binary, &self.allocator));
                     }
                 }
                 let read = PropertyRead { span, source_span, name_span, receiver, name };
-                return AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
+                return AngularExpression::PropertyRead(Box::new_in(read, &self.allocator));
             }
         }
 
@@ -1994,12 +1994,12 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let name_span = source_span; // Empty name span at end
-        let empty_name = Ident::from_in("", self.allocator);
+        let empty_name = Ident::from_in("", &self.allocator);
 
         if safe {
             let read =
                 SafePropertyRead { span, source_span, name_span, receiver, name: empty_name };
-            return AngularExpression::SafePropertyRead(Box::new_in(read, self.allocator));
+            return AngularExpression::SafePropertyRead(Box::new_in(read, &self.allocator));
         }
 
         // Check for assignment operator (in action mode only) - error recovery
@@ -2011,7 +2011,7 @@ impl<'a> Parser<'a> {
                 let property_read =
                     PropertyRead { span, source_span, name_span, receiver, name: empty_name };
                 let left =
-                    AngularExpression::PropertyRead(Box::new_in(property_read, self.allocator));
+                    AngularExpression::PropertyRead(Box::new_in(property_read, &self.allocator));
 
                 // Consume the assignment operator
                 self.advance();
@@ -2031,12 +2031,12 @@ impl<'a> Parser<'a> {
                     left,
                     right,
                 };
-                return AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                return AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             }
         }
 
         let read = PropertyRead { span, source_span, name_span, receiver, name: empty_name };
-        AngularExpression::PropertyRead(Box::new_in(read, self.allocator))
+        AngularExpression::PropertyRead(Box::new_in(read, &self.allocator))
     }
 
     /// Parses keyed read with an explicit start position for span calculation.
@@ -2081,7 +2081,7 @@ impl<'a> Parser<'a> {
                     self.error("The '?.' operator cannot be used in the assignment");
                     return AngularExpression::Empty(Box::new_in(
                         EmptyExpr { span, source_span },
-                        self.allocator,
+                        &self.allocator,
                     ));
                 }
 
@@ -2094,7 +2094,7 @@ impl<'a> Parser<'a> {
 
                 // Create KeyedRead as the assignment target
                 let keyed_read = KeyedRead { span, source_span, receiver, key };
-                let left = AngularExpression::KeyedRead(Box::new_in(keyed_read, self.allocator));
+                let left = AngularExpression::KeyedRead(Box::new_in(keyed_read, &self.allocator));
 
                 // Consume the assignment operator
                 self.advance();
@@ -2119,16 +2119,16 @@ impl<'a> Parser<'a> {
                     left,
                     right,
                 };
-                return AngularExpression::Binary(Box::new_in(binary, self.allocator));
+                return AngularExpression::Binary(Box::new_in(binary, &self.allocator));
             }
         }
 
         if safe {
             let read = SafeKeyedRead { span, source_span, receiver, key };
-            AngularExpression::SafeKeyedRead(Box::new_in(read, self.allocator))
+            AngularExpression::SafeKeyedRead(Box::new_in(read, &self.allocator))
         } else {
             let read = KeyedRead { span, source_span, receiver, key };
-            AngularExpression::KeyedRead(Box::new_in(read, self.allocator))
+            AngularExpression::KeyedRead(Box::new_in(read, &self.allocator))
         }
     }
 
@@ -2152,10 +2152,10 @@ impl<'a> Parser<'a> {
 
         if safe {
             let call = SafeCall { span, source_span, receiver, args, argument_span };
-            AngularExpression::SafeCall(Box::new_in(call, self.allocator))
+            AngularExpression::SafeCall(Box::new_in(call, &self.allocator))
         } else {
             let call = Call { span, source_span, receiver, args, argument_span };
-            AngularExpression::Call(Box::new_in(call, self.allocator))
+            AngularExpression::Call(Box::new_in(call, &self.allocator))
         }
     }
 
@@ -2180,10 +2180,10 @@ impl<'a> Parser<'a> {
 
         let method = if safe {
             let read = SafePropertyRead { span, source_span, name_span, receiver, name };
-            AngularExpression::SafePropertyRead(Box::new_in(read, self.allocator))
+            AngularExpression::SafePropertyRead(Box::new_in(read, &self.allocator))
         } else {
             let read = PropertyRead { span, source_span, name_span, receiver, name };
-            AngularExpression::PropertyRead(Box::new_in(read, self.allocator))
+            AngularExpression::PropertyRead(Box::new_in(read, &self.allocator))
         };
 
         // Then parse the call, using the receiver's start for the call's span
@@ -2194,7 +2194,7 @@ impl<'a> Parser<'a> {
     /// Note: The opening `(` was already consumed before calling this.
     fn parse_call_arguments(&mut self) -> (Vec<'a, AngularExpression<'a>>, u32) {
         self.rparens_expected += 1;
-        let mut args = Vec::new_in(self.allocator);
+        let mut args = Vec::new_in(&self.allocator);
 
         if !self.peek().map(|t| t.is_character(')')).unwrap_or(true) {
             loop {
@@ -2270,11 +2270,11 @@ impl<'a> Parser<'a> {
             let token = self.peek().cloned();
             self.advance();
             if let Some(token) = token {
-                let mut vec = Vec::new_in(self.allocator);
+                let mut vec = Vec::new_in(&self.allocator);
                 vec.push(self.get_arrow_function_identifier_arg(&token));
                 params = vec;
             } else {
-                params = Vec::new_in(self.allocator);
+                params = Vec::new_in(&self.allocator);
             }
         } else if self.peek().is_some_and(|t| t.is_character('(')) {
             // Parenthesized parameters: `() => ...` or `(a, b) => ...`
@@ -2284,7 +2284,7 @@ impl<'a> Parser<'a> {
             self.rparens_expected -= 1;
         } else {
             // Error case
-            params = Vec::new_in(self.allocator);
+            params = Vec::new_in(&self.allocator);
             let token_str =
                 self.peek().map(|t| t.str_value.to_string()).unwrap_or_else(|| "EOF".to_string());
             self.error(&format!("Unexpected token {token_str}"));
@@ -2300,7 +2300,7 @@ impl<'a> Parser<'a> {
             let source_span = span.to_absolute(self.absolute_offset);
             body = AngularExpression::Empty(Box::new_in(
                 EmptyExpr { span, source_span },
-                self.allocator,
+                &self.allocator,
             ));
         } else {
             // Arrow function can contain assignments even in a binding context
@@ -2314,13 +2314,13 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let arrow_fn = ArrowFunction { span, source_span, parameters: params, body };
-        AngularExpression::ArrowFunction(Box::new_in(arrow_fn, self.allocator))
+        AngularExpression::ArrowFunction(Box::new_in(arrow_fn, &self.allocator))
     }
 
     /// Parses arrow function parameters inside parentheses.
     /// Note: The opening `(` was already consumed.
     fn parse_arrow_function_parameters(&mut self) -> Vec<'a, ArrowFunctionParameter<'a>> {
-        let mut params = Vec::new_in(self.allocator);
+        let mut params = Vec::new_in(&self.allocator);
 
         if !self.optional_character(')') {
             loop {
@@ -2382,7 +2382,7 @@ impl<'a> Parser<'a> {
             let span = ParseSpan::new(start, end);
             let source_span = span.to_absolute(self.absolute_offset);
             let paren = ParenthesizedExpression { span, source_span, expression };
-            return AngularExpression::ParenthesizedExpression(Box::new_in(paren, self.allocator));
+            return AngularExpression::ParenthesizedExpression(Box::new_in(paren, &self.allocator));
         }
 
         // Array literal
@@ -2407,7 +2407,7 @@ impl<'a> Parser<'a> {
                     source_span,
                     value: LiteralValue::Number(token.num_value),
                 };
-                return AngularExpression::LiteralPrimitive(Box::new_in(lit, self.allocator));
+                return AngularExpression::LiteralPrimitive(Box::new_in(lit, &self.allocator));
             }
 
             // String literal
@@ -2420,7 +2420,7 @@ impl<'a> Parser<'a> {
                     source_span,
                     value: LiteralValue::String(token.str_value.clone()),
                 };
-                return AngularExpression::LiteralPrimitive(Box::new_in(lit, self.allocator));
+                return AngularExpression::LiteralPrimitive(Box::new_in(lit, &self.allocator));
             }
 
             // Template literal (no substitutions)
@@ -2428,7 +2428,7 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let span = ParseSpan::new(token.index, token.end);
                 let source_span = span.to_absolute(self.absolute_offset);
-                let mut elements = Vec::new_in(self.allocator);
+                let mut elements = Vec::new_in(&self.allocator);
                 elements.push(TemplateLiteralElement {
                     span,
                     source_span,
@@ -2438,9 +2438,9 @@ impl<'a> Parser<'a> {
                     span,
                     source_span,
                     elements,
-                    expressions: Vec::new_in(self.allocator),
+                    expressions: Vec::new_in(&self.allocator),
                 };
-                return AngularExpression::TemplateLiteral(Box::new_in(tpl, self.allocator));
+                return AngularExpression::TemplateLiteral(Box::new_in(tpl, &self.allocator));
             }
 
             // Template literal (with substitutions)
@@ -2468,7 +2468,7 @@ impl<'a> Parser<'a> {
                         };
                         return AngularExpression::LiteralPrimitive(Box::new_in(
                             lit,
-                            self.allocator,
+                            &self.allocator,
                         ));
                     }
                     "false" => {
@@ -2479,14 +2479,14 @@ impl<'a> Parser<'a> {
                         };
                         return AngularExpression::LiteralPrimitive(Box::new_in(
                             lit,
-                            self.allocator,
+                            &self.allocator,
                         ));
                     }
                     "null" => {
                         let lit = LiteralPrimitive { span, source_span, value: LiteralValue::Null };
                         return AngularExpression::LiteralPrimitive(Box::new_in(
                             lit,
-                            self.allocator,
+                            &self.allocator,
                         ));
                     }
                     "undefined" => {
@@ -2494,14 +2494,14 @@ impl<'a> Parser<'a> {
                             LiteralPrimitive { span, source_span, value: LiteralValue::Undefined };
                         return AngularExpression::LiteralPrimitive(Box::new_in(
                             lit,
-                            self.allocator,
+                            &self.allocator,
                         ));
                     }
                     "this" => {
                         let receiver = ThisReceiver { span, source_span };
                         return AngularExpression::ThisReceiver(Box::new_in(
                             receiver,
-                            self.allocator,
+                            &self.allocator,
                         ));
                     }
                     _ => {
@@ -2511,7 +2511,7 @@ impl<'a> Parser<'a> {
                         // keyword reports "Unexpected token <kw>".
                         self.error(&format!("Unexpected token {}", token.str_value));
                         let empty = EmptyExpr { span, source_span };
-                        return AngularExpression::Empty(Box::new_in(empty, self.allocator));
+                        return AngularExpression::Empty(Box::new_in(empty, &self.allocator));
                     }
                 }
             }
@@ -2526,7 +2526,7 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(token.index, token.end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let empty = EmptyExpr { span, source_span };
-                return AngularExpression::Empty(Box::new_in(empty, self.allocator));
+                return AngularExpression::Empty(Box::new_in(empty, &self.allocator));
             }
 
             // Identifier
@@ -2542,7 +2542,7 @@ impl<'a> Parser<'a> {
                 let implicit =
                     ImplicitReceiver { span: implicit_span, source_span: implicit_source_span };
                 let receiver =
-                    AngularExpression::ImplicitReceiver(Box::new_in(implicit, self.allocator));
+                    AngularExpression::ImplicitReceiver(Box::new_in(implicit, &self.allocator));
                 let name_span = source_span;
                 let read = PropertyRead {
                     span,
@@ -2551,7 +2551,7 @@ impl<'a> Parser<'a> {
                     receiver,
                     name: token.str_value.clone(),
                 };
-                return AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
+                return AngularExpression::PropertyRead(Box::new_in(read, &self.allocator));
             }
         }
 
@@ -2568,14 +2568,14 @@ impl<'a> Parser<'a> {
         let span = self.make_span(start, self.current_end_index());
         let source_span = span.to_absolute(self.absolute_offset);
         let empty = EmptyExpr { span, source_span };
-        AngularExpression::Empty(Box::new_in(empty, self.allocator))
+        AngularExpression::Empty(Box::new_in(empty, &self.allocator))
     }
 
     /// Parses an array literal.
     /// Note: The opening `[` was already consumed before calling this.
     fn parse_array_literal(&mut self, start: u32) -> AngularExpression<'a> {
         self.rbrackets_expected += 1;
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
 
         loop {
             if self.peek().map(|t| t.is_operator("...")).unwrap_or(false) {
@@ -2597,15 +2597,15 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let arr = LiteralArray { span, source_span, expressions };
-        AngularExpression::LiteralArray(Box::new_in(arr, self.allocator))
+        AngularExpression::LiteralArray(Box::new_in(arr, &self.allocator))
     }
 
     /// Parses a template literal with substitutions.
     fn parse_template_literal(&mut self, start: u32, head: Token<'a>) -> AngularExpression<'a> {
         self.advance(); // Consume the TemplateHead token
 
-        let mut elements = Vec::new_in(self.allocator);
-        let mut expressions = Vec::new_in(self.allocator);
+        let mut elements = Vec::new_in(&self.allocator);
+        let mut expressions = Vec::new_in(&self.allocator);
 
         // Add the first element from TemplateHead
         let head_span = ParseSpan::new(head.index, head.end);
@@ -2680,7 +2680,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let tpl = TemplateLiteral { span, source_span, elements, expressions };
-        AngularExpression::TemplateLiteral(Box::new_in(tpl, self.allocator))
+        AngularExpression::TemplateLiteral(Box::new_in(tpl, &self.allocator))
     }
 
     /// Parses a tagged template literal with an explicit start position for span calculation.
@@ -2698,22 +2698,22 @@ impl<'a> Parser<'a> {
                 let span = ParseSpan::new(token.index, token.end);
                 let source_span = span.to_absolute(self.absolute_offset);
 
-                let mut elements = Vec::new_in(self.allocator);
+                let mut elements = Vec::new_in(&self.allocator);
                 elements.push(TemplateLiteralElement {
                     span,
                     source_span,
                     text: token.str_value.clone(),
                 });
 
-                let expressions = Vec::new_in(self.allocator);
+                let expressions = Vec::new_in(&self.allocator);
                 TemplateLiteral { span, source_span, elements, expressions }
             } else if token.is_template_head() {
                 // Template with interpolations - reuse the same logic as parse_template_literal
                 // but extract the TemplateLiteral directly
                 self.advance();
 
-                let mut elements = Vec::new_in(self.allocator);
-                let mut expressions = Vec::new_in(self.allocator);
+                let mut elements = Vec::new_in(&self.allocator);
+                let mut expressions = Vec::new_in(&self.allocator);
 
                 // Add the first element from TemplateHead
                 let head_span = ParseSpan::new(token.index, token.end);
@@ -2784,7 +2784,7 @@ impl<'a> Parser<'a> {
             let source_span = span.to_absolute(self.absolute_offset);
 
             let tagged = TaggedTemplateLiteral { span, source_span, tag, template: template_expr };
-            return AngularExpression::TaggedTemplateLiteral(Box::new_in(tagged, self.allocator));
+            return AngularExpression::TaggedTemplateLiteral(Box::new_in(tagged, &self.allocator));
         }
 
         // No template token found, just return the tag
@@ -2813,15 +2813,15 @@ impl<'a> Parser<'a> {
         let source_span = span.to_absolute(self.absolute_offset);
 
         let regex = RegularExpressionLiteral { span, source_span, body, flags };
-        AngularExpression::RegularExpressionLiteral(Box::new_in(regex, self.allocator))
+        AngularExpression::RegularExpressionLiteral(Box::new_in(regex, &self.allocator))
     }
 
     /// Parses an object literal.
     /// Note: The opening `{` was already consumed before calling this.
     fn parse_object_literal(&mut self, start: u32) -> AngularExpression<'a> {
         self.rbraces_expected += 1;
-        let mut keys = Vec::new_in(self.allocator);
-        let mut values = Vec::new_in(self.allocator);
+        let mut keys = Vec::new_in(&self.allocator);
+        let mut values = Vec::new_in(&self.allocator);
 
         if !self.peek().map(|t| t.is_character('}')).unwrap_or(true) {
             loop {
@@ -2844,7 +2844,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let obj = LiteralMap { span, source_span, keys, values };
-        AngularExpression::LiteralMap(Box::new_in(obj, self.allocator))
+        AngularExpression::LiteralMap(Box::new_in(obj, &self.allocator))
     }
 
     /// Parses an object property.
@@ -2885,14 +2885,14 @@ impl<'a> Parser<'a> {
                 ));
                 self.advance();
                 let key = LiteralMapKey::Property(LiteralMapPropertyKey {
-                    key: Ident::from_in("", self.allocator),
+                    key: Ident::from_in("", &self.allocator),
                     quoted: false,
                     is_shorthand_initialized: false,
                 });
                 let span = ParseSpan::new(token_index, token_end);
                 let source_span = span.to_absolute(self.absolute_offset);
                 let empty = EmptyExpr { span, source_span };
-                return (key, AngularExpression::Empty(Box::new_in(empty, self.allocator)));
+                return (key, AngularExpression::Empty(Box::new_in(empty, &self.allocator)));
             }
 
             // Identifier key
@@ -2919,11 +2919,11 @@ impl<'a> Parser<'a> {
                     let implicit =
                         ImplicitReceiver { span: implicit_span, source_span: implicit_source_span };
                     let receiver =
-                        AngularExpression::ImplicitReceiver(Box::new_in(implicit, self.allocator));
+                        AngularExpression::ImplicitReceiver(Box::new_in(implicit, &self.allocator));
                     let name_span = source_span;
                     let read =
                         PropertyRead { span, source_span, name_span, receiver, name: key_name };
-                    let value = AngularExpression::PropertyRead(Box::new_in(read, self.allocator));
+                    let value = AngularExpression::PropertyRead(Box::new_in(read, &self.allocator));
                     return (key, value);
                 }
 
@@ -2940,14 +2940,14 @@ impl<'a> Parser<'a> {
 
         self.error("Missing expected identifier, keyword, or string");
         let key = LiteralMapKey::Property(LiteralMapPropertyKey {
-            key: Ident::from_in("", self.allocator),
+            key: Ident::from_in("", &self.allocator),
             quoted: false,
             is_shorthand_initialized: false,
         });
         let span = ParseSpan::new(0, 0);
         let source_span = span.to_absolute(self.absolute_offset);
         let empty = EmptyExpr { span, source_span };
-        (key, AngularExpression::Empty(Box::new_in(empty, self.allocator)))
+        (key, AngularExpression::Empty(Box::new_in(empty, &self.allocator)))
     }
 
     /// Parses a spread element: `...expr`.
@@ -2963,7 +2963,7 @@ impl<'a> Parser<'a> {
         let span = ParseSpan::new(spread_start, end);
         let source_span = span.to_absolute(self.absolute_offset);
         let spread = SpreadElement { span, source_span, expression };
-        AngularExpression::SpreadElement(Box::new_in(spread, self.allocator))
+        AngularExpression::SpreadElement(Box::new_in(spread, &self.allocator))
     }
 
     /// Parses a pipe expression.
@@ -3010,17 +3010,17 @@ impl<'a> Parser<'a> {
                     // The fullSpanEnd tracks whitespace after the pipe character
                     let full_span_end =
                         self.peek().map(|t| t.index).unwrap_or(self.source.len() as u32);
-                    (Ident::from_in("", self.allocator), full_span_end, Some(full_span_end))
+                    (Ident::from_in("", &self.allocator), full_span_end, Some(full_span_end))
                 }
             } else {
                 // End of input - create empty pipe name
                 self.error("Unexpected end of input, expected identifier or keyword");
                 let end_pos = self.source.len() as u32;
-                (Ident::from_in("", self.allocator), end_pos, Some(end_pos))
+                (Ident::from_in("", &self.allocator), end_pos, Some(end_pos))
             };
 
             // Parse pipe arguments
-            let mut args = Vec::new_in(self.allocator);
+            let mut args = Vec::new_in(&self.allocator);
             while self.optional_character(':') {
                 let arg = self.parse_expression();
                 // Check for empty argument followed by | or EOF
@@ -3055,7 +3055,7 @@ impl<'a> Parser<'a> {
                 args,
                 pipe_type: BindingPipeType::ReferencedByName,
             };
-            result = AngularExpression::BindingPipe(Box::new_in(pipe, self.allocator));
+            result = AngularExpression::BindingPipe(Box::new_in(pipe, &self.allocator));
 
             // Continue if there's another pipe
             if !self.optional_operator("|") {

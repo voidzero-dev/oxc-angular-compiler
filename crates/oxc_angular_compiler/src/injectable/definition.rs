@@ -155,7 +155,7 @@ fn generate_fac_definition<'a>(
         Some(deps) => {
             // Clone deps to new allocator-owned vec
             let mut factory_deps: OxcVec<'a, R3DependencyMetadata<'a>> =
-                OxcVec::with_capacity_in(deps.len(), allocator);
+                OxcVec::with_capacity_in(deps.len(), &allocator);
             for dep in deps {
                 factory_deps.push(R3DependencyMetadata {
                     token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
@@ -227,7 +227,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
@@ -260,7 +260,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("LocalService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
@@ -286,7 +286,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("PlatformService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
@@ -310,7 +310,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("AnyService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()
@@ -337,7 +337,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TreeShakableService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let metadata = R3InjectableMetadataBuilder::new()

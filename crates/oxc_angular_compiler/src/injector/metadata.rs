@@ -60,7 +60,7 @@ impl<'a> R3InjectorMetadataBuilder<'a> {
             name: None,
             r#type: None,
             providers: None,
-            imports: Vec::new_in(allocator),
+            imports: Vec::new_in(&allocator),
             raw_imports: None,
         }
     }

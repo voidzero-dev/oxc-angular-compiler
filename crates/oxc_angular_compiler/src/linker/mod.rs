@@ -525,6 +525,11 @@ fn extract_forward_ref<'a>(expr: &Expression<'a>, source: &'a str) -> (&'a str, 
     if let Expression::CallExpression(call) = expr {
         let is_forward_ref = match &call.callee {
             Expression::Identifier(ident) => ident.name == "forwardRef",
+            // Angular's own fesm bundles reach core through a namespace import, so
+            // they ship `i0.forwardRef(...)` rather than a bare call. The TS linker
+            // matches on `callee.getSymbolName()`, which returns the property name
+            // for a member expression, so both forms have to unwrap here too.
+            Expression::StaticMemberExpression(member) => member.property.name == "forwardRef",
             _ => false,
         };
         if is_forward_ref {
@@ -672,6 +677,24 @@ fn get_default_standalone_value(meta: &ObjectExpression<'_>) -> bool {
         }
         if let Ok(version) = semver::Version::parse(version_str) {
             return version.major >= 19;
+        }
+    }
+    true // If we can't determine the version, default to true (latest behavior)
+}
+
+/// Whether the declaration's `version` implies OnPush is the default change
+/// detection strategy. Angular v22 made OnPush the default; anything compiled
+/// against an earlier version meant `Eager`. The placeholder version used by dev
+/// builds tracks the newest behaviour.
+///
+/// Mirrors `hasOnPushByDefault` in the TS linker's `partial_component_linker_1.ts`.
+fn has_on_push_by_default(meta: &ObjectExpression<'_>) -> bool {
+    if let Some(version_str) = get_string_property(meta, "version") {
+        if version_str == "0.0.0-PLACEHOLDER" {
+            return true;
+        }
+        if let Ok(version) = semver::Version::parse(version_str) {
+            return version.major >= 22;
         }
     }
     true // If we can't determine the version, default to true (latest behavior)
@@ -2066,8 +2089,21 @@ fn link_component(
         if cd.contains("Eager") || cd.contains("Default") {
             parts.push("changeDetection: 1".to_string());
         } else if cd.contains("OnPush") {
+            // Emitted explicitly rather than left to the runtime default. The TS
+            // compiler omits OnPush here, but it ships with the runtime it targets;
+            // this linker does not know the consumer's version and supports back to
+            // v19. Pre-v22 runtimes compute `onPush = changeDetection === OnPush`,
+            // so an absent field reads as Default there and the component would
+            // silently lose OnPush. `0` is correct on both.
             parts.push("changeDetection: 0".to_string());
         }
+    } else if !has_on_push_by_default(meta) {
+        // Omitted. Which strategy that meant depends on the version the library
+        // was compiled against, and the runtime reads an absent field as OnPush,
+        // so a pre-v22 declaration has to say Eager out loud. Without this a
+        // component silently switches from Eager to OnPush and stops re-rendering
+        // on anything that is not a signal or input change.
+        parts.push("changeDetection: 1".to_string());
     }
 
     let define_component =
@@ -2743,6 +2779,11 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
 "#;
         let result = link(&allocator, code, "test.mjs");
         assert!(result.linked);
+        // Emitted explicitly, even though the TS compiler omits OnPush. That
+        // compiler ships with the runtime it targets; this linker does not know
+        // the consumer's version and supports back to v19, where the runtime
+        // computes `onPush = changeDetection === OnPush` and so reads an absent
+        // field as Default. Omitting it would silently drop OnPush there.
         assert!(
             result.code.contains("changeDetection: 0"),
             "ChangeDetectionStrategy.OnPush should be 0, got:\n{}",
@@ -2766,6 +2807,73 @@ MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "
         assert!(
             result.code.contains("changeDetection: 1"),
             "ChangeDetectionStrategy.Eager should resolve to 1, got:\n{}",
+            result.code
+        );
+    }
+
+    // When a declaration omits `changeDetection`, the strategy it meant depends on
+    // the Angular version it was compiled with: v22 made OnPush the default, so
+    // anything older meant Eager. The TS linker resolves that with
+    // `hasOnPushByDefault = major >= 22 || version === PLACEHOLDER_VERSION`
+    // (partial_component_linker_1.ts). The runtime derives
+    // `onPush = changeDetection !== Eager`, so an omitted field reads as OnPush —
+    // which means a pre-v22 declaration has to emit `changeDetection: 1`
+    // explicitly, or the component silently switches strategy.
+
+    #[test]
+    fn test_link_component_pre_v22_without_change_detection_is_eager() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "21.2.14", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            result.code.contains("changeDetection: 1"),
+            "A pre-v22 declaration without changeDetection means Eager, so it must be emitted explicitly, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_v22_without_change_detection_stays_on_push() {
+        // v22+ made OnPush the default, and the runtime already infers OnPush from
+        // an absent field, so nothing should be emitted.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "22.0.7", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("changeDetection"),
+            "v22+ defaults to OnPush, which the runtime infers from an absent field, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_placeholder_version_without_change_detection_stays_on_push() {
+        // `0.0.0-PLACEHOLDER` is what Angular's own dev builds ship; the TS linker
+        // treats it as the newest behaviour.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComponent {
+}
+MyComponent.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "0.0.0-PLACEHOLDER", ngImport: i0, type: MyComponent, selector: "my-comp", template: "<div></div>" });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked);
+        assert!(
+            !result.code.contains("changeDetection"),
+            "The placeholder version tracks the newest behaviour (OnPush), got:\n{}",
             result.code
         );
     }
@@ -4159,6 +4267,227 @@ MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "
         assert!(
             result.code.contains("providedIn: SomeModule"),
             "providedIn should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    // Angular's own fesm bundles reference core through the `i0` namespace import,
+    // so every forwardRef they ship is `i0.forwardRef(...)` rather than a bare
+    // `forwardRef(...)`. The TS linker matches on `callee.getSymbolName()`, which
+    // returns the property name for a member expression, so both forms unwrap.
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_class() {
+        // Mirrors `@angular/forms/signals`' InputValidityMonitor, whose root provider
+        // is declared as `useClass: i0.forwardRef(() => AnimationInputValidityMonitor)`.
+        // Leaving the wrapper in place emits `forwardRef(() => X).ɵfac(...)`, and
+        // `forwardRef` returns the arrow function it was handed — so `.ɵfac` is
+        // undefined and the provider throws the first time it is instantiated.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class InputValidityMonitor {}
+InputValidityMonitor.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: InputValidityMonitor, providedIn: 'root', useClass: i0.forwardRef(() => AnimationInputValidityMonitor) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("AnimationInputValidityMonitor.ɵfac(__ngFactoryType__)"),
+            "Should delegate to the unwrapped class's factory, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_provided_in() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, providedIn: i0.forwardRef(() => SomeModule) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("providedIn: SomeModule"),
+            "providedIn should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_existing() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useExisting: i0.forwardRef(() => OtherService) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("ɵɵinject(OtherService)"),
+            "useExisting should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_value() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useValue: i0.forwardRef(() => DEFAULT_CONFIG) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("DEFAULT_CONFIG"),
+            "useValue should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_namespaced_forward_ref_use_class_with_deps() {
+        // `useClass` + `deps` takes the delegated-conditional-factory path, which
+        // instantiates via `new (useClass)(...)` rather than delegating to `ɵfac`.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useClass: i0.forwardRef(() => OtherService), deps: [{ token: Dep1 }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("new (OtherService)"),
+            "useClass-with-deps should instantiate the unwrapped class, got:\n{}",
+            result.code
+        );
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_query_predicate_namespaced_forward_ref() {
+        // TS linker: `predicate = extractForwardRef(predicateExpr)` in
+        // partial_directive_linker_1.ts, so query predicates unwrap too.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", isStandalone: true, viewQueries: [{ propertyName: "child", first: true, predicate: i0.forwardRef(() => ChildDir), descendants: true }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Query predicate should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("ChildDir"),
+            "Query predicate should reference the unwrapped type, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_old_style_pipes_namespaced_forward_ref() {
+        // v12–v13 partial declarations use a `pipes` object rather than the
+        // unified `dependencies` array — a separate extract_forward_ref call site.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "12.0.0", version: "12.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", pipes: { "myPipe": i0.forwardRef(() => MyPipe) } });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Old-style pipes should have forwardRef unwrapped, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: () => [MyPipe]"),
+            "forwardRef in pipes should force closure emit mode, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_use_factory_forward_ref_is_not_unwrapped() {
+        // Guard: the TS linker reads `useFactory` with `getOpaque()`, deliberately
+        // NOT `extractForwardRef` — a factory is already lazy, so unwrapping it
+        // would change evaluation order. Keep the wrapper.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useFactory: i0.forwardRef(() => makeService) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("forwardRef"),
+            "useFactory must keep its forwardRef wrapper, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_injectable_non_forward_ref_member_call_is_untouched() {
+        // Guard against over-matching: only a callee *named* `forwardRef` unwraps.
+        // Any other member call is passed through verbatim.
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyService {}
+MyService.ɵprov = i0.ɵɵngDeclareInjectable({ minVersion: "12.0.0", version: "20.0.0", ngImport: i0, type: MyService, useValue: config.getDefault(() => Fallback) });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            result.code.contains("config.getDefault(() => Fallback)"),
+            "Non-forwardRef call should pass through verbatim, got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_link_component_dependency_namespaced_forward_ref() {
+        let allocator = Allocator::default();
+        let code = r#"
+import * as i0 from "@angular/core";
+class MyComp {}
+MyComp.ɵcmp = i0.ɵɵngDeclareComponent({ minVersion: "14.0.0", version: "20.0.0", ngImport: i0, type: MyComp, selector: "my-comp", template: "<div></div>", isStandalone: true, dependencies: [{ kind: "directive", type: i0.forwardRef(() => FooDir), selector: "foo" }] });
+"#;
+        let result = link(&allocator, code, "test.mjs");
+        assert!(result.linked, "Should have linked");
+        assert!(
+            !result.code.contains("forwardRef"),
+            "Should NOT contain forwardRef, got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("dependencies: () => [FooDir]"),
+            "Should wrap deps in closure when forwardRef detected, got:\n{}",
             result.code
         );
     }

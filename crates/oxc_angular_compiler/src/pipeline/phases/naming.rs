@@ -275,7 +275,7 @@ pub fn name_functions_and_variables(job: &mut ComponentCompilationJob<'_>) {
     add_names_to_root_view(
         job,
         &sanitized_base,
-        allocator,
+        &allocator,
         &mut state,
         &mut var_names,
         &mut semantic_var_names,
@@ -324,7 +324,7 @@ fn add_names_to_root_view<'a>(
         job,
         None, // Root view - no xref
         base_name,
-        allocator,
+        &allocator,
         root_fn_name.as_ref(),
         state,
         var_names,
@@ -359,7 +359,7 @@ fn add_names_to_child_view<'a>(
         job,
         Some(view_xref),
         base_name,
-        allocator,
+        &allocator,
         Some(&fn_name),
         state,
         var_names,
@@ -399,7 +399,7 @@ fn process_view_ops_depth_first<'a>(
     // Phase 0: Process function ops FIRST (matches TypeScript ops() generator order)
     // Arrow functions have their own ops lists that contain Variable ops prepended
     // by the generate_variables phase. These must be named before create/update ops.
-    process_function_ops_in_view(job, view_xref, allocator, state, var_names);
+    process_function_ops_in_view(job, view_xref, &allocator, state, var_names);
 
     // Phase 1: Collect info about child views with their create op indices
     // We need to collect upfront to avoid borrow issues during iteration
@@ -410,7 +410,7 @@ fn process_view_ops_depth_first<'a>(
     process_create_ops_with_child_recursion(
         job,
         view_xref,
-        allocator,
+        &allocator,
         base_name,
         fn_name,
         state,
@@ -420,7 +420,7 @@ fn process_view_ops_depth_first<'a>(
     );
 
     // Phase 3: Process update ops (style props, variables) AFTER all create ops and child views
-    process_update_ops_in_view(job, view_xref, allocator, state, var_names, semantic_var_names);
+    process_update_ops_in_view(job, view_xref, &allocator, state, var_names, semantic_var_names);
 }
 
 /// Collects child view info with their create op indices for interleaved processing.
@@ -608,7 +608,7 @@ fn process_create_ops_with_child_recursion<'a>(
 
                 process_single_create_op_ref(
                     op,
-                    allocator,
+                    &allocator,
                     base_name,
                     fn_name,
                     state,
@@ -632,7 +632,7 @@ fn process_create_ops_with_child_recursion<'a>(
                     job,
                     child_xref,
                     &child_base_name,
-                    allocator,
+                    &allocator,
                     state,
                     var_names,
                     semantic_var_names,
@@ -662,7 +662,7 @@ fn process_create_ops_with_child_recursion<'a>(
                         if let UpdateOp::Variable(var_op) = track_op {
                             name_variable_op(
                                 var_op,
-                                allocator,
+                                &allocator,
                                 state,
                                 var_names,
                                 semantic_var_names,
@@ -835,7 +835,7 @@ fn process_single_create_op_ref<'a>(
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
                 if let UpdateOp::Variable(var_op) = handler_op {
-                    name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                    name_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
                 }
             }
         }
@@ -854,7 +854,7 @@ fn process_single_create_op_ref<'a>(
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
                 if let UpdateOp::Variable(var_op) = handler_op {
-                    name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                    name_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
                 }
             }
         }
@@ -882,7 +882,7 @@ fn process_single_create_op_ref<'a>(
             // Process handler ops inline
             for handler_op in listener.handler_ops.iter_mut() {
                 if let UpdateOp::Variable(var_op) = handler_op {
-                    name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                    name_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
                 }
             }
         }
@@ -902,7 +902,7 @@ fn process_single_create_op_ref<'a>(
             // Process handler ops inline
             for handler_op in animation.handler_ops.iter_mut() {
                 if let UpdateOp::Variable(var_op) = handler_op {
-                    name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                    name_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
                 }
             }
         }
@@ -912,7 +912,7 @@ fn process_single_create_op_ref<'a>(
             // yields track_by_ops inline with the RepeaterCreate op.
         }
         CreateOp::Variable(var_op) => {
-            name_create_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+            name_create_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
         }
         _ => {}
     }
@@ -980,7 +980,7 @@ fn process_function_ops_in_view<'a>(
             if let UpdateOp::Variable(var_op) = op {
                 name_variable_op(
                     var_op,
-                    allocator,
+                    &allocator,
                     state,
                     var_names,
                     &mut arrow_fn_semantic_var_names,
@@ -1041,7 +1041,7 @@ fn process_update_ops_in_view<'a>(
                 }
             }
             UpdateOp::Variable(var_op) => {
-                name_variable_op(var_op, allocator, state, var_names, semantic_var_names);
+                name_variable_op(var_op, &allocator, state, var_names, semantic_var_names);
             }
             _ => {}
         }
@@ -1229,9 +1229,9 @@ mod tests {
             initializer: AllocBox::new_in(
                 IrExpression::NextContext(AllocBox::new_in(
                     NextContextExpr { steps: 1, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             flags: VariableFlags::NONE,
             view: Some(view_xref),

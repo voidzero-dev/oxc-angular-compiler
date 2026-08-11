@@ -21,16 +21,16 @@ pub fn create_element_args<'a>(
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OxcVec<'a, OutputExpression<'a>> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     // Tag name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(tag.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     // If localRefIndex is present, we need both constIndex and localRefIndex
     if let Some(refs_idx) = local_refs_index {
@@ -38,24 +38,24 @@ pub fn create_element_args<'a>(
         if let Some(attr_idx) = attributes {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(attr_idx as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         // Push localRefIndex
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else if let Some(attr_idx) = attributes {
         // Only constIndex, no localRefIndex
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(attr_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     args
@@ -87,7 +87,7 @@ pub fn create_element_stmt<'a>(
 
 /// Creates an ɵɵelementEnd() call statement.
 pub fn create_element_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_END, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_END, OxcVec::new_in(&allocator))
 }
 
 // =============================================================================
@@ -130,7 +130,11 @@ pub fn create_dom_element_stmt<'a>(
 pub fn create_dom_element_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT_END, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(
+        allocator,
+        Identifiers::DOM_ELEMENT_END,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 /// Creates an ɵɵtext() call statement.
@@ -143,10 +147,10 @@ pub fn create_text_stmt<'a>(
     slot: u32,
     initial_value: Option<&'a str>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Add initial text value if present and non-empty
@@ -154,7 +158,7 @@ pub fn create_text_stmt<'a>(
         if !value.is_empty() {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(value.into()), source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -183,7 +187,7 @@ pub fn create_template_stmt<'a>(
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_template_args(
-        allocator,
+        &allocator,
         slot,
         fn_name,
         decls,
@@ -209,26 +213,26 @@ fn create_template_args<'a>(
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OxcVec<'a, OutputExpression<'a>> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Template function reference
     if let Some(name) = fn_name {
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name, source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         let placeholder_str = allocator.alloc_str(&format!("_r{slot}"));
         let placeholder = Ident::from(placeholder_str);
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: placeholder, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -236,26 +240,26 @@ fn create_template_args<'a>(
     let decl_count = decls.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(decl_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Variable count
     let var_count = vars.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(var_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Tag (string | null)
     if let Some(t) = tag {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(t.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -263,12 +267,12 @@ fn create_template_args<'a>(
     if let Some(attr_idx) = attributes {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(attr_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -276,7 +280,7 @@ fn create_template_args<'a>(
     if let Some(refs_idx) = local_refs_index {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
         // Add templateRefExtractor: i0.ɵɵtemplateRefExtractor
         args.push(OutputExpression::ReadProp(Box::new_in(
@@ -284,15 +288,15 @@ fn create_template_args<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -334,7 +338,7 @@ pub fn create_dom_template_stmt<'a>(
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_template_args(
-        allocator,
+        &allocator,
         slot,
         fn_name,
         decls,
@@ -356,11 +360,11 @@ fn create_container_args<'a>(
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OxcVec<'a, OutputExpression<'a>> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     // If localRefIndex is present, we need both constIndex and localRefIndex
     if let Some(refs_idx) = local_refs_index {
@@ -368,24 +372,24 @@ fn create_container_args<'a>(
         if let Some(attr_idx) = attributes {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Number(attr_idx as f64), source_span: None },
-                allocator,
+                &allocator,
             )));
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         // Push localRefIndex
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else if let Some(attr_idx) = attributes {
         // Only constIndex, no localRefIndex
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(attr_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     args
@@ -407,9 +411,9 @@ pub fn create_container_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
-        allocator,
+        &allocator,
         Identifiers::ELEMENT_CONTAINER_END,
-        OxcVec::new_in(allocator),
+        OxcVec::new_in(&allocator),
     )
 }
 
@@ -461,9 +465,9 @@ pub fn create_dom_container_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
-        allocator,
+        &allocator,
         Identifiers::DOM_ELEMENT_CONTAINER_END,
-        OxcVec::new_in(allocator),
+        OxcVec::new_in(&allocator),
     )
 }
 
@@ -485,12 +489,12 @@ pub fn create_projection_stmt<'a>(
     fallback_decls: Option<u32>,
     fallback_vars: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // First arg is always the slot
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Only add additional args if needed (projectionSlotIndex !== 0 || attributes || fallback)
@@ -501,7 +505,7 @@ pub fn create_projection_stmt<'a>(
                 value: LiteralValue::Number(projection_slot_index as f64),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
 
         // Add attributes if present
@@ -515,14 +519,14 @@ pub fn create_projection_stmt<'a>(
             if args.len() == 2 {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Null, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
 
             // Add fallback function name as variable reference
             args.push(OutputExpression::ReadVar(Box::new_in(
                 crate::output::ast::ReadVarExpr { name: fn_name.into(), source_span: None },
-                allocator,
+                &allocator,
             )));
 
             // Add fallback decls
@@ -531,7 +535,7 @@ pub fn create_projection_stmt<'a>(
                     value: LiteralValue::Number(fallback_decls.unwrap_or(0) as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
 
             // Add fallback vars
@@ -540,7 +544,7 @@ pub fn create_projection_stmt<'a>(
                     value: LiteralValue::Number(fallback_vars.unwrap_or(0) as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -558,5 +562,5 @@ pub fn create_namespace_stmt<'a>(
         crate::ir::enums::Namespace::Svg => Identifiers::NAMESPACE_SVG,
         crate::ir::enums::Namespace::Math => Identifiers::NAMESPACE_MATH_ML,
     };
-    create_instruction_call_stmt(allocator, instruction, OxcVec::new_in(allocator))
+    create_instruction_call_stmt(allocator, instruction, OxcVec::new_in(&allocator))
 }

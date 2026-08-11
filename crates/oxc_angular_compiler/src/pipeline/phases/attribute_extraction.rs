@@ -27,12 +27,12 @@ pub fn extract_attributes(job: &mut ComponentCompilationJob<'_>) {
     let allocator = job.allocator;
 
     // Process root view
-    process_view_attributes(job, job.root.xref, allocator);
+    process_view_attributes(job, job.root.xref, &allocator);
 
     // Process embedded views
     let view_xrefs: Vec<XrefId> = job.views.keys().copied().collect();
     for view_xref in view_xrefs {
-        process_view_attributes(job, view_xref, allocator);
+        process_view_attributes(job, view_xref, &allocator);
     }
 }
 
@@ -448,10 +448,10 @@ fn extract_value_from_binding_expr<'a>(
 
                 let literal_expr = OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: output_value, source_span: None },
-                    allocator,
+                    &allocator,
                 ));
-                let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
-                Some(Box::new_in(value_expr, allocator))
+                let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, &allocator));
+                Some(Box::new_in(value_expr, &allocator))
             } else {
                 None
             }
@@ -460,8 +460,8 @@ fn extract_value_from_binding_expr<'a>(
             // Already in the right format - clone it and wrap in IrExpression
             // This is needed for host attributes from decorators which are already OutputExpr literals
             let cloned = output_expr.clone_in(allocator);
-            let value_expr = IrExpression::OutputExpr(Box::new_in(cloned, allocator));
-            Some(Box::new_in(value_expr, allocator))
+            let value_expr = IrExpression::OutputExpr(Box::new_in(cloned, &allocator));
+            Some(Box::new_in(value_expr, &allocator))
         }
         IrExpression::Empty(_) => {
             // Empty expression means no value

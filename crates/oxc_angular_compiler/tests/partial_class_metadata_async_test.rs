@@ -23,7 +23,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -37,7 +37,7 @@ fn make_class_metadata<'a>(
     decorator_name: &'static str,
 ) -> R3ClassMetadata<'a> {
     // decorators: [{ type: <decorator_name> }]
-    let mut decorator_map_entries = oxc_allocator::Vec::new_in(allocator);
+    let mut decorator_map_entries = oxc_allocator::Vec::new_in(&allocator);
     decorator_map_entries.push(LiteralMapEntry::new(
         Ident::from("type"),
         read_var(allocator, decorator_name),
@@ -45,13 +45,13 @@ fn make_class_metadata<'a>(
     ));
     let decorator_map = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: decorator_map_entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut decorators_array = oxc_allocator::Vec::new_in(allocator);
+    let mut decorators_array = oxc_allocator::Vec::new_in(&allocator);
     decorators_array.push(decorator_map);
     let decorators = OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries: decorators_array, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     R3ClassMetadata {

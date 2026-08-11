@@ -1205,8 +1205,12 @@ impl<'a> HtmlLexer<'a> {
         for _ in 0..4 {
             self.advance();
         }
-        // Skip whitespace (but not newlines for detecting invalid @let)
-        while self.peek() == ' ' || self.peek() == '\t' {
+        // Skip whitespace after `@let`, including newlines. Angular consumes all
+        // whitespace between `@let` and the declared name, so `@let\nfoo = ...;` is a
+        // valid declaration. Stopping at a newline here misclassified it as incomplete,
+        // leaving the value (and any object-literal braces in it) to be re-lexed as
+        // block content, which corrupted block nesting.
+        while chars::is_whitespace(self.peek()) {
             self.advance();
         }
 

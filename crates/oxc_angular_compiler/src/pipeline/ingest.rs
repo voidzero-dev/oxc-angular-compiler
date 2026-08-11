@@ -158,7 +158,7 @@ fn store_and_ref_expr<'a>(
     expr: AngularExpression<'a>,
 ) -> Box<'a, IrExpression<'a>> {
     let id = job.store_expression(expr);
-    Box::new_in(IrExpression::ExpressionRef(id), job.allocator)
+    Box::new_in(IrExpression::ExpressionRef(id), &job.allocator)
 }
 
 /// Converts an Angular expression to an IR expression during ingestion.
@@ -184,7 +184,7 @@ fn convert_ast_to_ir<'a>(
             let target = job.allocate_xref_id();
 
             // Convert the pipe input and arguments to IR expressions
-            let mut args = Vec::with_capacity_in(1 + pipe.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(1 + pipe.args.len(), &allocator);
 
             // First argument is the pipe input expression
             let input_expr = convert_ast_to_ir(job, pipe.exp);
@@ -206,9 +206,9 @@ fn convert_ast_to_ir<'a>(
                         var_offset: None,
                         source_span: Some(pipe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -230,9 +230,9 @@ fn convert_ast_to_ir<'a>(
                         name: safe.name,
                         source_span: Some(safe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -248,9 +248,9 @@ fn convert_ast_to_ir<'a>(
                         index,
                         source_span: Some(safe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -258,7 +258,7 @@ fn convert_ast_to_ir<'a>(
         AngularExpression::SafeCall(safe) => {
             let safe = safe.unbox();
             let receiver = convert_ast_to_ir(job, safe.receiver);
-            let mut args = Vec::with_capacity_in(safe.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(safe.args.len(), &allocator);
             for arg in safe.args {
                 let arg_expr = convert_ast_to_ir(job, arg);
                 args.push(arg_expr.unbox());
@@ -266,9 +266,9 @@ fn convert_ast_to_ir<'a>(
             Box::new_in(
                 IrExpression::SafeInvokeFunction(Box::new_in(
                     SafeInvokeFunctionExpr { receiver, args, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -276,8 +276,8 @@ fn convert_ast_to_ir<'a>(
         // Spread elements (e.g. [...base, item]) are preserved via the spreads parallel vec.
         AngularExpression::LiteralArray(arr) => {
             let arr = arr.unbox();
-            let mut elements = Vec::with_capacity_in(arr.expressions.len(), allocator);
-            let mut spreads = Vec::with_capacity_in(arr.expressions.len(), allocator);
+            let mut elements = Vec::with_capacity_in(arr.expressions.len(), &allocator);
+            let mut spreads = Vec::with_capacity_in(arr.expressions.len(), &allocator);
             for elem in arr.expressions {
                 let is_spread = matches!(elem, AngularExpression::SpreadElement(_));
                 let inner = if let AngularExpression::SpreadElement(s) = elem {
@@ -295,9 +295,9 @@ fn convert_ast_to_ir<'a>(
                         spreads,
                         source_span: Some(arr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -307,10 +307,10 @@ fn convert_ast_to_ir<'a>(
         AngularExpression::LiteralMap(map) => {
             use crate::ast::expression::LiteralMapKey;
             let map = map.unbox();
-            let mut keys = Vec::with_capacity_in(map.keys.len(), allocator);
-            let mut values = Vec::with_capacity_in(map.values.len(), allocator);
-            let mut quoted = Vec::with_capacity_in(map.keys.len(), allocator);
-            let mut spreads = Vec::with_capacity_in(map.keys.len(), allocator);
+            let mut keys = Vec::with_capacity_in(map.keys.len(), &allocator);
+            let mut values = Vec::with_capacity_in(map.values.len(), &allocator);
+            let mut quoted = Vec::with_capacity_in(map.keys.len(), &allocator);
+            let mut spreads = Vec::with_capacity_in(map.keys.len(), &allocator);
 
             for (key, value) in map.keys.into_iter().zip(map.values.into_iter()) {
                 match key {
@@ -338,9 +338,9 @@ fn convert_ast_to_ir<'a>(
                         spreads,
                         source_span: Some(map.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -359,9 +359,9 @@ fn convert_ast_to_ir<'a>(
                         rhs,
                         source_span: Some(bin.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -373,9 +373,9 @@ fn convert_ast_to_ir<'a>(
             Box::new_in(
                 IrExpression::Parenthesized(Box::new_in(
                     crate::ir::expression::IrParenthesizedExpr { expr: inner, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -394,9 +394,9 @@ fn convert_ast_to_ir<'a>(
                         false_expr: false_exp,
                         source_span: Some(cond.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -417,9 +417,9 @@ fn convert_ast_to_ir<'a>(
                             name: prop.name,
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             } else if matches!(prop.receiver, AngularExpression::ThisReceiver(_)) {
                 // Explicit `this` property read (e.g., `this.formGroup`) becomes a
@@ -435,17 +435,17 @@ fn convert_ast_to_ir<'a>(
                                         view: job.root.xref,
                                         source_span: Some(prop.source_span.to_span()),
                                     },
-                                    allocator,
+                                    &allocator,
                                 )),
-                                allocator,
+                                &allocator,
                             ),
                             name: prop.name,
                             optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             } else {
                 // This is a nested property read like `(expr).name`
@@ -459,9 +459,9 @@ fn convert_ast_to_ir<'a>(
                             optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             }
         }
@@ -480,9 +480,9 @@ fn convert_ast_to_ir<'a>(
                         optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -491,7 +491,7 @@ fn convert_ast_to_ir<'a>(
         AngularExpression::Call(call) => {
             let call = call.unbox();
             let receiver = convert_ast_to_ir(job, call.receiver);
-            let mut args = Vec::with_capacity_in(call.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(call.args.len(), &allocator);
             for arg in call.args {
                 let arg_expr = convert_ast_to_ir(job, arg);
                 args.push(arg_expr.unbox());
@@ -504,9 +504,9 @@ fn convert_ast_to_ir<'a>(
                         optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -521,9 +521,9 @@ fn convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(not.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -547,9 +547,9 @@ fn convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(unary.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -563,9 +563,9 @@ fn convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(typeof_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -579,9 +579,9 @@ fn convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(void_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -593,9 +593,9 @@ fn convert_ast_to_ir<'a>(
             Box::new_in(
                 IrExpression::Empty(Box::new_in(
                     EmptyExpr { source_span: Some(empty.source_span.to_span()) },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -605,14 +605,14 @@ fn convert_ast_to_ir<'a>(
         // the pipe_creation phase and any @let variable reads inside are never resolved.
         AngularExpression::TemplateLiteral(tl) => {
             let tl = tl.unbox();
-            let mut elements = Vec::with_capacity_in(tl.elements.len(), allocator);
+            let mut elements = Vec::with_capacity_in(tl.elements.len(), &allocator);
             for elem in tl.elements.iter() {
                 elements.push(crate::ir::expression::IrTemplateLiteralElement {
                     text: elem.text.clone(),
                     source_span: Some(elem.source_span.to_span()),
                 });
             }
-            let mut expressions = Vec::with_capacity_in(tl.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(tl.expressions.len(), &allocator);
             for expr in tl.expressions {
                 let converted = convert_ast_to_ir(job, expr);
                 expressions.push(converted.unbox());
@@ -624,9 +624,9 @@ fn convert_ast_to_ir<'a>(
                         expressions,
                         source_span: Some(tl.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -685,7 +685,7 @@ fn convert_interpolation_to_ir<'a>(
     expr: AngularExpression<'a>,
 ) -> Box<'a, IrExpression<'a>> {
     let allocator = job.allocator;
-    convert_interpolation_to_ir_with_i18n_placeholders(job, expr, Vec::new_in(allocator))
+    convert_interpolation_to_ir_with_i18n_placeholders(job, expr, Vec::new_in(&allocator))
 }
 
 /// Converts an Angular expression to IR, handling interpolations with i18n placeholders.
@@ -707,7 +707,7 @@ fn convert_interpolation_to_ir_with_i18n_placeholders<'a>(
         // Unbox the interpolation to take ownership of its fields
         let interp = interp_box.unbox();
 
-        let mut ir_expressions = Vec::new_in(allocator);
+        let mut ir_expressions = Vec::new_in(&allocator);
         for inner_expr in interp.expressions {
             // Convert each inner expression to IR (handles pipes, safe nav, etc.)
             let converted = convert_ast_to_ir(job, inner_expr);
@@ -722,9 +722,9 @@ fn convert_interpolation_to_ir_with_i18n_placeholders<'a>(
                     i18n_placeholders,
                     source_span: Some(interp.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             )),
-            allocator,
+            &allocator,
         )
     } else {
         // For non-interpolation expressions, convert to IR
@@ -774,7 +774,7 @@ pub fn ingest_component_with_options<'a>(
     // This ensures that when compiling multiple components in the same file,
     // each component's constants have unique names.
     let mut job = ComponentCompilationJob::with_pool_starting_index(
-        allocator,
+        &allocator,
         component_name,
         options.pool_starting_index,
     );
@@ -927,7 +927,7 @@ fn ingest_bound_text<'a>(
     // Ported from Angular's ingestBoundText (ingest.ts lines 485-495)
     let i18n_placeholders: Vec<'_, Ident<'_>> = match &bound_text.i18n {
         Some(I18nMeta::Node(I18nNode::Container(container))) => {
-            let mut placeholders = Vec::new_in(allocator);
+            let mut placeholders = Vec::new_in(&allocator);
             for child in container.children.iter() {
                 if let I18nNode::Placeholder(placeholder) = child {
                     placeholders.push(placeholder.name.clone());
@@ -935,7 +935,7 @@ fn ingest_bound_text<'a>(
             }
             placeholders
         }
-        _ => Vec::new_in(allocator),
+        _ => Vec::new_in(&allocator),
     };
 
     // Convert the interpolation expression to an IR interpolation.
@@ -1222,7 +1222,7 @@ fn ingest_element<'a>(
         xref: i18n_attrs_xref,
         handle: I18nSlotHandle::Single(SlotId(0)), // Will be computed during slot allocation
         target: xref,
-        configs: Vec::new_in(allocator),
+        configs: Vec::new_in(&allocator),
         i18n_attributes_config: None,
     });
 
@@ -1242,7 +1242,7 @@ fn ingest_element<'a>(
             let instance_id = message.instance_id;
 
             // Store i18n message metadata keyed by instance_id
-            let mut legacy_ids = Vec::new_in(allocator);
+            let mut legacy_ids = Vec::new_in(&allocator);
             for id in message.legacy_ids.iter() {
                 legacy_ids.push(id.clone());
             }
@@ -1373,16 +1373,16 @@ fn ingest_static_attributes_with_i18n<'a>(
         if name.as_str() == "ngNonBindable" || name.as_str().starts_with("animate.") {
             let literal_expr = OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::String(value), source_span: None },
-                allocator,
+                &allocator,
             ));
-            let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
+            let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, &allocator));
 
             let binding = BindingOp {
                 base: UpdateOpBase::default(),
                 target: element_xref,
                 kind: BindingKind::Attribute,
                 name,
-                expression: Box::new_in(value_expr, allocator),
+                expression: Box::new_in(value_expr, &allocator),
                 unit: None,
                 security_context: SecurityContext::None,
                 i18n_message: None,
@@ -1411,7 +1411,7 @@ fn ingest_static_attributes_with_i18n<'a>(
 
             // Store i18n message metadata for later phases (only if not already stored)
             if !job.i18n_message_metadata.contains_key(&instance_id) {
-                let mut legacy_ids = Vec::new_in(allocator);
+                let mut legacy_ids = Vec::new_in(&allocator);
                 for id in message.legacy_ids.iter() {
                     legacy_ids.push(id.clone());
                 }
@@ -1451,9 +1451,9 @@ fn ingest_static_attributes_with_i18n<'a>(
         // All other static attributes go to the create list as ExtractedAttributeOp
         let literal_expr = OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(value), source_span: None },
-            allocator,
+            &allocator,
         ));
-        let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
+        let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, &allocator));
 
         // Use Template kind for structural template attributes, Attribute otherwise
         let binding_kind = if is_structural_template_attribute {
@@ -1473,7 +1473,7 @@ fn ingest_static_attributes_with_i18n<'a>(
             binding_kind,
             namespace,
             name: local_name,
-            value: Some(Box::new_in(value_expr, allocator)),
+            value: Some(Box::new_in(value_expr, &allocator)),
             security_context: SecurityContext::None,
             truthy_expression: false,
             i18n_context: None,
@@ -1516,9 +1516,9 @@ fn ingest_single_static_attribute<'a>(
 
     let literal_expr = OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(value), source_span: None },
-        allocator,
+        &allocator,
     ));
-    let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, allocator));
+    let value_expr = IrExpression::OutputExpr(Box::new_in(literal_expr, &allocator));
 
     if is_structural_template_attribute {
         // For structural template attributes, create a BindingOp that goes to the update list.
@@ -1530,7 +1530,7 @@ fn ingest_single_static_attribute<'a>(
             target: element_xref,
             kind: BindingKind::Template,
             name,
-            expression: Box::new_in(value_expr, allocator),
+            expression: Box::new_in(value_expr, &allocator),
             unit: None,
             security_context: SecurityContext::None,
             i18n_message: None,
@@ -1553,7 +1553,7 @@ fn ingest_single_static_attribute<'a>(
             binding_kind: BindingKind::Attribute,
             namespace,
             name: local_name,
-            value: Some(Box::new_in(value_expr, allocator)),
+            value: Some(Box::new_in(value_expr, &allocator)),
             security_context: SecurityContext::None,
             truthy_expression: false,
             i18n_context: None,
@@ -1644,7 +1644,7 @@ fn ingest_binding_owned<'a>(
 
         // Store i18n message metadata for later phases (keyed by instance_id)
         if !job.i18n_message_metadata.contains_key(&instance_id) {
-            let mut legacy_ids = Vec::new_in(allocator);
+            let mut legacy_ids = Vec::new_in(&allocator);
             for id in message.legacy_ids.iter() {
                 legacy_ids.push(id.clone());
             }
@@ -1742,9 +1742,9 @@ fn ingest_listener_owned<'a>(
                 Box::new_in(
                     IrExpression::Empty(Box::new_in(
                         crate::ir::expression::EmptyExpr { source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             }
         } else {
@@ -1757,29 +1757,29 @@ fn ingest_listener_owned<'a>(
                 Box::new_in(
                     IrExpression::Empty(Box::new_in(
                         crate::ir::expression::EmptyExpr { source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             }
         };
 
-        let mut handler_ops = Vec::new_in(allocator);
+        let mut handler_ops = Vec::new_in(&allocator);
 
         // Create $event reference
         let event_ref = IrExpression::LexicalRead(Box::new_in(
             LexicalReadExpr { name: Ident::from("$event"), source_span: None },
-            allocator,
+            &allocator,
         ));
 
         // Create TwoWayBindingSetExpr(handlerExpr, $event)
         let two_way_set_expr = IrExpression::TwoWayBindingSet(Box::new_in(
             TwoWayBindingSetExpr {
                 target: handler_expr,
-                value: Box::new_in(event_ref.clone_in(allocator), allocator),
+                value: Box::new_in(event_ref.clone_in(allocator), &allocator),
                 source_span: Some(output.source_span),
             },
-            allocator,
+            &allocator,
         ));
 
         // Wrap in output expression statement: ExpressionStatement(TwoWayBindingSetExpr)
@@ -1787,14 +1787,14 @@ fn ingest_listener_owned<'a>(
             crate::output::ast::ExpressionStatement {
                 expr: OutputExpression::WrappedIrNode(Box::new_in(
                     crate::output::ast::WrappedIrExpr {
-                        node: Box::new_in(two_way_set_expr, allocator),
+                        node: Box::new_in(two_way_set_expr, &allocator),
                         source_span: Some(output.source_span),
                     },
-                    allocator,
+                    &allocator,
                 )),
                 source_span: Some(output.source_span),
             },
-            allocator,
+            &allocator,
         ));
         handler_ops.push(UpdateOp::Statement(StatementOp {
             base: UpdateOpBase::default(),
@@ -1806,14 +1806,14 @@ fn ingest_listener_owned<'a>(
             crate::output::ast::ReturnStatement {
                 value: OutputExpression::WrappedIrNode(Box::new_in(
                     crate::output::ast::WrappedIrExpr {
-                        node: Box::new_in(event_ref, allocator),
+                        node: Box::new_in(event_ref, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
         handler_ops.push(UpdateOp::Statement(StatementOp {
             base: UpdateOpBase::default(),
@@ -1834,7 +1834,7 @@ fn ingest_listener_owned<'a>(
         // Ported from Angular's makeListenerHandlerOps in ingest.ts:
         // - All expressions except the last become ExpressionStatement ops in handler_ops
         // - The last expression becomes the handler_expression (wrapped in return)
-        let mut handler_ops = Vec::new_in(allocator);
+        let mut handler_ops = Vec::new_in(&allocator);
         let mut handler_expr: Option<Box<'a, IrExpression<'a>>> = None;
 
         let exprs_count = handler_exprs.len();
@@ -1853,11 +1853,11 @@ fn ingest_listener_owned<'a>(
                                 node: ir_expr,
                                 source_span: Some(output.source_span),
                             },
-                            allocator,
+                            &allocator,
                         )),
                         source_span: Some(output.source_span),
                     },
-                    allocator,
+                    &allocator,
                 ));
                 handler_ops.push(UpdateOp::Statement(StatementOp {
                     base: UpdateOpBase::default(),
@@ -1953,7 +1953,7 @@ fn ingest_template<'a>(
         if let Some(I18nMeta::Message(ref message)) = template.i18n {
             let instance_id = message.instance_id;
             // Clone legacy_ids using the allocator
-            let mut legacy_ids = Vec::new_in(allocator);
+            let mut legacy_ids = Vec::new_in(&allocator);
             for id in message.legacy_ids.iter() {
                 legacy_ids.push(id.clone());
             }
@@ -2243,7 +2243,7 @@ fn ingest_template<'a>(
         xref: i18n_attrs_xref,
         handle: I18nSlotHandle::Single(SlotId(0)), // Will be computed during slot allocation
         target: xref,
-        configs: Vec::new_in(allocator),
+        configs: Vec::new_in(&allocator),
         i18n_attributes_config: None,
     });
 
@@ -2400,7 +2400,7 @@ fn ingest_content<'a>(
             target: xref,
             kind: BindingKind::Attribute,
             name: attr.name,
-            expression: Box::new_in(value_expr, allocator),
+            expression: Box::new_in(value_expr, &allocator),
             unit: None,
             security_context: SecurityContext::None,
             i18n_message: None,
@@ -2432,7 +2432,7 @@ fn ingest_if_block<'a>(
     let allocator = job.allocator;
 
     let mut first_xref: Option<XrefId> = None;
-    let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(allocator);
+    let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(&allocator);
     let mut create_ops: std::vec::Vec<CreateOp<'a>> = std::vec::Vec::new();
 
     for (i, branch) in if_block.branches.into_iter().enumerate() {
@@ -2491,7 +2491,7 @@ fn ingest_if_block<'a>(
                 tag: tag.clone(),
                 decls: None,
                 vars: None,
-                local_refs: Vec::new_in(allocator),
+                local_refs: Vec::new_in(&allocator),
                 local_refs_index: None, // Set by local_refs phase
                 i18n_placeholder,
                 attributes: None,
@@ -2509,7 +2509,7 @@ fn ingest_if_block<'a>(
                 tag: tag.clone(),
                 decls: None,
                 vars: None,
-                local_refs: Vec::new_in(allocator),
+                local_refs: Vec::new_in(&allocator),
                 local_refs_index: None, // Set by local_refs phase
                 i18n_placeholder,
                 attributes: None,
@@ -2602,8 +2602,8 @@ fn ingest_for_block<'a>(
     };
 
     // Collect context variables and aliases for the body view
-    let mut context_variables: Vec<'a, ContextVariable<'a>> = Vec::new_in(allocator);
-    let mut aliases: Vec<'a, AliasVariable<'a>> = Vec::new_in(allocator);
+    let mut context_variables: Vec<'a, ContextVariable<'a>> = Vec::new_in(&allocator);
+    let mut aliases: Vec<'a, AliasVariable<'a>> = Vec::new_in(&allocator);
 
     // Add the item variable (maps to $implicit in the context)
     context_variables.push(ContextVariable {
@@ -2617,7 +2617,7 @@ fn ingest_for_block<'a>(
     let mut var_names = RepeaterVarNames {
         item: Some(for_block.item.name.clone()),
         count: None,
-        index: oxc_allocator::Vec::new_in(allocator),
+        index: oxc_allocator::Vec::new_in(&allocator),
         first: None,
         last: None,
         even: None,
@@ -2678,7 +2678,7 @@ fn ingest_for_block<'a>(
                 // Angular throws for unknown variables; we return early to avoid
                 // emitting broken IR.
                 let expression = match get_computed_for_loop_variable_expression(
-                    allocator,
+                    &allocator,
                     var.value.as_str(),
                     &index_name,
                     &count_name,
@@ -2821,20 +2821,20 @@ fn get_computed_for_loop_variable_expression<'a>(
             // Return LexicalRead of the index variable
             Ok(IrExpression::LexicalRead(Box::new_in(
                 LexicalReadExpr { name: index_name.clone(), source_span: None },
-                allocator,
+                &allocator,
             )))
         }
         "$count" => {
             // Return LexicalRead of the count variable
             Ok(IrExpression::LexicalRead(Box::new_in(
                 LexicalReadExpr { name: count_name.clone(), source_span: None },
-                allocator,
+                &allocator,
             )))
         }
         "$first" => {
             // $index === 0
             Ok(create_binary_identical(
-                allocator,
+                &allocator,
                 create_lexical_read(allocator, index_name),
                 create_number_literal(allocator, 0.0),
             ))
@@ -2842,10 +2842,10 @@ fn get_computed_for_loop_variable_expression<'a>(
         "$last" => {
             // $index === $count - 1
             Ok(create_binary_identical(
-                allocator,
+                &allocator,
                 create_lexical_read(allocator, index_name),
                 create_binary_minus(
-                    allocator,
+                    &allocator,
                     create_lexical_read(allocator, count_name),
                     create_number_literal(allocator, 1.0),
                 ),
@@ -2854,9 +2854,9 @@ fn get_computed_for_loop_variable_expression<'a>(
         "$even" => {
             // $index % 2 === 0
             Ok(create_binary_identical(
-                allocator,
+                &allocator,
                 create_binary_modulo(
-                    allocator,
+                    &allocator,
                     create_lexical_read(allocator, index_name),
                     create_number_literal(allocator, 2.0),
                 ),
@@ -2866,9 +2866,9 @@ fn get_computed_for_loop_variable_expression<'a>(
         "$odd" => {
             // $index % 2 !== 0
             Ok(create_binary_not_identical(
-                allocator,
+                &allocator,
                 create_binary_modulo(
-                    allocator,
+                    &allocator,
                     create_lexical_read(allocator, index_name),
                     create_number_literal(allocator, 2.0),
                 ),
@@ -2892,7 +2892,7 @@ fn get_computed_for_loop_variable_expression<'a>(
 fn create_lexical_read<'a>(allocator: &'a Allocator, name: &Ident<'a>) -> IrExpression<'a> {
     IrExpression::LexicalRead(Box::new_in(
         LexicalReadExpr { name: name.clone(), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2907,9 +2907,9 @@ fn create_number_literal<'a>(allocator: &'a Allocator, value: f64) -> IrExpressi
                 span: ParseSpan::new(0, 0),
                 source_span: AbsoluteSourceSpan::new(0, 0),
             },
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2924,9 +2924,9 @@ fn create_string_literal_atom<'a>(allocator: &'a Allocator, value: Ident<'a>) ->
                 span: ParseSpan::new(0, 0),
                 source_span: AbsoluteSourceSpan::new(0, 0),
             },
-            allocator,
+            &allocator,
         )),
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2939,11 +2939,11 @@ fn create_binary_identical<'a>(
     IrExpression::Binary(Box::new_in(
         BinaryExpr {
             operator: IrBinaryOperator::Identical,
-            lhs: Box::new_in(lhs, allocator),
-            rhs: Box::new_in(rhs, allocator),
+            lhs: Box::new_in(lhs, &allocator),
+            rhs: Box::new_in(rhs, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2956,11 +2956,11 @@ fn create_binary_not_identical<'a>(
     IrExpression::Binary(Box::new_in(
         BinaryExpr {
             operator: IrBinaryOperator::NotIdentical,
-            lhs: Box::new_in(lhs, allocator),
-            rhs: Box::new_in(rhs, allocator),
+            lhs: Box::new_in(lhs, &allocator),
+            rhs: Box::new_in(rhs, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2973,11 +2973,11 @@ fn create_binary_minus<'a>(
     IrExpression::Binary(Box::new_in(
         BinaryExpr {
             operator: IrBinaryOperator::Minus,
-            lhs: Box::new_in(lhs, allocator),
-            rhs: Box::new_in(rhs, allocator),
+            lhs: Box::new_in(lhs, &allocator),
+            rhs: Box::new_in(rhs, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -2990,11 +2990,11 @@ fn create_binary_modulo<'a>(
     IrExpression::Binary(Box::new_in(
         BinaryExpr {
             operator: IrBinaryOperator::Modulo,
-            lhs: Box::new_in(lhs, allocator),
-            rhs: Box::new_in(rhs, allocator),
+            lhs: Box::new_in(lhs, &allocator),
+            rhs: Box::new_in(rhs, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -3029,7 +3029,7 @@ fn ingest_switch_block<'a>(
     // The downstream generate_conditional_expressions phase handles @default at
     // any position by splicing it out as the ternary fallback base.
     let mut first_xref: Option<XrefId> = None;
-    let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(allocator);
+    let mut conditions: Vec<'a, ConditionalCaseExpr<'a>> = Vec::new_in(&allocator);
     let mut create_ops: std::vec::Vec<CreateOp<'a>> = std::vec::Vec::new();
 
     for (i, group) in switch_block.groups.into_iter().enumerate() {
@@ -3075,7 +3075,7 @@ fn ingest_switch_block<'a>(
                 tag: tag.clone(),
                 decls: None,
                 vars: None,
-                local_refs: Vec::new_in(allocator),
+                local_refs: Vec::new_in(&allocator),
                 local_refs_index: None, // Set by local_refs phase
                 i18n_placeholder,
                 attributes: None,
@@ -3093,7 +3093,7 @@ fn ingest_switch_block<'a>(
                 tag: tag.clone(),
                 decls: None,
                 vars: None,
-                local_refs: Vec::new_in(allocator),
+                local_refs: Vec::new_in(&allocator),
                 local_refs_index: None, // Set by local_refs phase
                 i18n_placeholder,
                 attributes: None,
@@ -3220,7 +3220,7 @@ fn ingest_defer_view<'a>(
         decl_count: None,
         vars: None,
         attributes: None,
-        local_refs: Vec::new_in(job.allocator),
+        local_refs: Vec::new_in(&job.allocator),
         local_refs_index: None,
         i18n_placeholder,
     });
@@ -3646,7 +3646,7 @@ fn ingest_references_owned<'a>(
     allocator: &'a Allocator,
     references: Vec<'a, crate::ast::r3::R3Reference<'a>>,
 ) -> Vec<'a, LocalRef<'a>> {
-    let mut local_refs = Vec::new_in(allocator);
+    let mut local_refs = Vec::new_in(&allocator);
 
     for reference in references {
         local_refs.push(LocalRef { name: reference.name, target: reference.value });
@@ -3683,7 +3683,7 @@ fn host_store_and_ref_expr<'a>(
     expr: AngularExpression<'a>,
 ) -> Box<'a, IrExpression<'a>> {
     let id = job.store_expression(expr);
-    Box::new_in(IrExpression::ExpressionRef(id), job.allocator)
+    Box::new_in(IrExpression::ExpressionRef(id), &job.allocator)
 }
 
 /// Converts an Angular expression to an IR expression for host bindings.
@@ -3703,7 +3703,7 @@ fn host_convert_ast_to_ir<'a>(
             let pipe = pipe.unbox();
             let target = job.allocate_xref_id();
 
-            let mut args = Vec::with_capacity_in(1 + pipe.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(1 + pipe.args.len(), &allocator);
 
             // First argument is the pipe input expression
             let input_expr = host_convert_ast_to_ir(job, pipe.exp);
@@ -3725,9 +3725,9 @@ fn host_convert_ast_to_ir<'a>(
                         var_offset: None,
                         source_span: Some(pipe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3748,9 +3748,9 @@ fn host_convert_ast_to_ir<'a>(
                         name: safe.name,
                         source_span: Some(safe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3766,9 +3766,9 @@ fn host_convert_ast_to_ir<'a>(
                         index,
                         source_span: Some(safe.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3776,7 +3776,7 @@ fn host_convert_ast_to_ir<'a>(
         AngularExpression::SafeCall(safe) => {
             let safe = safe.unbox();
             let receiver = host_convert_ast_to_ir(job, safe.receiver);
-            let mut args = Vec::with_capacity_in(safe.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(safe.args.len(), &allocator);
             for arg in safe.args {
                 let arg_expr = host_convert_ast_to_ir(job, arg);
                 args.push(arg_expr.unbox());
@@ -3784,9 +3784,9 @@ fn host_convert_ast_to_ir<'a>(
             Box::new_in(
                 IrExpression::SafeInvokeFunction(Box::new_in(
                     SafeInvokeFunctionExpr { receiver, args, source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3804,9 +3804,9 @@ fn host_convert_ast_to_ir<'a>(
                         rhs,
                         source_span: Some(bin.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3831,9 +3831,9 @@ fn host_convert_ast_to_ir<'a>(
                         false_expr: false_exp,
                         source_span: Some(cond.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3848,9 +3848,9 @@ fn host_convert_ast_to_ir<'a>(
                             name: prop.name,
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             } else {
                 let receiver = host_convert_ast_to_ir(job, prop.receiver);
@@ -3862,9 +3862,9 @@ fn host_convert_ast_to_ir<'a>(
                             optional: false,
                             source_span: Some(prop.source_span.to_span()),
                         },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )
             }
         }
@@ -3882,9 +3882,9 @@ fn host_convert_ast_to_ir<'a>(
                         optional: false,
                         source_span: Some(keyed.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3892,7 +3892,7 @@ fn host_convert_ast_to_ir<'a>(
         AngularExpression::Call(call) => {
             let call = call.unbox();
             let receiver = host_convert_ast_to_ir(job, call.receiver);
-            let mut args = Vec::with_capacity_in(call.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(call.args.len(), &allocator);
             for arg in call.args {
                 let arg_expr = host_convert_ast_to_ir(job, arg);
                 args.push(arg_expr.unbox());
@@ -3905,9 +3905,9 @@ fn host_convert_ast_to_ir<'a>(
                         optional: false,
                         source_span: Some(call.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3921,9 +3921,9 @@ fn host_convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(not.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3946,9 +3946,9 @@ fn host_convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(unary.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3962,9 +3962,9 @@ fn host_convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(typeof_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3978,9 +3978,9 @@ fn host_convert_ast_to_ir<'a>(
                         expr,
                         source_span: Some(void_expr.source_span.to_span()),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )
         }
 
@@ -3999,7 +3999,7 @@ fn host_convert_interpolation_to_ir<'a>(
     if let AngularExpression::Interpolation(interp_box) = expr {
         let interp = interp_box.unbox();
 
-        let mut ir_expressions = Vec::new_in(allocator);
+        let mut ir_expressions = Vec::new_in(&allocator);
         for inner_expr in interp.expressions {
             let converted = host_convert_ast_to_ir(job, inner_expr);
             ir_expressions.push(converted.unbox());
@@ -4010,12 +4010,12 @@ fn host_convert_interpolation_to_ir<'a>(
                 crate::ir::expression::Interpolation {
                     strings: interp.strings,
                     expressions: ir_expressions,
-                    i18n_placeholders: Vec::new_in(allocator),
+                    i18n_placeholders: Vec::new_in(&allocator),
                     source_span: Some(interp.source_span.to_span()),
                 },
-                allocator,
+                &allocator,
             )),
-            allocator,
+            &allocator,
         )
     } else {
         host_convert_ast_to_ir(job, expr)
@@ -4049,7 +4049,7 @@ pub fn ingest_host_binding_with_version<'a>(
     legacy_optional_chaining: Option<bool>,
 ) -> HostBindingCompilationJob<'a> {
     let mut job = HostBindingCompilationJob::with_pool_starting_index(
-        allocator,
+        &allocator,
         input.component_name,
         input.component_selector,
         pool_starting_index,
@@ -4207,7 +4207,7 @@ fn ingest_host_attribute<'a>(
     // Wrap the OutputExpression in IrExpression::OutputExpr
     // This matches TypeScript which passes o.Expression directly to the IR
     let expression =
-        Box::new_in(IrExpression::OutputExpr(Box::new_in(value, allocator)), allocator);
+        Box::new_in(IrExpression::OutputExpr(Box::new_in(value, &allocator)), &allocator);
 
     // Create a BindingOp and add it to the UPDATE list, just like Angular's ingestHostAttribute.
     // The binding is marked as is_text_attribute: true, which means it will be extracted to
@@ -4263,7 +4263,7 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
     // Ported from Angular's makeListenerHandlerOps in ingest.ts:
     // - All expressions except the last become ExpressionStatement ops in handler_ops
     // - The last expression becomes the handler_expression (wrapped in return)
-    let mut handler_ops = Vec::new_in(allocator);
+    let mut handler_ops = Vec::new_in(&allocator);
     let mut handler_expr: Option<oxc_allocator::Box<'a, IrExpression<'a>>> = None;
 
     let exprs_count = handler_exprs.len();
@@ -4283,11 +4283,11 @@ fn ingest_host_event<'a>(job: &mut HostBindingCompilationJob<'a>, event: R3Bound
                                 node: ir_expr,
                                 source_span: Some(event.source_span),
                             },
-                            allocator,
+                            &allocator,
                         )),
                         source_span: Some(event.source_span),
                     },
-                    allocator,
+                    &allocator,
                 ));
             handler_ops.push(UpdateOp::Statement(StatementOp {
                 base: UpdateOpBase::default(),
@@ -4461,7 +4461,7 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
 
             // Store i18n message metadata for later phases (only if not already stored)
             if !job.i18n_message_metadata.contains_key(&instance_id) {
-                let mut legacy_ids = Vec::new_in(allocator);
+                let mut legacy_ids = Vec::new_in(&allocator);
                 for id in message.legacy_ids.iter() {
                     legacy_ids.push(id.clone());
                 }
@@ -4503,7 +4503,7 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
             target: xref,
             kind: BindingKind::Attribute,
             name: attr.name.clone(),
-            expression: Box::new_in(value_expr, allocator),
+            expression: Box::new_in(value_expr, &allocator),
             unit: None,
             security_context,
             i18n_message,
@@ -4611,12 +4611,12 @@ mod tests {
         // Control flow blocks should only have BlockPlaceholder metadata.
         let unexpected_i18n = I18nMeta::Message(I18nMessage {
             instance_id: 0,
-            nodes: Vec::new_in(&allocator),
+            nodes: Vec::new_in(&&allocator),
             meaning: Ident::from(""),
             description: Ident::from(""),
             custom_id: Ident::from(""),
             id: Ident::from(""),
-            legacy_ids: Vec::new_in(&allocator),
+            legacy_ids: Vec::new_in(&&allocator),
             message_string: Ident::from(""),
         });
 

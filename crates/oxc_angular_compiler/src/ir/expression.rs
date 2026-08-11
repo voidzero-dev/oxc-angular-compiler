@@ -278,12 +278,12 @@ impl<'a> IrExpression<'a> {
 impl<'a> IrExpression<'a> {
     /// Creates a new Ast expression wrapping an AngularExpression.
     pub fn from_ast(allocator: &'a oxc_allocator::Allocator, expr: AngularExpression<'a>) -> Self {
-        IrExpression::Ast(Box::new_in(expr, allocator))
+        IrExpression::Ast(Box::new_in(expr, &allocator))
     }
 
     /// Creates a new Empty expression.
     pub fn empty(allocator: &'a oxc_allocator::Allocator, source_span: Option<Span>) -> Self {
-        IrExpression::Empty(Box::new_in(EmptyExpr { source_span }, allocator))
+        IrExpression::Empty(Box::new_in(EmptyExpr { source_span }, &allocator))
     }
 
     /// Returns true if this is an empty expression.
@@ -322,7 +322,7 @@ impl<'a> IrExpression<'a> {
         match self {
             IrExpression::LexicalRead(e) => IrExpression::LexicalRead(Box::new_in(
                 LexicalReadExpr { name: e.name.clone(), source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::Reference(e) => IrExpression::Reference(Box::new_in(
                 ReferenceExpr {
@@ -331,48 +331,48 @@ impl<'a> IrExpression<'a> {
                     offset: e.offset,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Context(e) => IrExpression::Context(Box::new_in(
                 ContextExpr { view: e.view, source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::NextContext(e) => IrExpression::NextContext(Box::new_in(
                 NextContextExpr { steps: e.steps, source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::GetCurrentView(e) => IrExpression::GetCurrentView(Box::new_in(
                 GetCurrentViewExpr { source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::RestoreView(e) => IrExpression::RestoreView(Box::new_in(
                 RestoreViewExpr {
                     view: match &e.view {
                         RestoreViewTarget::Static(xref) => RestoreViewTarget::Static(*xref),
                         RestoreViewTarget::Dynamic(expr) => RestoreViewTarget::Dynamic(
-                            Box::new_in(expr.clone_in(allocator), allocator),
+                            Box::new_in(expr.clone_in(allocator), &allocator),
                         ),
                     },
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ResetView(e) => IrExpression::ResetView(Box::new_in(
                 ResetViewExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ReadVariable(e) => IrExpression::ReadVariable(Box::new_in(
                 ReadVariableExpr { xref: e.xref, name: e.name.clone(), source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::PureFunction(e) => {
-                let body = e.body.as_ref().map(|b| Box::new_in(b.clone_in(allocator), allocator));
+                let body = e.body.as_ref().map(|b| Box::new_in(b.clone_in(allocator), &allocator));
                 let fn_ref =
-                    e.fn_ref.as_ref().map(|f| Box::new_in(f.clone_in(allocator), allocator));
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                    e.fn_ref.as_ref().map(|f| Box::new_in(f.clone_in(allocator), &allocator));
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
@@ -384,17 +384,17 @@ impl<'a> IrExpression<'a> {
                         var_offset: e.var_offset,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::PureFunctionParameter(e) => {
                 IrExpression::PureFunctionParameter(Box::new_in(
                     PureFunctionParameterExpr { index: e.index, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::PipeBinding(e) => {
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
@@ -407,7 +407,7 @@ impl<'a> IrExpression<'a> {
                         var_offset: e.var_offset,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::PipeBindingVariadic(e) => IrExpression::PipeBindingVariadic(Box::new_in(
@@ -415,63 +415,63 @@ impl<'a> IrExpression<'a> {
                     target: e.target,
                     target_slot: e.target_slot,
                     name: e.name.clone(),
-                    args: Box::new_in(e.args.clone_in(allocator), allocator),
+                    args: Box::new_in(e.args.clone_in(allocator), &allocator),
                     num_args: e.num_args,
                     var_offset: e.var_offset,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::SafePropertyRead(e) => IrExpression::SafePropertyRead(Box::new_in(
                 SafePropertyReadExpr {
-                    receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                    receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                     name: e.name.clone(),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::SafeKeyedRead(e) => IrExpression::SafeKeyedRead(Box::new_in(
                 SafeKeyedReadExpr {
-                    receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
-                    index: Box::new_in(e.index.clone_in(allocator), allocator),
+                    receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
+                    index: Box::new_in(e.index.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::SafeInvokeFunction(e) => {
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
                 IrExpression::SafeInvokeFunction(Box::new_in(
                     SafeInvokeFunctionExpr {
-                        receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                        receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                         args,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::SafeTernary(e) => IrExpression::SafeTernary(Box::new_in(
                 SafeTernaryExpr {
-                    guard: Box::new_in(e.guard.clone_in(allocator), allocator),
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    guard: Box::new_in(e.guard.clone_in(allocator), &allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Empty(e) => IrExpression::Empty(Box::new_in(
                 EmptyExpr { source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::AssignTemporary(e) => IrExpression::AssignTemporary(Box::new_in(
                 AssignTemporaryExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     xref: e.xref,
                     name: e.name.clone(),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ReadTemporary(e) => IrExpression::ReadTemporary(Box::new_in(
                 ReadTemporaryExpr {
@@ -479,7 +479,7 @@ impl<'a> IrExpression<'a> {
                     name: e.name.clone(),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::SlotLiteral(e) => IrExpression::SlotLiteral(Box::new_in(
                 SlotLiteralExpr {
@@ -487,36 +487,36 @@ impl<'a> IrExpression<'a> {
                     target_xref: e.target_xref,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ConditionalCase(e) => IrExpression::ConditionalCase(Box::new_in(
                 ConditionalCaseExpr {
-                    expr: e.expr.as_ref().map(|ex| Box::new_in(ex.clone_in(allocator), allocator)),
+                    expr: e.expr.as_ref().map(|ex| Box::new_in(ex.clone_in(allocator), &allocator)),
                     target: e.target,
                     target_slot: e.target_slot,
                     alias: e.alias.clone(),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ConstCollected(e) => IrExpression::ConstCollected(Box::new_in(
                 ConstCollectedExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ConstReference(e) => IrExpression::ConstReference(Box::new_in(
                 ConstReferenceExpr { index: e.index, source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::TwoWayBindingSet(e) => IrExpression::TwoWayBindingSet(Box::new_in(
                 TwoWayBindingSetExpr {
-                    target: Box::new_in(e.target.clone_in(allocator), allocator),
-                    value: Box::new_in(e.value.clone_in(allocator), allocator),
+                    target: Box::new_in(e.target.clone_in(allocator), &allocator),
+                    value: Box::new_in(e.value.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ContextLetReference(e) => IrExpression::ContextLetReference(Box::new_in(
                 ContextLetReferenceExpr {
@@ -524,50 +524,50 @@ impl<'a> IrExpression<'a> {
                     target_slot: e.target_slot,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::StoreLet(e) => IrExpression::StoreLet(Box::new_in(
                 StoreLetExpr {
                     target: e.target,
-                    value: Box::new_in(e.value.clone_in(allocator), allocator),
+                    value: Box::new_in(e.value.clone_in(allocator), &allocator),
                     var_offset: e.var_offset,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::TrackContext(e) => IrExpression::TrackContext(Box::new_in(
                 TrackContextExpr { view: e.view, source_span: e.source_span },
-                allocator,
+                &allocator,
             )),
             IrExpression::Binary(e) => IrExpression::Binary(Box::new_in(
                 BinaryExpr {
                     operator: e.operator,
-                    lhs: Box::new_in(e.lhs.clone_in(allocator), allocator),
-                    rhs: Box::new_in(e.rhs.clone_in(allocator), allocator),
+                    lhs: Box::new_in(e.lhs.clone_in(allocator), &allocator),
+                    rhs: Box::new_in(e.rhs.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Ternary(e) => IrExpression::Ternary(Box::new_in(
                 TernaryExpr {
-                    condition: Box::new_in(e.condition.clone_in(allocator), allocator),
-                    true_expr: Box::new_in(e.true_expr.clone_in(allocator), allocator),
-                    false_expr: Box::new_in(e.false_expr.clone_in(allocator), allocator),
+                    condition: Box::new_in(e.condition.clone_in(allocator), &allocator),
+                    true_expr: Box::new_in(e.true_expr.clone_in(allocator), &allocator),
+                    false_expr: Box::new_in(e.false_expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Interpolation(e) => {
-                let mut strings = Vec::with_capacity_in(e.strings.len(), allocator);
+                let mut strings = Vec::with_capacity_in(e.strings.len(), &allocator);
                 for s in e.strings.iter() {
                     strings.push(s.clone());
                 }
-                let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+                let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
                 for expr in e.expressions.iter() {
                     expressions.push(expr.clone_in(allocator));
                 }
                 let mut i18n_placeholders =
-                    Vec::with_capacity_in(e.i18n_placeholders.len(), allocator);
+                    Vec::with_capacity_in(e.i18n_placeholders.len(), &allocator);
                 for ph in e.i18n_placeholders.iter() {
                     i18n_placeholders.push(ph.clone());
                 }
@@ -578,7 +578,7 @@ impl<'a> IrExpression<'a> {
                         i18n_placeholders,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::Ast(ast_expr) => {
@@ -587,8 +587,8 @@ impl<'a> IrExpression<'a> {
                 // For now, we'll mark this as needing implementation
                 // A full implementation would clone the entire AngularExpression tree
                 IrExpression::Ast(Box::new_in(
-                    clone_angular_expression(ast_expr, allocator),
-                    allocator,
+                    clone_angular_expression(ast_expr, &allocator),
+                    &allocator,
                 ))
             }
             IrExpression::ExpressionRef(id) => IrExpression::ExpressionRef(*id),
@@ -596,90 +596,90 @@ impl<'a> IrExpression<'a> {
                 // OutputExpr contains an already-converted output expression.
                 // We need to clone the OutputExpression, which requires its own clone implementation.
                 // For now, we'll use the output expression's CloneIn trait.
-                IrExpression::OutputExpr(Box::new_in(e.clone_in(allocator), allocator))
+                IrExpression::OutputExpr(Box::new_in(e.clone_in(allocator), &allocator))
             }
             IrExpression::ResolvedPropertyRead(e) => {
                 IrExpression::ResolvedPropertyRead(Box::new_in(
                     ResolvedPropertyReadExpr {
-                        receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                        receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                         name: e.name.clone(),
                         optional: e.optional,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::ResolvedBinary(e) => IrExpression::ResolvedBinary(Box::new_in(
                 ResolvedBinaryExpr {
                     operator: e.operator,
-                    left: Box::new_in(e.left.clone_in(allocator), allocator),
-                    right: Box::new_in(e.right.clone_in(allocator), allocator),
+                    left: Box::new_in(e.left.clone_in(allocator), &allocator),
+                    right: Box::new_in(e.right.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ResolvedCall(e) => {
-                let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+                let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
                 for arg in e.args.iter() {
                     args.push(arg.clone_in(allocator));
                 }
                 IrExpression::ResolvedCall(Box::new_in(
                     ResolvedCallExpr {
-                        receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                        receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                         args,
                         optional: e.optional,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::ResolvedKeyedRead(e) => IrExpression::ResolvedKeyedRead(Box::new_in(
                 ResolvedKeyedReadExpr {
-                    receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
-                    key: Box::new_in(e.key.clone_in(allocator), allocator),
+                    receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
+                    key: Box::new_in(e.key.clone_in(allocator), &allocator),
                     optional: e.optional,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ResolvedSafePropertyRead(e) => {
                 IrExpression::ResolvedSafePropertyRead(Box::new_in(
                     ResolvedSafePropertyReadExpr {
-                        receiver: Box::new_in(e.receiver.clone_in(allocator), allocator),
+                        receiver: Box::new_in(e.receiver.clone_in(allocator), &allocator),
                         name: e.name.clone(),
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::DerivedLiteralArray(e) => {
-                let mut entries = Vec::with_capacity_in(e.entries.len(), allocator);
+                let mut entries = Vec::with_capacity_in(e.entries.len(), &allocator);
                 for entry in e.entries.iter() {
                     entries.push(entry.clone_in(allocator));
                 }
-                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), &allocator);
                 for s in e.spreads.iter() {
                     spreads.push(*s);
                 }
                 IrExpression::DerivedLiteralArray(Box::new_in(
                     DerivedLiteralArrayExpr { entries, spreads, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::DerivedLiteralMap(e) => {
-                let mut keys = Vec::with_capacity_in(e.keys.len(), allocator);
+                let mut keys = Vec::with_capacity_in(e.keys.len(), &allocator);
                 for key in e.keys.iter() {
                     keys.push(key.clone());
                 }
-                let mut values = Vec::with_capacity_in(e.values.len(), allocator);
+                let mut values = Vec::with_capacity_in(e.values.len(), &allocator);
                 for value in e.values.iter() {
                     values.push(value.clone_in(allocator));
                 }
-                let mut quoted = Vec::with_capacity_in(e.quoted.len(), allocator);
+                let mut quoted = Vec::with_capacity_in(e.quoted.len(), &allocator);
                 for q in e.quoted.iter() {
                     quoted.push(*q);
                 }
-                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), &allocator);
                 for s in e.spreads.iter() {
                     spreads.push(*s);
                 }
@@ -691,83 +691,83 @@ impl<'a> IrExpression<'a> {
                         spreads,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::LiteralArray(e) => {
-                let mut elements = Vec::with_capacity_in(e.elements.len(), allocator);
+                let mut elements = Vec::with_capacity_in(e.elements.len(), &allocator);
                 for elem in e.elements.iter() {
                     elements.push(elem.clone_in(allocator));
                 }
-                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), &allocator);
                 for s in e.spreads.iter() {
                     spreads.push(*s);
                 }
                 IrExpression::LiteralArray(Box::new_in(
                     IrLiteralArrayExpr { elements, spreads, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::LiteralMap(e) => {
-                let mut keys = Vec::with_capacity_in(e.keys.len(), allocator);
+                let mut keys = Vec::with_capacity_in(e.keys.len(), &allocator);
                 for key in e.keys.iter() {
                     keys.push(key.clone());
                 }
-                let mut values = Vec::with_capacity_in(e.values.len(), allocator);
+                let mut values = Vec::with_capacity_in(e.values.len(), &allocator);
                 for value in e.values.iter() {
                     values.push(value.clone_in(allocator));
                 }
-                let mut quoted = Vec::with_capacity_in(e.quoted.len(), allocator);
+                let mut quoted = Vec::with_capacity_in(e.quoted.len(), &allocator);
                 for q in e.quoted.iter() {
                     quoted.push(*q);
                 }
-                let mut spreads = Vec::with_capacity_in(e.spreads.len(), allocator);
+                let mut spreads = Vec::with_capacity_in(e.spreads.len(), &allocator);
                 for s in e.spreads.iter() {
                     spreads.push(*s);
                 }
                 IrExpression::LiteralMap(Box::new_in(
                     IrLiteralMapExpr { keys, values, quoted, spreads, source_span: e.source_span },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::Not(e) => IrExpression::Not(Box::new_in(
                 NotExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Unary(e) => IrExpression::Unary(Box::new_in(
                 UnaryExpr {
                     operator: e.operator,
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Typeof(e) => IrExpression::Typeof(Box::new_in(
                 TypeofExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::Void(e) => IrExpression::Void(Box::new_in(
                 VoidExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::ResolvedTemplateLiteral(e) => {
-                let mut elements = Vec::with_capacity_in(e.elements.len(), allocator);
+                let mut elements = Vec::with_capacity_in(e.elements.len(), &allocator);
                 for elem in e.elements.iter() {
                     elements.push(IrTemplateLiteralElement {
                         text: elem.text.clone(),
                         source_span: elem.source_span,
                     });
                 }
-                let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+                let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
                 for expr in e.expressions.iter() {
                     expressions.push(expr.clone_in(allocator));
                 }
@@ -777,40 +777,40 @@ impl<'a> IrExpression<'a> {
                         expressions,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::ArrowFunction(e) => {
-                let mut params = Vec::with_capacity_in(e.params.len(), allocator);
+                let mut params = Vec::with_capacity_in(e.params.len(), &allocator);
                 for param in e.params.iter() {
                     params.push(crate::output::ast::FnParam { name: param.name.clone() });
                 }
                 IrExpression::ArrowFunction(Box::new_in(
                     ArrowFunctionExpr {
                         params,
-                        body: Box::new_in(e.body.clone_in(allocator), allocator),
+                        body: Box::new_in(e.body.clone_in(allocator), &allocator),
                         // ops are not cloned as they are transient data added during compilation
-                        ops: Vec::new_in(allocator),
+                        ops: Vec::new_in(&allocator),
                         var_offset: e.var_offset,
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
             IrExpression::Parenthesized(e) => IrExpression::Parenthesized(Box::new_in(
                 IrParenthesizedExpr {
-                    expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                    expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             )),
             IrExpression::SafeNavigationMigration(e) => {
                 IrExpression::SafeNavigationMigration(Box::new_in(
                     SafeNavigationMigrationExpr {
-                        expr: Box::new_in(e.expr.clone_in(allocator), allocator),
+                        expr: Box::new_in(e.expr.clone_in(allocator), &allocator),
                         source_span: e.source_span,
                     },
-                    allocator,
+                    &allocator,
                 ))
             }
         }
@@ -2514,82 +2514,82 @@ pub fn clone_angular_expression<'a>(
     match expr {
         AngularExpression::Empty(e) => AngularExpression::Empty(Box::new_in(
             AstEmptyExpr { span: e.span, source_span: e.source_span },
-            allocator,
+            &allocator,
         )),
         AngularExpression::ImplicitReceiver(e) => AngularExpression::ImplicitReceiver(Box::new_in(
             ImplicitReceiver { span: e.span, source_span: e.source_span },
-            allocator,
+            &allocator,
         )),
         AngularExpression::ThisReceiver(e) => AngularExpression::ThisReceiver(Box::new_in(
             ThisReceiver { span: e.span, source_span: e.source_span },
-            allocator,
+            &allocator,
         )),
         AngularExpression::Chain(e) => {
-            let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
             for expr in e.expressions.iter() {
-                expressions.push(clone_angular_expression(expr, allocator));
+                expressions.push(clone_angular_expression(expr, &allocator));
             }
             AngularExpression::Chain(Box::new_in(
                 Chain { expressions, span: e.span, source_span: e.source_span },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::Conditional(e) => AngularExpression::Conditional(Box::new_in(
             Conditional {
-                condition: clone_angular_expression(&e.condition, allocator),
-                true_exp: clone_angular_expression(&e.true_exp, allocator),
-                false_exp: clone_angular_expression(&e.false_exp, allocator),
+                condition: clone_angular_expression(&e.condition, &allocator),
+                true_exp: clone_angular_expression(&e.true_exp, &allocator),
+                false_exp: clone_angular_expression(&e.false_exp, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::PropertyRead(e) => AngularExpression::PropertyRead(Box::new_in(
             PropertyRead {
-                receiver: clone_angular_expression(&e.receiver, allocator),
+                receiver: clone_angular_expression(&e.receiver, &allocator),
                 name: e.name.clone(),
                 name_span: e.name_span,
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::SafePropertyRead(e) => AngularExpression::SafePropertyRead(Box::new_in(
             SafePropertyRead {
-                receiver: clone_angular_expression(&e.receiver, allocator),
+                receiver: clone_angular_expression(&e.receiver, &allocator),
                 name: e.name.clone(),
                 name_span: e.name_span,
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::KeyedRead(e) => AngularExpression::KeyedRead(Box::new_in(
             KeyedRead {
-                receiver: clone_angular_expression(&e.receiver, allocator),
-                key: clone_angular_expression(&e.key, allocator),
+                receiver: clone_angular_expression(&e.receiver, &allocator),
+                key: clone_angular_expression(&e.key, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::SafeKeyedRead(e) => AngularExpression::SafeKeyedRead(Box::new_in(
             SafeKeyedRead {
-                receiver: clone_angular_expression(&e.receiver, allocator),
-                key: clone_angular_expression(&e.key, allocator),
+                receiver: clone_angular_expression(&e.receiver, &allocator),
+                key: clone_angular_expression(&e.key, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::BindingPipe(e) => {
-            let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
             for arg in e.args.iter() {
-                args.push(clone_angular_expression(arg, allocator));
+                args.push(clone_angular_expression(arg, &allocator));
             }
             AngularExpression::BindingPipe(Box::new_in(
                 BindingPipe {
-                    exp: clone_angular_expression(&e.exp, allocator),
+                    exp: clone_angular_expression(&e.exp, &allocator),
                     name: e.name.clone(),
                     name_span: e.name_span,
                     args,
@@ -2597,29 +2597,29 @@ pub fn clone_angular_expression<'a>(
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::LiteralPrimitive(e) => AngularExpression::LiteralPrimitive(Box::new_in(
             LiteralPrimitive {
-                value: clone_literal_value(&e.value, allocator),
+                value: clone_literal_value(&e.value, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::LiteralArray(e) => {
-            let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
             for expr in e.expressions.iter() {
-                expressions.push(clone_angular_expression(expr, allocator));
+                expressions.push(clone_angular_expression(expr, &allocator));
             }
             AngularExpression::LiteralArray(Box::new_in(
                 LiteralArray { expressions, span: e.span, source_span: e.source_span },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::LiteralMap(e) => {
-            let mut keys = Vec::with_capacity_in(e.keys.len(), allocator);
+            let mut keys = Vec::with_capacity_in(e.keys.len(), &allocator);
             for key in e.keys.iter() {
                 keys.push(match key {
                     LiteralMapKey::Property(prop) => {
@@ -2635,143 +2635,143 @@ pub fn clone_angular_expression<'a>(
                     }),
                 });
             }
-            let mut values = Vec::with_capacity_in(e.values.len(), allocator);
+            let mut values = Vec::with_capacity_in(e.values.len(), &allocator);
             for val in e.values.iter() {
-                values.push(clone_angular_expression(val, allocator));
+                values.push(clone_angular_expression(val, &allocator));
             }
             AngularExpression::LiteralMap(Box::new_in(
                 LiteralMap { keys, values, span: e.span, source_span: e.source_span },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::SpreadElement(e) => AngularExpression::SpreadElement(Box::new_in(
             SpreadElement {
                 span: e.span,
                 source_span: e.source_span,
-                expression: clone_angular_expression(&e.expression, allocator),
+                expression: clone_angular_expression(&e.expression, &allocator),
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::Interpolation(e) => {
-            let mut strings = Vec::with_capacity_in(e.strings.len(), allocator);
+            let mut strings = Vec::with_capacity_in(e.strings.len(), &allocator);
             for s in e.strings.iter() {
                 strings.push(s.clone());
             }
-            let mut expressions = Vec::with_capacity_in(e.expressions.len(), allocator);
+            let mut expressions = Vec::with_capacity_in(e.expressions.len(), &allocator);
             for expr in e.expressions.iter() {
-                expressions.push(clone_angular_expression(expr, allocator));
+                expressions.push(clone_angular_expression(expr, &allocator));
             }
             AngularExpression::Interpolation(Box::new_in(
                 AstInterpolation { strings, expressions, span: e.span, source_span: e.source_span },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::Binary(e) => AngularExpression::Binary(Box::new_in(
             Binary {
                 operation: e.operation,
-                left: clone_angular_expression(&e.left, allocator),
-                right: clone_angular_expression(&e.right, allocator),
+                left: clone_angular_expression(&e.left, &allocator),
+                right: clone_angular_expression(&e.right, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::Unary(e) => AngularExpression::Unary(Box::new_in(
             Unary {
                 operator: e.operator,
-                expr: clone_angular_expression(&e.expr, allocator),
+                expr: clone_angular_expression(&e.expr, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::PrefixNot(e) => AngularExpression::PrefixNot(Box::new_in(
             PrefixNot {
-                expression: clone_angular_expression(&e.expression, allocator),
+                expression: clone_angular_expression(&e.expression, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::TypeofExpression(e) => AngularExpression::TypeofExpression(Box::new_in(
             TypeofExpression {
-                expression: clone_angular_expression(&e.expression, allocator),
+                expression: clone_angular_expression(&e.expression, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::VoidExpression(e) => AngularExpression::VoidExpression(Box::new_in(
             VoidExpression {
-                expression: clone_angular_expression(&e.expression, allocator),
+                expression: clone_angular_expression(&e.expression, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::NonNullAssert(e) => AngularExpression::NonNullAssert(Box::new_in(
             NonNullAssert {
-                expression: clone_angular_expression(&e.expression, allocator),
+                expression: clone_angular_expression(&e.expression, &allocator),
                 span: e.span,
                 source_span: e.source_span,
             },
-            allocator,
+            &allocator,
         )),
         AngularExpression::Call(e) => {
-            let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
             for arg in e.args.iter() {
-                args.push(clone_angular_expression(arg, allocator));
+                args.push(clone_angular_expression(arg, &allocator));
             }
             AngularExpression::Call(Box::new_in(
                 Call {
-                    receiver: clone_angular_expression(&e.receiver, allocator),
+                    receiver: clone_angular_expression(&e.receiver, &allocator),
                     args,
                     argument_span: e.argument_span,
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::SafeCall(e) => {
-            let mut args = Vec::with_capacity_in(e.args.len(), allocator);
+            let mut args = Vec::with_capacity_in(e.args.len(), &allocator);
             for arg in e.args.iter() {
-                args.push(clone_angular_expression(arg, allocator));
+                args.push(clone_angular_expression(arg, &allocator));
             }
             AngularExpression::SafeCall(Box::new_in(
                 SafeCall {
-                    receiver: clone_angular_expression(&e.receiver, allocator),
+                    receiver: clone_angular_expression(&e.receiver, &allocator),
                     args,
                     argument_span: e.argument_span,
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::TaggedTemplateLiteral(e) => {
             AngularExpression::TaggedTemplateLiteral(Box::new_in(
                 TaggedTemplateLiteral {
-                    tag: clone_angular_expression(&e.tag, allocator),
-                    template: clone_template_literal(&e.template, allocator),
+                    tag: clone_angular_expression(&e.tag, &allocator),
+                    template: clone_template_literal(&e.template, &allocator),
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::TemplateLiteral(e) => AngularExpression::TemplateLiteral(Box::new_in(
-            clone_template_literal(e, allocator),
-            allocator,
+            clone_template_literal(e, &allocator),
+            &allocator,
         )),
         AngularExpression::ParenthesizedExpression(e) => {
             AngularExpression::ParenthesizedExpression(Box::new_in(
                 ParenthesizedExpression {
-                    expression: clone_angular_expression(&e.expression, allocator),
+                    expression: clone_angular_expression(&e.expression, &allocator),
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::RegularExpressionLiteral(e) => {
@@ -2782,11 +2782,11 @@ pub fn clone_angular_expression<'a>(
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AngularExpression::ArrowFunction(e) => {
-            let mut parameters = Vec::with_capacity_in(e.parameters.len(), allocator);
+            let mut parameters = Vec::with_capacity_in(e.parameters.len(), &allocator);
             for p in e.parameters.iter() {
                 parameters.push(AstArrowFunctionParameter {
                     name: p.name.clone(),
@@ -2797,11 +2797,11 @@ pub fn clone_angular_expression<'a>(
             AngularExpression::ArrowFunction(Box::new_in(
                 AstArrowFunction {
                     parameters,
-                    body: clone_angular_expression(&e.body, allocator),
+                    body: clone_angular_expression(&e.body, &allocator),
                     span: e.span,
                     source_span: e.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
     }
@@ -2826,7 +2826,7 @@ fn clone_template_literal<'a>(
     tl: &TemplateLiteral<'a>,
     allocator: &'a oxc_allocator::Allocator,
 ) -> TemplateLiteral<'a> {
-    let mut elements = Vec::with_capacity_in(tl.elements.len(), allocator);
+    let mut elements = Vec::with_capacity_in(tl.elements.len(), &allocator);
     for elem in tl.elements.iter() {
         elements.push(TemplateLiteralElement {
             text: elem.text.clone(),
@@ -2834,9 +2834,9 @@ fn clone_template_literal<'a>(
             source_span: elem.source_span,
         });
     }
-    let mut expressions = Vec::with_capacity_in(tl.expressions.len(), allocator);
+    let mut expressions = Vec::with_capacity_in(tl.expressions.len(), &allocator);
     for expr in tl.expressions.iter() {
-        expressions.push(clone_angular_expression(expr, allocator));
+        expressions.push(clone_angular_expression(expr, &allocator));
     }
     TemplateLiteral { elements, expressions, span: tl.span, source_span: tl.source_span }
 }

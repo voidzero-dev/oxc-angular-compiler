@@ -323,7 +323,7 @@ pub fn extract_compiled_dependencies<'a>(
             // Create variable reference as runtime representation
             let runtime_representation = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from(allocator.alloc_str(name)), source_span: None },
-                allocator,
+                &allocator,
             ));
             LocalDependency { name: Ident::from(allocator.alloc_str(name)), runtime_representation }
         })
@@ -499,7 +499,7 @@ mod tests {
         // Create a variable read expression
         let var_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("myVar"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         collector.visit_expression(&var_expr);
@@ -521,7 +521,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         collector.visit_expression(&external_expr);
@@ -545,7 +545,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         let expr2 = OutputExpression::External(Box::new_in(
@@ -556,7 +556,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         collector.visit_expression(&expr1);
@@ -580,7 +580,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         let expr2 = OutputExpression::External(Box::new_in(
@@ -591,7 +591,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         collector.visit_expression(&expr1);
@@ -613,7 +613,7 @@ mod tests {
         for name in ["MyService", "localVar", "AppComponent", "helperFn"] {
             let expr = OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: Ident::from(name), source_span: None },
-                &allocator,
+                &&allocator,
             ));
             collector.visit_expression(&expr);
         }
@@ -648,7 +648,7 @@ mod tests {
                 },
                 source_span: None,
             },
-            &allocator,
+            &&allocator,
         ));
 
         // Top-level symbols

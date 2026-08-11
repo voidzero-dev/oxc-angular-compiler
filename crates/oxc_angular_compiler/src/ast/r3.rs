@@ -197,11 +197,11 @@ impl<'a> I18nMessage<'a> {
     /// Note: This preserves the `instance_id` so that cloned messages maintain
     /// their identity for i18n context sharing.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
-        let mut nodes = Vec::new_in(allocator);
+        let mut nodes = Vec::new_in(&allocator);
         for node in self.nodes.iter() {
             nodes.push(node.clone_in(allocator));
         }
-        let mut legacy_ids = Vec::new_in(allocator);
+        let mut legacy_ids = Vec::new_in(&allocator);
         for id in self.legacy_ids.iter() {
             legacy_ids.push(id.clone());
         }
@@ -243,7 +243,7 @@ impl<'a> I18nText<'a> {
 impl<'a> I18nContainer<'a> {
     /// Creates a deep clone of this i18n container using the provided allocator.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
-        let mut children = Vec::new_in(allocator);
+        let mut children = Vec::new_in(&allocator);
         for child in self.children.iter() {
             children.push(child.clone_in(allocator));
         }
@@ -254,7 +254,7 @@ impl<'a> I18nContainer<'a> {
 impl<'a> I18nIcu<'a> {
     /// Creates a deep clone of this ICU expression using the provided allocator.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
-        let mut cases = HashMap::new_in(allocator);
+        let mut cases = HashMap::new_in(&allocator);
         for (key, value) in self.cases.iter() {
             cases.insert(key.clone(), value.clone_in(allocator));
         }
@@ -271,11 +271,11 @@ impl<'a> I18nIcu<'a> {
 impl<'a> I18nTagPlaceholder<'a> {
     /// Creates a deep clone of this tag placeholder using the provided allocator.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
-        let mut attrs = HashMap::new_in(allocator);
+        let mut attrs = HashMap::new_in(&allocator);
         for (key, value) in self.attrs.iter() {
             attrs.insert(key.clone(), value.clone());
         }
-        let mut children = Vec::new_in(allocator);
+        let mut children = Vec::new_in(&allocator);
         for child in self.children.iter() {
             children.push(child.clone_in(allocator));
         }
@@ -308,7 +308,7 @@ impl<'a> I18nIcuPlaceholder<'a> {
     /// Creates a deep clone of this ICU placeholder using the provided allocator.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
         I18nIcuPlaceholder {
-            value: Box::new_in(self.value.clone_in(allocator), allocator),
+            value: Box::new_in(self.value.clone_in(allocator), &allocator),
             name: self.name.clone(),
             source_span: self.source_span,
         }
@@ -318,11 +318,11 @@ impl<'a> I18nIcuPlaceholder<'a> {
 impl<'a> I18nBlockPlaceholder<'a> {
     /// Creates a deep clone of this block placeholder using the provided allocator.
     pub fn clone_in(&self, allocator: &'a Allocator) -> Self {
-        let mut parameters = Vec::new_in(allocator);
+        let mut parameters = Vec::new_in(&allocator);
         for param in self.parameters.iter() {
             parameters.push(param.clone());
         }
-        let mut children = Vec::new_in(allocator);
+        let mut children = Vec::new_in(&allocator);
         for child in self.children.iter() {
             children.push(child.clone_in(allocator));
         }

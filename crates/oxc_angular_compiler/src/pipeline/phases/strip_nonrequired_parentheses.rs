@@ -54,7 +54,7 @@ pub fn strip_nonrequired_parentheses(job: &mut ComponentCompilationJob<'_>) {
             transform_expressions_in_create_op(
                 op,
                 &|expr, _flags| {
-                    strip_parens_in_expression(expr, &required_parens, allocator);
+                    strip_parens_in_expression(expr, &required_parens, &allocator);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -63,7 +63,7 @@ pub fn strip_nonrequired_parentheses(job: &mut ComponentCompilationJob<'_>) {
             transform_expressions_in_update_op(
                 op,
                 &|expr, _flags| {
-                    strip_parens_in_expression(expr, &required_parens, allocator);
+                    strip_parens_in_expression(expr, &required_parens, &allocator);
                 },
                 VisitorContextFlag::NONE,
             );
@@ -613,8 +613,8 @@ fn strip_parens_in_expression<'a>(
                 // We need to unwrap the AST parentheses
                 // This is tricky because we need to clone the inner expression
                 let inner_cloned =
-                    crate::ir::expression::clone_angular_expression(&paren.expression, allocator);
-                *expr = IrExpression::Ast(ArenaBox::new_in(inner_cloned, allocator));
+                    crate::ir::expression::clone_angular_expression(&paren.expression, &allocator);
+                *expr = IrExpression::Ast(ArenaBox::new_in(inner_cloned, &allocator));
             }
         }
     }
@@ -641,7 +641,7 @@ pub fn strip_nonrequired_parentheses_for_host(job: &mut HostBindingCompilationJo
         transform_expressions_in_create_op(
             op,
             &|expr, _flags| {
-                strip_parens_in_expression(expr, &required_parens, allocator);
+                strip_parens_in_expression(expr, &required_parens, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -650,7 +650,7 @@ pub fn strip_nonrequired_parentheses_for_host(job: &mut HostBindingCompilationJo
         transform_expressions_in_update_op(
             op,
             &|expr, _flags| {
-                strip_parens_in_expression(expr, &required_parens, allocator);
+                strip_parens_in_expression(expr, &required_parens, &allocator);
             },
             VisitorContextFlag::NONE,
         );

@@ -65,12 +65,12 @@ fn create_factory_delegation<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(type_expr.clone_in(allocator), allocator),
+            receiver: Box::new_in(type_expr.clone_in(allocator), &allocator),
             name: Ident::from("ɵfac"),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -79,28 +79,28 @@ fn create_factory_arrow<'a>(
     allocator: &'a Allocator,
     factory: &OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let params = Vec::new_in(allocator);
+    let params = Vec::new_in(&allocator);
 
     let factory_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(factory.clone_in(allocator), allocator),
-            args: Vec::new_in(allocator),
+            fn_expr: Box::new_in(factory.clone_in(allocator), &allocator),
+            args: Vec::new_in(&allocator),
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
-    let mut body = Vec::new_in(allocator);
+    let mut body = Vec::new_in(&allocator);
     body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: factory_call, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     OutputExpression::Function(Box::new_in(
         FunctionExpr { name: None, params, statements: body, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -109,7 +109,7 @@ fn build_definition_map<'a>(
     metadata: &R3ServiceMetadata<'a>,
     factory_expr: OutputExpression<'a>,
 ) -> Vec<'a, LiteralMapEntry<'a>> {
-    let mut entries = Vec::new_in(allocator);
+    let mut entries = Vec::new_in(&allocator);
 
     entries.push(LiteralMapEntry::new(
         Ident::from("token"),
@@ -126,7 +126,7 @@ fn build_definition_map<'a>(
             Ident::from("autoProvided"),
             OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Boolean(false), source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -145,34 +145,34 @@ fn create_define_service_call<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(Identifiers::DEFINE_SERVICE),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries: definition_map, source_span: None },
-        allocator,
+        &allocator,
     ));
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(define_service_fn, allocator),
+            fn_expr: Box::new_in(define_service_fn, &allocator),
             args,
             pure: true,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -184,7 +184,7 @@ mod tests {
     fn make_type_expr<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(name), source_span: None },
-            allocator,
+            &allocator,
         ))
     }
 
@@ -253,7 +253,7 @@ mod tests {
         let allocator = Allocator::default();
         let factory_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("makeService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
         let metadata = R3ServiceMetadata {
             name: Ident::from("MyService"),

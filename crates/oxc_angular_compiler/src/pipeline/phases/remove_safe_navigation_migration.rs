@@ -34,14 +34,14 @@ pub fn remove_safe_navigation_migration(job: &mut ComponentCompilationJob<'_>) {
             for op in view.create.iter_mut() {
                 transform_expressions_in_create_op(
                     op,
-                    &|expr, _flags| convert_marker(expr, allocator),
+                    &|expr, _flags| convert_marker(expr, &allocator),
                     VisitorContextFlag::NONE,
                 );
             }
             for op in view.update.iter_mut() {
                 transform_expressions_in_update_op(
                     op,
-                    &|expr, _flags| convert_marker(expr, allocator),
+                    &|expr, _flags| convert_marker(expr, &allocator),
                     VisitorContextFlag::NONE,
                 );
             }
@@ -82,11 +82,11 @@ fn convert_marker<'a>(expr: &mut IrExpression<'a>, allocator: &'a oxc_allocator:
     // overwrite `*expr` below, so the placeholder left behind is never observed.
     let arg = std::mem::replace(
         &mut call.args[0],
-        IrExpression::Empty(ArenaBox::new_in(EmptyExpr { source_span: None }, allocator)),
+        IrExpression::Empty(ArenaBox::new_in(EmptyExpr { source_span: None }, &allocator)),
     );
     *expr = IrExpression::SafeNavigationMigration(ArenaBox::new_in(
-        SafeNavigationMigrationExpr { expr: ArenaBox::new_in(arg, allocator), source_span },
-        allocator,
+        SafeNavigationMigrationExpr { expr: ArenaBox::new_in(arg, &allocator), source_span },
+        &allocator,
     ));
 }
 
@@ -96,14 +96,14 @@ pub fn remove_safe_navigation_migration_for_host(job: &mut HostBindingCompilatio
     for op in job.root.create.iter_mut() {
         transform_expressions_in_create_op(
             op,
-            &|expr, _flags| convert_marker(expr, allocator),
+            &|expr, _flags| convert_marker(expr, &allocator),
             VisitorContextFlag::NONE,
         );
     }
     for op in job.root.update.iter_mut() {
         transform_expressions_in_update_op(
             op,
-            &|expr, _flags| convert_marker(expr, allocator),
+            &|expr, _flags| convert_marker(expr, &allocator),
             VisitorContextFlag::NONE,
         );
     }

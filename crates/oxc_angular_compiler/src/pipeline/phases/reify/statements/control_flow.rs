@@ -34,26 +34,26 @@ pub fn create_conditional_create_stmt<'a>(
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Template function reference
     if let Some(name) = fn_name {
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name, source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_c{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -61,26 +61,26 @@ pub fn create_conditional_create_stmt<'a>(
     let decl_count = decls.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(decl_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // vars
     let var_count = vars.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(var_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // tag (string literal or null)
     if let Some(tag_name) = tag {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(tag_name.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -88,12 +88,12 @@ pub fn create_conditional_create_stmt<'a>(
     if let Some(const_index) = attributes {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(const_index as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -103,22 +103,22 @@ pub fn create_conditional_create_stmt<'a>(
     if let Some(refs_idx) = local_refs_index {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
         args.push(OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -144,7 +144,7 @@ pub fn create_conditional_update_stmt<'a>(
     test: OutputExpression<'a>,
     context_value: Option<OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(test);
     if let Some(ctx) = context_value {
         args.push(ctx);
@@ -175,26 +175,26 @@ pub fn create_conditional_branch_create_stmt<'a>(
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Template function reference
     if let Some(name) = fn_name {
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name, source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_c{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -202,26 +202,26 @@ pub fn create_conditional_branch_create_stmt<'a>(
     let decl_count = decls.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(decl_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // vars
     let var_count = vars.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(var_count as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // tag (string literal or null)
     if let Some(tag_name) = tag {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(tag_name.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -229,12 +229,12 @@ pub fn create_conditional_branch_create_stmt<'a>(
     if let Some(const_index) = attributes {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(const_index as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -244,22 +244,22 @@ pub fn create_conditional_branch_create_stmt<'a>(
     if let Some(refs_idx) = local_refs_index {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(refs_idx as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
         args.push(OutputExpression::ReadProp(Box::new_in(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::TEMPLATE_REF_EXTRACTOR),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -285,7 +285,7 @@ pub fn create_conditional_branch_create_stmt<'a>(
 pub fn create_control_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
 ) -> OutputStatement<'a> {
-    let args = OxcVec::new_in(allocator);
+    let args = OxcVec::new_in(&allocator);
     create_instruction_call_stmt(allocator, Identifiers::CONTROL_CREATE, args)
 }
 
@@ -294,11 +294,11 @@ pub fn create_advance_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     delta: u32,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     if delta > 1 {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(delta as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     create_instruction_call_stmt(allocator, Identifiers::ADVANCE, args)
@@ -309,7 +309,7 @@ pub fn create_repeater_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     collection: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(collection);
     create_instruction_call_stmt(allocator, Identifiers::REPEATER, args)
 }
@@ -337,26 +337,26 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
     empty_tag: Option<&Ident<'a>>,
     empty_attributes: Option<u32>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
 
     // Slot index
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Template function reference
     if let Some(name) = fn_name {
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name, source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         // Fallback placeholder
         let placeholder_str = allocator.alloc_str(&format!("_r{slot}"));
         args.push(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from(placeholder_str), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -364,25 +364,25 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
     let decls = body_decl_count.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(decls as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     // vars: Use the body view's variable count
     let vars = body_var_count.unwrap_or(0);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(vars as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Tag (from control flow insertion point, for content projection)
     if let Some(tag_name) = tag {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(tag_name.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -390,12 +390,12 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
     if let Some(const_index) = attributes {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(const_index as f64), source_span: None },
-            allocator,
+            &allocator,
         )));
     } else {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         )));
     }
 
@@ -410,14 +410,14 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
                 value: LiteralValue::Boolean(uses_component_instance),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )));
 
         // Empty view arguments (optional)
         if let Some(empty_name) = empty_fn_name {
             args.push(OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: empty_name, source_span: None },
-                allocator,
+                &allocator,
             )));
             // Empty decls
             let empty_decl_val = empty_decls.unwrap_or(0);
@@ -426,7 +426,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
                     value: LiteralValue::Number(empty_decl_val as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
             // Empty vars
             let empty_var_val = empty_vars.unwrap_or(0);
@@ -435,7 +435,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
                     value: LiteralValue::Number(empty_var_val as f64),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )));
 
             // Empty tag (from control flow insertion point for @empty block)
@@ -446,12 +446,12 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
                             value: LiteralValue::String(empty_tag_name.clone()),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     )));
                 } else {
                     args.push(OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Null, source_span: None },
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -463,7 +463,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
                         value: LiteralValue::Number(empty_const_index as f64),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )));
             }
         }
@@ -487,7 +487,7 @@ pub fn create_variable_decl_stmt_with_value<'a>(
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -496,10 +496,10 @@ pub fn create_declare_let_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     slot: u32,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     create_instruction_call_stmt(allocator, Identifiers::DECLARE_LET, args)
 }

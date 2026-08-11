@@ -115,9 +115,9 @@ pub fn remove_illegal_let_references(job: &mut ComponentCompilationJob<'_>) {
                                     source_span: AbsoluteSourceSpan::new(0, 0),
                                     value: LiteralValue::Undefined,
                                 },
-                                allocator,
+                                &allocator,
                             ));
-                            *expr = IrExpression::Ast(Box::new_in(undefined_expr, allocator));
+                            *expr = IrExpression::Ast(Box::new_in(undefined_expr, &allocator));
                         }
                     }
                 },

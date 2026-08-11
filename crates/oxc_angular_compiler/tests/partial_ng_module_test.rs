@@ -17,7 +17,7 @@ use oxc_str::Ident;
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -47,11 +47,11 @@ fn empty_module_emits_only_type() {
 #[test]
 fn module_with_declarations_and_imports() {
     let allocator = Allocator::default();
-    let mut decls = Vec::new_in(&allocator);
+    let mut decls = Vec::new_in(&&allocator);
     decls.push(R3Reference::value_only(read_var(&allocator, "MyComp")));
     decls.push(R3Reference::value_only(read_var(&allocator, "MyDir")));
 
-    let mut imports = Vec::new_in(&allocator);
+    let mut imports = Vec::new_in(&&allocator);
     imports.push(R3Reference::value_only(read_var(&allocator, "CommonModule")));
 
     let meta = R3NgModuleMetadataBuilder::new(&allocator)
@@ -177,7 +177,7 @@ fn injector_raw_imports_preserved_over_per_element_imports() {
     let allocator = Allocator::default();
     let raw_imports = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from("EXTERNAL_IMPORTS_ARRAY"), source_span: None },
-        &allocator,
+        &&allocator,
     ));
     let meta = R3InjectorMetadataBuilder::new(&allocator)
         .name(Ident::from("FeatureModule"))

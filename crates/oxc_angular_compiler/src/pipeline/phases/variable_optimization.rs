@@ -474,9 +474,9 @@ fn inline_always_inline_variables(job: &mut ComponentCompilationJob<'_>) {
 
     for view_xref in view_xrefs {
         // Process update ops
-        inline_always_inline_in_op_list_update(job, view_xref, allocator);
+        inline_always_inline_in_op_list_update(job, view_xref, &allocator);
         // Process create ops
-        inline_always_inline_in_op_list_create(job, view_xref, allocator);
+        inline_always_inline_in_op_list_create(job, view_xref, &allocator);
         // Process listener handler_ops and repeater trackByOps
         // Per TypeScript's variable_optimization.ts lines 36-47:
         // for (const op of unit.create) {
@@ -486,7 +486,7 @@ fn inline_always_inline_variables(job: &mut ComponentCompilationJob<'_>) {
         //     inlineAlwaysInlineVariables(op.trackByOps);
         //   }
         // }
-        inline_always_inline_in_listener_handler_ops(job, view_xref, allocator);
+        inline_always_inline_in_listener_handler_ops(job, view_xref, &allocator);
     }
 }
 
@@ -513,33 +513,33 @@ fn inline_always_inline_in_listener_handler_ops<'a>(
                 inline_always_inline_in_handler_ops_and_expr(
                     &mut listener.handler_ops,
                     listener.handler_expression.as_mut(),
-                    allocator,
+                    &allocator,
                 );
             }
             CreateOp::TwoWayListener(listener) => {
                 inline_always_inline_in_handler_ops_and_expr(
                     &mut listener.handler_ops,
                     None, // TwoWayListener doesn't have handler_expression
-                    allocator,
+                    &allocator,
                 );
             }
             CreateOp::AnimationListener(listener) => {
                 inline_always_inline_in_handler_ops_and_expr(
                     &mut listener.handler_ops,
                     None, // AnimationListener doesn't have handler_expression
-                    allocator,
+                    &allocator,
                 );
             }
             CreateOp::Animation(animation) => {
                 inline_always_inline_in_handler_ops_and_expr(
                     &mut animation.handler_ops,
                     None, // Animation doesn't have handler_expression
-                    allocator,
+                    &allocator,
                 );
             }
             CreateOp::RepeaterCreate(repeater) => {
                 if let Some(track_by_ops) = &mut repeater.track_by_ops {
-                    inline_always_inline_in_handler_ops_and_expr(track_by_ops, None, allocator);
+                    inline_always_inline_in_handler_ops_and_expr(track_by_ops, None, &allocator);
                 }
             }
             _ => {}
@@ -574,7 +574,7 @@ fn inline_always_inline_in_handler_ops_and_expr<'a>(
 
     // Second pass: inline the variables into all expressions in handler_ops
     for op in handler_ops.iter_mut() {
-        transform_expressions_in_update_op(op, allocator, |expr| {
+        transform_expressions_in_update_op(op, &allocator, |expr| {
             if let IrExpression::ReadVariable(read_var) = expr {
                 if let Some(initializer) = always_inline_vars.get(&read_var.xref) {
                     return Some(initializer.clone_in(allocator));
@@ -586,7 +586,7 @@ fn inline_always_inline_in_handler_ops_and_expr<'a>(
 
     // Also inline into handler_expression (the return value expression)
     if let Some(expr) = handler_expression {
-        inline_into_expression(expr.as_mut(), &always_inline_vars, allocator);
+        inline_into_expression(expr.as_mut(), &always_inline_vars, &allocator);
     }
 
     // Third pass: remove the inlined variable declarations
@@ -687,7 +687,7 @@ fn inline_always_inline_in_op_list_update<'a>(
         };
 
         for op in view.update.iter_mut() {
-            transform_expressions_in_update_op(op, allocator, |expr| {
+            transform_expressions_in_update_op(op, &allocator, |expr| {
                 if let IrExpression::ReadVariable(read_var) = expr {
                     if let Some(initializer) = always_inline_vars.get(&read_var.xref) {
                         return Some(initializer.clone_in(allocator));
@@ -780,7 +780,7 @@ fn inline_always_inline_in_op_list_create<'a>(
         };
 
         for op in view.create.iter_mut() {
-            transform_expressions_in_create_op(op, allocator, |expr| {
+            transform_expressions_in_create_op(op, &allocator, |expr| {
                 if let IrExpression::ReadVariable(read_var) = expr {
                     if let Some(initializer) = always_inline_vars.get(&read_var.xref) {
                         return Some(initializer.clone_in(allocator));
@@ -848,7 +848,7 @@ fn inline_identifier_ctx_variables(job: &mut ComponentCompilationJob<'_>) {
         std::iter::once(job.root.xref).chain(job.views.keys().copied()).collect();
 
     for view_xref in view_xrefs {
-        inline_identifier_ctx_vars_in_update_ops(job, view_xref, allocator);
+        inline_identifier_ctx_vars_in_update_ops(job, view_xref, &allocator);
     }
 }
 
@@ -953,7 +953,7 @@ fn inline_identifier_ctx_vars_in_update_ops<'a>(
         };
 
         for op in view.update.iter_mut() {
-            transform_expressions_in_update_op(op, allocator, |expr| {
+            transform_expressions_in_update_op(op, &allocator, |expr| {
                 if let IrExpression::ReadVariable(read_var) = expr {
                     if let Some(initializer) = single_use_ctx_vars.get(&read_var.xref) {
                         return Some(initializer.clone_in(allocator));
@@ -1014,7 +1014,7 @@ fn inline_context_variables_into_variable_ops(job: &mut ComponentCompilationJob<
         std::iter::once(job.root.xref).chain(job.views.keys().copied()).collect();
 
     for view_xref in view_xrefs {
-        inline_context_vars_in_view_update_ops(job, view_xref, allocator);
+        inline_context_vars_in_view_update_ops(job, view_xref, &allocator);
     }
 }
 
@@ -1169,7 +1169,7 @@ fn inline_context_vars_in_view_update_ops<'a>(
         for op in view.update.iter_mut() {
             if let UpdateOp::Variable(var) = op {
                 // Only transform Variable ops
-                transform_expression_in_place(&mut var.initializer, allocator, |expr| {
+                transform_expression_in_place(&mut var.initializer, &allocator, |expr| {
                     if let IrExpression::ReadVariable(read) = expr {
                         if to_inline.contains(&read.xref) {
                             if let Some(initializer) = context_vars.get(&read.xref) {
@@ -1220,7 +1220,7 @@ fn transform_expression_in_place<'a, F>(
 ) where
     F: FnMut(&IrExpression<'a>) -> Option<IrExpression<'a>>,
 {
-    let new_expr = transform_expression(expr.as_ref(), allocator, &mut transform);
+    let new_expr = transform_expression(expr.as_ref(), &allocator, &mut transform);
     **expr = new_expr;
 }
 
@@ -1696,10 +1696,10 @@ fn optimize_arrow_function_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
 
             // Step 1: Optimize variables in the arrow function's ops
             // (No handler_expression for arrow functions)
-            optimize_handler_ops(&mut func.ops, None, allocator, &mut local_diagnostics);
+            optimize_handler_ops(&mut func.ops, None, &allocator, &mut local_diagnostics);
 
             // Step 2: Apply save/restore view optimization
-            optimize_save_restore_view(&mut func.ops, &mut None, allocator);
+            optimize_save_restore_view(&mut func.ops, &mut None, &allocator);
         }
     }
 
@@ -1740,43 +1740,43 @@ fn optimize_listener_handler_ops<'a>(job: &mut ComponentCompilationJob<'a>) {
                     optimize_handler_ops(
                         &mut listener.handler_ops,
                         listener.handler_expression.as_ref().map(|e| e.as_ref()),
-                        allocator,
+                        &allocator,
                         &mut local_diagnostics,
                     );
                     optimize_save_restore_view(
                         &mut listener.handler_ops,
                         &mut listener.handler_expression,
-                        allocator,
+                        &allocator,
                     );
                 }
                 CreateOp::TwoWayListener(listener) => {
                     optimize_handler_ops(
                         &mut listener.handler_ops,
                         None,
-                        allocator,
+                        &allocator,
                         &mut local_diagnostics,
                     );
-                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, allocator);
+                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, &allocator);
                 }
                 CreateOp::AnimationListener(listener) => {
                     optimize_handler_ops(
                         &mut listener.handler_ops,
                         None,
-                        allocator,
+                        &allocator,
                         &mut local_diagnostics,
                     );
-                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, allocator);
+                    optimize_save_restore_view(&mut listener.handler_ops, &mut None, &allocator);
                 }
                 CreateOp::Animation(animation) => {
                     optimize_handler_ops(
                         &mut animation.handler_ops,
                         None,
-                        allocator,
+                        &allocator,
                         &mut local_diagnostics,
                     );
                     // Per Angular's variable_optimization.ts lines 61-66,
                     // Animation handlers also get optimizeSaveRestoreView.
-                    optimize_save_restore_view(&mut animation.handler_ops, &mut None, allocator);
+                    optimize_save_restore_view(&mut animation.handler_ops, &mut None, &allocator);
                 }
                 _ => {}
             }
@@ -1807,7 +1807,7 @@ fn optimize_handler_ops<'a>(
     // Step 1: Remove unused variables (loop until stable)
     loop {
         let changed =
-            optimize_handler_ops_once(handler_ops, handler_expression, allocator, diagnostics);
+            optimize_handler_ops_once(handler_ops, handler_expression, &allocator, diagnostics);
         if !changed {
             break;
         }
@@ -1816,7 +1816,7 @@ fn optimize_handler_ops<'a>(
     // Step 2: Inline context variables (nextContext()) into other variable ops.
     // Per TypeScript's allowConservativeInlining (lines 536-538):
     // "Context can only be inlined into other variables."
-    inline_context_vars_in_handler_ops(handler_ops, handler_expression, allocator, diagnostics);
+    inline_context_vars_in_handler_ops(handler_ops, handler_expression, &allocator, diagnostics);
 }
 
 /// After variables have been optimized in nested ops (e.g. handlers or functions), we may end up
@@ -1871,7 +1871,7 @@ fn optimize_save_restore_view<'a>(
                     // Remove the restoreView op
                     handler_ops.clear();
                     // Unwrap the ResetView from handler_expression
-                    *handler_expression = Some(OxcBox::new_in(inner_expr, allocator));
+                    *handler_expression = Some(OxcBox::new_in(inner_expr, &allocator));
                 }
                 return;
             }
@@ -1953,14 +1953,14 @@ fn optimize_save_restore_view<'a>(
             ReturnStatement {
                 value: OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
                     WrappedIrExpr {
-                        node: oxc_allocator::Box::new_in(inner_expr, allocator),
+                        node: oxc_allocator::Box::new_in(inner_expr, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         )),
     });
 
@@ -2091,7 +2091,7 @@ fn optimize_handler_ops_once<'a>(
     // We need to rebuild the handler_ops vector since we can't easily mutate in place
     // and also need to replace some ops with statement ops
     let mut new_ops: OxcVec<'a, UpdateOp<'a>> =
-        OxcVec::with_capacity_in(handler_ops.len(), allocator);
+        OxcVec::with_capacity_in(handler_ops.len(), &allocator);
 
     for (idx, op) in handler_ops.iter().enumerate() {
         match &actions[idx] {
@@ -2111,18 +2111,18 @@ fn optimize_handler_ops_once<'a>(
                     let wrapped = WrappedIrExpr {
                         node: oxc_allocator::Box::new_in(
                             var.initializer.clone_in(allocator),
-                            allocator,
+                            &allocator,
                         ),
                         source_span: None,
                     };
                     let expr_stmt = OutputStatement::Expression(oxc_allocator::Box::new_in(
                         ExpressionStatement {
                             expr: OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
-                                wrapped, allocator,
+                                wrapped, &allocator,
                             )),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     ));
                     new_ops.push(UpdateOp::Statement(StatementOp {
                         base: UpdateOpBase::default(),
@@ -2159,17 +2159,17 @@ fn optimize_handler_ops_once<'a>(
     for idx in &convert_indices {
         if let UpdateOp::Variable(var) = &handler_ops[*idx] {
             let wrapped = WrappedIrExpr {
-                node: oxc_allocator::Box::new_in(var.initializer.clone_in(allocator), allocator),
+                node: oxc_allocator::Box::new_in(var.initializer.clone_in(allocator), &allocator),
                 source_span: None,
             };
             let expr_stmt = OutputStatement::Expression(oxc_allocator::Box::new_in(
                 ExpressionStatement {
                     expr: OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
-                        wrapped, allocator,
+                        wrapped, &allocator,
                     )),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             statement_replacements.insert(
                 *idx,
@@ -2183,7 +2183,7 @@ fn optimize_handler_ops_once<'a>(
 
     // Now rebuild the ops vector
     let mut result_ops: OxcVec<'a, UpdateOp<'a>> =
-        OxcVec::with_capacity_in(handler_ops.len(), allocator);
+        OxcVec::with_capacity_in(handler_ops.len(), &allocator);
 
     for (idx, op) in handler_ops.iter().enumerate() {
         if remove_indices.contains(&idx) {
@@ -2193,7 +2193,7 @@ fn optimize_handler_ops_once<'a>(
             result_ops.push(replacement);
         } else {
             // Clone the original op
-            result_ops.push(clone_update_op(op, allocator, diagnostics));
+            result_ops.push(clone_update_op(op, &allocator, diagnostics));
         }
     }
 
@@ -2215,14 +2215,17 @@ fn clone_update_op<'a>(
             xref: var.xref,
             kind: var.kind,
             name: var.name.clone(),
-            initializer: oxc_allocator::Box::new_in(var.initializer.clone_in(allocator), allocator),
+            initializer: oxc_allocator::Box::new_in(
+                var.initializer.clone_in(allocator),
+                &allocator,
+            ),
             flags: var.flags,
             view: var.view,
             local: var.local,
         }),
         UpdateOp::Statement(stmt) => UpdateOp::Statement(StatementOp {
             base: UpdateOpBase::default(),
-            statement: clone_statement_with_ir_nodes(&stmt.statement, allocator),
+            statement: clone_statement_with_ir_nodes(&stmt.statement, &allocator),
         }),
         // For other op types that might appear in handler_ops, we'd need to clone them too.
         // This shouldn't happen in practice for handler_ops but we handle it gracefully
@@ -2243,12 +2246,12 @@ fn clone_update_op<'a>(
                                         value: crate::output::ast::LiteralValue::Undefined,
                                         source_span: None,
                                     },
-                                    allocator,
+                                    &allocator,
                                 ),
                             ),
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     ),
                 ),
             })
@@ -2267,21 +2270,21 @@ fn clone_statement_with_ir_nodes<'a>(
         OutputStatement::Expression(expr_stmt) => {
             OutputStatement::Expression(oxc_allocator::Box::new_in(
                 ExpressionStatement {
-                    expr: clone_expr_with_ir_nodes(&expr_stmt.expr, allocator),
+                    expr: clone_expr_with_ir_nodes(&expr_stmt.expr, &allocator),
                     source_span: expr_stmt.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         OutputStatement::Return(ret_stmt) => OutputStatement::Return(oxc_allocator::Box::new_in(
             crate::output::ast::ReturnStatement {
-                value: clone_expr_with_ir_nodes(&ret_stmt.value, allocator),
+                value: clone_expr_with_ir_nodes(&ret_stmt.value, &allocator),
                 source_span: ret_stmt.source_span,
             },
-            allocator,
+            &allocator,
         )),
         // For other statement types, use the standard clone
-        _ => crate::output::ast::clone_output_statement(stmt, allocator),
+        _ => crate::output::ast::clone_output_statement(stmt, &allocator),
     }
 }
 
@@ -2295,10 +2298,10 @@ fn clone_expr_with_ir_nodes<'a>(
             // Clone the wrapped IR expression
             OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
                 WrappedIrExpr {
-                    node: oxc_allocator::Box::new_in(wrapped.node.clone_in(allocator), allocator),
+                    node: oxc_allocator::Box::new_in(wrapped.node.clone_in(allocator), &allocator),
                     source_span: wrapped.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         // For other expression types, use the standard clone
@@ -2732,18 +2735,18 @@ fn convert_variables_to_statements(
                         let wrapped = WrappedIrExpr {
                             node: oxc_allocator::Box::new_in(
                                 var.initializer.clone_in(allocator),
-                                allocator,
+                                &allocator,
                             ),
                             source_span: None,
                         };
                         let expr_stmt = OutputStatement::Expression(oxc_allocator::Box::new_in(
                             ExpressionStatement {
                                 expr: OutputExpression::WrappedIrNode(oxc_allocator::Box::new_in(
-                                    wrapped, allocator,
+                                    wrapped, &allocator,
                                 )),
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         ));
                         let statement_op = UpdateOp::Statement(StatementOp {
                             base: UpdateOpBase::default(),
@@ -2844,91 +2847,91 @@ fn transform_expressions_in_update_op<'a, F>(
 {
     match op {
         UpdateOp::Variable(var) => {
-            let new_expr = transform_expression(&var.initializer, allocator, &mut transform);
+            let new_expr = transform_expression(&var.initializer, &allocator, &mut transform);
             *var.initializer = new_expr;
         }
         UpdateOp::Property(prop) => {
-            let new_expr = transform_expression(&prop.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&prop.expression, &allocator, &mut transform);
             *prop.expression = new_expr;
         }
         UpdateOp::StyleProp(style) => {
-            let new_expr = transform_expression(&style.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&style.expression, &allocator, &mut transform);
             *style.expression = new_expr;
         }
         UpdateOp::ClassProp(class) => {
-            let new_expr = transform_expression(&class.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&class.expression, &allocator, &mut transform);
             *class.expression = new_expr;
         }
         UpdateOp::StyleMap(style) => {
-            let new_expr = transform_expression(&style.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&style.expression, &allocator, &mut transform);
             *style.expression = new_expr;
         }
         UpdateOp::ClassMap(class) => {
-            let new_expr = transform_expression(&class.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&class.expression, &allocator, &mut transform);
             *class.expression = new_expr;
         }
         UpdateOp::Attribute(attr) => {
-            let new_expr = transform_expression(&attr.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&attr.expression, &allocator, &mut transform);
             *attr.expression = new_expr;
         }
         UpdateOp::DomProperty(dom) => {
-            let new_expr = transform_expression(&dom.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&dom.expression, &allocator, &mut transform);
             *dom.expression = new_expr;
         }
         UpdateOp::TwoWayProperty(two_way) => {
-            let new_expr = transform_expression(&two_way.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&two_way.expression, &allocator, &mut transform);
             *two_way.expression = new_expr;
         }
         UpdateOp::Binding(binding) => {
-            let new_expr = transform_expression(&binding.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&binding.expression, &allocator, &mut transform);
             *binding.expression = new_expr;
         }
         UpdateOp::InterpolateText(text) => {
-            let new_expr = transform_expression(&text.interpolation, allocator, &mut transform);
+            let new_expr = transform_expression(&text.interpolation, &allocator, &mut transform);
             *text.interpolation = new_expr;
         }
         UpdateOp::StoreLet(store) => {
-            let new_expr = transform_expression(&store.value, allocator, &mut transform);
+            let new_expr = transform_expression(&store.value, &allocator, &mut transform);
             *store.value = new_expr;
         }
         UpdateOp::Conditional(cond) => {
             if let Some(ref test) = cond.test {
-                let new_expr = transform_expression(test, allocator, &mut transform);
-                cond.test = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(test, &allocator, &mut transform);
+                cond.test = Some(OxcBox::new_in(new_expr, &allocator));
             }
             for condition in cond.conditions.iter_mut() {
                 if let Some(ref expr) = condition.expr {
-                    let new_expr = transform_expression(expr, allocator, &mut transform);
-                    condition.expr = Some(OxcBox::new_in(new_expr, allocator));
+                    let new_expr = transform_expression(expr, &allocator, &mut transform);
+                    condition.expr = Some(OxcBox::new_in(new_expr, &allocator));
                 }
             }
             if let Some(ref processed) = cond.processed {
-                let new_expr = transform_expression(processed, allocator, &mut transform);
-                cond.processed = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(processed, &allocator, &mut transform);
+                cond.processed = Some(OxcBox::new_in(new_expr, &allocator));
             }
             if let Some(ref ctx_val) = cond.context_value {
-                let new_expr = transform_expression(ctx_val, allocator, &mut transform);
-                cond.context_value = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(ctx_val, &allocator, &mut transform);
+                cond.context_value = Some(OxcBox::new_in(new_expr, &allocator));
             }
         }
         UpdateOp::Repeater(rep) => {
-            let new_expr = transform_expression(&rep.collection, allocator, &mut transform);
+            let new_expr = transform_expression(&rep.collection, &allocator, &mut transform);
             *rep.collection = new_expr;
         }
         UpdateOp::AnimationBinding(anim) => {
-            let new_expr = transform_expression(&anim.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&anim.expression, &allocator, &mut transform);
             *anim.expression = new_expr;
         }
         UpdateOp::Control(ctrl) => {
-            let new_expr = transform_expression(&ctrl.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&ctrl.expression, &allocator, &mut transform);
             *ctrl.expression = new_expr;
         }
         UpdateOp::I18nExpression(i18n) => {
-            let new_expr = transform_expression(&i18n.expression, allocator, &mut transform);
+            let new_expr = transform_expression(&i18n.expression, &allocator, &mut transform);
             *i18n.expression = new_expr;
         }
         UpdateOp::DeferWhen(defer_when) => {
-            let new_expr = transform_expression(&defer_when.condition, allocator, &mut transform);
+            let new_expr = transform_expression(&defer_when.condition, &allocator, &mut transform);
             *defer_when.condition = new_expr;
         }
         UpdateOp::Statement(stmt) => {
@@ -2936,7 +2939,7 @@ fn transform_expressions_in_update_op<'a, F>(
             // (e.g., TwoWayBindingSetExpr in two-way listener handlers)
             transform_expressions_in_output_statement(
                 &mut stmt.statement,
-                allocator,
+                &allocator,
                 &mut transform,
             );
         }
@@ -2959,27 +2962,27 @@ fn transform_expressions_in_output_statement<'a, F>(
 
     match stmt {
         OutputStatement::Expression(expr_stmt) => {
-            transform_expressions_in_output_expression(&mut expr_stmt.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut expr_stmt.expr, &allocator, transform);
         }
         OutputStatement::Return(ret_stmt) => {
-            transform_expressions_in_output_expression(&mut ret_stmt.value, allocator, transform);
+            transform_expressions_in_output_expression(&mut ret_stmt.value, &allocator, transform);
         }
         OutputStatement::DeclareVar(decl) => {
             if let Some(ref mut value) = decl.value {
-                transform_expressions_in_output_expression(value, allocator, transform);
+                transform_expressions_in_output_expression(value, &allocator, transform);
             }
         }
         OutputStatement::If(if_stmt) => {
             transform_expressions_in_output_expression(
                 &mut if_stmt.condition,
-                allocator,
+                &allocator,
                 transform,
             );
             for stmt in if_stmt.true_case.iter_mut() {
-                transform_expressions_in_output_statement(stmt, allocator, transform);
+                transform_expressions_in_output_statement(stmt, &allocator, transform);
             }
             for stmt in if_stmt.false_case.iter_mut() {
-                transform_expressions_in_output_statement(stmt, allocator, transform);
+                transform_expressions_in_output_statement(stmt, &allocator, transform);
             }
         }
         OutputStatement::DeclareFunction(_) => {
@@ -3002,97 +3005,97 @@ fn transform_expressions_in_output_expression<'a, F>(
     match expr {
         OutputExpression::WrappedIrNode(wrapped) => {
             // This is the key case: transform the wrapped IR expression
-            let new_expr = transform_expression(&wrapped.node, allocator, transform);
+            let new_expr = transform_expression(&wrapped.node, &allocator, transform);
             *wrapped.node = new_expr;
         }
         OutputExpression::Conditional(cond) => {
-            transform_expressions_in_output_expression(&mut cond.condition, allocator, transform);
-            transform_expressions_in_output_expression(&mut cond.true_case, allocator, transform);
+            transform_expressions_in_output_expression(&mut cond.condition, &allocator, transform);
+            transform_expressions_in_output_expression(&mut cond.true_case, &allocator, transform);
             if let Some(ref mut false_case) = cond.false_case {
-                transform_expressions_in_output_expression(false_case, allocator, transform);
+                transform_expressions_in_output_expression(false_case, &allocator, transform);
             }
         }
         OutputExpression::BinaryOperator(bin) => {
-            transform_expressions_in_output_expression(&mut bin.lhs, allocator, transform);
-            transform_expressions_in_output_expression(&mut bin.rhs, allocator, transform);
+            transform_expressions_in_output_expression(&mut bin.lhs, &allocator, transform);
+            transform_expressions_in_output_expression(&mut bin.rhs, &allocator, transform);
         }
         OutputExpression::UnaryOperator(un) => {
-            transform_expressions_in_output_expression(&mut un.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut un.expr, &allocator, transform);
         }
         OutputExpression::Not(not) => {
-            transform_expressions_in_output_expression(&mut not.condition, allocator, transform);
+            transform_expressions_in_output_expression(&mut not.condition, &allocator, transform);
         }
         OutputExpression::ReadProp(member) => {
-            transform_expressions_in_output_expression(&mut member.receiver, allocator, transform);
+            transform_expressions_in_output_expression(&mut member.receiver, &allocator, transform);
         }
         OutputExpression::ReadKey(idx) => {
-            transform_expressions_in_output_expression(&mut idx.receiver, allocator, transform);
-            transform_expressions_in_output_expression(&mut idx.index, allocator, transform);
+            transform_expressions_in_output_expression(&mut idx.receiver, &allocator, transform);
+            transform_expressions_in_output_expression(&mut idx.index, &allocator, transform);
         }
         OutputExpression::InvokeFunction(call) => {
-            transform_expressions_in_output_expression(&mut call.fn_expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut call.fn_expr, &allocator, transform);
             for arg in call.args.iter_mut() {
-                transform_expressions_in_output_expression(arg, allocator, transform);
+                transform_expressions_in_output_expression(arg, &allocator, transform);
             }
         }
         OutputExpression::Instantiate(inst) => {
-            transform_expressions_in_output_expression(&mut inst.class_expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut inst.class_expr, &allocator, transform);
             for arg in inst.args.iter_mut() {
-                transform_expressions_in_output_expression(arg, allocator, transform);
+                transform_expressions_in_output_expression(arg, &allocator, transform);
             }
         }
         OutputExpression::ArrowFunction(arrow) => match &mut arrow.body {
             crate::output::ast::ArrowFunctionBody::Expression(body_expr) => {
-                transform_expressions_in_output_expression(body_expr, allocator, transform);
+                transform_expressions_in_output_expression(body_expr, &allocator, transform);
             }
             crate::output::ast::ArrowFunctionBody::Statements(stmts) => {
                 for stmt in stmts.iter_mut() {
-                    transform_expressions_in_output_statement(stmt, allocator, transform);
+                    transform_expressions_in_output_statement(stmt, &allocator, transform);
                 }
             }
         },
         OutputExpression::Function(func) => {
             for stmt in func.statements.iter_mut() {
-                transform_expressions_in_output_statement(stmt, allocator, transform);
+                transform_expressions_in_output_statement(stmt, &allocator, transform);
             }
         }
         OutputExpression::LiteralArray(arr) => {
             for elem in arr.entries.iter_mut() {
-                transform_expressions_in_output_expression(elem, allocator, transform);
+                transform_expressions_in_output_expression(elem, &allocator, transform);
             }
         }
         OutputExpression::LiteralMap(map) => {
             for entry in map.entries.iter_mut() {
-                transform_expressions_in_output_expression(&mut entry.value, allocator, transform);
+                transform_expressions_in_output_expression(&mut entry.value, &allocator, transform);
             }
         }
         OutputExpression::Parenthesized(paren) => {
-            transform_expressions_in_output_expression(&mut paren.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut paren.expr, &allocator, transform);
         }
         OutputExpression::Comma(comma) => {
             for expr in comma.parts.iter_mut() {
-                transform_expressions_in_output_expression(expr, allocator, transform);
+                transform_expressions_in_output_expression(expr, &allocator, transform);
             }
         }
         OutputExpression::TaggedTemplateLiteral(tagged) => {
-            transform_expressions_in_output_expression(&mut tagged.tag, allocator, transform);
+            transform_expressions_in_output_expression(&mut tagged.tag, &allocator, transform);
             for expr in tagged.template.expressions.iter_mut() {
-                transform_expressions_in_output_expression(expr, allocator, transform);
+                transform_expressions_in_output_expression(expr, &allocator, transform);
             }
         }
         OutputExpression::TemplateLiteral(template) => {
             for expr in template.expressions.iter_mut() {
-                transform_expressions_in_output_expression(expr, allocator, transform);
+                transform_expressions_in_output_expression(expr, &allocator, transform);
             }
         }
         OutputExpression::Typeof(type_of) => {
-            transform_expressions_in_output_expression(&mut type_of.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut type_of.expr, &allocator, transform);
         }
         OutputExpression::Void(void_expr) => {
-            transform_expressions_in_output_expression(&mut void_expr.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut void_expr.expr, &allocator, transform);
         }
         OutputExpression::SpreadElement(spread) => {
-            transform_expressions_in_output_expression(&mut spread.expr, allocator, transform);
+            transform_expressions_in_output_expression(&mut spread.expr, &allocator, transform);
         }
         // Leaf expressions with no sub-expressions to transform
         OutputExpression::Literal(_)
@@ -3116,53 +3119,53 @@ fn transform_expressions_in_create_op<'a, F>(
 {
     match op {
         CreateOp::Variable(var) => {
-            let new_expr = transform_expression(&var.initializer, allocator, &mut transform);
+            let new_expr = transform_expression(&var.initializer, &allocator, &mut transform);
             *var.initializer = new_expr;
         }
         CreateOp::Listener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_expressions_in_update_op(handler_op, allocator, &mut transform);
+                transform_expressions_in_update_op(handler_op, &allocator, &mut transform);
             }
             if let Some(ref handler_expr) = listener.handler_expression {
-                let new_expr = transform_expression(handler_expr, allocator, &mut transform);
-                listener.handler_expression = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(handler_expr, &allocator, &mut transform);
+                listener.handler_expression = Some(OxcBox::new_in(new_expr, &allocator));
             }
         }
         CreateOp::TwoWayListener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_expressions_in_update_op(handler_op, allocator, &mut transform);
+                transform_expressions_in_update_op(handler_op, &allocator, &mut transform);
             }
         }
         CreateOp::AnimationListener(listener) => {
             for handler_op in listener.handler_ops.iter_mut() {
-                transform_expressions_in_update_op(handler_op, allocator, &mut transform);
+                transform_expressions_in_update_op(handler_op, &allocator, &mut transform);
             }
         }
         CreateOp::Animation(animation) => {
             for handler_op in animation.handler_ops.iter_mut() {
-                transform_expressions_in_update_op(handler_op, allocator, &mut transform);
+                transform_expressions_in_update_op(handler_op, &allocator, &mut transform);
             }
         }
         CreateOp::RepeaterCreate(rep) => {
-            let new_expr = transform_expression(&rep.track, allocator, &mut transform);
+            let new_expr = transform_expression(&rep.track, &allocator, &mut transform);
             *rep.track = new_expr;
             // Also transform track_by_ops if present
             if let Some(ref mut track_by_ops) = rep.track_by_ops {
                 for track_op in track_by_ops.iter_mut() {
-                    transform_expressions_in_update_op(track_op, allocator, &mut transform);
+                    transform_expressions_in_update_op(track_op, &allocator, &mut transform);
                 }
             }
         }
         CreateOp::ExtractedAttribute(attr) => {
             if let Some(ref value) = attr.value {
-                let new_expr = transform_expression(value, allocator, &mut transform);
-                attr.value = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(value, &allocator, &mut transform);
+                attr.value = Some(OxcBox::new_in(new_expr, &allocator));
             }
         }
         CreateOp::DeferOn(defer_on) => {
             if let Some(ref options) = defer_on.options {
-                let new_expr = transform_expression(options, allocator, &mut transform);
-                defer_on.options = Some(OxcBox::new_in(new_expr, allocator));
+                let new_expr = transform_expression(options, &allocator, &mut transform);
+                defer_on.options = Some(OxcBox::new_in(new_expr, &allocator));
             }
         }
         _ => {}
@@ -3210,27 +3213,25 @@ where
             IrExpression::SafeNavigationMigration(OxcBox::new_in(
                 SafeNavigationMigrationExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&m.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&m.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: m.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::PureFunction(pf) => {
             use crate::ir::expression::PureFunctionExpr;
-            let body = pf
-                .body
-                .as_ref()
-                .map(|b| OxcBox::new_in(transform_expression(b, allocator, transform), allocator));
-            let fn_ref = pf
-                .fn_ref
-                .as_ref()
-                .map(|f| OxcBox::new_in(transform_expression(f, allocator, transform), allocator));
-            let mut args = OxcVec::with_capacity_in(pf.args.len(), allocator);
+            let body = pf.body.as_ref().map(|b| {
+                OxcBox::new_in(transform_expression(b, &allocator, transform), &allocator)
+            });
+            let fn_ref = pf.fn_ref.as_ref().map(|f| {
+                OxcBox::new_in(transform_expression(f, &allocator, transform), &allocator)
+            });
+            let mut args = OxcVec::with_capacity_in(pf.args.len(), &allocator);
             for arg in pf.args.iter() {
-                args.push(transform_expression(arg, allocator, transform));
+                args.push(transform_expression(arg, &allocator, transform));
             }
             IrExpression::PureFunction(OxcBox::new_in(
                 PureFunctionExpr {
@@ -3240,21 +3241,21 @@ where
                     var_offset: pf.var_offset,
                     source_span: pf.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Interpolation(interp) => {
             use crate::ir::expression::Interpolation;
-            let mut strings = OxcVec::with_capacity_in(interp.strings.len(), allocator);
+            let mut strings = OxcVec::with_capacity_in(interp.strings.len(), &allocator);
             for s in interp.strings.iter() {
                 strings.push(s.clone());
             }
-            let mut expressions = OxcVec::with_capacity_in(interp.expressions.len(), allocator);
+            let mut expressions = OxcVec::with_capacity_in(interp.expressions.len(), &allocator);
             for e in interp.expressions.iter() {
-                expressions.push(transform_expression(e, allocator, transform));
+                expressions.push(transform_expression(e, &allocator, transform));
             }
             let mut i18n_placeholders =
-                OxcVec::with_capacity_in(interp.i18n_placeholders.len(), allocator);
+                OxcVec::with_capacity_in(interp.i18n_placeholders.len(), &allocator);
             for ph in interp.i18n_placeholders.iter() {
                 i18n_placeholders.push(ph.clone());
             }
@@ -3265,7 +3266,7 @@ where
                     i18n_placeholders,
                     source_span: interp.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::RestoreView(rv) => {
@@ -3273,13 +3274,13 @@ where
             let view = match &rv.view {
                 RestoreViewTarget::Static(xref) => RestoreViewTarget::Static(*xref),
                 RestoreViewTarget::Dynamic(inner) => RestoreViewTarget::Dynamic(OxcBox::new_in(
-                    transform_expression(inner, allocator, transform),
-                    allocator,
+                    transform_expression(inner, &allocator, transform),
+                    &allocator,
                 )),
             };
             IrExpression::RestoreView(OxcBox::new_in(
                 RestoreViewExpr { view, source_span: rv.source_span },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResetView(rv) => {
@@ -3287,19 +3288,19 @@ where
             IrExpression::ResetView(OxcBox::new_in(
                 ResetViewExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&rv.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&rv.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: rv.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::PipeBinding(pb) => {
             use crate::ir::expression::PipeBindingExpr;
-            let mut args = OxcVec::with_capacity_in(pb.args.len(), allocator);
+            let mut args = OxcVec::with_capacity_in(pb.args.len(), &allocator);
             for arg in pb.args.iter() {
-                args.push(transform_expression(arg, allocator, transform));
+                args.push(transform_expression(arg, &allocator, transform));
             }
             IrExpression::PipeBinding(OxcBox::new_in(
                 PipeBindingExpr {
@@ -3310,7 +3311,7 @@ where
                     var_offset: pb.var_offset,
                     source_span: pb.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::PipeBindingVariadic(pbv) => {
@@ -3321,14 +3322,14 @@ where
                     target_slot: pbv.target_slot,
                     name: pbv.name.clone(),
                     args: OxcBox::new_in(
-                        transform_expression(&pbv.args, allocator, transform),
-                        allocator,
+                        transform_expression(&pbv.args, &allocator, transform),
+                        &allocator,
                     ),
                     num_args: pbv.num_args,
                     var_offset: pbv.var_offset,
                     source_span: pbv.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::SafePropertyRead(spr) => {
@@ -3336,13 +3337,13 @@ where
             IrExpression::SafePropertyRead(OxcBox::new_in(
                 SafePropertyReadExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&spr.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&spr.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     name: spr.name.clone(),
                     source_span: spr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::SafeKeyedRead(skr) => {
@@ -3350,34 +3351,34 @@ where
             IrExpression::SafeKeyedRead(OxcBox::new_in(
                 SafeKeyedReadExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&skr.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&skr.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     index: OxcBox::new_in(
-                        transform_expression(&skr.index, allocator, transform),
-                        allocator,
+                        transform_expression(&skr.index, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: skr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::SafeInvokeFunction(sif) => {
             use crate::ir::expression::SafeInvokeFunctionExpr;
-            let mut args = OxcVec::with_capacity_in(sif.args.len(), allocator);
+            let mut args = OxcVec::with_capacity_in(sif.args.len(), &allocator);
             for arg in sif.args.iter() {
-                args.push(transform_expression(arg, allocator, transform));
+                args.push(transform_expression(arg, &allocator, transform));
             }
             IrExpression::SafeInvokeFunction(OxcBox::new_in(
                 SafeInvokeFunctionExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&sif.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&sif.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     args,
                     source_span: sif.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::SafeTernary(st) => {
@@ -3385,16 +3386,16 @@ where
             IrExpression::SafeTernary(OxcBox::new_in(
                 SafeTernaryExpr {
                     guard: OxcBox::new_in(
-                        transform_expression(&st.guard, allocator, transform),
-                        allocator,
+                        transform_expression(&st.guard, &allocator, transform),
+                        &allocator,
                     ),
                     expr: OxcBox::new_in(
-                        transform_expression(&st.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&st.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: st.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Ternary(t) => {
@@ -3402,20 +3403,20 @@ where
             IrExpression::Ternary(OxcBox::new_in(
                 TernaryExpr {
                     condition: OxcBox::new_in(
-                        transform_expression(&t.condition, allocator, transform),
-                        allocator,
+                        transform_expression(&t.condition, &allocator, transform),
+                        &allocator,
                     ),
                     true_expr: OxcBox::new_in(
-                        transform_expression(&t.true_expr, allocator, transform),
-                        allocator,
+                        transform_expression(&t.true_expr, &allocator, transform),
+                        &allocator,
                     ),
                     false_expr: OxcBox::new_in(
-                        transform_expression(&t.false_expr, allocator, transform),
-                        allocator,
+                        transform_expression(&t.false_expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: t.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::AssignTemporary(at) => {
@@ -3423,14 +3424,14 @@ where
             IrExpression::AssignTemporary(OxcBox::new_in(
                 AssignTemporaryExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&at.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&at.expr, &allocator, transform),
+                        &allocator,
                     ),
                     xref: at.xref,
                     name: at.name.clone(),
                     source_span: at.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ConditionalCase(cc) => {
@@ -3438,14 +3439,14 @@ where
             IrExpression::ConditionalCase(OxcBox::new_in(
                 ConditionalCaseExpr {
                     expr: cc.expr.as_ref().map(|e| {
-                        OxcBox::new_in(transform_expression(e, allocator, transform), allocator)
+                        OxcBox::new_in(transform_expression(e, &allocator, transform), &allocator)
                     }),
                     target: cc.target,
                     target_slot: cc.target_slot,
                     alias: cc.alias.clone(),
                     source_span: cc.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ConstCollected(cc) => {
@@ -3453,12 +3454,12 @@ where
             IrExpression::ConstCollected(OxcBox::new_in(
                 ConstCollectedExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&cc.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&cc.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: cc.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::TwoWayBindingSet(twb) => {
@@ -3466,16 +3467,16 @@ where
             IrExpression::TwoWayBindingSet(OxcBox::new_in(
                 TwoWayBindingSetExpr {
                     target: OxcBox::new_in(
-                        transform_expression(&twb.target, allocator, transform),
-                        allocator,
+                        transform_expression(&twb.target, &allocator, transform),
+                        &allocator,
                     ),
                     value: OxcBox::new_in(
-                        transform_expression(&twb.value, allocator, transform),
-                        allocator,
+                        transform_expression(&twb.value, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: twb.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::StoreLet(sl) => {
@@ -3484,13 +3485,13 @@ where
                 StoreLetExpr {
                     target: sl.target,
                     value: OxcBox::new_in(
-                        transform_expression(&sl.value, allocator, transform),
-                        allocator,
+                        transform_expression(&sl.value, &allocator, transform),
+                        &allocator,
                     ),
                     var_offset: sl.var_offset,
                     source_span: sl.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Binary(binary) => {
@@ -3499,16 +3500,16 @@ where
                 BinaryExpr {
                     operator: binary.operator,
                     lhs: OxcBox::new_in(
-                        transform_expression(&binary.lhs, allocator, transform),
-                        allocator,
+                        transform_expression(&binary.lhs, &allocator, transform),
+                        &allocator,
                     ),
                     rhs: OxcBox::new_in(
-                        transform_expression(&binary.rhs, allocator, transform),
-                        allocator,
+                        transform_expression(&binary.rhs, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: binary.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedPropertyRead(rpr) => {
@@ -3516,14 +3517,14 @@ where
             IrExpression::ResolvedPropertyRead(OxcBox::new_in(
                 ResolvedPropertyReadExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&rpr.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&rpr.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     name: rpr.name.clone(),
                     optional: rpr.optional,
                     source_span: rpr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedBinary(rb) => {
@@ -3532,35 +3533,35 @@ where
                 ResolvedBinaryExpr {
                     operator: rb.operator,
                     left: OxcBox::new_in(
-                        transform_expression(&rb.left, allocator, transform),
-                        allocator,
+                        transform_expression(&rb.left, &allocator, transform),
+                        &allocator,
                     ),
                     right: OxcBox::new_in(
-                        transform_expression(&rb.right, allocator, transform),
-                        allocator,
+                        transform_expression(&rb.right, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: rb.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedCall(rc) => {
             use crate::ir::expression::ResolvedCallExpr;
-            let mut args = OxcVec::with_capacity_in(rc.args.len(), allocator);
+            let mut args = OxcVec::with_capacity_in(rc.args.len(), &allocator);
             for arg in rc.args.iter() {
-                args.push(transform_expression(arg, allocator, transform));
+                args.push(transform_expression(arg, &allocator, transform));
             }
             IrExpression::ResolvedCall(OxcBox::new_in(
                 ResolvedCallExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&rc.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&rc.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     args,
                     optional: rc.optional,
                     source_span: rc.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedKeyedRead(rkr) => {
@@ -3568,17 +3569,17 @@ where
             IrExpression::ResolvedKeyedRead(OxcBox::new_in(
                 ResolvedKeyedReadExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&rkr.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&rkr.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     key: OxcBox::new_in(
-                        transform_expression(&rkr.key, allocator, transform),
-                        allocator,
+                        transform_expression(&rkr.key, &allocator, transform),
+                        &allocator,
                     ),
                     optional: rkr.optional,
                     source_span: rkr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedSafePropertyRead(rspr) => {
@@ -3586,45 +3587,45 @@ where
             IrExpression::ResolvedSafePropertyRead(OxcBox::new_in(
                 ResolvedSafePropertyReadExpr {
                     receiver: OxcBox::new_in(
-                        transform_expression(&rspr.receiver, allocator, transform),
-                        allocator,
+                        transform_expression(&rspr.receiver, &allocator, transform),
+                        &allocator,
                     ),
                     name: rspr.name.clone(),
                     source_span: rspr.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::DerivedLiteralArray(arr) => {
             use crate::ir::expression::DerivedLiteralArrayExpr;
-            let mut entries = OxcVec::with_capacity_in(arr.entries.len(), allocator);
+            let mut entries = OxcVec::with_capacity_in(arr.entries.len(), &allocator);
             for entry in arr.entries.iter() {
-                entries.push(transform_expression(entry, allocator, transform));
+                entries.push(transform_expression(entry, &allocator, transform));
             }
-            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), allocator);
+            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), &allocator);
             for s in arr.spreads.iter() {
                 spreads.push(*s);
             }
             IrExpression::DerivedLiteralArray(OxcBox::new_in(
                 DerivedLiteralArrayExpr { entries, spreads, source_span: arr.source_span },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::DerivedLiteralMap(map) => {
             use crate::ir::expression::DerivedLiteralMapExpr;
-            let mut keys = OxcVec::with_capacity_in(map.keys.len(), allocator);
+            let mut keys = OxcVec::with_capacity_in(map.keys.len(), &allocator);
             for key in map.keys.iter() {
                 keys.push(key.clone());
             }
-            let mut values = OxcVec::with_capacity_in(map.values.len(), allocator);
+            let mut values = OxcVec::with_capacity_in(map.values.len(), &allocator);
             for value in map.values.iter() {
-                values.push(transform_expression(value, allocator, transform));
+                values.push(transform_expression(value, &allocator, transform));
             }
-            let mut quoted = OxcVec::with_capacity_in(map.quoted.len(), allocator);
+            let mut quoted = OxcVec::with_capacity_in(map.quoted.len(), &allocator);
             for q in map.quoted.iter() {
                 quoted.push(*q);
             }
-            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), allocator);
+            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), &allocator);
             for s in map.spreads.iter() {
                 spreads.push(*s);
             }
@@ -3636,45 +3637,45 @@ where
                     spreads,
                     source_span: map.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::LiteralArray(arr) => {
             use crate::ir::expression::IrLiteralArrayExpr;
-            let mut elements = OxcVec::with_capacity_in(arr.elements.len(), allocator);
+            let mut elements = OxcVec::with_capacity_in(arr.elements.len(), &allocator);
             for elem in arr.elements.iter() {
-                elements.push(transform_expression(elem, allocator, transform));
+                elements.push(transform_expression(elem, &allocator, transform));
             }
-            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), allocator);
+            let mut spreads = OxcVec::with_capacity_in(arr.spreads.len(), &allocator);
             for s in arr.spreads.iter() {
                 spreads.push(*s);
             }
             IrExpression::LiteralArray(OxcBox::new_in(
                 IrLiteralArrayExpr { elements, spreads, source_span: arr.source_span },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::LiteralMap(map) => {
             use crate::ir::expression::IrLiteralMapExpr;
-            let mut keys = OxcVec::with_capacity_in(map.keys.len(), allocator);
+            let mut keys = OxcVec::with_capacity_in(map.keys.len(), &allocator);
             for key in map.keys.iter() {
                 keys.push(key.clone());
             }
-            let mut values = OxcVec::with_capacity_in(map.values.len(), allocator);
+            let mut values = OxcVec::with_capacity_in(map.values.len(), &allocator);
             for value in map.values.iter() {
-                values.push(transform_expression(value, allocator, transform));
+                values.push(transform_expression(value, &allocator, transform));
             }
-            let mut quoted = OxcVec::with_capacity_in(map.quoted.len(), allocator);
+            let mut quoted = OxcVec::with_capacity_in(map.quoted.len(), &allocator);
             for q in map.quoted.iter() {
                 quoted.push(*q);
             }
-            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), allocator);
+            let mut spreads = OxcVec::with_capacity_in(map.spreads.len(), &allocator);
             for s in map.spreads.iter() {
                 spreads.push(*s);
             }
             IrExpression::LiteralMap(OxcBox::new_in(
                 IrLiteralMapExpr { keys, values, quoted, spreads, source_span: map.source_span },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Not(n) => {
@@ -3682,12 +3683,12 @@ where
             IrExpression::Not(OxcBox::new_in(
                 NotExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&n.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&n.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: n.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Unary(u) => {
@@ -3696,12 +3697,12 @@ where
                 UnaryExpr {
                     operator: u.operator,
                     expr: OxcBox::new_in(
-                        transform_expression(&u.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&u.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: u.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Typeof(t) => {
@@ -3709,12 +3710,12 @@ where
             IrExpression::Typeof(OxcBox::new_in(
                 TypeofExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&t.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&t.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: t.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Void(v) => {
@@ -3722,30 +3723,30 @@ where
             IrExpression::Void(OxcBox::new_in(
                 VoidExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&v.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&v.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: v.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::ResolvedTemplateLiteral(rtl) => {
             use crate::ir::expression::{IrTemplateLiteralElement, ResolvedTemplateLiteralExpr};
-            let mut elements = OxcVec::with_capacity_in(rtl.elements.len(), allocator);
+            let mut elements = OxcVec::with_capacity_in(rtl.elements.len(), &allocator);
             for elem in rtl.elements.iter() {
                 elements.push(IrTemplateLiteralElement {
                     text: elem.text.clone(),
                     source_span: elem.source_span,
                 });
             }
-            let mut expressions = OxcVec::with_capacity_in(rtl.expressions.len(), allocator);
+            let mut expressions = OxcVec::with_capacity_in(rtl.expressions.len(), &allocator);
             for e in rtl.expressions.iter() {
-                expressions.push(transform_expression(e, allocator, transform));
+                expressions.push(transform_expression(e, &allocator, transform));
             }
             IrExpression::ResolvedTemplateLiteral(OxcBox::new_in(
                 ResolvedTemplateLiteralExpr { elements, expressions, source_span: rtl.source_span },
-                allocator,
+                &allocator,
             ))
         }
 
@@ -3753,23 +3754,23 @@ where
             use crate::ir::expression::ArrowFunctionExpr;
             use crate::output::ast::FnParam;
 
-            let mut params = OxcVec::with_capacity_in(arrow_fn.params.len(), allocator);
+            let mut params = OxcVec::with_capacity_in(arrow_fn.params.len(), &allocator);
             for param in arrow_fn.params.iter() {
                 params.push(FnParam { name: param.name.clone() });
             }
 
-            let body = transform_expression(&arrow_fn.body, allocator, transform);
+            let body = transform_expression(&arrow_fn.body, &allocator, transform);
 
             IrExpression::ArrowFunction(OxcBox::new_in(
                 ArrowFunctionExpr {
                     params,
-                    body: OxcBox::new_in(body, allocator),
+                    body: OxcBox::new_in(body, &allocator),
                     // ops are not transformed as they are transient data
-                    ops: OxcVec::new_in(allocator),
+                    ops: OxcVec::new_in(&allocator),
                     var_offset: arrow_fn.var_offset,
                     source_span: arrow_fn.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         IrExpression::Parenthesized(paren) => {
@@ -3777,12 +3778,12 @@ where
             IrExpression::Parenthesized(OxcBox::new_in(
                 IrParenthesizedExpr {
                     expr: OxcBox::new_in(
-                        transform_expression(&paren.expr, allocator, transform),
-                        allocator,
+                        transform_expression(&paren.expr, &allocator, transform),
+                        &allocator,
                     ),
                     source_span: paren.source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
     }
@@ -3916,7 +3917,7 @@ fn inline_context_vars_in_handler_ops<'a>(
                 continue;
             }
             // Transform the initializer
-            transform_expression_in_place(&mut var.initializer, allocator, |expr| {
+            transform_expression_in_place(&mut var.initializer, &allocator, |expr| {
                 if let IrExpression::ReadVariable(read) = expr {
                     if to_inline.contains(&read.xref) {
                         if let Some(initializer) = context_vars.get(&read.xref) {
@@ -3932,7 +3933,7 @@ fn inline_context_vars_in_handler_ops<'a>(
     // Third pass: remove the inlined context variable declarations
     // Build a new vector without the inlined variables
     let mut new_ops: OxcVec<'a, UpdateOp<'a>> =
-        OxcVec::with_capacity_in(handler_ops.len(), allocator);
+        OxcVec::with_capacity_in(handler_ops.len(), &allocator);
     for op in handler_ops.iter() {
         if let UpdateOp::Variable(var) = op {
             if to_inline.contains(&var.xref) {
@@ -3940,7 +3941,7 @@ fn inline_context_vars_in_handler_ops<'a>(
                 continue;
             }
         }
-        new_ops.push(clone_update_op(op, allocator, diagnostics));
+        new_ops.push(clone_update_op(op, &allocator, diagnostics));
     }
 
     *handler_ops = new_ops;

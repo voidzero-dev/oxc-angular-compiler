@@ -204,12 +204,12 @@ fn safe_transform_modern<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformCon
             let source_span = p.source_span;
             *expr = IrExpression::ResolvedPropertyRead(ArenaBox::new_in(
                 ResolvedPropertyReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
                     name,
                     optional: true,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ));
         }
         IrExpression::SafeKeyedRead(k) => {
@@ -218,26 +218,26 @@ fn safe_transform_modern<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformCon
             let source_span = k.source_span;
             *expr = IrExpression::ResolvedKeyedRead(ArenaBox::new_in(
                 ResolvedKeyedReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
-                    key: ArenaBox::new_in(key, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    key: ArenaBox::new_in(key, &allocator),
                     optional: true,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ));
         }
         IrExpression::SafeInvokeFunction(c) => {
             let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
-            let args = std::mem::replace(&mut c.args, ArenaVec::new_in(allocator));
+            let args = std::mem::replace(&mut c.args, ArenaVec::new_in(&allocator));
             let source_span = c.source_span;
             *expr = IrExpression::ResolvedCall(ArenaBox::new_in(
                 ResolvedCallExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
                     args,
                     optional: true,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ));
         }
         _ => {}
@@ -369,12 +369,12 @@ where
         // Create: (tmp = guard, body(tmp))
         let assign_temp = IrExpression::AssignTemporary(ArenaBox::new_in(
             AssignTemporaryExpr {
-                expr: ArenaBox::new_in(guard, allocator),
+                expr: ArenaBox::new_in(guard, &allocator),
                 xref,
                 name: None, // Name is resolved in a later phase
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         let read_temp = IrExpression::ReadTemporary(ArenaBox::new_in(
@@ -383,12 +383,12 @@ where
                 name: None, // Name is resolved in a later phase
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
         SafeTernaryExpr {
-            guard: ArenaBox::new_in(assign_temp, allocator),
-            expr: ArenaBox::new_in(body(read_temp), allocator),
+            guard: ArenaBox::new_in(assign_temp, &allocator),
+            expr: ArenaBox::new_in(body(read_temp), &allocator),
             source_span: None,
         }
     } else {
@@ -396,8 +396,8 @@ where
         let guard_clone = guard.clone_in(allocator);
 
         SafeTernaryExpr {
-            guard: ArenaBox::new_in(guard, allocator),
-            expr: ArenaBox::new_in(body(guard_clone), allocator),
+            guard: ArenaBox::new_in(guard, &allocator),
+            expr: ArenaBox::new_in(body(guard_clone), &allocator),
             source_span: None,
         }
     }
@@ -452,7 +452,7 @@ fn has_safe_ternary_receiver(e: &IrExpression<'_>) -> bool {
 fn make_placeholder<'a>(allocator: &'a Allocator) -> IrExpression<'a> {
     IrExpression::Empty(ArenaBox::new_in(
         crate::ir::expression::EmptyExpr { source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -477,7 +477,7 @@ fn extract_access_info<'a>(
         }
         IrExpression::SafeInvokeFunction(c) => {
             let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
-            let mut args = ArenaVec::with_capacity_in(c.args.len(), allocator);
+            let mut args = ArenaVec::with_capacity_in(c.args.len(), &allocator);
             for arg in c.args.iter() {
                 args.push(arg.clone_in(allocator));
             }
@@ -498,7 +498,7 @@ fn extract_access_info<'a>(
         }
         IrExpression::ResolvedCall(c) => {
             let receiver = std::mem::replace(c.receiver.as_mut(), make_placeholder(allocator));
-            let mut args = ArenaVec::with_capacity_in(c.args.len(), allocator);
+            let mut args = ArenaVec::with_capacity_in(c.args.len(), &allocator);
             for arg in c.args.iter() {
                 args.push(arg.clone_in(allocator));
             }
@@ -518,35 +518,35 @@ fn create_access_expr<'a>(
         AccessInfo::PropertyRead { name, source_span } => {
             IrExpression::ResolvedPropertyRead(ArenaBox::new_in(
                 ResolvedPropertyReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
                     name,
                     // Legacy expansion produces a plain read inside the `== null ? null`
                     // ternary, not native optional chaining.
                     optional: false,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AccessInfo::KeyedRead { key, source_span } => {
             IrExpression::ResolvedKeyedRead(ArenaBox::new_in(
                 ResolvedKeyedReadExpr {
-                    receiver: ArenaBox::new_in(receiver, allocator),
-                    key: ArenaBox::new_in(key, allocator),
+                    receiver: ArenaBox::new_in(receiver, &allocator),
+                    key: ArenaBox::new_in(key, &allocator),
                     optional: false,
                     source_span,
                 },
-                allocator,
+                &allocator,
             ))
         }
         AccessInfo::Call { args, source_span } => IrExpression::ResolvedCall(ArenaBox::new_in(
             ResolvedCallExpr {
-                receiver: ArenaBox::new_in(receiver, allocator),
+                receiver: ArenaBox::new_in(receiver, &allocator),
                 args,
                 optional: false,
                 source_span,
             },
-            allocator,
+            &allocator,
         )),
     }
 }
@@ -603,7 +603,7 @@ fn modify_deepest_safe_ternary<'a>(
     let old_expr = std::mem::replace(deepest.expr.as_mut(), make_placeholder(allocator));
 
     // Replace with the new expression
-    deepest.expr = ArenaBox::new_in(new_expr, allocator);
+    deepest.expr = ArenaBox::new_in(new_expr, &allocator);
 
     old_expr
 }
@@ -639,7 +639,7 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
     }
 
     // Extract access info from the expression
-    let Some((info, mut receiver, is_safe)) = extract_access_info(expr, allocator) else {
+    let Some((info, mut receiver, is_safe)) = extract_access_info(expr, &allocator) else {
         return;
     };
 
@@ -649,24 +649,24 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
         // We use a placeholder to get the old expr out
         let placeholder = IrExpression::Empty(ArenaBox::new_in(
             crate::ir::expression::EmptyExpr { source_span: None },
-            allocator,
+            &allocator,
         ));
-        let dst_expr = modify_deepest_safe_ternary(&mut receiver, placeholder, allocator);
+        let dst_expr = modify_deepest_safe_ternary(&mut receiver, placeholder, &allocator);
 
         if is_safe {
             // Safe access: wrap in a new SafeTernary
             let st = safe_ternary_with_temporary(
                 dst_expr,
-                |r| create_access_expr(r, info, allocator),
+                |r| create_access_expr(r, info, &allocator),
                 ctx,
             );
-            let new_inner = IrExpression::SafeTernary(ArenaBox::new_in(st, allocator));
+            let new_inner = IrExpression::SafeTernary(ArenaBox::new_in(st, &allocator));
             // Put the new SafeTernary back into the deepest slot
-            modify_deepest_safe_ternary(&mut receiver, new_inner, allocator);
+            modify_deepest_safe_ternary(&mut receiver, new_inner, &allocator);
         } else {
             // Unsafe access: just add the access to dst.expr
-            let new_access = create_access_expr(dst_expr, info, allocator);
-            modify_deepest_safe_ternary(&mut receiver, new_access, allocator);
+            let new_access = create_access_expr(dst_expr, info, &allocator);
+            modify_deepest_safe_ternary(&mut receiver, new_access, &allocator);
         }
 
         // Return the receiver (the outer SafeTernary)
@@ -675,8 +675,8 @@ fn safe_transform<'a>(expr: &mut IrExpression<'a>, ctx: &SafeTransformContext<'a
         // No SafeTernary in receiver, and this is a safe access - create new SafeTernary
         // (We know is_safe is true here because of the early return above)
         let st =
-            safe_ternary_with_temporary(receiver, |r| create_access_expr(r, info, allocator), ctx);
-        *expr = IrExpression::SafeTernary(ArenaBox::new_in(st, allocator));
+            safe_ternary_with_temporary(receiver, |r| create_access_expr(r, info, &allocator), ctx);
+        *expr = IrExpression::SafeTernary(ArenaBox::new_in(st, &allocator));
     }
 }
 

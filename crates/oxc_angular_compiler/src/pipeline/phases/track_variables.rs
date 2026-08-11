@@ -48,7 +48,7 @@ pub fn generate_track_variables(job: &mut ComponentCompilationJob<'_>) {
                 // SAFETY: We're only reading from expression_store, not modifying it
                 let expressions = unsafe { &*expression_store_ptr };
                 transform_track_expression(
-                    allocator,
+                    &allocator,
                     &mut rep.track,
                     &index_names,
                     implicit_name.as_ref(),
@@ -81,9 +81,9 @@ fn transform_track_expression<'a>(
                     *inner_expr = IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from("$index"), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ));
                     return;
                 }
@@ -95,9 +95,9 @@ fn transform_track_expression<'a>(
                         *inner_expr = IrExpression::OutputExpr(Box::new_in(
                             OutputExpression::ReadVar(Box::new_in(
                                 ReadVarExpr { name: Ident::from("$item"), source_span: None },
-                                allocator,
+                                &allocator,
                             )),
-                            allocator,
+                            &allocator,
                         ));
                         return;
                     }
@@ -108,9 +108,9 @@ fn transform_track_expression<'a>(
                     *inner_expr = IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from("$item"), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ));
                     return;
                 }
@@ -120,7 +120,7 @@ fn transform_track_expression<'a>(
             if let IrExpression::Ast(ast_expr) = inner_expr {
                 // Try to transform the entire AST expression, handling nested property reads
                 if let Some(transformed) = transform_angular_expression_for_track(
-                    allocator,
+                    &allocator,
                     ast_expr.as_ref(),
                     &index_names_clone,
                     implicit_name_clone.as_ref(),
@@ -135,7 +135,7 @@ fn transform_track_expression<'a>(
                 let stored_expr = expressions.get(*id);
                 // Try to transform the stored expression, handling nested property reads
                 if let Some(transformed) = transform_angular_expression_for_track(
-                    allocator,
+                    &allocator,
                     stored_expr,
                     &index_names_clone,
                     implicit_name_clone.as_ref(),
@@ -172,9 +172,9 @@ fn transform_angular_expression_for_track<'a>(
                 return Some(IrExpression::OutputExpr(Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("$index"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -184,9 +184,9 @@ fn transform_angular_expression_for_track<'a>(
                     return Some(IrExpression::OutputExpr(Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
                             ReadVarExpr { name: Ident::from("$item"), source_span: None },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     )));
                 }
             }
@@ -196,9 +196,9 @@ fn transform_angular_expression_for_track<'a>(
                 return Some(IrExpression::OutputExpr(Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("$item"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -209,7 +209,7 @@ fn transform_angular_expression_for_track<'a>(
         AngularExpression::PropertyRead(prop_read) => {
             // Try to transform the receiver
             if let Some(transformed_receiver) = transform_angular_expression_for_track(
-                allocator,
+                &allocator,
                 &prop_read.receiver,
                 index_names,
                 implicit_name,
@@ -217,12 +217,12 @@ fn transform_angular_expression_for_track<'a>(
                 // Build a resolved property read with the transformed receiver
                 return Some(IrExpression::ResolvedPropertyRead(Box::new_in(
                     ResolvedPropertyReadExpr {
-                        receiver: Box::new_in(transformed_receiver, allocator),
+                        receiver: Box::new_in(transformed_receiver, &allocator),
                         name: prop_read.name.clone(),
                         optional: false,
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )));
             }
             None

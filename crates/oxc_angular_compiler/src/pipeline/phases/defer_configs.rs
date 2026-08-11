@@ -86,8 +86,8 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
         // Angular uses `literalOrArrayLiteral([op.loadingMinimumTime, op.loadingAfterTime])`
         // which emits `null` for missing values, not `0`.
         if config.loading_minimum_time.is_some() || config.loading_after_time.is_some() {
-            let mut elements = OxcVec::with_capacity_in(2, allocator);
-            let mut spreads = oxc_allocator::Vec::with_capacity_in(2, allocator);
+            let mut elements = OxcVec::with_capacity_in(2, &allocator);
+            let mut spreads = oxc_allocator::Vec::with_capacity_in(2, &allocator);
 
             // minimumTime: number or null
             let min_val = match config.loading_minimum_time {
@@ -97,9 +97,9 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
             elements.push(IrExpression::Ast(Box::new_in(
                 crate::ast::expression::AngularExpression::LiteralPrimitive(Box::new_in(
                     LiteralPrimitive { span, source_span, value: min_val },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )));
             spreads.push(false);
 
@@ -111,33 +111,33 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
             elements.push(IrExpression::Ast(Box::new_in(
                 crate::ast::expression::AngularExpression::LiteralPrimitive(Box::new_in(
                     LiteralPrimitive { span, source_span, value: after_val },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )));
             spreads.push(false);
 
             let array_expr = IrExpression::LiteralArray(Box::new_in(
                 IrLiteralArrayExpr { elements, spreads, source_span: None },
-                allocator,
+                &allocator,
             ));
 
             loading_config_expr = Some(Box::new_in(
                 IrExpression::ConstCollected(Box::new_in(
                     ConstCollectedExpr {
-                        expr: Box::new_in(array_expr, allocator),
+                        expr: Box::new_in(array_expr, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ));
         }
 
         // Create placeholder config: [minimumTime]
         if let Some(min_time) = config.placeholder_minimum_time {
-            let mut elements = OxcVec::with_capacity_in(1, allocator);
-            let mut spreads = oxc_allocator::Vec::with_capacity_in(1, allocator);
+            let mut elements = OxcVec::with_capacity_in(1, &allocator);
+            let mut spreads = oxc_allocator::Vec::with_capacity_in(1, &allocator);
             elements.push(IrExpression::Ast(Box::new_in(
                 crate::ast::expression::AngularExpression::LiteralPrimitive(Box::new_in(
                     LiteralPrimitive {
@@ -145,26 +145,26 @@ pub fn configure_defer_instructions(job: &mut ComponentCompilationJob<'_>) {
                         source_span,
                         value: LiteralValue::Number(min_time as f64),
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             )));
             spreads.push(false);
 
             let array_expr = IrExpression::LiteralArray(Box::new_in(
                 IrLiteralArrayExpr { elements, spreads, source_span: None },
-                allocator,
+                &allocator,
             ));
 
             placeholder_config_expr = Some(Box::new_in(
                 IrExpression::ConstCollected(Box::new_in(
                     ConstCollectedExpr {
-                        expr: Box::new_in(array_expr, allocator),
+                        expr: Box::new_in(array_expr, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ));
         }
 

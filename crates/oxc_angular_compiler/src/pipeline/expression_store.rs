@@ -40,7 +40,7 @@ pub struct ExpressionStore<'a> {
 impl<'a> ExpressionStore<'a> {
     /// Creates a new expression store.
     pub fn new(allocator: &'a Allocator) -> Self {
-        Self { expressions: Vec::new_in(allocator) }
+        Self { expressions: Vec::new_in(&allocator) }
     }
 
     /// Stores an expression and returns its ID.
@@ -106,7 +106,7 @@ mod tests {
         // Store an expression
         let expr = AngularExpression::Empty(oxc_allocator::Box::new_in(
             EmptyExpr { span: ParseSpan::new(0, 0), source_span: AbsoluteSourceSpan::new(0, 0) },
-            &allocator,
+            &&allocator,
         ));
         let id = store.store(expr);
 

@@ -86,7 +86,7 @@ impl<'a> HtmlParser<'a> {
         leading_trivia_chars: std::vec::Vec<char>,
     ) -> Self {
         Self::new_internal(
-            allocator,
+            &allocator,
             source,
             url,
             false,
@@ -109,7 +109,7 @@ impl<'a> HtmlParser<'a> {
         options: &super::super::ParseTemplateOptions,
     ) -> Self {
         Self::new_internal(
-            allocator,
+            &allocator,
             source,
             url,
             options.enable_selectorless,
@@ -204,15 +204,15 @@ impl<'a> HtmlParser<'a> {
                         HtmlBlock {
                             block_type: BlockType::If,
                             name: Ident::from(""),
-                            parameters: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            parameters: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             name_span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
                         },
                     );
-                    let node = HtmlNode::Block(Box::new_in(block, self.allocator));
+                    let node = HtmlNode::Block(Box::new_in(block, &self.allocator));
                     self.add_to_parent(node);
                 }
                 ContainerIndex::Element(idx) => {
@@ -227,9 +227,9 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
-                            attrs: Vec::new_in(self.allocator),
-                            directives: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            attrs: Vec::new_in(&self.allocator),
+                            directives: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
@@ -237,14 +237,14 @@ impl<'a> HtmlParser<'a> {
                             is_void: false,
                         },
                     );
-                    let node = HtmlNode::Element(Box::new_in(element, self.allocator));
+                    let node = HtmlNode::Element(Box::new_in(element, &self.allocator));
                     self.add_to_parent(node);
                 }
             }
         }
 
         // Convert root_nodes to arena-allocated Vec
-        let mut nodes = Vec::new_in(self.allocator);
+        let mut nodes = Vec::new_in(&self.allocator);
         for node in self.root_nodes {
             nodes.push(node);
         }
@@ -301,8 +301,8 @@ impl<'a> HtmlParser<'a> {
                     HtmlBlock {
                         block_type: BlockType::If,
                         name: Ident::from(""),
-                        parameters: Vec::new_in(self.allocator),
-                        children: Vec::new_in(self.allocator),
+                        parameters: Vec::new_in(&self.allocator),
+                        children: Vec::new_in(&self.allocator),
                         span: Span::new(0, 0),
                         name_span: Span::new(0, 0),
                         start_span: Span::new(0, 0),
@@ -313,7 +313,7 @@ impl<'a> HtmlParser<'a> {
                     block.end_span = Some(es);
                     block.span = Span::new(block.span.start, es.end);
                 }
-                return Some(HtmlNode::Block(Box::new_in(block, self.allocator)));
+                return Some(HtmlNode::Block(Box::new_in(block, &self.allocator)));
             }
         }
         None
@@ -376,9 +376,9 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
-                            attrs: Vec::new_in(self.allocator),
-                            directives: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            attrs: Vec::new_in(&self.allocator),
+                            directives: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
@@ -387,7 +387,7 @@ impl<'a> HtmlParser<'a> {
                         },
                     );
                     // Add to the next parent on the stack (which is now the matching element)
-                    self.add_to_parent(HtmlNode::Element(Box::new_in(element, self.allocator)));
+                    self.add_to_parent(HtmlNode::Element(Box::new_in(element, &self.allocator)));
                 }
                 ContainerIndex::Block(idx) => {
                     // Blocks are never implicitly closed by a parent end tag.
@@ -398,15 +398,15 @@ impl<'a> HtmlParser<'a> {
                         HtmlBlock {
                             block_type: BlockType::If,
                             name: Ident::from(""),
-                            parameters: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            parameters: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             name_span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
                         },
                     );
-                    self.add_to_parent(HtmlNode::Block(Box::new_in(block, self.allocator)));
+                    self.add_to_parent(HtmlNode::Block(Box::new_in(block, &self.allocator)));
                 }
             }
         }
@@ -421,9 +421,9 @@ impl<'a> HtmlParser<'a> {
                 name: Ident::from(""),
                 component_prefix: None,
                 component_tag_name: None,
-                attrs: Vec::new_in(self.allocator),
-                directives: Vec::new_in(self.allocator),
-                children: Vec::new_in(self.allocator),
+                attrs: Vec::new_in(&self.allocator),
+                directives: Vec::new_in(&self.allocator),
+                children: Vec::new_in(&self.allocator),
                 span: Span::new(0, 0),
                 start_span: Span::new(0, 0),
                 end_span: None,
@@ -435,7 +435,7 @@ impl<'a> HtmlParser<'a> {
             element.end_span = Some(es);
             element.span = Span::new(element.span.start, es.end);
         }
-        (Some(HtmlNode::Element(Box::new_in(element, self.allocator))), unexpected_close_detected)
+        (Some(HtmlNode::Element(Box::new_in(element, &self.allocator))), unexpected_close_detected)
     }
 
     /// Auto-closes elements that have optional end tags based on HTML5 rules.
@@ -653,12 +653,12 @@ impl<'a> HtmlParser<'a> {
         let is_void = is_void_element(&tag_name);
 
         let element = HtmlElement {
-            name: Ident::from_in(tag_name.clone(), self.allocator),
-            component_prefix: component_prefix.map(|p| Ident::from_in(p, self.allocator)),
-            component_tag_name: component_tag_name.map(|t| Ident::from_in(t, self.allocator)),
+            name: Ident::from_in(tag_name.clone(), &self.allocator),
+            component_prefix: component_prefix.map(|p| Ident::from_in(p, &self.allocator)),
+            component_tag_name: component_tag_name.map(|t| Ident::from_in(t, &self.allocator)),
             attrs,
             directives,
-            children: Vec::new_in(self.allocator),
+            children: Vec::new_in(&self.allocator),
             span,
             start_span,
             end_span,
@@ -668,7 +668,7 @@ impl<'a> HtmlParser<'a> {
 
         if is_self_closing || is_void {
             // Self-closing elements are complete immediately
-            self.add_to_parent(HtmlNode::Element(Box::new_in(element, self.allocator)));
+            self.add_to_parent(HtmlNode::Element(Box::new_in(element, &self.allocator)));
         } else {
             // Push onto container stack for child parsing
             self.push_element_container(element);
@@ -740,8 +740,8 @@ impl<'a> HtmlParser<'a> {
     fn parse_attributes_and_directives(
         &mut self,
     ) -> (Vec<'a, HtmlAttribute<'a>>, Vec<'a, HtmlDirective<'a>>) {
-        let mut attrs = Vec::new_in(self.allocator);
-        let mut directives = Vec::new_in(self.allocator);
+        let mut attrs = Vec::new_in(&self.allocator);
+        let mut directives = Vec::new_in(&self.allocator);
 
         while let Some(token) = self.peek() {
             // Handle directive tokens (selectorless mode)
@@ -915,11 +915,11 @@ impl<'a> HtmlParser<'a> {
 
             // Convert tokens to arena-allocated format
             let arena_value_tokens = value_tokens.map(|tokens| {
-                let mut arena_tokens = Vec::new_in(self.allocator);
+                let mut arena_tokens = Vec::new_in(&self.allocator);
                 for (token_type, parts, tok_span) in tokens {
-                    let mut arena_parts = Vec::new_in(self.allocator);
+                    let mut arena_parts = Vec::new_in(&self.allocator);
                     for part in parts {
-                        arena_parts.push(Ident::from_in(part, self.allocator));
+                        arena_parts.push(Ident::from_in(part, &self.allocator));
                     }
                     arena_tokens.push(InterpolatedToken {
                         token_type,
@@ -931,8 +931,8 @@ impl<'a> HtmlParser<'a> {
             });
 
             let attr = HtmlAttribute {
-                name: Ident::from_in(name, self.allocator),
-                value: Ident::from_in(value, self.allocator),
+                name: Ident::from_in(name, &self.allocator),
+                value: Ident::from_in(value, &self.allocator),
                 span,
                 name_span,
                 value_span,
@@ -1098,23 +1098,23 @@ impl<'a> HtmlParser<'a> {
         }
 
         // Convert to arena-allocated tokens
-        let mut arena_tokens = Vec::new_in(self.allocator);
+        let mut arena_tokens = Vec::new_in(&self.allocator);
         for (token_type, parts, span) in tokens {
-            let mut arena_parts = Vec::new_in(self.allocator);
+            let mut arena_parts = Vec::new_in(&self.allocator);
             for part in parts {
-                arena_parts.push(Ident::from_in(part, self.allocator));
+                arena_parts.push(Ident::from_in(part, &self.allocator));
             }
             arena_tokens.push(InterpolatedToken { token_type, parts: arena_parts, span });
         }
 
         let span = self.make_span(start, end);
         let text_node = HtmlText {
-            value: Ident::from_in(text, self.allocator),
+            value: Ident::from_in(text, &self.allocator),
             span,
             full_start,
             tokens: arena_tokens,
         };
-        Some(HtmlNode::Text(Box::new_in(text_node, self.allocator)))
+        Some(HtmlNode::Text(Box::new_in(text_node, &self.allocator)))
     }
 
     /// Parses an incomplete tag (error recovery).
@@ -1145,19 +1145,19 @@ impl<'a> HtmlParser<'a> {
         // Create element with no end span (incomplete)
         // Note: is_self_closing is false because this is an incomplete tag, not explicitly self-closing
         let element = HtmlElement {
-            name: Ident::from_in(tag_name.clone(), self.allocator),
+            name: Ident::from_in(tag_name.clone(), &self.allocator),
             component_prefix: None,
             component_tag_name: None,
-            attrs: Vec::new_in(self.allocator),
-            directives: Vec::new_in(self.allocator),
-            children: Vec::new_in(self.allocator),
+            attrs: Vec::new_in(&self.allocator),
+            directives: Vec::new_in(&self.allocator),
+            children: Vec::new_in(&self.allocator),
             span,
             start_span,
             end_span: None,
             is_self_closing: false,
             is_void: is_void_element(&tag_name),
         };
-        Some(HtmlNode::Element(Box::new_in(element, self.allocator)))
+        Some(HtmlNode::Element(Box::new_in(element, &self.allocator)))
     }
 
     /// Parses a comment.
@@ -1193,8 +1193,8 @@ impl<'a> HtmlParser<'a> {
         };
 
         let span = self.make_span(start, end);
-        let comment = HtmlComment { value: Ident::from_in(value, self.allocator), span };
-        Some(HtmlNode::Comment(Box::new_in(comment, self.allocator)))
+        let comment = HtmlComment { value: Ident::from_in(value, &self.allocator), span };
+        Some(HtmlNode::Comment(Box::new_in(comment, &self.allocator)))
     }
 
     /// Parses a CDATA section and converts it to a text node.
@@ -1231,18 +1231,18 @@ impl<'a> HtmlParser<'a> {
 
         let span = self.make_span(start, end);
         // CDATA content becomes a text node with a single text token
-        let mut tokens = Vec::new_in(self.allocator);
-        let mut parts = Vec::new_in(self.allocator);
-        parts.push(Ident::from_in(value.clone(), self.allocator));
+        let mut tokens = Vec::new_in(&self.allocator);
+        let mut parts = Vec::new_in(&self.allocator);
+        parts.push(Ident::from_in(value.clone(), &self.allocator));
         tokens.push(InterpolatedToken { token_type: InterpolatedTokenType::Text, parts, span });
         // CDATA tokens don't have leading trivia stripped
         let text = HtmlText {
-            value: Ident::from_in(value, self.allocator),
+            value: Ident::from_in(value, &self.allocator),
             span,
             full_start: None,
             tokens,
         };
-        Some(HtmlNode::Text(Box::new_in(text, self.allocator)))
+        Some(HtmlNode::Text(Box::new_in(text, &self.allocator)))
     }
 
     /// Parses a @let declaration.
@@ -1302,14 +1302,14 @@ impl<'a> HtmlParser<'a> {
         let parse_result = expr_parser.parse_binding(value_str, value_span);
 
         let let_decl = HtmlLetDeclaration {
-            name: Ident::from_in(name, self.allocator),
+            name: Ident::from_in(name, &self.allocator),
             value: parse_result.ast,
             span,
             name_span,
             value_span,
         };
 
-        Some(HtmlNode::LetDeclaration(Box::new_in(let_decl, self.allocator)))
+        Some(HtmlNode::LetDeclaration(Box::new_in(let_decl, &self.allocator)))
     }
 
     /// Parses an ICU expansion form.
@@ -1345,7 +1345,7 @@ impl<'a> HtmlParser<'a> {
         };
 
         // Parse cases
-        let mut cases = Vec::new_in(self.allocator);
+        let mut cases = Vec::new_in(&self.allocator);
         while let Some(tok) = self.peek() {
             if tok.token_type == HtmlTokenType::ExpansionFormEnd {
                 break;
@@ -1377,15 +1377,15 @@ impl<'a> HtmlParser<'a> {
         let span = self.make_span(start, end);
 
         let expansion = HtmlExpansion {
-            switch_value: Ident::from_in(switch_value, self.allocator),
-            expansion_type: Ident::from_in(expansion_type, self.allocator),
+            switch_value: Ident::from_in(switch_value, &self.allocator),
+            expansion_type: Ident::from_in(expansion_type, &self.allocator),
             cases,
             span,
             switch_value_span,
             in_i18n_block: false, // Set by i18n processing when inside i18n blocks
         };
 
-        Some(HtmlNode::Expansion(Box::new_in(expansion, self.allocator)))
+        Some(HtmlNode::Expansion(Box::new_in(expansion, &self.allocator)))
     }
 
     /// Parses a single expansion case.
@@ -1461,9 +1461,9 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
-                            attrs: Vec::new_in(self.allocator),
-                            directives: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            attrs: Vec::new_in(&self.allocator),
+                            directives: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
@@ -1471,7 +1471,7 @@ impl<'a> HtmlParser<'a> {
                             is_void: false,
                         },
                     );
-                    self.add_to_parent(HtmlNode::Element(Box::new_in(element, self.allocator)));
+                    self.add_to_parent(HtmlNode::Element(Box::new_in(element, &self.allocator)));
                 }
                 ContainerIndex::Block(idx) => {
                     let block = std::mem::replace(
@@ -1479,15 +1479,15 @@ impl<'a> HtmlParser<'a> {
                         HtmlBlock {
                             block_type: BlockType::If,
                             name: Ident::from(""),
-                            parameters: Vec::new_in(self.allocator),
-                            children: Vec::new_in(self.allocator),
+                            parameters: Vec::new_in(&self.allocator),
+                            children: Vec::new_in(&self.allocator),
                             span: Span::new(0, 0),
                             name_span: Span::new(0, 0),
                             start_span: Span::new(0, 0),
                             end_span: None,
                         },
                     );
-                    self.add_to_parent(HtmlNode::Block(Box::new_in(block, self.allocator)));
+                    self.add_to_parent(HtmlNode::Block(Box::new_in(block, &self.allocator)));
                 }
             }
         }
@@ -1499,7 +1499,7 @@ impl<'a> HtmlParser<'a> {
         self.blocks = saved_blocks;
 
         // Convert to allocator vec
-        let mut expansion = Vec::new_in(self.allocator);
+        let mut expansion = Vec::new_in(&self.allocator);
         for node in expansion_nodes {
             expansion.push(node);
         }
@@ -1521,7 +1521,7 @@ impl<'a> HtmlParser<'a> {
         let expansion_span = self.make_span(exp_start, exp_end);
 
         Some(HtmlExpansionCase {
-            value: Ident::from_in(value, self.allocator),
+            value: Ident::from_in(value, &self.allocator),
             expansion,
             span,
             value_span,
@@ -1559,7 +1559,7 @@ impl<'a> HtmlParser<'a> {
         };
 
         // Collect block parameters
-        let mut parameters = Vec::new_in(self.allocator);
+        let mut parameters = Vec::new_in(&self.allocator);
         while let Some(tok) = self.peek() {
             if tok.token_type == HtmlTokenType::BlockParameter {
                 let Some(param_token) = self.advance() else {
@@ -1571,7 +1571,7 @@ impl<'a> HtmlParser<'a> {
                 let param_end = param_token.end;
                 let param_span = self.make_span(param_start, param_end);
                 parameters.push(HtmlBlockParameter {
-                    expression: Ident::from_in(&param_text, self.allocator),
+                    expression: Ident::from_in(&param_text, &self.allocator),
                     span: param_span,
                 });
             } else {
@@ -1593,9 +1593,9 @@ impl<'a> HtmlParser<'a> {
 
         let block = HtmlBlock {
             block_type,
-            name: Ident::from_in(name, self.allocator),
+            name: Ident::from_in(name, &self.allocator),
             parameters,
-            children: Vec::new_in(self.allocator),
+            children: Vec::new_in(&self.allocator),
             span,
             name_span,
             start_span,
@@ -1616,7 +1616,7 @@ impl<'a> HtmlParser<'a> {
         let name_end = name_token.end;
         let name_span = self.make_span(directive_start, name_end);
 
-        let mut attrs = Vec::new_in(self.allocator);
+        let mut attrs = Vec::new_in(&self.allocator);
         let mut start_paren_span = None;
         let mut end_paren_span = None;
         let mut directive_end = name_end;
@@ -1700,8 +1700,8 @@ impl<'a> HtmlParser<'a> {
                             let attr_name_span = self.make_span(attr_name_start, attr_name_end);
 
                             attrs.push(HtmlAttribute {
-                                name: Ident::from_in(attr_name, self.allocator),
-                                value: Ident::from_in(attr_value, self.allocator),
+                                name: Ident::from_in(attr_name, &self.allocator),
+                                value: Ident::from_in(attr_value, &self.allocator),
                                 span: attr_span,
                                 name_span: attr_name_span,
                                 value_span,
@@ -1726,7 +1726,7 @@ impl<'a> HtmlParser<'a> {
         let span = self.make_span(directive_start, directive_end);
 
         Some(HtmlDirective {
-            name: Ident::from_in(name, self.allocator),
+            name: Ident::from_in(name, &self.allocator),
             attrs,
             span,
             name_span,

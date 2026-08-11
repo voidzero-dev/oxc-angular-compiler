@@ -2163,6 +2163,166 @@ fn test_safe_navigation_migration_forces_legacy_on_v22() {
 }
 
 #[test]
+fn test_safe_navigation_preserved_in_chained_property_bindings_v22() {
+    // CX-47617: when an element has several property bindings, the reify phase
+    // chains them into a single `ɵɵproperty(a)(b)` call. The chaining phase
+    // clones the arguments of every binding after the first, and that clone used
+    // to hard-code `optional: false`, silently dropping the `?.` guard on all but
+    // the first binding. Under Angular v22 (native optional chaining) this emitted
+    // e.g. `ctx.c.d` instead of `ctx.c?.d`, crashing at runtime when `c` is nullish.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.d" [tooltip]="e?.f"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.a?.b"), "first binding must keep `?.`, got:\n{js}");
+    assert!(js.contains("ctx.c?.d"), "second (chained) binding must keep `?.`, got:\n{js}");
+    assert!(js.contains("ctx.e?.f"), "third (chained) binding must keep `?.`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_keyed_and_call_bindings_v22() {
+    // Same chaining-clone bug for SafeKeyedRead (`?.[k]`) and SafeCall (`?.()`)
+    // in later bindings of a chain.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.[k]" [tooltip]="fn?.()"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("ctx.c?.[ctx.k]"), "chained keyed read must keep `?.[`, got:\n{js}");
+    assert!(js.contains("ctx.fn?.()"), "chained safe call must keep `?.()`, got:\n{js}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_attr_class_style_v22() {
+    // The chaining-clone bug affected every chainable binding instruction, not
+    // just ɵɵproperty. Verify attribute, class and style bindings keep `?.` on
+    // their chained (non-first) argument.
+    for (tpl, instr) in [
+        (r#"<div [attr.a]="w?.x" [attr.b]="y?.z"></div>"#, "attribute"),
+        (r#"<div [class.a]="w?.x" [class.b]="y?.z"></div>"#, "class"),
+        (r#"<div [style.a]="w?.x" [style.b]="y?.z"></div>"#, "style"),
+    ] {
+        let js = compile_template_to_js_with_version(
+            tpl,
+            "TestComponent",
+            Some(AngularVersion::new(22, 0, 0)),
+        );
+        assert!(js.contains("ctx.w?.x"), "{instr}: first binding must keep `?.`, got:\n{js}");
+        assert!(js.contains("ctx.y?.z"), "{instr}: chained binding must keep `?.`, got:\n{js}");
+    }
+}
+
+#[test]
+fn test_safe_navigation_preserved_when_nested_in_chained_binding_v22() {
+    // `?.` buried inside a larger expression (under `!`, in a binary, chained,
+    // or in a ternary branch) on a chained binding must survive the recursive
+    // clone.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="!c?.d" [tooltip]="e?.f?.g" [alt]="h ? i?.j : k?.l"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    assert!(js.contains("!ctx.c?.d"), "`?.` under `!` on chained binding must survive, got:\n{js}");
+    assert!(js.contains("ctx.e?.f?.g"), "chained `?.` on chained binding must survive, got:\n{js}");
+    assert!(
+        js.contains("ctx.i?.j"),
+        "`?.` in ternary branch on chained binding must survive, got:\n{js}"
+    );
+    assert!(
+        js.contains("ctx.k?.l"),
+        "`?.` in ternary branch on chained binding must survive, got:\n{js}"
+    );
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_host_property_bindings_v22() {
+    // CX-47617: host property bindings go through the same `chain_for_host` ->
+    // `clone_expression` path as template bindings. Multiple host `[prop]`
+    // bindings chain into `ɵɵhostProperty(a)(b)`, and the chained (non-first)
+    // ones must keep their `?.` guard under Angular v22.
+    use oxc_angular_compiler::{HostMetadataInput, compile_template_to_js_with_options};
+
+    let allocator = Allocator::default();
+    let options = ComponentTransformOptions {
+        angular_version: Some(AngularVersion::new(22, 0, 0)),
+        host: Some(HostMetadataInput {
+            properties: vec![
+                ("[title]".to_string(), "a?.b".to_string()),
+                ("[id]".to_string(), "c?.d".to_string()),
+                ("[lang]".to_string(), "e?.f".to_string()),
+            ],
+            attributes: vec![],
+            listeners: vec![],
+            class_attr: None,
+            style_attr: None,
+        }),
+        selector: Some("my-comp".to_string()),
+        ..Default::default()
+    };
+
+    let output = compile_template_to_js_with_options(
+        &allocator,
+        "<p>hi</p>",
+        "MyComponent",
+        "test.ts",
+        &options,
+    )
+    .expect("compilation should succeed");
+    let code = &output.code;
+
+    assert!(code.contains("ctx.a?.b"), "first host binding must keep `?.`, got:\n{code}");
+    assert!(
+        code.contains("ctx.c?.d"),
+        "second (chained) host binding must keep `?.`, got:\n{code}"
+    );
+    assert!(code.contains("ctx.e?.f"), "third (chained) host binding must keep `?.`, got:\n{code}");
+}
+
+#[test]
+fn test_safe_navigation_preserved_in_chained_bindings_legacy_v21() {
+    // Older Angular (< v22) uses the legacy `== null ? null` expansion instead of
+    // native `?.`. The guard there is a structural ternary, not the `optional`
+    // flag, so the chaining-clone bug never affected legacy output. This test
+    // pins that: every chained binding — not just the first — must keep its own
+    // null-guard ternary in v21, and the fix must not perturb legacy codegen.
+    let js = compile_template_to_js_with_version(
+        r#"<div [title]="a?.b" [subtitle]="c?.d" [tooltip]="e?.f"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 0)),
+    );
+    assert!(!js.contains("?."), "v21 must not emit native optional chaining, got:\n{js}");
+    for (recv, member) in [("ctx.a", "ctx.a.b"), ("ctx.c", "ctx.c.d"), ("ctx.e", "ctx.e.f")] {
+        assert!(
+            js.contains(&format!("({recv} == null)? null: {member}")),
+            "each chained binding must keep its legacy null guard; missing for {member}, got:\n{js}"
+        );
+    }
+}
+
+#[test]
+fn test_two_way_binding_writeback_target_is_never_optional_v22() {
+    // Guard against "helpfully" preserving `?.` when cloning a two-way binding's
+    // write-back assignment target. `a?.b = $event` is a JS SyntaxError (an
+    // optional chain is not a legal assignment target), so the LHS of the
+    // `|| (target = value)` clause must stay a plain member access even when the
+    // bound expression uses safe navigation under Angular v22.
+    let js = compile_template_to_js_with_version(
+        r#"<input [(ngModel)]="a?.b">"#,
+        "TestComponent",
+        Some(AngularVersion::new(22, 0, 0)),
+    );
+    // The twoWayBindingSet argument keeps its `?.` (it is only read, never assigned)...
+    assert!(js.contains("ɵɵtwoWayBindingSet(ctx.a?.b"), "read side should keep `?.`, got:\n{js}");
+    // ...but the write-back assignment target must be a plain, assignable read.
+    assert!(js.contains("ctx.a.b = $event"), "write-back LHS must be non-optional, got:\n{js}");
+    assert!(
+        !js.contains("a?.b = $event"),
+        "must not emit an illegal optional-chain LHS, got:\n{js}"
+    );
+}
+
+#[test]
 fn test_safe_navigation_migration_ignores_qualified_call() {
     // Only the *unqualified* `$safeNavigationMigration(...)` helper is magic. A
     // method named `$safeNavigationMigration` on some object is a legitimate call

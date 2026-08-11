@@ -64,10 +64,10 @@ pub fn generate_temporary_variables(job: &mut ComponentCompilationJob<'_>) {
 
     // Process all views - both create and update ops (matching TypeScript behavior)
     for view in job.all_views_mut() {
-        let mut create_stmts = generate_temporaries_for_create(&mut view.create, allocator);
+        let mut create_stmts = generate_temporaries_for_create(&mut view.create, &allocator);
         view.create.prepend(&mut create_stmts);
 
-        let mut update_stmts = generate_temporaries_for_update(&mut view.update, allocator);
+        let mut update_stmts = generate_temporaries_for_update(&mut view.update, &allocator);
         view.update.prepend(&mut update_stmts);
     }
 }
@@ -111,7 +111,7 @@ fn generate_temporaries_for_create<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, allocator);
+                assign_temp_names(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -141,26 +141,26 @@ fn generate_temporaries_for_create<'a>(
                 let mut handler_stmts = generate_temporaries_for_handler_ops_with_expression(
                     &mut listener.handler_ops,
                     &mut listener.handler_expression,
-                    allocator,
+                    &allocator,
                 );
-                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, allocator);
+                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, &allocator);
             }
             CreateOp::AnimationListener(listener) => {
                 let mut handler_stmts =
-                    generate_temporaries_for_handler_ops(&mut listener.handler_ops, allocator);
-                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, allocator);
+                    generate_temporaries_for_handler_ops(&mut listener.handler_ops, &allocator);
+                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, &allocator);
             }
             CreateOp::TwoWayListener(listener) => {
                 let mut handler_stmts =
-                    generate_temporaries_for_handler_ops(&mut listener.handler_ops, allocator);
-                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, allocator);
+                    generate_temporaries_for_handler_ops(&mut listener.handler_ops, &allocator);
+                prepend_update_ops(&mut listener.handler_ops, &mut handler_stmts, &allocator);
             }
             CreateOp::RepeaterCreate(repeater) => {
                 // Process track_by_ops if present
                 if let Some(track_by_ops) = &mut repeater.track_by_ops {
                     let mut track_stmts =
-                        generate_temporaries_for_handler_ops(track_by_ops, allocator);
-                    prepend_update_ops(track_by_ops, &mut track_stmts, allocator);
+                        generate_temporaries_for_handler_ops(track_by_ops, &allocator);
+                    prepend_update_ops(track_by_ops, &mut track_stmts, &allocator);
                 }
             }
             _ => {}
@@ -207,7 +207,7 @@ fn generate_temporaries_for_handler_ops<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, allocator);
+                assign_temp_names(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -245,7 +245,7 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
     allocator: &'a Allocator,
 ) -> Vec<UpdateOp<'a>> {
     // First, process handler_ops exactly like generate_temporaries_for_handler_ops
-    let mut generated_statements = generate_temporaries_for_handler_ops(ops, allocator);
+    let mut generated_statements = generate_temporaries_for_handler_ops(ops, &allocator);
 
     // Then process handler_expression once, with op_count = ops.len().
     // In Angular TS, the return expression is the last entry in handlerOps,
@@ -277,7 +277,7 @@ fn generate_temporaries_for_handler_ops_with_expression<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, allocator);
+                assign_temp_names(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -308,7 +308,7 @@ fn prepend_update_ops<'a>(
     }
 
     // Create a new vec with capacity for both stmts and ops
-    let mut new_ops = oxc_allocator::Vec::with_capacity_in(stmts.len() + ops.len(), allocator);
+    let mut new_ops = oxc_allocator::Vec::with_capacity_in(stmts.len() + ops.len(), &allocator);
 
     // Add statement ops first (prepend)
     for stmt in stmts.drain(..) {
@@ -360,7 +360,7 @@ fn generate_temporaries_for_update<'a>(
                 if flags.contains(VisitorContextFlag::IN_CHILD_OPERATION) {
                     return;
                 }
-                assign_temp_names(expr, &tracker, allocator);
+                assign_temp_names(expr, &tracker, &allocator);
             },
             VisitorContextFlag::NONE,
         );
@@ -394,7 +394,7 @@ fn create_declare_var_statement<'a>(allocator: &'a Allocator, name: &str) -> Out
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -426,114 +426,114 @@ fn assign_temp_names<'a>(
         }
         // Recursively process nested expressions
         IrExpression::SafeNavigationMigration(m) => {
-            assign_temp_names(&mut m.expr, tracker, allocator);
+            assign_temp_names(&mut m.expr, tracker, &allocator);
         }
         IrExpression::SafeTernary(st) => {
-            assign_temp_names(&mut st.guard, tracker, allocator);
-            assign_temp_names(&mut st.expr, tracker, allocator);
+            assign_temp_names(&mut st.guard, tracker, &allocator);
+            assign_temp_names(&mut st.expr, tracker, &allocator);
         }
         IrExpression::Ternary(t) => {
-            assign_temp_names(&mut t.condition, tracker, allocator);
-            assign_temp_names(&mut t.true_expr, tracker, allocator);
-            assign_temp_names(&mut t.false_expr, tracker, allocator);
+            assign_temp_names(&mut t.condition, tracker, &allocator);
+            assign_temp_names(&mut t.true_expr, tracker, &allocator);
+            assign_temp_names(&mut t.false_expr, tracker, &allocator);
         }
         IrExpression::SafePropertyRead(sp) => {
-            assign_temp_names(&mut sp.receiver, tracker, allocator);
+            assign_temp_names(&mut sp.receiver, tracker, &allocator);
         }
         IrExpression::SafeKeyedRead(sk) => {
-            assign_temp_names(&mut sk.receiver, tracker, allocator);
-            assign_temp_names(&mut sk.index, tracker, allocator);
+            assign_temp_names(&mut sk.receiver, tracker, &allocator);
+            assign_temp_names(&mut sk.index, tracker, &allocator);
         }
         IrExpression::SafeInvokeFunction(sf) => {
-            assign_temp_names(&mut sf.receiver, tracker, allocator);
+            assign_temp_names(&mut sf.receiver, tracker, &allocator);
             for arg in sf.args.iter_mut() {
-                assign_temp_names(arg, tracker, allocator);
+                assign_temp_names(arg, tracker, &allocator);
             }
         }
         IrExpression::PipeBinding(pb) => {
             for arg in pb.args.iter_mut() {
-                assign_temp_names(arg, tracker, allocator);
+                assign_temp_names(arg, tracker, &allocator);
             }
         }
         IrExpression::PipeBindingVariadic(pbv) => {
-            assign_temp_names(&mut pbv.args, tracker, allocator);
+            assign_temp_names(&mut pbv.args, tracker, &allocator);
         }
         IrExpression::PureFunction(pf) => {
             for arg in pf.args.iter_mut() {
-                assign_temp_names(arg, tracker, allocator);
+                assign_temp_names(arg, tracker, &allocator);
             }
         }
         IrExpression::Interpolation(i) => {
             for e in i.expressions.iter_mut() {
-                assign_temp_names(e, tracker, allocator);
+                assign_temp_names(e, tracker, &allocator);
             }
         }
         IrExpression::RestoreView(rv) => {
             use crate::ir::expression::RestoreViewTarget;
             if let RestoreViewTarget::Dynamic(e) = &mut rv.view {
-                assign_temp_names(e, tracker, allocator);
+                assign_temp_names(e, tracker, &allocator);
             }
         }
         IrExpression::ResetView(rv) => {
-            assign_temp_names(&mut rv.expr, tracker, allocator);
+            assign_temp_names(&mut rv.expr, tracker, &allocator);
         }
         IrExpression::ConditionalCase(cc) => {
             if let Some(e) = &mut cc.expr {
-                assign_temp_names(e, tracker, allocator);
+                assign_temp_names(e, tracker, &allocator);
             }
         }
         IrExpression::TwoWayBindingSet(tbs) => {
-            assign_temp_names(&mut tbs.target, tracker, allocator);
-            assign_temp_names(&mut tbs.value, tracker, allocator);
+            assign_temp_names(&mut tbs.target, tracker, &allocator);
+            assign_temp_names(&mut tbs.value, tracker, &allocator);
         }
         IrExpression::StoreLet(sl) => {
-            assign_temp_names(&mut sl.value, tracker, allocator);
+            assign_temp_names(&mut sl.value, tracker, &allocator);
         }
         IrExpression::ConstCollected(cc) => {
-            assign_temp_names(&mut cc.expr, tracker, allocator);
+            assign_temp_names(&mut cc.expr, tracker, &allocator);
         }
         IrExpression::Binary(binary) => {
-            assign_temp_names(&mut binary.lhs, tracker, allocator);
-            assign_temp_names(&mut binary.rhs, tracker, allocator);
+            assign_temp_names(&mut binary.lhs, tracker, &allocator);
+            assign_temp_names(&mut binary.rhs, tracker, &allocator);
         }
         IrExpression::ResolvedPropertyRead(rpr) => {
-            assign_temp_names(&mut rpr.receiver, tracker, allocator);
+            assign_temp_names(&mut rpr.receiver, tracker, &allocator);
         }
         IrExpression::ResolvedBinary(rb) => {
-            assign_temp_names(&mut rb.left, tracker, allocator);
-            assign_temp_names(&mut rb.right, tracker, allocator);
+            assign_temp_names(&mut rb.left, tracker, &allocator);
+            assign_temp_names(&mut rb.right, tracker, &allocator);
         }
         IrExpression::ResolvedCall(rc) => {
-            assign_temp_names(&mut rc.receiver, tracker, allocator);
+            assign_temp_names(&mut rc.receiver, tracker, &allocator);
             for arg in rc.args.iter_mut() {
-                assign_temp_names(arg, tracker, allocator);
+                assign_temp_names(arg, tracker, &allocator);
             }
         }
         IrExpression::ResolvedKeyedRead(rkr) => {
-            assign_temp_names(&mut rkr.receiver, tracker, allocator);
-            assign_temp_names(&mut rkr.key, tracker, allocator);
+            assign_temp_names(&mut rkr.receiver, tracker, &allocator);
+            assign_temp_names(&mut rkr.key, tracker, &allocator);
         }
         IrExpression::ResolvedSafePropertyRead(rspr) => {
-            assign_temp_names(&mut rspr.receiver, tracker, allocator);
+            assign_temp_names(&mut rspr.receiver, tracker, &allocator);
         }
         IrExpression::DerivedLiteralArray(arr) => {
             for entry in arr.entries.iter_mut() {
-                assign_temp_names(entry, tracker, allocator);
+                assign_temp_names(entry, tracker, &allocator);
             }
         }
         IrExpression::DerivedLiteralMap(map) => {
             for value in map.values.iter_mut() {
-                assign_temp_names(value, tracker, allocator);
+                assign_temp_names(value, tracker, &allocator);
             }
         }
         IrExpression::LiteralArray(arr) => {
             for elem in arr.elements.iter_mut() {
-                assign_temp_names(elem, tracker, allocator);
+                assign_temp_names(elem, tracker, &allocator);
             }
         }
         IrExpression::LiteralMap(map) => {
             for value in map.values.iter_mut() {
-                assign_temp_names(value, tracker, allocator);
+                assign_temp_names(value, tracker, &allocator);
             }
         }
         // Leaf expressions - no nested expressions
@@ -557,28 +557,28 @@ fn assign_temp_names<'a>(
             // AssignTemporary/ReadTemporary - those only exist at the IR level
         }
         IrExpression::Not(n) => {
-            assign_temp_names(&mut n.expr, tracker, allocator);
+            assign_temp_names(&mut n.expr, tracker, &allocator);
         }
         IrExpression::Unary(u) => {
-            assign_temp_names(&mut u.expr, tracker, allocator);
+            assign_temp_names(&mut u.expr, tracker, &allocator);
         }
         IrExpression::Typeof(t) => {
-            assign_temp_names(&mut t.expr, tracker, allocator);
+            assign_temp_names(&mut t.expr, tracker, &allocator);
         }
         IrExpression::Void(v) => {
-            assign_temp_names(&mut v.expr, tracker, allocator);
+            assign_temp_names(&mut v.expr, tracker, &allocator);
         }
         IrExpression::ResolvedTemplateLiteral(rtl) => {
             for e in rtl.expressions.iter_mut() {
-                assign_temp_names(e, tracker, allocator);
+                assign_temp_names(e, tracker, &allocator);
             }
         }
 
         IrExpression::ArrowFunction(arrow_fn) => {
-            assign_temp_names(&mut arrow_fn.body, tracker, allocator);
+            assign_temp_names(&mut arrow_fn.body, tracker, &allocator);
         }
         IrExpression::Parenthesized(paren) => {
-            assign_temp_names(&mut paren.expr, tracker, allocator);
+            assign_temp_names(&mut paren.expr, tracker, &allocator);
         }
     }
 }
@@ -669,9 +669,9 @@ impl TempVarTracker {
 pub fn generate_temporary_variables_for_host(job: &mut HostBindingCompilationJob<'_>) {
     let allocator = job.allocator;
 
-    let mut create_stmts = generate_temporaries_for_create(&mut job.root.create, allocator);
+    let mut create_stmts = generate_temporaries_for_create(&mut job.root.create, &allocator);
     job.root.create.prepend(&mut create_stmts);
 
-    let mut update_stmts = generate_temporaries_for_update(&mut job.root.update, allocator);
+    let mut update_stmts = generate_temporaries_for_update(&mut job.root.update, &allocator);
     job.root.update.prepend(&mut update_stmts);
 }

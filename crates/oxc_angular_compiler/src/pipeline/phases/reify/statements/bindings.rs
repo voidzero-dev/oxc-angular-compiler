@@ -54,15 +54,15 @@ fn create_sanitizer_expr<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: sanitizer.clone(),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -73,10 +73,10 @@ pub fn create_property_stmt_with_expr<'a>(
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     if let Some(san) = sanitizer {
@@ -94,10 +94,10 @@ pub fn create_aria_property_stmt<'a>(
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::ARIA_PROPERTY, args)
@@ -109,10 +109,10 @@ pub fn create_binding_stmt_with_expr<'a>(
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     // This should be specialized by binding_specialization phase
@@ -126,17 +126,17 @@ pub fn create_style_prop_stmt_with_expr<'a>(
     value: OutputExpression<'a>,
     unit: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     // Add unit suffix if present
     if let Some(unit_val) = unit {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(unit_val.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     create_instruction_call_stmt(allocator, Identifiers::STYLE_PROP, args)
@@ -148,10 +148,10 @@ pub fn create_class_prop_stmt_with_expr<'a>(
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::CLASS_PROP, args)
@@ -168,10 +168,10 @@ pub fn create_attribute_stmt_with_expr<'a>(
     sanitizer: Option<&Ident<'a>>,
     namespace: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     // Add sanitizer if present, or null if namespace is present
@@ -181,7 +181,7 @@ pub fn create_attribute_stmt_with_expr<'a>(
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -189,7 +189,7 @@ pub fn create_attribute_stmt_with_expr<'a>(
     if let Some(ns) = namespace {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(ns.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     create_instruction_call_stmt(allocator, Identifiers::ATTRIBUTE, args)
@@ -202,10 +202,10 @@ pub fn create_two_way_property_stmt<'a>(
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     if let Some(san) = sanitizer {
@@ -226,10 +226,10 @@ pub fn create_dom_property_stmt<'a>(
     sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let remapped_name = remap_dom_property(name);
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(remapped_name), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     if let Some(san) = sanitizer {
@@ -243,7 +243,7 @@ pub fn create_style_map_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::STYLE_MAP, args)
 }
@@ -253,7 +253,7 @@ pub fn create_class_map_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(value);
     create_instruction_call_stmt(allocator, Identifiers::CLASS_MAP, args)
 }
@@ -294,11 +294,11 @@ pub fn create_property_interpolate_stmt<'a>(
     // and sanitizer). Otherwise a singleton like `{{url}}` with a sanitizer would
     // mis-select propertyInterpolate1 instead of propertyInterpolate.
     let interp_args_len = interp_args.len();
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // First arg: property name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     // Then interleaved strings and expressions
     for arg in interp_args {
@@ -335,11 +335,11 @@ pub fn create_attribute_interpolate_stmt<'a>(
 ) -> OutputStatement<'a> {
     // Save length before consuming — same reason as create_property_interpolate_stmt.
     let interp_args_len = interp_args.len();
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // First arg: attribute name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     // Then interleaved strings and expressions
     for arg in interp_args {
@@ -352,7 +352,7 @@ pub fn create_attribute_interpolate_stmt<'a>(
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
@@ -360,7 +360,7 @@ pub fn create_attribute_interpolate_stmt<'a>(
     if let Some(ns) = namespace {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(ns.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     let instruction = if expr_count == 1 && interp_args_len == 1 {
@@ -381,10 +381,10 @@ pub fn create_host_property_stmt<'a>(
     sanitizer: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
     let remapped_name = remap_dom_property(name);
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(remapped_name), source_span: None },
-        allocator,
+        &allocator,
     )));
     args.push(value);
     if let Some(san) = sanitizer {
@@ -407,11 +407,11 @@ pub fn create_style_prop_interpolate_stmt<'a>(
     expr_count: usize,
     unit: Option<&Ident<'a>>,
 ) -> OutputStatement<'a> {
-    let mut args = OxcVec::new_in(allocator);
+    let mut args = OxcVec::new_in(&allocator);
     // First arg: style property name
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
-        allocator,
+        &allocator,
     )));
     // Then interleaved strings and expressions
     for arg in interp_args {
@@ -421,7 +421,7 @@ pub fn create_style_prop_interpolate_stmt<'a>(
     if let Some(unit_val) = unit {
         args.push(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::String(unit_val.clone()), source_span: None },
-            allocator,
+            &allocator,
         )));
     }
     let instruction = get_style_prop_interpolate_instruction(expr_count);

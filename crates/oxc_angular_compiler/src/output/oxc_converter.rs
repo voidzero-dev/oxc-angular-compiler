@@ -55,17 +55,17 @@ pub fn convert_oxc_expression<'a>(
         // Literals
         Expression::BooleanLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Boolean(lit.value.into()), source_span: None },
-            allocator,
+            &allocator,
         ))),
 
         Expression::NullLiteral(_) => Some(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Null, source_span: None },
-            allocator,
+            &allocator,
         ))),
 
         Expression::NumericLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
             LiteralExpr { value: LiteralValue::Number(lit.value.into()), source_span: None },
-            allocator,
+            &allocator,
         ))),
 
         Expression::StringLiteral(lit) => Some(OutputExpression::Literal(Box::new_in(
@@ -73,13 +73,13 @@ pub fn convert_oxc_expression<'a>(
                 value: LiteralValue::String(lit.value.clone().into()),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))),
 
         // Identifiers
         Expression::Identifier(id) => Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: id.name.clone().into(), source_span: None },
-            allocator,
+            &allocator,
         ))),
 
         // Array expressions
@@ -109,12 +109,12 @@ pub fn convert_oxc_expression<'a>(
             let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
                     name: member.property.name.clone().into(),
                     optional: member.optional,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -123,12 +123,12 @@ pub fn convert_oxc_expression<'a>(
             let index = convert_oxc_expression(allocator, &member.expression, source_text)?;
             Some(OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver, allocator),
-                    index: Box::new_in(index, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
+                    index: Box::new_in(index, &allocator),
                     optional: member.optional,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -145,11 +145,11 @@ pub fn convert_oxc_expression<'a>(
             Some(OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator,
-                    lhs: Box::new_in(lhs, allocator),
-                    rhs: Box::new_in(rhs, allocator),
+                    lhs: Box::new_in(lhs, &allocator),
+                    rhs: Box::new_in(rhs, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -165,11 +165,11 @@ pub fn convert_oxc_expression<'a>(
             Some(OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator,
-                    lhs: Box::new_in(lhs, allocator),
-                    rhs: Box::new_in(rhs, allocator),
+                    lhs: Box::new_in(lhs, &allocator),
+                    rhs: Box::new_in(rhs, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -185,12 +185,12 @@ pub fn convert_oxc_expression<'a>(
             let false_case = convert_oxc_expression(allocator, &cond.alternate, source_text)?;
             Some(OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
-                    condition: Box::new_in(condition, allocator),
-                    true_case: Box::new_in(true_case, allocator),
-                    false_case: Some(Box::new_in(false_case, allocator)),
+                    condition: Box::new_in(condition, &allocator),
+                    true_case: Box::new_in(true_case, &allocator),
+                    false_case: Some(Box::new_in(false_case, &allocator)),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
 
@@ -201,27 +201,27 @@ pub fn convert_oxc_expression<'a>(
         Expression::ParenthesizedExpression(paren) => {
             let inner = convert_oxc_expression(allocator, &paren.expression, source_text)?;
             Some(OutputExpression::Parenthesized(Box::new_in(
-                ParenthesizedExpr { expr: Box::new_in(inner, allocator), source_span: None },
-                allocator,
+                ParenthesizedExpr { expr: Box::new_in(inner, &allocator), source_span: None },
+                &allocator,
             )))
         }
 
         // Sequence expressions (comma operator)
         Expression::SequenceExpression(seq) => {
-            let mut parts = OxcVec::with_capacity_in(seq.expressions.len(), allocator);
+            let mut parts = OxcVec::with_capacity_in(seq.expressions.len(), &allocator);
             for expr in &seq.expressions {
                 parts.push(convert_oxc_expression(allocator, expr, source_text)?);
             }
             Some(OutputExpression::Comma(Box::new_in(
                 CommaExpr { parts, source_span: None },
-                allocator,
+                &allocator,
             )))
         }
 
         // This expression
         Expression::ThisExpression(_) => Some(OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("this"), source_span: None },
-            allocator,
+            &allocator,
         ))),
 
         // TypeScript type expressions - unwrap the inner expression
@@ -257,7 +257,7 @@ fn convert_array_expression<'a>(
     arr: &oxc_ast::ast::ArrayExpression<'a>,
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
-    let mut entries = OxcVec::with_capacity_in(arr.elements.len(), allocator);
+    let mut entries = OxcVec::with_capacity_in(arr.elements.len(), &allocator);
 
     for element in &arr.elements {
         match element {
@@ -266,10 +266,10 @@ fn convert_array_expression<'a>(
                 let inner_expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
                 let spread_expr = OutputExpression::SpreadElement(Box::new_in(
                     SpreadElementExpr {
-                        expr: Box::new_in(inner_expr, allocator),
+                        expr: Box::new_in(inner_expr, &allocator),
                         source_span: None,
                     },
-                    allocator,
+                    &allocator,
                 ));
                 entries.push(spread_expr);
             }
@@ -277,7 +277,7 @@ fn convert_array_expression<'a>(
                 // Elision (empty slot) - push undefined
                 entries.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
             _ => {
@@ -291,7 +291,7 @@ fn convert_array_expression<'a>(
 
     Some(OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -301,7 +301,7 @@ fn convert_object_expression<'a>(
     obj: &oxc_ast::ast::ObjectExpression<'a>,
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
-    let mut entries = OxcVec::with_capacity_in(obj.properties.len(), allocator);
+    let mut entries = OxcVec::with_capacity_in(obj.properties.len(), &allocator);
 
     for prop in &obj.properties {
         match prop {
@@ -335,7 +335,7 @@ fn convert_object_expression<'a>(
 
     Some(OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -359,7 +359,7 @@ fn convert_call_expression_with_optional<'a>(
     let fn_expr = convert_oxc_expression(allocator, &call.callee, source_text)?;
 
     // Convert arguments
-    let mut args = OxcVec::with_capacity_in(call.arguments.len(), allocator);
+    let mut args = OxcVec::with_capacity_in(call.arguments.len(), &allocator);
     for arg in &call.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
@@ -377,13 +377,13 @@ fn convert_call_expression_with_optional<'a>(
 
     Some(OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -397,7 +397,7 @@ fn convert_new_expression<'a>(
     let class_expr = convert_oxc_expression(allocator, &new_expr.callee, source_text)?;
 
     // Convert arguments
-    let mut args = OxcVec::with_capacity_in(new_expr.arguments.len(), allocator);
+    let mut args = OxcVec::with_capacity_in(new_expr.arguments.len(), &allocator);
     for arg in &new_expr.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
@@ -413,8 +413,12 @@ fn convert_new_expression<'a>(
     }
 
     Some(OutputExpression::Instantiate(Box::new_in(
-        InstantiateExpr { class_expr: Box::new_in(class_expr, allocator), args, source_span: None },
-        allocator,
+        InstantiateExpr {
+            class_expr: Box::new_in(class_expr, &allocator),
+            args,
+            source_span: None,
+        },
+        &allocator,
     )))
 }
 
@@ -425,7 +429,7 @@ fn convert_arrow_function_expression<'a>(
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert parameters
-    let mut params = OxcVec::with_capacity_in(arrow.params.items.len(), allocator);
+    let mut params = OxcVec::with_capacity_in(arrow.params.items.len(), &allocator);
     for param in &arrow.params.items {
         // For simplicity, only handle identifier patterns
         if let BindingPattern::BindingIdentifier(id) = &param.pattern {
@@ -442,7 +446,9 @@ fn convert_arrow_function_expression<'a>(
         let expr_body = arrow.body.statements.first()?;
         if let oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) = expr_body {
             match convert_oxc_expression(allocator, &expr_stmt.expression, source_text) {
-                Some(converted) => ArrowFunctionBody::Expression(Box::new_in(converted, allocator)),
+                Some(converted) => {
+                    ArrowFunctionBody::Expression(Box::new_in(converted, &allocator))
+                }
                 None => {
                     // Unsupported expression (e.g., await, yield, class) —
                     // fall back to raw source for the entire arrow
@@ -456,7 +462,7 @@ fn convert_arrow_function_expression<'a>(
         // Block body: () => { ... }
         // If any statement cannot be converted, fall back to raw source to avoid
         // silently dropping statements (which corrupts the function body).
-        let mut statements = OxcVec::with_capacity_in(arrow.body.statements.len(), allocator);
+        let mut statements = OxcVec::with_capacity_in(arrow.body.statements.len(), &allocator);
         for stmt in &arrow.body.statements {
             match convert_statement(allocator, stmt, source_text) {
                 Some(output_stmt) => statements.push(output_stmt),
@@ -471,7 +477,7 @@ fn convert_arrow_function_expression<'a>(
 
     Some(OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr { params, body, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -495,19 +501,19 @@ fn convert_statement<'a>(
                 .unwrap_or_else(|| {
                     OutputExpression::Literal(Box::new_in(
                         LiteralExpr { value: LiteralValue::Undefined, source_span: None },
-                        allocator,
+                        &allocator,
                     ))
                 });
             Some(OutputStatement::Return(Box::new_in(
                 ReturnStatement { value, source_span: None },
-                allocator,
+                &allocator,
             )))
         }
         oxc_ast::ast::Statement::ExpressionStatement(expr_stmt) => {
             let expr = convert_oxc_expression(allocator, &expr_stmt.expression, source_text)?;
             Some(OutputStatement::Expression(Box::new_in(
                 super::ast::ExpressionStatement { expr, source_span: None },
-                allocator,
+                &allocator,
             )))
         }
         // Other statement types not supported — caller should fall back to raw source
@@ -525,34 +531,34 @@ fn convert_unary_expression<'a>(
 
     match unary.operator {
         OxcUnaryOperator::LogicalNot => Some(OutputExpression::Not(Box::new_in(
-            NotExpr { condition: Box::new_in(expr, allocator), source_span: None },
-            allocator,
+            NotExpr { condition: Box::new_in(expr, &allocator), source_span: None },
+            &allocator,
         ))),
         OxcUnaryOperator::Typeof => Some(OutputExpression::Typeof(Box::new_in(
-            TypeofExpr { expr: Box::new_in(expr, allocator), source_span: None },
-            allocator,
+            TypeofExpr { expr: Box::new_in(expr, &allocator), source_span: None },
+            &allocator,
         ))),
         OxcUnaryOperator::Void => Some(OutputExpression::Void(Box::new_in(
-            VoidExpr { expr: Box::new_in(expr, allocator), source_span: None },
-            allocator,
+            VoidExpr { expr: Box::new_in(expr, &allocator), source_span: None },
+            &allocator,
         ))),
         OxcUnaryOperator::UnaryPlus => Some(OutputExpression::UnaryOperator(Box::new_in(
             UnaryOperatorExpr {
                 operator: UnaryOperator::Plus,
-                expr: Box::new_in(expr, allocator),
+                expr: Box::new_in(expr, &allocator),
                 parens: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))),
         OxcUnaryOperator::UnaryNegation => Some(OutputExpression::UnaryOperator(Box::new_in(
             UnaryOperatorExpr {
                 operator: UnaryOperator::Minus,
-                expr: Box::new_in(expr, allocator),
+                expr: Box::new_in(expr, &allocator),
                 parens: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))),
         // BitwiseNot and Delete operators not directly supported in OutputExpression
         OxcUnaryOperator::BitwiseNot | OxcUnaryOperator::Delete => None,
@@ -566,7 +572,7 @@ fn convert_template_literal<'a>(
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     // Convert quasis to template literal elements
-    let mut elements = OxcVec::with_capacity_in(tpl.quasis.len(), allocator);
+    let mut elements = OxcVec::with_capacity_in(tpl.quasis.len(), &allocator);
     for quasi in &tpl.quasis {
         let text = quasi
             .value
@@ -583,14 +589,14 @@ fn convert_template_literal<'a>(
     }
 
     // Convert expressions
-    let mut expressions = OxcVec::with_capacity_in(tpl.expressions.len(), allocator);
+    let mut expressions = OxcVec::with_capacity_in(tpl.expressions.len(), &allocator);
     for expr in &tpl.expressions {
         expressions.push(convert_oxc_expression(allocator, expr, source_text)?);
     }
 
     Some(OutputExpression::TemplateLiteral(Box::new_in(
         TemplateLiteralExpr { elements, expressions, source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 
@@ -619,24 +625,24 @@ fn convert_chain_element<'a>(
             let index = convert_oxc_expression(allocator, &member.expression, source_text)?;
             Some(OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
-                    receiver: Box::new_in(receiver, allocator),
-                    index: Box::new_in(index, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
+                    index: Box::new_in(index, &allocator),
                     optional: member.optional,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
         ChainElement::StaticMemberExpression(member) => {
             let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
             Some(OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
-                    receiver: Box::new_in(receiver, allocator),
+                    receiver: Box::new_in(receiver, &allocator),
                     name: member.property.name.clone().into(),
                     optional: member.optional,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
         ChainElement::PrivateFieldExpression(_) => {
@@ -692,7 +698,7 @@ fn make_raw_source<'a>(
     let js = strip_expression_types(raw);
     Some(OutputExpression::RawSource(Box::new_in(
         RawSourceExpr { source: Ident::from(allocator.alloc_str(&js)), source_span: None },
-        allocator,
+        &allocator,
     )))
 }
 

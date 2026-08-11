@@ -31,7 +31,7 @@ pub fn compile_declare_injector_from_metadata<'a>(
     allocator: &'a Allocator,
     meta: &R3InjectorMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(allocator);
+    let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_INJECTOR));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
@@ -60,7 +60,7 @@ pub fn compile_declare_injector_from_metadata<'a>(
         entries.push(LiteralMapEntry::new(Ident::from("imports"), raw.clone_in(allocator), false));
     } else if !meta.imports.is_empty() {
         let mut elements: Vec<'a, OutputExpression<'a>> =
-            Vec::with_capacity_in(meta.imports.len(), allocator);
+            Vec::with_capacity_in(meta.imports.len(), &allocator);
         for imp in &meta.imports {
             elements.push(imp.clone_in(allocator));
         }
@@ -68,7 +68,7 @@ pub fn compile_declare_injector_from_metadata<'a>(
             Ident::from("imports"),
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries: elements, source_span: None },
-                allocator,
+                &allocator,
             )),
             false,
         ));
@@ -86,26 +86,26 @@ fn invoke_declare<'a>(
 ) -> OutputExpression<'a> {
     let map_expr = OutputExpression::LiteralMap(Box::new_in(
         LiteralMapExpr { entries, source_span: None },
-        allocator,
+        &allocator,
     ));
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -116,19 +116,19 @@ fn namespaced_prop<'a>(
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, receiver), allocator),
+            receiver: Box::new_in(read_var(allocator, receiver), &allocator),
             name: Ident::from(prop),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 fn string_literal<'a>(allocator: &'a Allocator, value: &'static str) -> OutputExpression<'a> {
     OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::String(Ident::from(value)), source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 

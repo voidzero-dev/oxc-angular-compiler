@@ -76,48 +76,48 @@ pub(crate) fn wrap_forward_ref<'a>(
     allocator: &'a Allocator,
     expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
     body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: expr, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     let inner_fn = OutputExpression::Function(Box::new_in(
         FunctionExpr {
             name: None,
-            params: Vec::new_in(allocator),
+            params: Vec::new_in(&allocator),
             statements: body,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     let i0 = OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-        allocator,
+        &allocator,
     ));
     let forward_ref_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(i0, allocator),
+            receiver: Box::new_in(i0, &allocator),
             name: Ident::from(Identifiers::FORWARD_REF),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(inner_fn);
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(forward_ref_fn, allocator),
+            fn_expr: Box::new_in(forward_ref_fn, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 

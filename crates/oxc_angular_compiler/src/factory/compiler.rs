@@ -116,7 +116,7 @@ pub fn compile_factory_function<'a>(
         // For delegated factories, only use the type parameter
         OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: factory_type_param.clone(), source_span: None },
-            allocator,
+            &allocator,
         ))
     } else {
         // (__ngFactoryType__ || MyClass)
@@ -126,14 +126,14 @@ pub fn compile_factory_function<'a>(
                 lhs: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: factory_type_param.clone(), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
-                rhs: Box::new_in(base.type_expr.clone_in(allocator), allocator),
+                rhs: Box::new_in(base.type_expr.clone_in(allocator), &allocator),
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     };
 
@@ -150,11 +150,11 @@ pub fn compile_factory_function<'a>(
             let inject_args = inject_dependencies(allocator, deps.as_slice(), base.target);
             Some(OutputExpression::Instantiate(Box::new_in(
                 InstantiateExpr {
-                    class_expr: Box::new_in(type_for_ctor.clone_in(allocator), allocator),
+                    class_expr: Box::new_in(type_for_ctor.clone_in(allocator), &allocator),
                     args: inject_args,
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             )))
         }
         R3FactoryDeps::Invalid => None,
@@ -170,7 +170,7 @@ pub fn compile_factory_function<'a>(
         return compile_inherited_factory(allocator, base, factory_name);
     }
 
-    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
     let ret_expr: Option<OutputExpression<'a>>;
 
     // Handle the different metadata types
@@ -190,12 +190,12 @@ pub fn compile_factory_function<'a>(
                         InstantiateExpr {
                             class_expr: Box::new_in(
                                 delegated_meta.delegate.clone_in(allocator),
-                                allocator,
+                                &allocator,
                             ),
                             args: delegate_args,
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     ))
                 }
                 R3FactoryDelegateType::Function => {
@@ -204,20 +204,20 @@ pub fn compile_factory_function<'a>(
                         InvokeFunctionExpr {
                             fn_expr: Box::new_in(
                                 delegated_meta.delegate.clone_in(allocator),
-                                allocator,
+                                &allocator,
                             ),
                             args: delegate_args,
                             pure: false,
                             optional: false,
                             source_span: None,
                         },
-                        allocator,
+                        &allocator,
                     ))
                 }
             };
 
             ret_expr = Some(make_conditional_factory(
-                allocator,
+                &allocator,
                 &mut body,
                 &factory_type_param,
                 ctor_expr,
@@ -227,7 +227,7 @@ pub fn compile_factory_function<'a>(
         R3FactoryMetadata::Expression(expr_meta) => {
             // useValue or useExisting case
             ret_expr = Some(make_conditional_factory(
-                allocator,
+                &allocator,
                 &mut body,
                 &factory_type_param,
                 ctor_expr,
@@ -248,20 +248,20 @@ pub fn compile_factory_function<'a>(
             let invalid_factory_call = create_invalid_factory_call(allocator);
             body.push(OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: invalid_factory_call, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
         Some(expr) => {
             // Return the result
             body.push(OutputStatement::Return(Box::new_in(
                 ReturnStatement { value: expr, source_span: None },
-                allocator,
+                &allocator,
             )));
         }
     }
 
     // Create the factory function
-    let mut params = Vec::new_in(allocator);
+    let mut params = Vec::new_in(&allocator);
     params.push(FnParam { name: factory_type_param });
 
     let factory_fn = OutputExpression::Function(Box::new_in(
@@ -271,10 +271,10 @@ pub fn compile_factory_function<'a>(
             statements: body,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
-    FactoryCompileResult { expression: factory_fn, statements: Vec::new_in(allocator) }
+    FactoryCompileResult { expression: factory_fn, statements: Vec::new_in(&allocator) }
 }
 
 /// Creates the conditional factory pattern for delegated/expression factories.
@@ -307,13 +307,13 @@ fn make_conditional_factory<'a>(
             name: conditional_factory_var.clone(),
             value: Some(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
-                allocator,
+                &allocator,
             ))),
             modifiers: StmtModifier::NONE,
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // Create the true case: __ngConditionalFactory__ = <ctor_expr> or invalidFactory()
@@ -329,18 +329,18 @@ fn make_conditional_factory<'a>(
                                 name: conditional_factory_var.clone(),
                                 source_span: None,
                             },
-                            allocator,
+                            &allocator,
                         )),
-                        allocator,
+                        &allocator,
                     ),
-                    rhs: Box::new_in(expr, allocator),
+                    rhs: Box::new_in(expr, &allocator),
                     source_span: None,
                 },
-                allocator,
+                &allocator,
             ));
             OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: assignment, source_span: None },
-                allocator,
+                &allocator,
             ))
         }
         None => {
@@ -348,7 +348,7 @@ fn make_conditional_factory<'a>(
             let invalid_factory_call = create_invalid_factory_call(allocator);
             OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: invalid_factory_call, source_span: None },
-                allocator,
+                &allocator,
             ))
         }
     };
@@ -360,43 +360,43 @@ fn make_conditional_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: conditional_factory_var.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(non_ctor_expr, allocator),
+            rhs: Box::new_in(non_ctor_expr, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
     let false_stmt = OutputStatement::Expression(Box::new_in(
         ExpressionStatement { expr: false_assignment, source_span: None },
-        allocator,
+        &allocator,
     ));
 
     // Create the if statement
-    let mut true_case = Vec::new_in(allocator);
+    let mut true_case = Vec::new_in(&allocator);
     true_case.push(true_stmt);
-    let mut false_case = Vec::new_in(allocator);
+    let mut false_case = Vec::new_in(&allocator);
     false_case.push(false_stmt);
 
     body.push(OutputStatement::If(Box::new_in(
         IfStmt {
             condition: OutputExpression::ReadVar(Box::new_in(
                 ReadVarExpr { name: factory_type_param.clone(), source_span: None },
-                allocator,
+                &allocator,
             )),
             true_case,
             false_case,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // Return the variable reference
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: conditional_factory_var, source_span: None },
-        allocator,
+        &allocator,
     ))
 }
 
@@ -420,7 +420,7 @@ fn compile_inherited_factory<'a>(
 ) -> FactoryCompileResult<'a> {
     // Create base factory variable name: ɵMyClass_BaseFactory
     let base_factory_var_name =
-        Ident::from_in(format!("ɵ{}_BaseFactory", base.name).as_str(), allocator);
+        Ident::from_in(format!("ɵ{}_BaseFactory", base.name).as_str(), &allocator);
     let factory_type_param = Ident::from("__ngFactoryType__");
 
     // Create ɵɵgetInheritedFactory(MyClass) call
@@ -430,29 +430,29 @@ fn compile_inherited_factory<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                        allocator,
+                        &allocator,
                     )),
-                    allocator,
+                    &allocator,
                 ),
                 name: Ident::from(Identifiers::GET_INHERITED_FACTORY),
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ));
 
-        let mut args = Vec::new_in(allocator);
+        let mut args = Vec::new_in(&allocator);
         args.push(base.type_expr.clone_in(allocator));
 
         OutputExpression::InvokeFunction(Box::new_in(
             InvokeFunctionExpr {
-                fn_expr: Box::new_in(fn_expr, allocator),
+                fn_expr: Box::new_in(fn_expr, &allocator),
                 args,
                 pure: false,
                 optional: false,
                 source_span: None,
             },
-            allocator,
+            &allocator,
         ))
     };
 
@@ -463,14 +463,14 @@ fn compile_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: base_factory_var_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(get_inherited_factory_call, allocator),
+            rhs: Box::new_in(get_inherited_factory_call, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create memoization pattern: baseFactoryVar || (baseFactoryVar = ɵɵgetInheritedFactory(...))
@@ -480,14 +480,14 @@ fn compile_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: base_factory_var_name.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(assignment, allocator),
+            rhs: Box::new_in(assignment, &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create (__ngFactoryType__ || MyClass)
@@ -497,40 +497,40 @@ fn compile_inherited_factory<'a>(
             lhs: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: factory_type_param.clone(), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
-            rhs: Box::new_in(base.type_expr.clone_in(allocator), allocator),
+            rhs: Box::new_in(base.type_expr.clone_in(allocator), &allocator),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create the factory call: (memoizedFactory)(__ngFactoryType__ || MyClass)
-    let mut factory_call_args = Vec::new_in(allocator);
+    let mut factory_call_args = Vec::new_in(&allocator);
     factory_call_args.push(type_for_ctor);
 
     let factory_call = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(memoized_factory, allocator),
+            fn_expr: Box::new_in(memoized_factory, &allocator),
             args: factory_call_args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create return statement for inner function
-    let mut inner_body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    let mut inner_body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
     inner_body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: factory_call, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Create inner function: function MyClass_Factory(__ngFactoryType__) { ... }
-    let mut inner_params = Vec::new_in(allocator);
+    let mut inner_params = Vec::new_in(&allocator);
     inner_params.push(FnParam { name: factory_type_param });
 
     let inner_fn = OutputExpression::Function(Box::new_in(
@@ -540,11 +540,11 @@ fn compile_inherited_factory<'a>(
             statements: inner_body,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Create IIFE body: let ɵMyClass_BaseFactory; return function...;
-    let mut iife_body: Vec<'a, OutputStatement<'a>> = Vec::new_in(allocator);
+    let mut iife_body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
 
     // Declaration: let ɵMyClass_BaseFactory;
     iife_body.push(OutputStatement::DeclareVar(Box::new_in(
@@ -555,38 +555,38 @@ fn compile_inherited_factory<'a>(
             leading_comment: None,
             source_span: None,
         },
-        allocator,
+        &allocator,
     )));
 
     // Return the inner function
     iife_body.push(OutputStatement::Return(Box::new_in(
         ReturnStatement { value: inner_fn, source_span: None },
-        allocator,
+        &allocator,
     )));
 
     // Create arrow function IIFE: () => { let x; return function...; }
     let arrow_fn = OutputExpression::ArrowFunction(Box::new_in(
         ArrowFunctionExpr {
-            params: Vec::new_in(allocator),
+            params: Vec::new_in(&allocator),
             body: ArrowFunctionBody::Statements(iife_body),
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     // Invoke the IIFE: (() => { ... })()
     let iife = OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(arrow_fn, allocator),
-            args: Vec::new_in(allocator),
+            fn_expr: Box::new_in(arrow_fn, &allocator),
+            args: Vec::new_in(&allocator),
             pure: true, // Mark as @__PURE__ for tree-shaking
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
-    FactoryCompileResult { expression: iife, statements: Vec::new_in(allocator) }
+    FactoryCompileResult { expression: iife, statements: Vec::new_in(&allocator) }
 }
 
 /// Injects dependencies by creating inject calls.
@@ -595,7 +595,7 @@ fn inject_dependencies<'a>(
     deps: &[R3DependencyMetadata<'a>],
     target: FactoryTarget,
 ) -> Vec<'a, OutputExpression<'a>> {
-    let mut result = Vec::new_in(allocator);
+    let mut result = Vec::new_in(&allocator);
     for (index, dep) in deps.iter().enumerate() {
         result.push(compile_inject_dependency(allocator, dep, target, index));
     }
@@ -634,13 +634,13 @@ fn compile_inject_dependency<'a>(
             }
 
             let inject_fn = get_inject_fn(target);
-            let mut args = Vec::new_in(allocator);
+            let mut args = Vec::new_in(&allocator);
             args.push(token.clone_in(allocator));
 
             if flags != InjectFlags::DEFAULT || dep.optional {
                 args.push(OutputExpression::Literal(Box::new_in(
                     LiteralExpr { value: LiteralValue::Number(flags as f64), source_span: None },
-                    allocator,
+                    &allocator,
                 )));
             }
 
@@ -648,7 +648,7 @@ fn compile_inject_dependency<'a>(
         }
         (Some(token), Some(_attr_type)) => {
             // Attribute injection
-            let mut args = Vec::new_in(allocator);
+            let mut args = Vec::new_in(&allocator);
             args.push(token.clone_in(allocator));
             create_import_call(allocator, Identifiers::INJECT_ATTRIBUTE, args)
         }
@@ -678,32 +678,32 @@ fn create_import_call<'a>(
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
                     ReadVarExpr { name: Ident::from("i0"), source_span: None },
-                    allocator,
+                    &allocator,
                 )),
-                allocator,
+                &allocator,
             ),
             name: Ident::from(name),
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ));
 
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(fn_expr, allocator),
+            fn_expr: Box::new_in(fn_expr, &allocator),
             args,
             pure: false,
             optional: false,
             source_span: None,
         },
-        allocator,
+        &allocator,
     ))
 }
 
 /// Creates `i0.ɵɵinvalidFactory()` call.
 pub fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
-    create_import_call(allocator, Identifiers::INVALID_FACTORY, Vec::new_in(allocator))
+    create_import_call(allocator, Identifiers::INVALID_FACTORY, Vec::new_in(&allocator))
 }
 
 /// Creates i0.ɵɵinvalidFactoryDep(index) call.
@@ -711,10 +711,10 @@ fn create_invalid_factory_dep_call<'a>(
     allocator: &'a Allocator,
     index: usize,
 ) -> OutputExpression<'a> {
-    let mut args = Vec::new_in(allocator);
+    let mut args = Vec::new_in(&allocator);
     args.push(OutputExpression::Literal(Box::new_in(
         LiteralExpr { value: LiteralValue::Number(index as f64), source_span: None },
-        allocator,
+        &allocator,
     )));
     create_import_call(allocator, Identifiers::INVALID_FACTORY_DEP, args)
 }
@@ -730,7 +730,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("TestClass"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -738,7 +738,7 @@ mod tests {
             type_expr: type_expr.clone_in(&allocator),
             type_decl: type_expr,
             type_argument_count: 0,
-            deps: R3FactoryDeps::Valid(Vec::new_in(&allocator)),
+            deps: R3FactoryDeps::Valid(Vec::new_in(&&allocator)),
             target: FactoryTarget::Pipe,
         });
 
@@ -755,15 +755,15 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("MyPipe"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let dep_token = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("SomeService"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
-        let mut deps = Vec::new_in(&allocator);
+        let mut deps = Vec::new_in(&&allocator);
         deps.push(R3DependencyMetadata::simple(dep_token));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -788,7 +788,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("BrokenClass"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         let meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -812,7 +812,7 @@ mod tests {
         let allocator = Allocator::default();
         let type_expr = OutputExpression::ReadVar(Box::new_in(
             ReadVarExpr { name: Ident::from("ChildClass"), source_span: None },
-            &allocator,
+            &&allocator,
         ));
 
         // R3FactoryDeps::None indicates no constructor, use inherited factory
