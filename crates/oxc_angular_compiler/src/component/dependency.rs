@@ -388,9 +388,7 @@ fn create_token_expression<'a>(
                     )),
                     &allocator,
                 ),
-                // Namespace member access must use the module's exported name, not the
-                // local binding. For an aliased import `import { Foo as Bar }`, emit
-                // `i1.Foo` (not `i1.Bar`, which would be undefined at runtime).
+                // Export name when aliased (`Foo as Bar` → `i1.Foo`).
                 name: dep.token_imported_name.clone().unwrap_or_else(|| token_name.clone()),
                 optional: false,
                 source_span: None,
@@ -553,12 +551,7 @@ mod tests {
 
     #[test]
     fn test_aliased_import_uses_exported_name() {
-        // Regression: an aliased import used as a DI token, e.g.
-        //   import { ExportedName as LocalAlias } from "@scope/pkg";
-        //   constructor(x: LocalAlias) {}
-        // must emit a namespace member access with the module's EXPORTED name
-        // (`i1.ExportedName`), not the local alias (`i1.LocalAlias`) which resolves
-        // to `undefined` at runtime and breaks injection.
+        // Aliased DI token must use export name on the namespace object.
         let allocator = Allocator::default();
         let mut dep = R3DependencyMetadata::new(Ident::from("LocalAlias"));
         dep.token_source_module = Some(Ident::from("@scope/pkg"));

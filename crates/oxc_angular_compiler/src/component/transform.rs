@@ -526,24 +526,10 @@ pub fn build_import_map<'a>(
                         .map(|resolved| Ident::from(allocator.alloc_str(resolved)))
                         .unwrap_or_else(|| default_source_module.clone().into());
 
-                    // Capture the original exported name when it differs from the
-                    // local binding (i.e., `import { Foo as Bar }`). Used so
-                    // namespace property access (`i1.X`) and `@defer` resolvers
-                    // reference the module export, not the local alias.
-                    //
-                    // IMPORTANT: when `resolved_imports` rewrites `source_module` to
-                    // the file behind a barrel, the original specifier's export name
-                    // still names the *barrel* export, not the target file's export.
-                    // Example:
-                    //   // service.ts: export class Service {}
-                    //   // barrel: export { Service as PublicService } from './service'
-                    //   import { PublicService as Service } from './barrel';
-                    //   resolved_imports: Service -> ./service
-                    // Emitting `i1.PublicService` against `./service` is wrong (that
-                    // file only has `Service`). Drop `imported_name` so we fall back
-                    // to the local binding — restoring pre-alias-fix behavior for
-                    // path-overridden imports. Callers that need the true target
-                    // export after multi-hop renames must extend `resolved_imports`.
+                    // `import { Foo as Bar }` → export name `Foo` for `i1.Foo` / @defer.
+                    // After `resolved_imports` rewrites the path to the file behind a
+                    // barrel, that export name is barrel-side only — drop it and use
+                    // the local binding against the resolved module.
                     let imported_export_name = module_export_name_to_str(&spec.imported);
                     let imported_name = if path_overridden {
                         None
@@ -671,9 +657,7 @@ fn resolve_factory_dep_namespaces<'a>(
                     )),
                     &allocator,
                 ),
-                // Use the module's exported name, not the local binding: a namespace
-                // member access (`i1.X`) must reference the export name. For an aliased
-                // import `import { Foo as Bar }`, `imported_name` is `Some("Foo")`.
+                // Export name when aliased (`Foo as Bar` → `i1.Foo`).
                 name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
                 optional: false,
                 source_span: None,
@@ -711,8 +695,7 @@ fn resolve_host_directive_namespaces<'a>(
                     )),
                     &allocator,
                 ),
-                // Use the module's exported name, not the local binding (see
-                // resolve_factory_dep_namespaces): `i1.X` must use the export name.
+                // Export name when aliased (`Foo as Bar` → `i1.Foo`).
                 name: import_info.imported_name.clone().unwrap_or_else(|| name.clone()),
                 optional: false,
                 source_span: None,
@@ -6872,15 +6855,8 @@ export class TestComponent {
 
     #[test]
     fn test_aliased_import_di_token_uses_exported_name_in_factory_and_ctor_params() {
-        // Regression for PR #375 / Codex review: aliased named imports used as DI
-        // tokens must emit the module export name for BOTH the factory inject path
-        // and setClassMetadata ctorParameters.
-        //
-        //   import { ExportedName as LocalAlias } from './svc';
-        //   constructor(x: LocalAlias) {}
-        //
-        // must produce `i1.ExportedName` (not `i1.LocalAlias`, which is undefined
-        // on the namespace object at runtime).
+        // Aliased DI token: factory inject and ctorParameters both use the export
+        // name (`i1.ExportedName`), never the local alias.
         let allocator = Allocator::default();
         let source = r#"
 import { Component } from '@angular/core';
@@ -6933,17 +6909,8 @@ export class X {
         );
     }
 
-    /// Codex claim (PR #375): when `resolved_imports` rewrites the module path to the
-    /// file behind a barrel, `imported_name` still names the barrel export, not the
-    /// target file export.
-    ///
-    ///   // service.ts exports `Service`
-    ///   // barrel: export { Service as PublicService } from './service'
-    ///   import { PublicService as Service } from './barrel';
-    ///   resolved_imports: Service -> ./service
-    ///
-    /// Namespace is `import * as i1 from './service'`, which only has `.Service`.
-    /// Emitting `i1.PublicService` would be wrong.
+    /// Barrel re-export rename + local alias + path rewrite: property access must
+    /// use the resolved module's export (local `Service`), not the barrel name.
     #[test]
     fn test_resolved_imports_with_barrel_rename_and_local_alias() {
         use std::collections::HashMap;
@@ -6964,8 +6931,7 @@ export class X {
 "#;
 
         let mut resolved = HashMap::new();
-        // Path rewritten to the file behind the barrel. That file exports `Service`,
-        // not `PublicService`.
+        // Target file exports `Service`, not `PublicService`.
         resolved.insert("Service".to_string(), "./service".to_string());
 
         let mut options = TransformOptions::default();
