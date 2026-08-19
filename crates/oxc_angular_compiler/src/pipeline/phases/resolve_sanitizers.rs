@@ -27,10 +27,13 @@ fn get_sanitizer_fn(security_context: SecurityContext) -> Option<&'static str> {
         // selects the actual sanitizer at runtime based on the tag name.
         SecurityContext::UrlOrResourceUrl => Some(Identifiers::SANITIZE_URL_OR_RESOURCE_URL),
         SecurityContext::None => None,
-        // AttributeNoBinding means the attribute should not be bound at all.
-        // This should produce a compile-time error in the HTML-to-R3 transform.
-        // For now, return None but the binding should have been rejected earlier.
-        SecurityContext::AttributeNoBinding => None,
+        // `ATTRIBUTE_NO_BINDING` attributes (e.g. `animate|attributeName`,
+        // `iframe|sandbox`) must be validated at runtime: upstream
+        // `resolve_sanitizers.ts` maps this context to `Identifiers.validateAttribute`
+        // (`ɵɵvalidateAttribute`). Previously this returned `None`, leaving such
+        // bindings unprotected (Issue #315 sub-gap 2). Mirror upstream by emitting
+        // the validate-attribute "sanitizer" so the binding is checked at runtime.
+        SecurityContext::AttributeNoBinding => Some(Identifiers::VALIDATE_ATTRIBUTE),
     }
 }
 

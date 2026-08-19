@@ -164,7 +164,7 @@
                       "<div data-prop=\"{{v}}\">",
                       "</div>"
                     ],
-                    ["BoundAttribute", "data-prop=\"{{v}}\"", "data-prop", "{{v}}"]
+                    ["BoundAttribute", "data-prop=\"{{v}}\"", "prop", "{{v}}"]
                   ],
                   "ignore_error": false
                 }
@@ -345,7 +345,7 @@
                       "<ng-template data-ref-a>",
                       "</ng-template>"
                     ],
-                    ["TextAttribute", "data-ref-a", "data-ref-a", "<empty>"]
+                    ["Reference", "data-ref-a", "a", "<empty>"]
                   ],
                   "ignore_error": false
                 }
@@ -385,7 +385,7 @@
                       "<ng-template data-let-a=\"b\">",
                       "</ng-template>"
                     ],
-                    ["TextAttribute", "data-let-a=\"b\"", "data-let-a", "b"]
+                    ["Variable", "data-let-a=\"b\"", "a", "b"]
                   ],
                   "ignore_error": false
                 }
@@ -618,7 +618,7 @@
                       "<div data-on-event=\"v\">",
                       "</div>"
                     ],
-                    ["TextAttribute", "data-on-event=\"v\"", "data-on-event", "v"]
+                    ["BoundEvent", "data-on-event=\"v\"", "event", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -675,7 +675,8 @@
                       "<div data-bindon-prop=\"v\">",
                       "</div>"
                     ],
-                    ["TextAttribute", "data-bindon-prop=\"v\"", "data-bindon-prop", "v"]
+                    ["BoundAttribute", "data-bindon-prop=\"v\"", "prop", "v"],
+                    ["BoundEvent", "data-bindon-prop=\"v\"", "prop", "v"]
                   ],
                   "ignore_error": false
                 }
@@ -740,6 +741,21 @@
             {
               "name": "is correct for references via ref-",
               "path": "R3 AST source spans/references/is correct for references via ref-",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "<div ref-a></div>",
+                  "expected": [
+                    ["Element", "<div ref-a></div>", "<div ref-a>", "</div>"],
+                    ["Reference", "ref-a", "a", "<empty>"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
+              "name": "is correct for references via data-ref-",
+              "path": "R3 AST source spans/references/is correct for references via data-ref-",
               "assertions": [
                 {
                   "type": "ExpectFromHtml",
@@ -956,6 +972,29 @@
                   "ignore_error": false
                 }
               ]
+            },
+            {
+              "name": "is correct for switch blocks with exhaustive checking",
+              "path": "R3 AST source spans/switch blocks/is correct for switch blocks with exhaustive checking",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "@switch (cond.kind) {@case (x()) {X case}@default never;}",
+                  "expected": [
+                    [
+                      "SwitchBlock",
+                      "@switch (cond.kind) {@case (x()) {X case}@default never;}",
+                      "@switch (cond.kind) {",
+                      "}"
+                    ],
+                    ["SwitchBlockCaseGroup", "@case (x()) {X case}", "@case (x()) {"],
+                    ["SwitchBlockCase", "@case (x()) {X case}", "@case (x()) {"],
+                    ["Text", "X case"],
+                    ["SwitchExhaustiveCheck", "@default never;", "@default never;"]
+                  ],
+                  "ignore_error": false
+                }
+              ]
             }
           ]
         },
@@ -1048,7 +1087,7 @@
                 {
                   "type": "ExpectFromHtml",
                   "input": "@let foo = 123;",
-                  "expected": [["LetDeclaration", "@let foo = 123;", "foo", "123"]],
+                  "expected": [["LetDeclaration", "@let foo = 123", "foo", "123"]],
                   "ignore_error": false
                 }
               ]

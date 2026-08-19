@@ -17,6 +17,7 @@ use crate::i18n::ast::{
 };
 use crate::i18n::parser::{I18nMessageFactory, create_i18n_message_factory};
 use crate::i18n::translation_bundle::TranslationBundle;
+use crate::schema::is_trusted_types_sink;
 use crate::util::{ParseSourceFile, ParseSourceSpan};
 
 // ============================================================================
@@ -1099,6 +1100,23 @@ impl<'a> I18nVisitor<'a> {
             }
         }
 
+        // Issue #315 (defense-in-depth): never translate Trusted Types sink attributes
+        // (e.g. `iframe src`) on the merge path either. The extraction path
+        // (`visit_attributes_of`) reports an error for these; this method is `&self`, so
+        // it cannot push to `self.errors` — it silently keeps the original (untranslated)
+        // value, which is the safe outcome.
+        //
+        // FAITHFULNESS NOTE (no namespace strip): `is_trusted_types_sink` only
+        // LOWERCASES the tag — it does NOT strip a `:ns:` prefix (matching upstream
+        // `schema/trusted_types_sinks.ts` `isTrustedTypesSink`, a single `.toLowerCase()`
+        // then `${tag}|${name}` / `*|${name}`). So we pass the FULL element `name`
+        // un-stripped, exactly as the AOT i18n guard passes `node.name`
+        // (`render3/view/i18n/meta.ts` ~213). Hence `<svg:iframe i18n-src>` looks up
+        // `:svg:iframe|src`, which is NOT a sink -> allowed (the previous ns-strip wrongly
+        // mapped it to `iframe|src` and blocked it). This JIT-style merge model has no
+        // selectorless-component nodes, so the component/bare-component cases handled in
+        // `transform/html_to_r3.rs` do not arise here.
+
         attrs
             .iter()
             .filter_map(|attr| {
@@ -1112,7 +1130,10 @@ impl<'a> I18nVisitor<'a> {
                 let needs_translation =
                     i18n_meta.is_some() || implicit_attr_names.iter().any(|n| n == attr.name);
 
-                if needs_translation && !attr.is_interpolation_only && !attr.value.trim().is_empty()
+                if needs_translation
+                    && !is_trusted_types_sink(element_name, attr.name)
+                    && !attr.is_interpolation_only
+                    && !attr.value.trim().is_empty()
                 {
                     // Look up translation for this attribute
                     if let Some(translated_value) = self.translate_attribute_value_for_merge(
@@ -1243,8 +1264,46 @@ impl<'a> I18nVisitor<'a> {
             }
         }
 
+        // Issue #315 (defense-in-depth): refuse to translate Trusted Types sink
+        // attributes (e.g. `iframe src`). The AOT i18n path already guards this in
+        // `render3/view/i18n/meta.ts` (mirrored in `transform/html_to_r3.rs`);
+        // upstream's `extractor_merger.ts` does NOT have this guard, but a translated
+        // sink value would still be an XSS vector, so we refuse it here too.
+        //
+        // FAITHFULNESS NOTE (no namespace strip): `is_trusted_types_sink` only
+        // LOWERCASES the tag — it does NOT strip a `:ns:` prefix (matching upstream
+        // `schema/trusted_types_sinks.ts` `isTrustedTypesSink`). So we pass the FULL
+        // element `name` un-stripped, exactly as the AOT i18n guard passes `node.name`
+        // (`render3/view/i18n/meta.ts` ~213). Hence `<svg:iframe i18n-src>` looks up
+        // `:svg:iframe|src`, which is NOT a sink -> allowed (the previous ns-strip
+        // wrongly mapped it to `iframe|src` and blocked it). This JIT-style extraction
+        // model has no selectorless-component nodes, so the component/bare-component
+        // cases handled in `transform/html_to_r3.rs` do not arise here.
+        //
+        // SCOPE NOTE: like the AOT path, this only blocks *trusted-types sink*
+        // attributes; it does not block other security-sensitive contexts (e.g. a
+        // translatable `<svg:script i18n-href>`), matching v21.2.7's scope rather than
+        // hardening beyond it. See the parallel NOTE in `transform/html_to_r3.rs`.
+
         // Process attributes
         for attr in attrs {
+            let is_explicit = explicit_attr_names.contains_key(attr.name);
+            let is_implicit = implicit_attr_names.iter().any(|n| n == attr.name);
+            if !is_explicit && !is_implicit {
+                continue;
+            }
+
+            if is_trusted_types_sink(element_name, attr.name) {
+                self.report_error(
+                    attr.span,
+                    &format!(
+                        "Translating attribute '{}' is disallowed for security reasons.",
+                        attr.name
+                    ),
+                );
+                continue;
+            }
+
             if let Some(i18n_meta) = explicit_attr_names.get(attr.name) {
                 self.add_message_from_attr(
                     attr.name,
@@ -1253,7 +1312,7 @@ impl<'a> I18nVisitor<'a> {
                     attr.span,
                     attr.is_interpolation_only,
                 );
-            } else if implicit_attr_names.iter().any(|n| n == attr.name) {
+            } else {
                 self.add_message_from_attr(
                     attr.name,
                     attr.value,
@@ -1792,6 +1851,148 @@ mod tests {
         let result = extract_messages(&[], &[], &FxHashMap::default(), true, source_file);
         assert!(result.messages.is_empty());
         assert!(result.errors.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // Issue #315: Trusted Types sink attributes must not be translated.
+    // ------------------------------------------------------------------
+
+    /// Builds a single `<element i18n-<attr>="..." <attr>="value">` node for tests.
+    fn element_with_i18n_attr<'a>(
+        element: &'a str,
+        attr: &'a str,
+        i18n_marker: &'a str,
+        value: &'a str,
+    ) -> Vec<HtmlNodeRef<'a>> {
+        vec![HtmlNodeRef::Element {
+            name: element,
+            attrs: vec![
+                HtmlAttrRef {
+                    name: i18n_marker,
+                    value: "",
+                    span: Span::default(),
+                    is_interpolation_only: false,
+                },
+                HtmlAttrRef {
+                    name: attr,
+                    value,
+                    span: Span::default(),
+                    is_interpolation_only: false,
+                },
+            ],
+            children: vec![],
+            span: Span::default(),
+            start_span: Span::default(),
+            end_span: None,
+        }]
+    }
+
+    #[test]
+    fn test_sink_attr_iframe_src_not_extracted_and_reports_error() {
+        // `<iframe i18n-src src="http://evil"> ` — `iframe|src` is a Trusted Types
+        // (TrustedScriptURL) sink, so it must NOT be collected as a translatable
+        // message, and the extraction path must report a security error.
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr("iframe", "src", "i18n-src", "http://example.com");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(
+            result.messages.is_empty(),
+            "sink attribute `iframe src` must not be extracted, got {:?}",
+            result.messages
+        );
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("disallowed for security reasons")),
+            "expected a security error for `iframe src`, got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_sink_attr_srcdoc_not_extracted() {
+        // `iframe|srcdoc` is a TrustedHTML sink.
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr("iframe", "srcdoc", "i18n-srcdoc", "<b>hi</b>");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(result.messages.is_empty());
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("disallowed for security reasons"))
+        );
+    }
+
+    #[test]
+    fn test_sink_attr_wildcard_innerhtml_not_extracted() {
+        // `*|innerHTML` is a sink on ANY tag; check on a plain `<div>` and verify the
+        // match is case-insensitive (`innerHTML` vs lowercase set entry).
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr("div", "innerHTML", "i18n-innerHTML", "<b>hi</b>");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(result.messages.is_empty());
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("disallowed for security reasons"))
+        );
+    }
+
+    #[test]
+    fn test_sink_attr_namespaced_element_not_stripped_is_allowed() {
+        // FAITHFUL to v21.2.7: `is_trusted_types_sink` only LOWERCASES the tag — it does
+        // NOT strip `:ns:` (matching upstream `schema/trusted_types_sinks.ts`
+        // `isTrustedTypesSink`). The i18n guard passes the FULL element name un-stripped
+        // (`render3/view/i18n/meta.ts` ~213 passes `node.name`), so `:svg:iframe|src` is
+        // NOT a member of `TRUSTED_TYPES_SINKS` -> ALLOWED. Verified against
+        // @angular/compiler@21.2.7 `parseTemplate({enableSelectorless:true})`:
+        // `<svg:iframe i18n-src>` produces NO error. (Pre-fix this path ns-stripped to
+        // `iframe|src` and wrongly blocked it.)
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr(":svg:iframe", "src", "i18n-src", "http://example.com");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert_eq!(
+            result.messages.len(),
+            1,
+            "namespaced `:svg:iframe src` is NOT a sink and must be extracted, got {:?}",
+            result.messages
+        );
+        assert!(
+            !result.errors.iter().any(|e| e.message.contains("disallowed for security reasons")),
+            "namespaced `:svg:iframe src` must NOT trigger a security error, got {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn test_sink_attr_plain_iframe_still_blocked() {
+        // CONTROL (unchanged): a plain `<iframe i18n-src>` -> `iframe|src` IS a sink ->
+        // blocked. Verified against @angular/compiler@21.2.7.
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr("iframe", "src", "i18n-src", "http://example.com");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(
+            result.messages.is_empty(),
+            "plain `iframe src` IS a sink and must be blocked, got {:?}",
+            result.messages
+        );
+        assert!(
+            result.errors.iter().any(|e| e.message.contains("disallowed for security reasons"))
+        );
+    }
+
+    #[test]
+    fn test_non_sink_attr_title_is_extracted() {
+        // Control: `<a i18n-title title="Go">` — `a|title` is NOT a sink, so it must
+        // still be extracted and produce no security error.
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let nodes = element_with_i18n_attr("a", "title", "i18n-title", "Go home");
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert_eq!(
+            result.messages.len(),
+            1,
+            "non-sink `a title` must be extracted, got {:?}",
+            result.messages
+        );
+        assert!(
+            !result.errors.iter().any(|e| e.message.contains("disallowed for security reasons")),
+            "non-sink attribute must not trigger a security error, got {:?}",
+            result.errors
+        );
     }
 
     #[test]

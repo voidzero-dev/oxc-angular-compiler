@@ -544,8 +544,10 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
     ) {
         if self.mode == HumanizeMode::SourceSpans {
             // Source spans mode: [LetDeclaration, sourceSpan, name, value]
-            // The source span includes the trailing semicolon (Angular v22).
+            // v21.2.7 fixtures: the humanized source span does not include the
+            // trailing semicolon (Angular later changed this in v22).
             let source_span = self.span_text(&decl.source_span);
+            let source_span = source_span.trim_end_matches(';').to_string();
             let name = self.span_text(&decl.name_span);
             let value = self.span_text(&decl.value_span);
             self.result.push(vec!["LetDeclaration".to_string(), source_span, name, value]);
@@ -675,16 +677,25 @@ impl<'a> R3Visitor<'a> for R3Humanizer<'_> {
         for group in &block.groups {
             self.visit_switch_block_case_group(group);
         }
-        if let Some(check) = &block.exhaustive_check {
-            let row = if self.mode == HumanizeMode::SourceSpans {
-                let source_span = self.span_text(&check.source_span);
-                let start_span = self.span_text(&check.start_source_span);
-                vec!["SwitchExhaustiveCheck".to_string(), source_span, start_span]
-            } else {
-                vec!["SwitchExhaustiveCheck".to_string()]
-            };
-            self.result.push(row);
+        // Angular v21.2.7 exhaustive-switch feature: emit the `@default never;`
+        // marker after the case groups (matching upstream `block.exhaustiveCheck?.visit`).
+        if let Some(exhaustive_check) = &block.exhaustive_check {
+            self.visit_switch_exhaustive_check(exhaustive_check);
         }
+    }
+
+    fn visit_switch_exhaustive_check(
+        &mut self,
+        check: &oxc_angular_compiler::ast::r3::R3SwitchExhaustiveCheck,
+    ) {
+        let row = if self.mode == HumanizeMode::SourceSpans {
+            let source_span = self.span_text(&check.source_span);
+            let start_span = self.span_text(&check.start_source_span);
+            vec!["SwitchExhaustiveCheck".to_string(), source_span, start_span]
+        } else {
+            vec!["SwitchExhaustiveCheck".to_string()]
+        };
+        self.result.push(row);
     }
 
     fn visit_switch_block_case_group(

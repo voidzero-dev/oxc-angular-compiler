@@ -113,6 +113,28 @@
                   ]
                 },
                 {
+                  "name": "should parse named HTML entities containing digits",
+                  "path": "HtmlParser/parse/text nodes/should parse named HTML entities containing digits",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&sup1;</div>",
+                      "expected": [
+                        ["html.Element", "div", 0.0],
+                        ["html.Text", "¹", 1.0, [""], ["¹", "&sup1;"], [""]]
+                      ]
+                    },
+                    {
+                      "type": "HumanizeDom",
+                      "input": "<div>&frac12;</div>",
+                      "expected": [
+                        ["html.Element", "div", 0.0],
+                        ["html.Text", "½", 1.0, [""], ["½", "&frac12;"], [""]]
+                      ]
+                    }
+                  ]
+                },
+                {
                   "name": "should normalize line endings within CDATA",
                   "path": "HtmlParser/parse/text nodes/should normalize line endings within CDATA",
                   "assertions": []
@@ -973,6 +995,24 @@
                         ["html.Block", "case", 1.0],
                         ["html.BlockParameter", "'baz'"],
                         ["html.Text", " baz ", 2.0, [" baz "]]
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "name": "should parse exhaustive default checks in a switch block",
+                  "path": "HtmlParser/parse/blocks/should parse exhaustive default checks in a switch block",
+                  "assertions": [
+                    {
+                      "type": "HumanizeDom",
+                      "input": "@switch (expr) {@case ('foo') {} @default never;}",
+                      "expected": [
+                        ["html.Block", "switch", 0.0],
+                        ["html.BlockParameter", "expr"],
+                        ["html.Block", "case", 1.0],
+                        ["html.BlockParameter", "'foo'"],
+                        ["html.Text", " ", 1.0, [" "]],
+                        ["html.Block", "default never", 1.0]
                       ]
                     }
                   ]

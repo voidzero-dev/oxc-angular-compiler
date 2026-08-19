@@ -524,10 +524,24 @@ fn test_not_selector() {
 // ============================================================================
 
 #[test]
-fn test_replace_comments_without_adding_lines() {
-    // Angular v22 removes inline comments without inserting an extra newline.
+fn test_remove_inline_comments_without_adding_extra_lines() {
+    // Upstream v21.2.7: a single-line comment collapses to nothing (no extra newline);
+    // only the literal space following it remains.
     let result = shim("/* b {c} */ b {c}", "contenta");
     assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_preserve_internal_newlines_from_multiline_comments() {
+    // Upstream v21.2.7: only the newline INSIDE the comment is preserved.
+    let result = shim("/* b {c}\n */ b {c}", "contenta");
+    assert_eq!(result, "\n b[contenta] {c}");
+}
+
+#[test]
+fn test_remove_multiple_inline_comments_without_adding_extra_lines() {
+    let result = shim("/* b {c} */ b {c} /* a {c} */ a {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}  a[contenta] {c}");
 }
 
 #[test]
@@ -538,9 +552,77 @@ fn test_keep_sourcemapping_url_comments() {
 
 #[test]
 fn test_handle_adjacent_comments() {
+    // Upstream v21.2.7: adjacent single-line comments collapse to nothing; only the two
+    // literal spaces (between the comments and before the selector) remain.
     let result = shim("/* comment 1 */ /* comment 2 */ b {c}", "contenta");
     assert_eq!(result, "  b[contenta] {c}");
 }
+
+// ----------------------------------------------------------------------------
+// FINDING 2 [MEDIUM]: ShadowCss preserves ONLY `sourceURL=` / `sourceMappingURL=`
+// hash comments; every other comment (including `/* # source: ... */`) is
+// stripped to its interior newlines, so no comment text leaks.
+//
+// Matches upstream v21.2.7 `_commentWithHashRe` (shadow_css.ts:1114):
+//   const _commentWithHashRe = /\/\*\s*#\s*source(Mapping)?URL=/g;
+// i.e. `/*`, optional ws, `#`, optional ws, then literally `sourceURL=` OR
+// `sourceMappingURL=` (trailing `=` REQUIRED; case-sensitive). Ground truth below
+// was confirmed by running upstream's exact `stripComments` regex logic.
+// ----------------------------------------------------------------------------
+
+#[test]
+fn test_preserve_source_url_comment() {
+    // `/*#sourceURL=foo*/` matches -> PRESERVED verbatim.
+    let result = shim("/*#sourceURL=foo*/ b {c}", "contenta");
+    assert_eq!(result, "/*#sourceURL=foo*/ b[contenta] {c}");
+}
+
+#[test]
+fn test_preserve_source_mapping_url_comment_with_spaces() {
+    // `/* # sourceMappingURL=foo */` matches -> PRESERVED verbatim.
+    let result = shim("/* # sourceMappingURL=foo */ b {c}", "contenta");
+    assert_eq!(result, "/* # sourceMappingURL=foo */ b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_non_sourcemap_hash_comment() {
+    // `/* # source: secret */` does NOT match `source(Mapping)?URL=` -> STRIPPED.
+    // (single line -> collapses to nothing, leaving only the trailing space).
+    let result = shim("/* # source: secret */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_url_without_equals() {
+    // `/* #sourceURLx */` -> `#sourceURL` not followed by `=` -> STRIPPED.
+    let result = shim("/* #sourceURLx */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_url_without_hash() {
+    // `/* sourceURL= */` -> no `#` -> STRIPPED.
+    let result = shim("/* sourceURL= */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_source_map_hash_comment() {
+    // `/* # sourceMap */` -> `sourceMap` is neither `sourceURL=` nor
+    // `sourceMappingURL=` -> STRIPPED.
+    let result = shim("/* # sourceMap */ b {c}", "contenta");
+    assert_eq!(result, " b[contenta] {c}");
+}
+
+#[test]
+fn test_strip_non_sourcemap_hash_comment_preserves_interior_newline() {
+    // A stripped non-sourcemap comment still keeps its interior `\n` (line-count
+    // stability), collapsing to just that newline plus the trailing space.
+    let result = shim("/* # source:\nsecret */ b {c}", "contenta");
+    assert_eq!(result, "\n b[contenta] {c}");
+}
+
+// =====================================================================}
 
 // ============================================================================
 // Additional Attribute Selector Tests

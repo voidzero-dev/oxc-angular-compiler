@@ -3155,6 +3155,48 @@
               ]
             },
             {
+              "name": "should parse named entities containing digits",
+              "path": "HtmlLexer/entities/should parse named entities containing digits",
+              "assertions": [
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&sup1;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "¹", "&sup1;"],
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                },
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&frac12;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "½", "&frac12;"],
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                },
+                {
+                  "type": "HtmlLexerTest",
+                  "input": "&blk34;",
+                  "test_type": "HumanizeParts",
+                  "expected": [
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.ENCODED_ENTITY", "▓", "&blk34;"],
+                    ["TokenType.TEXT", ""],
+                    ["TokenType.EOF"]
+                  ],
+                  "options": null
+                }
+              ]
+            },
+            {
               "name": "should parse hexadecimal entities",
               "path": "HtmlLexer/entities/should parse hexadecimal entities",
               "assertions": [
@@ -5038,25 +5080,6 @@
                   "test_type": "HumanizeParts",
                   "expected": [
                     ["TokenType.BLOCK_OPEN_START", "default never"],
-                    ["TokenType.BLOCK_OPEN_END"],
-                    ["TokenType.BLOCK_CLOSE"],
-                    ["TokenType.EOF"]
-                  ],
-                  "options": null
-                }
-              ]
-            },
-            {
-              "name": "should parse @default never(expr);",
-              "path": "HtmlLexer/blocks/should parse @default never(expr);",
-              "assertions": [
-                {
-                  "type": "HtmlLexerTest",
-                  "input": "@default never(expr);",
-                  "test_type": "HumanizeParts",
-                  "expected": [
-                    ["TokenType.BLOCK_OPEN_START", "default never"],
-                    ["TokenType.BLOCK_PARAMETER", "expr"],
                     ["TokenType.BLOCK_OPEN_END"],
                     ["TokenType.BLOCK_CLOSE"],
                     ["TokenType.EOF"]

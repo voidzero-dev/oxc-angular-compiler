@@ -15,10 +15,24 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {} */ b {}",
+                  "input": "/* b {c} */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": " b[contenta] {}",
+                  "expected": " b[contenta] {c}",
+                  "normalized": false
+                }
+              ]
+            },
+            {
+              "name": "should preserve internal newlines from multiline comments",
+              "path": "ShadowCss/comments/should preserve internal newlines from multiline comments",
+              "assertions": [
+                {
+                  "type": "ShimCss",
+                  "input": "/* b {c}\n */ b {c}",
+                  "content_attr": "contenta",
+                  "host_attr": null,
+                  "expected": "\n b[contenta] {c}",
                   "normalized": false
                 }
               ]
@@ -43,10 +57,10 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* b {} */ b {} /* a {} */ a {}",
+                  "input": "/* b {c} */ b {c} /* a {c} */ a {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": " b[contenta] {}  a[contenta] {}",
+                  "expected": " b[contenta] {c}  a[contenta] {c}",
                   "normalized": false
                 }
               ]
@@ -79,10 +93,10 @@
               "assertions": [
                 {
                   "type": "ShimCss",
-                  "input": "/* comment 1 */ /* comment 2 */ b {}",
+                  "input": "/* comment 1 */ /* comment 2 */ b {c}",
                   "content_attr": "contenta",
                   "host_attr": null,
-                  "expected": "  b[contenta] {}",
+                  "expected": "  b[contenta] {c}",
                   "normalized": false
                 }
               ]

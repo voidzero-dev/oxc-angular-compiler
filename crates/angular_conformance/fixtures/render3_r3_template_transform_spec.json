@@ -2078,6 +2078,18 @@
               ]
             },
             {
+              "name": "should parse a switch block with a default never case",
+              "path": "R3 template transform/switch blocks/should parse a switch block with a default never case",
+              "assertions": [
+                {
+                  "type": "ExpectFromHtml",
+                  "input": "\n          @switch (cond.kind) {\n            @default never;\n          }\n        ",
+                  "expected": [["SwitchBlock", "cond.kind"], ["SwitchExhaustiveCheck"]],
+                  "ignore_error": false
+                }
+              ]
+            },
+            {
               "name": "should parse a switch block when preserveWhitespaces is enabled",
               "path": "R3 template transform/switch blocks/should parse a switch block when preserveWhitespaces is enabled",
               "assertions": []

@@ -913,8 +913,12 @@ pub struct R3SwitchBlock<'a> {
     pub groups: Vec<'a, R3SwitchBlockCaseGroup<'a>>,
     /// Unknown blocks for error recovery.
     pub unknown_blocks: Vec<'a, R3UnknownBlock<'a>>,
-    /// Optional exhaustive check (`@default never;`, v22+).
-    pub exhaustive_check: Option<R3SwitchExhaustiveCheck<'a>>,
+    /// Exhaustive-check marker (`@default never;`), if present.
+    ///
+    /// Angular v21.2.7 exhaustive-switch feature: a `@default never;` block
+    /// inside a `@switch` produces a `SwitchExhaustiveCheck` node stored here
+    /// (rather than a regular `@default` case group).
+    pub exhaustive_check: Option<R3SwitchExhaustiveCheck>,
     /// Source span.
     pub source_span: Span,
     /// Start span.
@@ -925,14 +929,13 @@ pub struct R3SwitchBlock<'a> {
     pub name_span: Span,
 }
 
-/// A switch exhaustive check (`@default never;`, v22+).
+/// A switch exhaustive-check marker (`@default never;`).
 ///
-/// Marks a `@switch` as exhaustive for type-narrowing purposes. It carries no
-/// body and emits no runtime output.
+/// Angular v21.2.7 exhaustive-switch feature: asserts that the surrounding
+/// `@switch` is exhaustively type-checked. It is a self-terminating block with
+/// no body and is stored on `R3SwitchBlock::exhaustive_check`.
 #[derive(Debug)]
-pub struct R3SwitchExhaustiveCheck<'a> {
-    /// Optional expression (`@default never(expr);`).
-    pub expression: Option<AngularExpression<'a>>,
+pub struct R3SwitchExhaustiveCheck {
     /// Source span.
     pub source_span: Span,
     /// Start span.
@@ -1531,13 +1534,13 @@ pub trait R3Visitor<'a> {
         for group in &block.groups {
             self.visit_switch_block_case_group(group);
         }
-        if let Some(check) = &block.exhaustive_check {
-            self.visit_switch_exhaustive_check(check);
+        if let Some(exhaustive_check) = &block.exhaustive_check {
+            self.visit_switch_exhaustive_check(exhaustive_check);
         }
     }
 
-    /// Visit a switch exhaustive check (`@default never;`).
-    fn visit_switch_exhaustive_check(&mut self, _check: &R3SwitchExhaustiveCheck<'a>) {}
+    /// Visit a switch exhaustive-check marker (`@default never;`).
+    fn visit_switch_exhaustive_check(&mut self, _check: &R3SwitchExhaustiveCheck) {}
 
     /// Visit a switch block case group.
     fn visit_switch_block_case_group(&mut self, group: &R3SwitchBlockCaseGroup<'a>) {
