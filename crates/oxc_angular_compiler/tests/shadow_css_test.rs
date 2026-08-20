@@ -9,7 +9,7 @@
 //!
 //! The goal is to have 1:1 compatibility with Angular's ShadowCss implementation.
 
-use oxc_angular_compiler::styles::shim_css_text;
+use oxc_angular_compiler::styles::{finalize_component_style, shim_css_text};
 
 /// Normalize CSS for comparison (matches Angular's toEqualCss behavior).
 /// - Removes leading/trailing whitespace
@@ -328,7 +328,6 @@ fn test_multibyte_utf8_preserved_in_css_values() {
 
 #[test]
 fn test_finalize_preserves_unicode() {
-    use oxc_angular_compiler::styles::finalize_component_style;
     // Full pipeline with Sass-compiled CSS containing actual bullet character
     let css = ".test:after { content: \"\u{2022}\"; }";
     let result = finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", true);
@@ -1002,47 +1001,65 @@ fn test_scope_first_selector_after_multiple_comments() {
 
 #[test]
 fn test_scope_selector_glued_directly_to_preceding_comment() {
-    // Regression: a comment with NO separating whitespace before the next
-    // selector - e.g. `*/.foo`. This is not how anyone hand-writes CSS, but
-    // it's exactly what PostCSS's AST-based reprint produces when it
-    // processes a `styleUrl` file (Vite's `preprocessCSS`, used for Tailwind,
-    // runs before this CSS ever reaches `shim_css_text`): it strips the
-    // blank line that normally separates `/* comment */` from the following
-    // rule. `.foo` must still get its content attribute; a whole rule
-    // silently losing Emulated encapsulation - because the selector string
-    // handed to `scope_simple_selector` was `%COMMENT%.foo`, which the old
-    // code bailed out of scoping entirely - is how a component's own styles
-    // leak globally onto any other element sharing that class name, with no
-    // console error.
-    let css = "/* comment */.foo { color: red; }";
-    let expected = ".foo[contenta] { color: red; }";
-    assert_css_eq!(shim(css, "contenta"), expected);
+    // A comment with NO whitespace before the next selector. Nobody writes
+    // this by hand, but it's what PostCSS's AST reprint produces when a Vite
+    // consumer runs a `styleUrl` file through `preprocessCSS` (e.g. for
+    // Tailwind) before it reaches `shim_css_text`. Bailing out here shipped
+    // `.foo` with no content attribute at all - a global rule that clobbers
+    // any other component's `.foo`, with no console error.
+    assert_css_eq!(
+        shim("/* comment */.foo { color: red; }", "contenta"),
+        ".foo[contenta] { color: red; }"
+    );
 }
 
 #[test]
 fn test_scope_selector_glued_directly_to_multiple_preceding_comments() {
-    // Same as above, but with two adjacent comments (also produced by
-    // PostCSS reprinting, e.g. an SCSS partial's license header merged with
-    // a rule doc-comment) both glued with no whitespace before the selector.
-    let css = "/* one *//* two */.foo { color: red; }";
-    let expected = ".foo[contenta] { color: red; }";
-    assert_css_eq!(shim(css, "contenta"), expected);
+    assert_css_eq!(
+        shim("/* one *//* two */.foo { color: red; }", "contenta"),
+        ".foo[contenta] { color: red; }"
+    );
 }
 
 #[test]
 fn test_scope_selector_glued_directly_to_trailing_comment() {
-    // A comment glued to the END of a selector, immediately before `{`.
-    let css = ".foo/* comment */{ color: red; }";
-    let expected = ".foo[contenta] { color: red; }";
-    assert_css_eq!(shim(css, "contenta"), expected);
+    // Comment glued to the END of a selector, immediately before `{`.
+    assert_css_eq!(
+        shim(".foo/* comment */{ color: red; }", "contenta"),
+        ".foo[contenta]{ color: red; }"
+    );
+}
+
+#[test]
+fn test_scope_selector_with_interior_glued_comment() {
+    // Placeholder *inside* the compound selector rather than at either end.
+    // These must scope too - an unscoped rule leaks globally either way.
+    assert_css_eq!(
+        shim(".foo/* c */:hover { color: red; }", "contenta"),
+        ".foo[contenta]:hover { color: red; }"
+    );
+    assert_css_eq!(
+        shim(".foo/* c */.bar { color: red; }", "contenta"),
+        ".foo.bar[contenta] { color: red; }"
+    );
+    assert_css_eq!(
+        shim("/* a */.foo/* b */.bar/* c */ { color: red; }", "contenta"),
+        ".foo.bar[contenta] { color: red; }"
+    );
+}
+
+#[test]
+fn test_comment_only_selector_is_not_scoped() {
+    // A lone comment where a selector would go must stay a no-op - scoping it
+    // would emit a bare `[contenta]` matching every element in the component.
+    assert!(!shim("/* c */ { color: red; }", "contenta").contains("contenta"));
+    assert!(!shim("/* a */ /* b */ { color: red; }", "contenta").contains("contenta"));
 }
 
 #[test]
 fn test_scope_multiple_rules_after_comment_glued_selectors() {
-    // The real-world shape that surfaced this bug: several unrelated rules
-    // in the same stylesheet, each with its explanatory comment glued
-    // directly to the following selector by PostCSS's reprint, must all
-    // still scope correctly rather than only the first one.
+    // Several rules in one stylesheet, each with its comment glued on by
+    // PostCSS - all must scope, not just the first.
     let css = "/* first */.foo { width: 1px; }/* second */.bar { height: 2px; }";
     let expected = ".foo[contenta] { width: 1px; }.bar[contenta] { height: 2px; }";
     assert_css_eq!(shim(css, "contenta"), expected);
@@ -1050,42 +1067,199 @@ fn test_scope_multiple_rules_after_comment_glued_selectors() {
 
 #[test]
 fn test_scope_comment_glued_selectors_in_descendant_chain_and_comma_list() {
-    // The comment only glues to the *first* compound selector in a
-    // multi-part selector - every part still needs its own attribute.
-    let descendant = "/* c */.container .tabs-group { color: red; }";
+    // The comment glues only to the *first* compound selector - every other
+    // part still needs its own attribute.
     assert_css_eq!(
-        shim(descendant, "contenta"),
+        shim("/* c */.container .tabs-group { color: red; }", "contenta"),
         ".container[contenta] .tabs-group[contenta] { color: red; }"
     );
-
-    let comma_list = "/* c */.a, .b { color: red; }";
-    assert_css_eq!(shim(comma_list, "contenta"), ".a[contenta], .b[contenta] { color: red; }");
+    assert_css_eq!(
+        shim("/* c */.a, .b { color: red; }", "contenta"),
+        ".a[contenta], .b[contenta] { color: red; }"
+    );
 }
 
 #[test]
 fn test_scope_comment_glued_to_host_and_host_context() {
-    let host = "/* c */:host { color: red; }";
-    assert_css_eq!(shim_with_host(host, "contenta", "hosta"), "[hosta] { color: red; }");
-
-    let host_context = "/* c */:host-context(.dark) { color: red; }";
     assert_css_eq!(
-        shim_with_host(host_context, "contenta", "hosta"),
+        shim_with_host("/* c */:host { color: red; }", "contenta", "hosta"),
+        "[hosta] { color: red; }"
+    );
+    assert_css_eq!(
+        shim_with_host("/* c */:host-context(.dark) { color: red; }", "contenta", "hosta"),
         ".dark[hosta], .dark [hosta] { color: red; }"
+    );
+    assert_css_eq!(
+        shim_with_host(":host/* c */.a { color: red; }", "contenta", "hosta"),
+        ".a[hosta] { color: red; }"
     );
 }
 
 #[test]
-fn test_interior_comment_placeholder_falls_back_to_unscoped() {
-    // Documented, intentional limitation: a comment placeholder *inside* a
-    // selector body (not glued to its start or end, e.g. between a class
-    // name and a pseudo-class) is too unusual to safely split - the fix
-    // deliberately leaves this case unscoped rather than risk corrupting the
-    // selector. This isn't a shape PostCSS's normal reprint produces (which
-    // is what the fix actually targets); it just must not panic or garble
-    // the selector.
-    let css = ".foo/* c */:hover { color: red; }";
-    let expected = ".foo:hover { color: red; }";
-    assert_css_eq!(shim(css, "contenta"), expected);
+fn test_comment_glued_keyframe_selectors_stay_unscoped() {
+    // `%COMMENT0%from` must still be recognised as a keyframe selector after
+    // the placeholders are stripped - scoping it would break the animation.
+    assert_css_eq!(
+        shim("@keyframes k {/* c */from { opacity: 0; }/* d */50% { opacity: 1; } }", "contenta"),
+        "@keyframes contenta_k {from { opacity: 0; }50% { opacity: 1; }}"
+    );
+}
+
+#[test]
+fn test_comment_glued_selector_preserves_comment_newlines() {
+    // Comments restore as the newlines they contained, so the shimmed output
+    // keeps its line count and component sourcemaps don't shift. Stripping
+    // placeholders out of a selector must not drop any of them. Their exact
+    // position within the selector doesn't matter (they're blank text) - they
+    // come back out in front of it.
+    assert_eq!(
+        shim("/* multi\nline */.foo { color: red; }", "contenta"),
+        "\n.foo[contenta] { color: red; }"
+    );
+    assert_eq!(
+        shim(".foo/* multi\nline */{ color: red; }", "contenta"),
+        "\n.foo[contenta]{ color: red; }"
+    );
+    // An interior comment's newline must not land mid-compound-selector, where
+    // it would silently become a descendant combinator (`.foo :hover`).
+    assert_eq!(
+        shim(".foo/* multi\nline */:hover { color: red; }", "contenta"),
+        "\n.foo[contenta]:hover { color: red; }"
+    );
+}
+
+#[test]
+fn test_comment_glued_stylesheet_stays_scoped_through_finalize() {
+    // End-to-end shape that surfaced this: a whole component stylesheet as
+    // PostCSS reprints it, with every documenting comment glued to the rule
+    // it documents. Run through the minifying entry point too, since that
+    // re-parses the shimmed output.
+    let css = "\
+:host { position: relative; }\
+/* Contributes width but no height. */\
+.probe { display: grid; height: 0; }\
+:host:has(.widget) { padding-left: 21px; }\
+/* This rule positions the widget precisely. */\
+.widget { width: 9px; position: absolute; }\
+.widget:hover { background-color: red; }\
+/* Sticky variant used when scrolling. */\
+.container.sticky-header { display: flex; }\
+";
+
+    for minify in [false, true] {
+        let result =
+            finalize_component_style(css, true, "_ngcontent-%COMP%", "_nghost-%COMP%", minify);
+        assert!(!result.contains("%COMMENT"), "placeholder leaked (minify={minify}):\n{result}");
+        for selector in [".probe", ".widget", ".container.sticky-header"] {
+            assert!(
+                result.contains(&format!("{selector}[_ngcontent-%COMP%]")),
+                "`{selector}` lost its content attribute (minify={minify}):\n{result}"
+            );
+        }
+    }
+}
+
+// ============================================================================
+// Regression: comment placeholders must never survive into the shipped CSS
+// ============================================================================
+
+/// Inputs that exercise every pass which duplicates, drops or reorders the
+/// selector text a comment placeholder can be embedded in.
+const PLACEHOLDER_STRESS_CASES: &[&str] = &[
+    // `:host-context()` emits its trailing selector text once per permutation,
+    // duplicating any placeholder inside it.
+    ":host-context(.d) /* c */ .e { color: red; }",
+    ":host-context(.d)/* c */ .e { color: red; }",
+    ":host-context(.d) .e/* c */ { color: red; }",
+    ":host-context(/* c */.d) .e { color: red; }",
+    ":host-context(.a, .b) /* c */ .e { color: red; }",
+    ":host-context(.a):host-context(.b) /* c */ .e { color: red; }",
+    ":where(:host-context(.d)) /* c */ .e { color: red; }",
+    "/* pre */:host-context(.d) /* c */ .e { color: red; }",
+    ":host-context(.a) /* c */ :host { color: red; }",
+    // Passes that discard selector text, dropping placeholders.
+    "polyfill-next-selector { content: ':host .a'; }/* c */::content .b { color: red; }",
+    "polyfill-rule { content: ':host .a'; color: red; }/* c */.z { color: blue; }",
+    "polyfill-unscoped-rule { content: '.a'; color: red; }/* c */.z { color: blue; }",
+    ".a ::ng-deep /* c */ .b { color: red; }",
+    // Ordinary shapes, glued and unglued.
+    "/* c */.foo/* d */.bar/* e */ { color: red; }",
+    "@media screen { /* c */.foo { color: red; } }",
+    "@keyframes k {/* c */from { opacity: 0; } }",
+    "/* c */ { color: red; }",
+];
+
+#[test]
+fn test_comment_placeholder_never_leaks_into_output() {
+    // A literal `%COMMENT<n>%` in shipped CSS is a corrupt selector. Before
+    // placeholders carried their comment index, every `:host-context()` case
+    // below leaked one: each duplicated placeholder consumed the *next*
+    // comment, so the last one ran out and was left in the output verbatim.
+    for css in PLACEHOLDER_STRESS_CASES {
+        let result = shim_with_host(css, "contenta", "hosta");
+        assert!(!result.contains("%COMMENT"), "placeholder leaked for {css:?}:\n{result}");
+    }
+}
+
+#[test]
+fn test_sourcemap_comment_survives_placeholder_duplication() {
+    // Sourcemap comments are the one kind restored verbatim, so a mis-mapped
+    // placeholder is directly visible: before the fix the duplicated
+    // `:host-context()` placeholder consumed this comment and teleported it
+    // into the middle of a selector, leaving `%COMMENT%` at the real position.
+    for css in PLACEHOLDER_STRESS_CASES {
+        let with_map = format!("{css}\n/*# sourceMappingURL=x.map */");
+        let result = shim_with_host(&with_map, "contenta", "hosta");
+        // It must still occupy its own line - the teleport spliced it into the
+        // middle of a selector. (`polyfill-unscoped-rule` legitimately appends
+        // its rule after this line, so don't require it to be last.)
+        assert!(
+            result.lines().any(|line| line.trim() == "/*# sourceMappingURL=x.map */"),
+            "sourcemap comment moved for {css:?}:\n{result}"
+        );
+        assert_eq!(
+            result.matches("sourceMappingURL").count(),
+            1,
+            "sourcemap comment duplicated for {css:?}:\n{result}"
+        );
+    }
+}
+
+#[test]
+fn test_placeholder_shaped_text_in_source_css_never_leaks() {
+    // Backstop: a placeholder whose index doesn't resolve must not survive into
+    // the output. Reachable today only by writing the placeholder shape into
+    // the source CSS, but it's what keeps "no `%COMMENT<n>%` in shipped CSS"
+    // true for any future pass that duplicates or fabricates one.
+    let result = shim(".foo%COMMENT99%.bar { color: red; }", "contenta");
+    assert!(!result.contains("%COMMENT"), "{result}");
+    assert!(result.contains("[contenta]"), "{result}");
+}
+
+#[test]
+fn test_host_context_permutations_share_one_comment() {
+    // Every permutation gets a copy of the placeholder; each must restore to
+    // the same (blank) comment rather than eating a later one.
+    assert_css_eq!(
+        shim_with_host(":host-context(.a, .b) /* c */ .e { color: red; }", "contenta", "hosta"),
+        ".a[hosta] .e[contenta], .a [hosta] .e[contenta], \
+         .b[hosta] .e[contenta], .b [hosta] .e[contenta] { color: red; }"
+    );
+    assert_css_eq!(
+        shim_with_host(":host-context(/* c */.d) .e { color: red; }", "contenta", "hosta"),
+        ".d[hosta] .e[contenta], .d [hosta] .e[contenta] { color: red; }"
+    );
+}
+
+#[test]
+fn test_comment_placeholder_indices_are_independent_of_position() {
+    // Restoration is by index, so a dropped placeholder earlier in the file
+    // must not shift the comments that follow it onto the wrong placeholders.
+    let css = "polyfill-next-selector { content: ':host .a'; }/* dropped */::content .b { color: red; }\n\
+               /*# sourceMappingURL=x.map */";
+    let result = shim_with_host(css, "contenta", "hosta");
+    assert!(result.contains("/*# sourceMappingURL=x.map */"), "{result}");
+    assert!(!result.contains("%COMMENT"), "{result}");
 }
 
 #[test]
