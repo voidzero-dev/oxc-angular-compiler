@@ -2243,9 +2243,38 @@ fn scope_simple_selector(selector: &str, content_attr: &str) -> String {
         return String::new();
     }
 
-    // Don't scope comment placeholders
+    // A comment can end up glued directly to the selector that follows it -
+    // e.g. when CSS has been reprinted by an upstream formatter (PostCSS)
+    // that strips the blank line normally separating `/* comment */` from
+    // the next rule, `extract_comments` leaves behind `%COMMENT%.foo` with
+    // no separating whitespace. Bailing out unscoped for the *whole* string
+    // here would silently drop Emulated encapsulation for `.foo` too - so
+    // peel any leading/trailing placeholder(s) off, scope the real selector
+    // text, then splice them back. `restore_comments` later turns every
+    // placeholder into blank text, so their exact position doesn't matter.
     if selector.contains(COMMENT_PLACEHOLDER) {
-        return selector.to_string();
+        let mut rest = selector;
+        let mut leading = String::new();
+        while let Some(stripped) = rest.strip_prefix(COMMENT_PLACEHOLDER) {
+            leading.push_str(COMMENT_PLACEHOLDER);
+            rest = stripped;
+        }
+        let mut trailing = String::new();
+        while let Some(stripped) = rest.strip_suffix(COMMENT_PLACEHOLDER) {
+            trailing.push_str(COMMENT_PLACEHOLDER);
+            rest = stripped;
+        }
+        if rest.is_empty() {
+            // Nothing but comment placeholder(s) - no real selector to scope.
+            return selector.to_string();
+        }
+        if rest.contains(COMMENT_PLACEHOLDER) {
+            // A placeholder sits inside the selector body itself (e.g. a
+            // comment between a class name and a combinator) - too unusual
+            // to safely split; leave unscoped rather than risk corruption.
+            return selector.to_string();
+        }
+        return format!("{leading}{}{trailing}", scope_simple_selector(rest, content_attr));
     }
 
     // Already has the content attribute

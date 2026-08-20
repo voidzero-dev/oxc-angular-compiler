@@ -1001,6 +1001,94 @@ fn test_scope_first_selector_after_multiple_comments() {
 }
 
 #[test]
+fn test_scope_selector_glued_directly_to_preceding_comment() {
+    // Regression: a comment with NO separating whitespace before the next
+    // selector - e.g. `*/.foo`. This is not how anyone hand-writes CSS, but
+    // it's exactly what PostCSS's AST-based reprint produces when it
+    // processes a `styleUrl` file (Vite's `preprocessCSS`, used for Tailwind,
+    // runs before this CSS ever reaches `shim_css_text`): it strips the
+    // blank line that normally separates `/* comment */` from the following
+    // rule. `.foo` must still get its content attribute; a whole rule
+    // silently losing Emulated encapsulation - because the selector string
+    // handed to `scope_simple_selector` was `%COMMENT%.foo`, which the old
+    // code bailed out of scoping entirely - is how a component's own styles
+    // leak globally onto any other element sharing that class name, with no
+    // console error.
+    let css = "/* comment */.foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_selector_glued_directly_to_multiple_preceding_comments() {
+    // Same as above, but with two adjacent comments (also produced by
+    // PostCSS reprinting, e.g. an SCSS partial's license header merged with
+    // a rule doc-comment) both glued with no whitespace before the selector.
+    let css = "/* one *//* two */.foo { color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_selector_glued_directly_to_trailing_comment() {
+    // A comment glued to the END of a selector, immediately before `{`.
+    let css = ".foo/* comment */{ color: red; }";
+    let expected = ".foo[contenta] { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_multiple_rules_after_comment_glued_selectors() {
+    // The real-world shape that surfaced this bug: several unrelated rules
+    // in the same stylesheet, each with its explanatory comment glued
+    // directly to the following selector by PostCSS's reprint, must all
+    // still scope correctly rather than only the first one.
+    let css = "/* first */.foo { width: 1px; }/* second */.bar { height: 2px; }";
+    let expected = ".foo[contenta] { width: 1px; }.bar[contenta] { height: 2px; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
+fn test_scope_comment_glued_selectors_in_descendant_chain_and_comma_list() {
+    // The comment only glues to the *first* compound selector in a
+    // multi-part selector - every part still needs its own attribute.
+    let descendant = "/* c */.container .tabs-group { color: red; }";
+    assert_css_eq!(
+        shim(descendant, "contenta"),
+        ".container[contenta] .tabs-group[contenta] { color: red; }"
+    );
+
+    let comma_list = "/* c */.a, .b { color: red; }";
+    assert_css_eq!(shim(comma_list, "contenta"), ".a[contenta], .b[contenta] { color: red; }");
+}
+
+#[test]
+fn test_scope_comment_glued_to_host_and_host_context() {
+    let host = "/* c */:host { color: red; }";
+    assert_css_eq!(shim_with_host(host, "contenta", "hosta"), "[hosta] { color: red; }");
+
+    let host_context = "/* c */:host-context(.dark) { color: red; }";
+    assert_css_eq!(
+        shim_with_host(host_context, "contenta", "hosta"),
+        ".dark[hosta], .dark [hosta] { color: red; }"
+    );
+}
+
+#[test]
+fn test_interior_comment_placeholder_falls_back_to_unscoped() {
+    // Documented, intentional limitation: a comment placeholder *inside* a
+    // selector body (not glued to its start or end, e.g. between a class
+    // name and a pseudo-class) is too unusual to safely split - the fix
+    // deliberately leaves this case unscoped rather than risk corrupting the
+    // selector. This isn't a shape PostCSS's normal reprint produces (which
+    // is what the fix actually targets); it just must not panic or garble
+    // the selector.
+    let css = ".foo/* c */:hover { color: red; }";
+    let expected = ".foo:hover { color: red; }";
+    assert_css_eq!(shim(css, "contenta"), expected);
+}
+
+#[test]
 fn test_newline_as_descendant_combinator() {
     // Newline between selectors is a valid CSS descendant combinator
     let css = ".foo\n.bar { color: red; }";
