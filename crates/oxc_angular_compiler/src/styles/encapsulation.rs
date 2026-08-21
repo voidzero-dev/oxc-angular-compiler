@@ -434,16 +434,20 @@ fn extract_comments(css: &str) -> (String, Vec<String>) {
 ///
 /// Every placeholder carries the index of the comment it stands for, so a
 /// placeholder that got duplicated (`:host-context()` permutations) restores to
-/// the same comment as its twin, and one that got dropped shifts nothing. Any
-/// placeholder with an out-of-range index resolves to nothing rather than being
-/// left in the output - a literal `%COMMENT<n>%` must never reach shipped CSS.
+/// the same comment as its twin, and one that got dropped shifts nothing.
+///
+/// `extract_comments` only ever emits in-range indices, and the passes that
+/// copy selector text copy the index along with it, so every placeholder *we*
+/// generated resolves. An index that doesn't is therefore source CSS that
+/// merely looks like a placeholder (`content: "%COMMENT7%"`), and is left
+/// exactly as the author wrote it.
 fn restore_comments(css: &str, comments: &[String]) -> String {
     let mut result = String::with_capacity(css.len());
     let mut at = 0;
 
     while let Some((range, index)) = find_comment_placeholder(css, at) {
         result.push_str(&css[at..range.start]);
-        result.push_str(comments.get(index).map_or("", String::as_str));
+        result.push_str(comments.get(index).map_or(&css[range.start..range.end], String::as_str));
         at = range.end;
     }
     result.push_str(&css[at..]);
@@ -2105,6 +2109,30 @@ fn scope_selector_part_with_context(
         return String::new();
     }
 
+    // Detach any comment placeholders before anything inspects the selector.
+    // A comment can be glued straight onto the selector text (PostCSS reprints
+    // `/* why */\n.foo` as `/* why */.foo`), and every check below is a
+    // whole-string match: with `%COMMENT0%` still attached, `:where(.one)`
+    // stops looking like a pure pseudo-function and gets scoped as
+    // `[content]:where(.one)` instead of `:where(.one[content])` - which is a
+    // real cascade change, since `:where()` contributes no specificity. The
+    // placeholders restore to blank text, so re-emitting them in front is
+    // enough.
+    if selector.contains(COMMENT_PLACEHOLDER_PREFIX) {
+        // `%COMMENT` without a valid index isn't ours - fall through and treat
+        // it as ordinary selector text.
+        let (stripped, placeholders) = strip_comment_placeholders(selector);
+        if !placeholders.is_empty() {
+            if stripped.trim().is_empty() {
+                // Nothing but placeholder(s) - no real selector to scope. Must
+                // not fall through, or a lone comment would become a bare
+                // `[content]` matching every element in the component.
+                return selector.to_string();
+            }
+            return placeholders + &scope_selector_part_with_context(&stripped, ctx, part_has_host);
+        }
+    }
+
     // If this part IS the host marker, don't add content attr
     if !ctx.host_marker.is_empty() && selector.trim() == ctx.host_marker {
         return selector.to_string();
@@ -2300,29 +2328,9 @@ fn scope_simple_selector(selector: &str, content_attr: &str) -> String {
         return String::new();
     }
 
-    // A comment can end up glued directly to the selector text: PostCSS and
-    // other formatters reprint `/* why */\n.foo` as `/* why */.foo`, so
-    // `extract_comments` leaves behind `%COMMENT0%.foo` with nothing separating
-    // them. Bailing out here would ship `.foo` with no content attribute at
-    // all - a global rule that clobbers every other component's `.foo`, with no
-    // error. So strip the placeholders out, scope the real selector text, and
-    // re-emit them in front: they restore to blank text (or, for a sourcemap
-    // comment, to text that was never part of the selector anyway), so only
-    // their order relative to each other matters.
-    if selector.contains(COMMENT_PLACEHOLDER_PREFIX) {
-        // `%COMMENT` without a valid index isn't ours - fall through and scope
-        // it as ordinary selector text.
-        let (stripped, placeholders) = strip_comment_placeholders(selector);
-        if !placeholders.is_empty() {
-            if stripped.trim().is_empty() {
-                // Nothing but placeholder(s) - no real selector to scope. Must
-                // not fall through, or a lone comment would become a bare
-                // `[content]` matching every element in the component.
-                return selector.to_string();
-            }
-            return placeholders + &scope_simple_selector(&stripped, content_attr);
-        }
-    }
+    // Comment placeholders are detached in `scope_selector_part_with_context`,
+    // which is upstream of every caller of this function, so the selector text
+    // here is already placeholder-free.
 
     // Already has the content attribute
     let attr = format!("[{}]", content_attr);

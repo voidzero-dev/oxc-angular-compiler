@@ -1226,14 +1226,43 @@ fn test_sourcemap_comment_survives_placeholder_duplication() {
 }
 
 #[test]
-fn test_placeholder_shaped_text_in_source_css_never_leaks() {
-    // Backstop: a placeholder whose index doesn't resolve must not survive into
-    // the output. Reachable today only by writing the placeholder shape into
-    // the source CSS, but it's what keeps "no `%COMMENT<n>%` in shipped CSS"
-    // true for any future pass that duplicates or fabricates one.
-    let result = shim(".foo%COMMENT99%.bar { color: red; }", "contenta");
-    assert!(!result.contains("%COMMENT"), "{result}");
-    assert!(result.contains("[contenta]"), "{result}");
+fn test_placeholder_shaped_text_in_source_css_is_left_alone() {
+    // Author-written text that merely looks like a placeholder must survive.
+    // Every placeholder we generate resolves (`extract_comments` only emits
+    // in-range indices and the duplicating passes copy the index with the
+    // text), so an index that doesn't resolve is the author's, not ours.
+    for css in [
+        ".label { content: \"%COMMENT0%\"; }",
+        ".label { content: \"%COMMENT99%\"; }",
+        "/* c */.label { content: \"%COMMENT7%\"; }",
+    ] {
+        let result = shim(css, "contenta");
+        assert!(result.contains("content: \"%COMMENT"), "declaration text was eaten: {result}");
+        assert!(result.contains(".label[contenta]"), "{result}");
+    }
+}
+
+#[test]
+fn test_comment_glued_to_pure_pseudo_function_scopes_inside_it() {
+    // `:where()` contributes no specificity, so scoping to `[contenta]:where(.one)`
+    // instead of `:where(.one[contenta])` silently changes the cascade. A glued
+    // comment must not make the part stop looking like a pure pseudo-function.
+    assert_css_eq!(
+        shim("/* c */:where(.one) { color: red; }", "contenta"),
+        ":where(.one[contenta]) { color: red; }"
+    );
+    assert_css_eq!(
+        shim(":where(.one)/* c */ { color: red; }", "contenta"),
+        ":where(.one[contenta]) { color: red; }"
+    );
+    assert_css_eq!(
+        shim("/* c */:is(.a, .b) { color: red; }", "contenta"),
+        ":is(.a[contenta], .b[contenta]) { color: red; }"
+    );
+    assert_css_eq!(
+        shim("/* c */:where(.a):is(.b) { color: red; }", "contenta"),
+        ":where(.a[contenta]):is(.b[contenta]) { color: red; }"
+    );
 }
 
 #[test]
