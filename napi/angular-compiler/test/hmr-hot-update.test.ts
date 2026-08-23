@@ -56,10 +56,8 @@ afterAll(() => {
   rmSync(tempDir, { recursive: true, force: true })
 })
 
-function getAngularPlugin() {
-  const plugin = angular({ liveReload: true }).find(
-    (candidate) => candidate.name === '@oxc-angular/vite',
-  )
+function getAngularPlugin(options: Parameters<typeof angular>[0] = { liveReload: true }) {
+  const plugin = angular(options).find((candidate) => candidate.name === '@oxc-angular/vite')
 
   if (!plugin) {
     throw new Error('Failed to find @oxc-angular/vite plugin')
@@ -209,11 +207,19 @@ async function transformComponent(plugin: Plugin) {
     throw new Error('Expected plugin transform handler')
   }
 
+  const watched: string[] = []
   await plugin.transform.handler.call(
-    { error() {}, warn() {}, addWatchFile() {} } as any,
+    {
+      error() {},
+      warn() {},
+      addWatchFile(id: string) {
+        watched.push(normalizePath(id))
+      },
+    } as any,
     COMPONENT_SOURCE,
     componentPath,
   )
+  return watched
 }
 
 /**
@@ -761,9 +767,7 @@ describe('handleHotUpdate - Issue #185', () => {
   })
 
   it('should not act when liveReload is disabled', async () => {
-    const plugin = angular({ liveReload: false }).find(
-      (candidate) => candidate.name === '@oxc-angular/vite',
-    )!
+    const plugin = getAngularPlugin({ liveReload: false })
     const mockServer = await setupPluginWithServer(plugin)
 
     const utilFile = normalizePath(join(tempDir, 'src', 'utils.ts'))
@@ -773,5 +777,27 @@ describe('handleHotUpdate - Issue #185', () => {
 
     // No HMR or full-reload should be sent when liveReload is off.
     expect(mockServer._wsMessages).toHaveLength(0)
+  })
+
+  it('should not add template graph edges when liveReload is disabled', async () => {
+    const plugin = getAngularPlugin({ liveReload: false })
+    await setupPluginWithServer(plugin)
+
+    const watched = await transformComponent(plugin)
+
+    // The graph edge exists only to keep Vite off its `.html` reload branch
+    // during HMR. With HMR off, `handleHotUpdate` returns before it can use
+    // the edge, and the edge alone turns Vite's dropped `.html` payload into
+    // an unconditional `full-reload` with path `*`.
+    expect(watched).toEqual([])
+  })
+
+  it('should add a template graph edge when liveReload is enabled', async () => {
+    const plugin = getAngularPlugin()
+    await setupPluginWithServer(plugin)
+
+    const watched = await transformComponent(plugin)
+
+    expect(watched).toContain(normalizePath(templatePath))
   })
 })

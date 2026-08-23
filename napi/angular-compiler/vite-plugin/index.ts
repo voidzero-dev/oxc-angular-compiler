@@ -828,13 +828,21 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               // Watch the file so edits reach `handleHotUpdate` even when it
               // lives outside the dev-server root.
               viteServer.watcher?.add?.(dep)
-              // Templates only. Styles must stay out of the graph: the
-              // import edge makes Vite propagate a style change up to this
-              // component `.ts` and re-execute it, which defines a duplicate
-              // class and leaves `angular:component-update` patching a class
-              // that is no longer mounted. Styles never needed it — Vite only
-              // force-reloads on `.html`.
-              if (TEMPLATE_REGEX.test(normalizedDep)) {
+              // Templates only, and only while HMR is on.
+              //
+              // Styles must stay out of the graph: the import edge makes Vite
+              // propagate a style change up to this component `.ts` and
+              // re-execute it, which defines a duplicate class and leaves
+              // `angular:component-update` patching a class that is no longer
+              // mounted. Styles never needed it — Vite only force-reloads on
+              // `.html`.
+              //
+              // With `liveReload: false`, `handleHotUpdate` returns before it
+              // can use the edge, so the edge has no consumer other than
+              // Vite's default propagation — which is exactly what turns a
+              // payload the client would have dropped into an unconditional
+              // `full-reload` with path `*`.
+              if (pluginOptions.liveReload && TEMPLATE_REGEX.test(normalizedDep)) {
                 this.addWatchFile(dep)
               }
             }
