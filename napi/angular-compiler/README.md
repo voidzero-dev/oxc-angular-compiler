@@ -144,6 +144,17 @@ into one of these branches, mirroring Angular CLI's official behavior
 Set `liveReload: false` to disable both HMR and reloads — the plugin
 returns from `handleHotUpdate` without sending any event.
 
+"No reload" means no reload is requested. Vite full-reloads any changed
+`.html` whose module list is empty or holds no `js` module, so the plugin
+registers each component template in the module graph (`addWatchFile`) and
+returns it as its own HMR boundary. Without that, Vite puts a `full-reload`
+on the socket on top of every template edit. Its client usually drops that
+payload because the path does not match `location.pathname` — but in
+`middlewareMode` the path is `*`, which always reloads
+([#443](https://github.com/voidzero-dev/oxc-angular-compiler/issues/443)).
+
+`index.html` is not a component template, so it still triggers a full reload.
+
 ### Transform Options
 
 ```typescript

@@ -189,7 +189,7 @@ async function transformComponent(plugin: Plugin) {
   }
 
   await plugin.transform.handler.call(
-    { error() {}, warn() {} } as any,
+    { error() {}, warn() {}, addWatchFile() {} } as any,
     COMPONENT_SOURCE,
     componentPath,
   )
@@ -286,7 +286,7 @@ describe('pendingHmrUpdates race condition', () => {
       throw new Error('Expected plugin transform handler')
     }
     await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
+      { error() {}, warn() {}, addWatchFile() {} } as any,
       originalSource,
       multiComponentPath,
     )
@@ -332,7 +332,7 @@ describe('pendingHmrUpdates race condition', () => {
       throw new Error('Expected plugin transform handler')
     }
     await plugin.transform.handler.call(
-      { error() {}, warn() {} } as any,
+      { error() {}, warn() {}, addWatchFile() {} } as any,
       source,
       multiComponentPath,
     )
@@ -373,7 +373,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiStylesPath)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      multiStylesPath,
+    )
 
     // Edit only YComponent's styles. Stripping wipes BOTH components' styles
     // (and templates), so old and new stripped forms must still match.
@@ -416,7 +420,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiUrlPath)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      multiUrlPath,
+    )
 
     // Edit just first.component.html. resourceToComponent maps it to
     // multi-url.component.ts; dispatchAllComponentsInFile must fan out to
@@ -454,7 +462,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call({ error() {}, warn() {} } as any, originalSource, stalePath)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      originalSource,
+      stalePath,
+    )
 
     // Trigger an HMR-eligible edit so a pending entry is queued for both
     // components (including DropComponent).
@@ -471,7 +483,11 @@ describe('pendingHmrUpdates race condition', () => {
       export class KeepComponent {}
     `
     writeFileSync(stalePath, reducedSource)
-    await plugin.transform.handler.call({ error() {}, warn() {} } as any, reducedSource, stalePath)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      reducedSource,
+      stalePath,
+    )
 
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
 
@@ -501,7 +517,11 @@ describe('pendingHmrUpdates race condition', () => {
     if (!plugin.transform || typeof plugin.transform === 'function') {
       throw new Error('Expected plugin transform handler')
     }
-    await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, multiReloadPath)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      multiReloadPath,
+    )
 
     // Change a class member, NOT the template/styles. The stripped form will
     // differ from the cached one → full reload, no HMR.
@@ -606,19 +626,40 @@ describe('handleHotUpdate - Issue #185', () => {
     const mockServer = await setupPluginWithServer(plugin)
     await transformComponent(plugin)
 
-    // The component's HTML template IS in resourceToComponent
+    // The component's HTML template IS in resourceToComponent.
+    // `_clientModule` mirrors Vite's mixed module node: `isSelfAccepting` is
+    // a prototype getter there, so the flag lands on the client node.
     const componentHtmlFile = normalizePath(templatePath)
-    const mockModules = [{ id: componentHtmlFile }]
+    const mockModules = [{ id: componentHtmlFile, _clientModule: { isSelfAccepting: false } }]
     const ctx = createMockHmrContext(componentHtmlFile, mockModules, mockServer)
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    // Component HMR is dispatched, and Vite's modules are preserved for the
-    // default pipeline.
+    // Component HMR is dispatched, and the template module becomes its own
+    // HMR boundary. Without that, Vite sends a `full-reload` for the changed
+    // `.html` on top of the update we just dispatched — and that reload is
+    // unconditional in `middlewareMode`, where its path is `*`.
+    // See https://github.com/voidzero-dev/oxc-angular-compiler/issues/443.
     expect(result).toEqual(mockModules)
+    expect(mockModules[0]._clientModule.isSelfAccepting).toBe(true)
     expect(mockServer._wsMessages).toContainEqual(
       expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
     )
+  })
+
+  it('should not mark non-component HTML as self-accepting', async () => {
+    const plugin = getAngularPlugin()
+    await setupPluginWithServer(plugin)
+
+    // index.html must keep reloading the page — it is not hot-swappable.
+    const indexHtml = normalizePath(join(tempDir, 'index.html'))
+    const mockModules = [{ id: indexHtml, _clientModule: { isSelfAccepting: false } }]
+    const ctx = createMockHmrContext(indexHtml, mockModules)
+
+    const result = await callHandleHotUpdate(plugin, ctx)
+
+    expect(result).toEqual(mockModules)
+    expect(mockModules[0]._clientModule.isSelfAccepting).toBe(false)
   })
 
   it('should not swallow non-resource HTML files', async () => {

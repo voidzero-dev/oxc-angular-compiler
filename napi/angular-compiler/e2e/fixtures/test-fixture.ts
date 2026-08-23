@@ -142,6 +142,69 @@ export class HmrDetector {
   }
 
   /**
+   * Record every HMR websocket payload the dev server sends.
+   *
+   * Must be called BEFORE `page.goto`, because it wraps `window.WebSocket`
+   * and Vite's client opens its socket during page load.
+   *
+   * Reading the wire is the only honest way to assert that no reload was
+   * requested. Vite's client drops a `full-reload` whose `.html` path does
+   * not match `location.pathname`, so a DOM sentinel survives even when the
+   * server did ask for a reload.
+   */
+  async captureWirePayloads(): Promise<void> {
+    await this.page.addInitScript(() => {
+      const KEY = '__viteHmrPayloads'
+      const read = (): unknown[] => {
+        try {
+          return JSON.parse(sessionStorage.getItem(KEY) || '[]')
+        } catch {
+          return []
+        }
+      }
+      // Persist across navigations: a `full-reload` payload is only
+      // observable if the record outlives the reload it caused.
+      const record = (payload: unknown) => {
+        const all = read()
+        all.push(payload)
+        try {
+          sessionStorage.setItem(KEY, JSON.stringify(all))
+        } catch {
+          // Storage is unavailable; the assertion will report the gap.
+        }
+      }
+      const NativeWebSocket = window.WebSocket
+      class RecordingWebSocket extends NativeWebSocket {
+        constructor(url: string | URL, protocols?: string | string[]) {
+          super(url, protocols)
+          this.addEventListener('message', (event: MessageEvent) => {
+            try {
+              record(JSON.parse(event.data))
+            } catch {
+              // Non-JSON frames are not HMR payloads.
+            }
+          })
+        }
+      }
+      window.WebSocket = RecordingWebSocket as unknown as typeof WebSocket
+    })
+  }
+
+  /**
+   * Every HMR websocket payload recorded since `captureWirePayloads`,
+   * including payloads received before a reload.
+   */
+  async getWirePayloads(): Promise<Array<{ type: string; event?: string; path?: string }>> {
+    return await this.page.evaluate(() => {
+      try {
+        return JSON.parse(sessionStorage.getItem('__viteHmrPayloads') || '[]')
+      } catch {
+        return []
+      }
+    })
+  }
+
+  /**
    * Set up listeners to capture HMR events from the page.
    * Call this before making file changes.
    * Note: We use addScriptTag to inject the listener code because

@@ -156,7 +156,11 @@ async function transformComponent(plugin: Plugin, source: string, path: string) 
     throw new Error('Expected plugin transform handler')
   }
 
-  await plugin.transform.handler.call({ error() {}, warn() {} } as any, source, path)
+  await plugin.transform.handler.call(
+    { error() {}, warn() {}, addWatchFile() {} } as any,
+    source,
+    path,
+  )
 }
 
 function componentUpdateCount(server: any): number {
