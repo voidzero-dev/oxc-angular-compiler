@@ -154,10 +154,17 @@ const ANGULAR_TS_REGEX = /\.tsx?$/
 const TEMPLATE_REGEX = /\.html?$/
 const ANGULAR_COMPONENT_PREFIX = '@ng/component'
 
-/** True when `mod` is the module graph node for `normalizedFile`. */
+/**
+ * True when `mod` is the module graph node for `normalizedFile` itself, and
+ * not a postfixed variant of it.
+ *
+ * Vite sets `mod.file` to `cleanUrl(mod.id)`, which strips `?` and `#`, so a
+ * template that application code also imports as `./tpl.html?raw` is filed
+ * under the same `file` and appears in `ctx.modules` too. Matching on `id`
+ * keeps the two apart: an exact match means same file, no postfix.
+ */
 function isModuleForFile(mod: ModuleNode, normalizedFile: string): boolean {
-  const file = mod.file ?? mod.id
-  return !!file && normalizePath(file) === normalizedFile
+  return !!mod.id && normalizePath(mod.id) === normalizedFile
 }
 
 /**
@@ -1080,6 +1087,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // The browser never imported the template, so Vite's client finds
           // no `hotModulesMap` entry and the update is a no-op there. The DOM
           // change comes entirely from `angular:component-update` above.
+          //
+          // Only the template's own node is marked. A variant the browser did
+          // import — `./tpl.html?raw` and friends — keeps propagating to its
+          // importers, which would otherwise hold a stale value: Vite would
+          // stop at a module with no `import.meta.hot.accept` handler.
           if (handled && TEMPLATE_REGEX.test(normalizedFile)) {
             for (const mod of ctx.modules) {
               if (isModuleForFile(mod, normalizedFile)) markModuleSelfAccepting(mod)

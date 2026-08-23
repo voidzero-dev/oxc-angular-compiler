@@ -108,13 +108,16 @@ function createMockServer() {
  * the plugin writes the flag to the client-environment node it delegates to.
  * The returned `clientModule` is that node, so a test can assert on it.
  */
-function createMockTemplateModule(id: string): {
+function createMockTemplateModule(
+  id: string,
+  file: string = id,
+): {
   module: Partial<ModuleNode>
   clientModule: { isSelfAccepting: boolean }
 } {
   const clientModule = { isSelfAccepting: false }
   return {
-    module: { id, _clientModule: clientModule } as unknown as Partial<ModuleNode>,
+    module: { id, file, _clientModule: clientModule } as unknown as Partial<ModuleNode>,
     clientModule,
   }
 }
@@ -663,6 +666,29 @@ describe('handleHotUpdate - Issue #185', () => {
     expect(mockServer._wsMessages).toContainEqual(
       expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
     )
+  })
+
+  it('should not mark a postfixed variant of the template as self-accepting', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+    await transformComponent(plugin)
+
+    // Vite sets `file` to `cleanUrl(id)`, so a browser-imported
+    // `./app.component.html?raw` is filed under the template's path and shows
+    // up in `ctx.modules` alongside the node `addWatchFile` created.
+    const componentHtmlFile = normalizePath(templatePath)
+    const bare = createMockTemplateModule(componentHtmlFile)
+    const raw = createMockTemplateModule(`${componentHtmlFile}?raw`, componentHtmlFile)
+    const ctx = createMockHmrContext(componentHtmlFile, [bare.module, raw.module], mockServer)
+
+    await callHandleHotUpdate(plugin, ctx)
+
+    // Only the template itself becomes the boundary.
+    expect(bare.clientModule.isSelfAccepting).toBe(true)
+    // The `?raw` variant has real importers holding its value. Stopping
+    // propagation there would leave them with a stale string, because the
+    // browser has no `import.meta.hot.accept` handler for it.
+    expect(raw.clientModule.isSelfAccepting).toBe(false)
   })
 
   it('should not mark non-component HTML as self-accepting', async () => {
