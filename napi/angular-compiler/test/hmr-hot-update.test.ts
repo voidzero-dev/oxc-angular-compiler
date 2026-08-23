@@ -101,6 +101,24 @@ function createMockServer() {
   }
 }
 
+/**
+ * Mock of Vite's mixed module node.
+ *
+ * `isSelfAccepting` is a prototype getter with no setter on the real node, so
+ * the plugin writes the flag to the client-environment node it delegates to.
+ * The returned `clientModule` is that node, so a test can assert on it.
+ */
+function createMockTemplateModule(id: string): {
+  module: Partial<ModuleNode>
+  clientModule: { isSelfAccepting: boolean }
+} {
+  const clientModule = { isSelfAccepting: false }
+  return {
+    module: { id, _clientModule: clientModule } as unknown as Partial<ModuleNode>,
+    clientModule,
+  }
+}
+
 function createMockHmrContext(
   file: string,
   modules: Partial<ModuleNode>[] = [],
@@ -630,8 +648,8 @@ describe('handleHotUpdate - Issue #185', () => {
     // `_clientModule` mirrors Vite's mixed module node: `isSelfAccepting` is
     // a prototype getter there, so the flag lands on the client node.
     const componentHtmlFile = normalizePath(templatePath)
-    const mockModules = [{ id: componentHtmlFile, _clientModule: { isSelfAccepting: false } }]
-    const ctx = createMockHmrContext(componentHtmlFile, mockModules, mockServer)
+    const { module: templateModule, clientModule } = createMockTemplateModule(componentHtmlFile)
+    const ctx = createMockHmrContext(componentHtmlFile, [templateModule], mockServer)
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
@@ -640,8 +658,8 @@ describe('handleHotUpdate - Issue #185', () => {
     // `.html` on top of the update we just dispatched — and that reload is
     // unconditional in `middlewareMode`, where its path is `*`.
     // See https://github.com/voidzero-dev/oxc-angular-compiler/issues/443.
-    expect(result).toEqual(mockModules)
-    expect(mockModules[0]._clientModule.isSelfAccepting).toBe(true)
+    expect(result).toEqual([templateModule])
+    expect(clientModule.isSelfAccepting).toBe(true)
     expect(mockServer._wsMessages).toContainEqual(
       expect.objectContaining({ type: 'custom', event: 'angular:component-update' }),
     )
@@ -653,13 +671,13 @@ describe('handleHotUpdate - Issue #185', () => {
 
     // index.html must keep reloading the page — it is not hot-swappable.
     const indexHtml = normalizePath(join(tempDir, 'index.html'))
-    const mockModules = [{ id: indexHtml, _clientModule: { isSelfAccepting: false } }]
-    const ctx = createMockHmrContext(indexHtml, mockModules)
+    const { module: indexModule, clientModule } = createMockTemplateModule(indexHtml)
+    const ctx = createMockHmrContext(indexHtml, [indexModule])
 
     const result = await callHandleHotUpdate(plugin, ctx)
 
-    expect(result).toEqual(mockModules)
-    expect(mockModules[0]._clientModule.isSelfAccepting).toBe(false)
+    expect(result).toEqual([indexModule])
+    expect(clientModule.isSelfAccepting).toBe(false)
   })
 
   it('should not swallow non-resource HTML files', async () => {
