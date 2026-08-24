@@ -268,10 +268,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // emits per-component HMR updates and we mirror that here.
   const componentsByFile = new Map<string, Set<string>>()
 
-  // Reverse mapping: resource file path → component file path. Multi-component
-  // files almost always use inline templates, so a single owner per resource is
-  // sufficient in practice; if a templateUrl/styleUrl is shared across multiple
-  // components in the same file, only one will receive the HMR event.
+  // Reverse mapping: resource file path → component file path. Single-valued:
+  // the last transform to reference a resource owns the slot. Multiple
+  // components in the SAME file are covered by `dispatchAllComponentsInFile`;
+  // a resource shared across component FILES is covered by the multi-valued
+  // owner maps (`templateComponentOwners`, `styleComponentOwners`).
   const resourceToComponent = new Map<string, string>()
 
   // Cache for resolved resources
@@ -299,6 +300,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // components must dispatch HMR to every one of them when the style or one of
   // its preprocessor deps changes.
   const styleComponentOwners = new Map<string, Set<string>>()
+
+  // Direct component owners of each external template (normalized template
+  // path → component files referencing it as a templateUrl). Mirrors
+  // `styleComponentOwners`: a template shared by several component files must
+  // dispatch HMR to every one of them when it changes (issue #445).
+  const templateComponentOwners = new Map<string, Set<string>>()
 
   // Record the preprocessor dependencies of a compiled style and rebuild the
   // reverse map (dep -> owning styles). Replaces any previous registration for
@@ -814,6 +821,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 if (owners.size === 0) styleComponentOwners.delete(style)
               }
             }
+            for (const [template, owners] of templateComponentOwners) {
+              if (owners.has(actualId) && !newDeps.has(template)) {
+                owners.delete(actualId)
+                if (owners.size === 0) templateComponentOwners.delete(template)
+              }
+            }
 
             for (const dep of dependencies) {
               const normalizedDep = normalizePath(dep)
@@ -823,6 +836,12 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               if (directStyleUrls.has(normalizedDep)) {
                 let owners = styleComponentOwners.get(normalizedDep)
                 if (!owners) styleComponentOwners.set(normalizedDep, (owners = new Set()))
+                owners.add(actualId)
+              }
+              // Every component that uses an external template is an owner of it.
+              if (TEMPLATE_REGEX.test(normalizedDep)) {
+                let owners = templateComponentOwners.get(normalizedDep)
+                if (!owners) templateComponentOwners.set(normalizedDep, (owners = new Set()))
                 owners.add(actualId)
               }
               // Watch the file so edits reach `handleHotUpdate` even when it
@@ -1038,11 +1057,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
           // A changed file can be BOTH a shared dep of one component's style
           // and another component's direct templateUrl/styleUrl — process both
-          // roles before returning (no early return above). Direct styles are
-          // also reachable via styleComponentOwners alone: once the last
-          // resourceToComponent owner switches styles, its prune removes the
-          // single-valued entry while the remaining shared-style owners stay.
-          if (resourceToComponent.has(normalizedFile) || styleComponentOwners.has(normalizedFile)) {
+          // roles before returning (no early return above). Direct styles and
+          // templates are also reachable via their owner maps alone: once the
+          // last resourceToComponent owner switches resources, its prune
+          // removes the single-valued entry while the remaining shared owners
+          // stay.
+          if (
+            resourceToComponent.has(normalizedFile) ||
+            styleComponentOwners.has(normalizedFile) ||
+            templateComponentOwners.has(normalizedFile)
+          ) {
             // Stylesheets that only appear as transitive deps of other styles
             // (never used as a direct styleUrl) were already handled by the
             // shared-dep branch; skip them here to avoid a duplicate update.
@@ -1063,10 +1087,13 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   }
                 }
               } else {
-                const componentFile = resourceToComponent.get(normalizedFile)
-                if (componentFile && dispatchAllComponentsInFile(componentFile)) {
-                  debugHmr('external resource HMR: %s -> %s', normalizedFile, componentFile)
-                  handled = true
+                // A template shared by several component files updates every
+                // one of them (resourceToComponent is single-valued).
+                for (const owner of templateComponentOwners.get(normalizedFile) ?? []) {
+                  if (dispatchAllComponentsInFile(owner)) {
+                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                    handled = true
+                  }
                 }
               }
             }

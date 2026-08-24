@@ -801,3 +801,160 @@ describe('handleHotUpdate - Issue #185', () => {
     expect(watched).toContain(normalizePath(templatePath))
   })
 })
+
+describe('handleHotUpdate for a templateUrl shared across component files - Issue #445', () => {
+  const componentSource = (selector: string, className: string, templateUrl: string) => `
+    import { Component } from '@angular/core';
+    @Component({ selector: '${selector}', templateUrl: './${templateUrl}' })
+    export class ${className} {}
+  `
+
+  async function transformSharedComponent(plugin: Plugin, source: string, path: string) {
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      path,
+    )
+  }
+
+  function componentUpdateIds(server: any): string[] {
+    return server._wsMessages
+      .filter((m: any) => m.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+  }
+
+  it('dispatches HMR to every component file sharing the template', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const sharedHtmlPath = join(appDir, 'shared-owners.component.html')
+    const alphaPath = join(appDir, 'shared-owner-alpha.component.ts')
+    const betaPath = join(appDir, 'shared-owner-beta.component.ts')
+    writeFileSync(sharedHtmlPath, '<p>Shared</p>')
+
+    const alphaSource = componentSource(
+      'app-shared-a',
+      'AlphaComponent',
+      'shared-owners.component.html',
+    )
+    const betaSource = componentSource(
+      'app-shared-b',
+      'BetaComponent',
+      'shared-owners.component.html',
+    )
+    writeFileSync(alphaPath, alphaSource)
+    writeFileSync(betaPath, betaSource)
+
+    await transformSharedComponent(plugin, alphaSource, alphaPath)
+    await transformSharedComponent(plugin, betaSource, betaPath)
+
+    // Editing the shared template must update BOTH owner files, not just the
+    // last-transformed one that resourceToComponent happens to point at.
+    writeFileSync(sharedHtmlPath, '<p>Shared edited</p>')
+    const ctx = createMockHmrContext(
+      normalizePath(sharedHtmlPath),
+      [{ id: normalizePath(sharedHtmlPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentIds = componentUpdateIds(mockServer)
+    expect(componentIds).toContain(`${alphaPath}@AlphaComponent`)
+    expect(componentIds).toContain(`${betaPath}@BetaComponent`)
+  })
+
+  it('dispatches HMR to remaining owners when one owner switches templates', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const sharedHtmlPath = join(appDir, 'shared-prune.component.html')
+    const betaOwnHtmlPath = join(appDir, 'shared-prune-own.component.html')
+    const alphaPath = join(appDir, 'prune-owner-alpha.component.ts')
+    const betaPath = join(appDir, 'prune-owner-beta.component.ts')
+    writeFileSync(sharedHtmlPath, '<p>Shared</p>')
+    writeFileSync(betaOwnHtmlPath, '<p>Own</p>')
+
+    const alphaSource = componentSource(
+      'app-prune-a',
+      'AlphaComponent',
+      'shared-prune.component.html',
+    )
+    const betaSource = componentSource(
+      'app-prune-b',
+      'BetaComponent',
+      'shared-prune.component.html',
+    )
+    writeFileSync(alphaPath, alphaSource)
+    writeFileSync(betaPath, betaSource)
+
+    await transformSharedComponent(plugin, alphaSource, alphaPath)
+    await transformSharedComponent(plugin, betaSource, betaPath)
+
+    // Beta switches to its own template; its prune removes the single-valued
+    // resourceToComponent entry for the shared template.
+    const betaSwitchedSource = componentSource(
+      'app-prune-b',
+      'BetaComponent',
+      'shared-prune-own.component.html',
+    )
+    writeFileSync(betaPath, betaSwitchedSource)
+    await transformSharedComponent(plugin, betaSwitchedSource, betaPath)
+
+    // Editing the shared template must still update Alpha (reachable via
+    // templateComponentOwners even though resourceToComponent no longer has it).
+    writeFileSync(sharedHtmlPath, '<p>Shared edited</p>')
+    const ctx = createMockHmrContext(
+      normalizePath(sharedHtmlPath),
+      [{ id: normalizePath(sharedHtmlPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentIds = componentUpdateIds(mockServer)
+    expect(componentIds).toContain(`${alphaPath}@AlphaComponent`)
+    expect(componentIds).not.toContain(`${betaPath}@BetaComponent`)
+  })
+
+  it('marks the shared template module self-accepting when dispatching to every owner', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const sharedHtmlPath = join(appDir, 'shared-accept.component.html')
+    const alphaPath = join(appDir, 'accept-owner-alpha.component.ts')
+    const betaPath = join(appDir, 'accept-owner-beta.component.ts')
+    writeFileSync(sharedHtmlPath, '<p>Shared</p>')
+
+    const alphaSource = componentSource(
+      'app-accept-a',
+      'AlphaComponent',
+      'shared-accept.component.html',
+    )
+    const betaSource = componentSource(
+      'app-accept-b',
+      'BetaComponent',
+      'shared-accept.component.html',
+    )
+    writeFileSync(alphaPath, alphaSource)
+    writeFileSync(betaPath, betaSource)
+
+    await transformSharedComponent(plugin, alphaSource, alphaPath)
+    await transformSharedComponent(plugin, betaSource, betaPath)
+
+    const normalizedShared = normalizePath(sharedHtmlPath)
+    const { module: templateModule, clientModule } = createMockTemplateModule(normalizedShared)
+    const ctx = createMockHmrContext(normalizedShared, [templateModule], mockServer)
+
+    const result = await callHandleHotUpdate(plugin, ctx)
+
+    // The multi-owner dispatch must keep the template as its own HMR boundary
+    // (issue #443) while updating both owners.
+    expect(result).toEqual([templateModule])
+    expect(clientModule.isSelfAccepting).toBe(true)
+    const componentIds = componentUpdateIds(mockServer)
+    expect(componentIds).toContain(`${alphaPath}@AlphaComponent`)
+    expect(componentIds).toContain(`${betaPath}@BetaComponent`)
+  })
+})
