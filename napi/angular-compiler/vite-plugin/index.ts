@@ -1473,16 +1473,17 @@ function extractClassStylesFor(
   const fields = locateStyleFieldsFor(code, className)
   if (!fields) return null
 
-  let inline: string[] = []
-  if (fields.inline) {
-    inline = readStringLiterals(code, fields.inline)
-    if (inline.length === 0) return null
+  const read = (field: (typeof fields)['inline']): string[] | null => {
+    if (field.kind === 'absent') return []
+    if (field.kind === 'unreadable') return null
+    const { literals, complete } = readStringLiterals(code, field.range)
+    // A partial read is unknown, not partial knowledge: acting on the
+    // literals alone would drop whatever the unreadable elements name.
+    return complete ? literals : null
   }
-  let urls: string[] = []
-  if (fields.urls) {
-    urls = readStringLiterals(code, fields.urls)
-    if (urls.length === 0) return null
-  }
+  const inline = read(fields.inline)
+  const urls = read(fields.urls)
+  if (inline === null || urls === null) return null
   return { inline, urls }
 }
 
@@ -1502,8 +1503,8 @@ function extractClassStylesFor(
 function extractInlineStyles(code: string, className: string): string[] | null {
   const range = locateStylesFieldFor(code, className)
   if (!range) return null
-  const styles = readStringLiterals(code, range)
-  return styles.length > 0 ? styles : null
+  const { literals } = readStringLiterals(code, range)
+  return literals.length > 0 ? literals : null
 }
 
 /**

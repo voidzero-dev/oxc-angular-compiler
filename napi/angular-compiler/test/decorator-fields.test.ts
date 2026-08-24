@@ -370,35 +370,57 @@ describe('decorator-fields utils', () => {
   // served none, while a class whose styles cannot be read must fall back to
   // the file-level list. Only a null return distinguishes them.
   describe('locateStyleFieldsFor', () => {
+    // Read the literals out of a located field, for the tests that care
+    // about the value rather than the classification.
+    const literalsIn = (src: string, field: { kind: string; range?: [number, number] }) => {
+      expect(field.kind).toBe('literal')
+      return readStringLiterals(src, (field as { range: [number, number] }).range).literals
+    }
+
     it('returns null when className matches no decorator', () => {
       const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
       expect(locateStyleFieldsFor(src, 'Nope')).toBeNull()
     })
 
-    it('returns both members null for a class that declares no styles', () => {
+    it('reports both fields absent for a class that declares no styles', () => {
       const src = `@Component({ template: '<p></p>' })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({ urls: null, inline: null })
+      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+        urls: { kind: 'absent' },
+        inline: { kind: 'absent' },
+      })
     })
 
-    it('reports a field that is present but holds no literal', () => {
-      const src = `@Component({ styleUrls: [STYLE_URL] })\nexport class Foo {}`
-      const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(fields.urls).not.toBeNull()
-      expect(readStringLiterals(src, fields.urls!)).toEqual([])
+    it('reports a field whose value has no literal shape as unreadable', () => {
+      const src = `@Component({ styleUrls: STYLE_URLS })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+    })
+
+    it('reports a singular `styleUrl` identifier value as unreadable, not absent', () => {
+      // The regression this guards: reporting it absent tells the caller
+      // "this class has no styles", which strips the component's CSS.
+      const src = `@Component({ styleUrl: STYLE_URL })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
     })
 
     it('reports inline and url ranges together when a class declares both', () => {
       const src = `@Component({ styles: ['.x{}'], styleUrls: ['./real.css'] })\nexport class Foo {}`
       const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(readStringLiterals(src, fields.inline!)).toEqual(['.x{}'])
-      expect(readStringLiterals(src, fields.urls!)).toEqual(['./real.css'])
+      expect(literalsIn(src, fields.inline)).toEqual(['.x{}'])
+      expect(literalsIn(src, fields.urls)).toEqual(['./real.css'])
     })
 
     it('falls back to the singular `styleUrl` for the urls member', () => {
       const src = `@Component({ styleUrl: './solo.css' })\nexport class Foo {}`
       const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(readStringLiterals(src, fields.urls!)).toEqual(['./solo.css'])
-      expect(fields.inline).toBeNull()
+      expect(literalsIn(src, fields.urls)).toEqual(['./solo.css'])
+      expect(fields.inline).toEqual({ kind: 'absent' })
+    })
+
+    it('reports the urls member unreadable when only the singular form is unreadable', () => {
+      const src = `@Component({ styleUrl: STYLE_URL, styles: ['.x{}'] })\nexport class Foo {}`
+      const fields = locateStyleFieldsFor(src, 'Foo')!
+      expect(fields.urls).toEqual({ kind: 'unreadable' })
+      expect(literalsIn(src, fields.inline)).toEqual(['.x{}'])
     })
 
     it('resolves each class separately in a multi-component file', () => {
@@ -409,8 +431,11 @@ describe('decorator-fields utils', () => {
         export class BareComponent {}
       `
       const styled = locateStyleFieldsFor(src, 'StyledComponent')!
-      expect(readStringLiterals(src, styled.urls!)).toEqual(['./a.css'])
-      expect(locateStyleFieldsFor(src, 'BareComponent')).toEqual({ urls: null, inline: null })
+      expect(literalsIn(src, styled.urls)).toEqual(['./a.css'])
+      expect(locateStyleFieldsFor(src, 'BareComponent')).toEqual({
+        urls: { kind: 'absent' },
+        inline: { kind: 'absent' },
+      })
     })
   })
 
@@ -420,17 +445,24 @@ describe('decorator-fields utils', () => {
   // closes (real field missed), and a `// styles: [...]` line comment
   // or `/* styles: [...] */` block comment as a real field (wrong
   // range returned).
+  //
+  // `complete` reports whether every element was read. A caller acting
+  // on a partial list silently drops stylesheets.
   // -----------------------------------------------------------------
   describe('readStringLiterals', () => {
     // Read the value of `styles:` from a one-component source, so these
     // exercise the same path the extractors use.
-    const literalsOf = (value: string): string[] => {
+    const readOf = (value: string) => {
       const src = `@Component({ styles: ${value} })\nclass Foo {}`
       return readStringLiterals(src, locateStylesFieldFor(src, 'Foo')!)
     }
+    const literalsOf = (value: string): string[] => readOf(value).literals
 
     it('reads every entry of an array in order', () => {
-      expect(literalsOf(`['./a.css', './b.css']`)).toEqual(['./a.css', './b.css'])
+      expect(readOf(`['./a.css', './b.css']`)).toEqual({
+        literals: ['./a.css', './b.css'],
+        complete: true,
+      })
     })
 
     it('reads a single-entry array', () => {
@@ -438,7 +470,7 @@ describe('decorator-fields utils', () => {
     })
 
     it('reads a bare string value as one entry', () => {
-      expect(literalsOf(`'./a.css'`)).toEqual(['./a.css'])
+      expect(readOf(`'./a.css'`)).toEqual({ literals: ['./a.css'], complete: true })
     })
 
     it('reads mixed quote styles, including template literals', () => {
@@ -449,8 +481,9 @@ describe('decorator-fields utils', () => {
       ])
     })
 
-    it('returns no entries for an empty array', () => {
-      expect(literalsOf(`[]`)).toEqual([])
+    it('reports an empty array as complete, not unknown', () => {
+      // `styles: []` is a definitive answer: this class has no styles.
+      expect(readOf(`[]`)).toEqual({ literals: [], complete: true })
     })
 
     it('keeps an escaped quote inside a literal, unescaped', () => {
@@ -469,15 +502,49 @@ describe('decorator-fields utils', () => {
       expect(literalsOf(`['./a.css', /* don't */ './b.css']`)).toEqual(['./a.css', './b.css'])
     })
 
-    it('skips a non-literal entry rather than failing', () => {
-      expect(literalsOf(`[SOME_CONST, './a.css']`)).toEqual(['./a.css'])
+    it('reports a non-literal entry as incomplete', () => {
+      // The literal alongside it is not a partial answer to act on: acting
+      // on it would drop the stylesheet the constant resolves to.
+      expect(readOf(`[SOME_CONST, './a.css']`).complete).toBe(false)
     })
 
-    it('stops at an unterminated literal and returns what it read', () => {
+    it('reports a spread entry as incomplete', () => {
+      expect(readOf(`[...SHARED, './a.css']`).complete).toBe(false)
+    })
+
+    it('reports an interpolated template literal as incomplete', () => {
+      // The raw slice is `${DIR}/a.css`, not a real path. The Rust extractor
+      // folds it; this scan cannot.
+      expect(readOf('[`${DIR}/a.css`]').complete).toBe(false)
+    })
+
+    it('reports a bare interpolated template literal as incomplete', () => {
+      expect(readOf('`${DIR}/a.css`').complete).toBe(false)
+    })
+
+    it('treats an escaped `${` in a template literal as ordinary text', () => {
+      expect(readOf('[`\\${NOT_INTERPOLATED}.css`]')).toEqual({
+        literals: ['\\${NOT_INTERPOLATED}.css'],
+        complete: true,
+      })
+    })
+
+    it('treats `${` inside a quoted string as ordinary text', () => {
+      expect(readOf(`['\${DIR}/a.css']`)).toEqual({
+        literals: ['${DIR}/a.css'],
+        complete: true,
+      })
+    })
+
+    it('stops at an unterminated literal and reports incomplete', () => {
       // The locator bounds the range, so the unterminated entry is dropped.
       const src = `@Component({ styles: ['./a.css', './b.css] })\nclass Foo {}`
       const range = locateStylesFieldFor(src, 'Foo')
-      if (range) expect(readStringLiterals(src, range)).toEqual(['./a.css'])
+      if (range) {
+        const read = readStringLiterals(src, range)
+        expect(read.literals).toEqual(['./a.css'])
+        expect(read.complete).toBe(false)
+      }
     })
   })
 

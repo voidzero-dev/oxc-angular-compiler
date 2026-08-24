@@ -1204,6 +1204,20 @@ describe('@ng/component endpoint resolves the template per class', () => {
     )
   }
 
+  // The component-file branch queues `pendingHmrUpdates` under `ctx.file`
+  // verbatim, and the endpoint looks the id up verbatim. Asserting the queued
+  // id here turns a spelling mismatch into a named failure instead of an
+  // unexplained empty body — the difference only shows up on Windows, where
+  // a normalized path and a `join()` path are different strings.
+  function expectDispatched(mockServer: any, componentId: string) {
+    const ids = mockServer._wsMessages
+      .filter((m: any) => m?.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+    expect(ids, 'expected the HMR dispatch to use the requested path spelling').toContain(
+      componentId,
+    )
+  }
+
   function getMiddleware(mockServer: any) {
     const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
     expect(middleware, 'expected middleware to be registered').toBeDefined()
@@ -1324,6 +1338,8 @@ describe('@ng/component endpoint resolves the template per class', () => {
     const ctx = createMockHmrContext(mixedPath, [{ id: mixedPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
 
+    expectDispatched(mockServer, `${mixedPath}@InlineComponent`)
+
     // InlineComponent must get its inline template — templateUrls.length > 0
     // for the FILE must not shadow the per-class inline branch.
     const body = await invokeAngularMiddleware(
@@ -1370,6 +1386,20 @@ describe('@ng/component endpoint resolves the styles per class', () => {
       { error() {}, warn() {}, addWatchFile() {} } as any,
       source,
       path,
+    )
+  }
+
+  // The component-file branch queues `pendingHmrUpdates` under `ctx.file`
+  // verbatim, and the endpoint looks the id up verbatim. Asserting the queued
+  // id here turns a spelling mismatch into a named failure instead of an
+  // unexplained empty body — the difference only shows up on Windows, where
+  // a normalized path and a `join()` path are different strings.
+  function expectDispatched(mockServer: any, componentId: string) {
+    const ids = mockServer._wsMessages
+      .filter((m: any) => m?.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+    expect(ids, 'expected the HMR dispatch to use the requested path spelling').toContain(
+      componentId,
     )
   }
 
@@ -1508,6 +1538,8 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     const ctx = createMockHmrContext(mixedPath, [{ id: mixedPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
 
+    expectDispatched(mockServer, `${mixedPath}@InlineComponent`)
+
     // InlineComponent must get its OWN inline styles — a sibling's styleUrl
     // making the FILE-level list non-empty must not shadow the inline branch.
     const body = await invokeAngularMiddleware(
@@ -1581,13 +1613,16 @@ describe('@ng/component endpoint resolves the styles per class', () => {
 
     const edited = source.replace('color: red', 'color: green')
     writeFileSync(inlineCommentPath, edited)
-    const ctx = createMockHmrContext(
-      normalizePath(inlineCommentPath),
-      [{ id: normalizePath(inlineCommentPath) }],
-      mockServer,
-    )
+    // Editing the `.ts` itself takes the component-file branch, which keys
+    // `componentsByFile` and `pendingHmrUpdates` on `ctx.file` verbatim. Use
+    // the same spelling here, for `transform` above, and for the endpoint
+    // request below: on Windows a normalized path and a `join()` path differ
+    // as strings, and the lookup would miss. Real Vite hands both hooks the
+    // same normalized spelling, so only a test can mix them.
+    const ctx = createMockHmrContext(inlineCommentPath, [{ id: inlineCommentPath }], mockServer)
     await callHandleHotUpdate(plugin, ctx)
 
+    expectDispatched(mockServer, `${inlineCommentPath}@InlineCommentComponent`)
     const body = await invokeAngularMiddleware(
       getMiddleware(mockServer),
       `${inlineCommentPath}@InlineCommentComponent`,
@@ -1720,5 +1755,221 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).toContain('PS_CONST_MARKER')
+  })
+
+  it('falls back when the singular `styleUrl` is a same-file constant', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const ownCssPath = join(appDir, 'ps-singconst-own.component.css')
+    const sibCssPath = join(appDir, 'ps-singconst-sib.component.css')
+    const singConstPath = join(appDir, 'ps-singconst.component.ts')
+    writeFileSync(ownCssPath, '.PS_SINGCONST_OWN_MARKER { color: red; }')
+    writeFileSync(sibCssPath, '.PS_SINGCONST_SIB_MARKER { color: red; }')
+
+    // The Rust extractor folds the const (verified: it reports ./own.css),
+    // but the text scan cannot. That is "unknown", not "no styles" — serving
+    // an empty set would strip this component's CSS entirely.
+    const source = `
+      import { Component } from '@angular/core';
+      const STYLE_URL = './ps-singconst-own.component.css';
+      @Component({
+        selector: 'app-ps-singconst',
+        template: '<p>const</p>',
+        styleUrl: STYLE_URL,
+      })
+      export class SingConstComponent {}
+      @Component({
+        selector: 'app-ps-singconst-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-singconst-sib.component.css'],
+      })
+      export class SingConstSiblingComponent {}
+    `
+    writeFileSync(singConstPath, source)
+    await transformSource(plugin, source, singConstPath)
+
+    writeFileSync(ownCssPath, '.PS_SINGCONST_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(ownCssPath),
+      [{ id: normalizePath(ownCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${singConstPath}@SingConstComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_SINGCONST_OWN_MARKER')
+  })
+
+  it('serves no styles for an explicitly empty `styleUrls` array', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const sibCssPath = join(appDir, 'ps-emptyurls-sib.component.css')
+    const emptyUrlsPath = join(appDir, 'ps-emptyurls.component.ts')
+    writeFileSync(sibCssPath, '.PS_EMPTYURLS_SIB_MARKER { color: red; }')
+
+    // `styleUrls: []` is valid and definitive: this class has no styles. It
+    // must not inherit the file-level union.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-emptyurls',
+        template: '<p>empty</p>',
+        styleUrls: [],
+      })
+      export class EmptyUrlsComponent {}
+      @Component({
+        selector: 'app-ps-emptyurls-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-emptyurls-sib.component.css'],
+      })
+      export class EmptyUrlsSiblingComponent {}
+    `
+    writeFileSync(emptyUrlsPath, source)
+    await transformSource(plugin, source, emptyUrlsPath)
+
+    writeFileSync(sibCssPath, '.PS_EMPTYURLS_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(sibCssPath),
+      [{ id: normalizePath(sibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${emptyUrlsPath}@EmptyUrlsComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS_EMPTYURLS_SIB_MARKER')
+  })
+
+  it('serves no styles for an explicitly empty inline `styles` array', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const sibCssPath = join(appDir, 'ps-emptyinline-sib.component.css')
+    const emptyInlinePath = join(appDir, 'ps-emptyinline.component.ts')
+    writeFileSync(sibCssPath, '.PS_EMPTYINLINE_SIB_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-emptyinline',
+        template: '<p>empty</p>',
+        styles: [],
+      })
+      export class EmptyInlineComponent {}
+      @Component({
+        selector: 'app-ps-emptyinline-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-emptyinline-sib.component.css'],
+      })
+      export class EmptyInlineSiblingComponent {}
+    `
+    writeFileSync(emptyInlinePath, source)
+    await transformSource(plugin, source, emptyInlinePath)
+
+    writeFileSync(sibCssPath, '.PS_EMPTYINLINE_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(sibCssPath),
+      [{ id: normalizePath(sibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${emptyInlinePath}@EmptyInlineComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS_EMPTYINLINE_SIB_MARKER')
+  })
+
+  it('falls back when a `styleUrls` array mixes a constant with a literal', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const constCssPath = join(appDir, 'ps-mixed-const.component.css')
+    const litCssPath = join(appDir, 'ps-mixed-lit.component.css')
+    const mixedPath = join(appDir, 'ps-mixed.component.ts')
+    writeFileSync(constCssPath, '.PS_MIXED_CONST_MARKER { color: red; }')
+    writeFileSync(litCssPath, '.PS_MIXED_LIT_MARKER { color: red; }')
+
+    // One entry is a const the text scan cannot read. Returning just the
+    // literal would silently drop a stylesheet — the array is unknown, not
+    // partially known.
+    const source = `
+      import { Component } from '@angular/core';
+      const MIXED_STYLE = './ps-mixed-const.component.css';
+      @Component({
+        selector: 'app-ps-mixed',
+        template: '<p>mixed</p>',
+        styleUrls: [MIXED_STYLE, './ps-mixed-lit.component.css'],
+      })
+      export class MixedComponent {}
+    `
+    writeFileSync(mixedPath, source)
+    await transformSource(plugin, source, mixedPath)
+
+    writeFileSync(litCssPath, '.PS_MIXED_LIT_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(litCssPath),
+      [{ id: normalizePath(litCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${mixedPath}@MixedComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_MIXED_LIT_MARKER')
+    expect(body).toContain('PS_MIXED_CONST_MARKER')
+  })
+
+  it('falls back when a `styleUrl` template literal is interpolated', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const interpCssPath = join(appDir, 'ps-interp.component.css')
+    const interpPath = join(appDir, 'ps-interp.component.ts')
+    writeFileSync(interpCssPath, '.PS_INTERP_MARKER { color: red; }')
+
+    // The Rust extractor folds this to ./ps-interp.component.css; the raw
+    // slice `${DIR}/ps-interp.component.css` is not a real path.
+    const source = `
+      import { Component } from '@angular/core';
+      const DIR = '.';
+      @Component({
+        selector: 'app-ps-interp',
+        template: '<p>interp</p>',
+        styleUrl: \`\${DIR}/ps-interp.component.css\`,
+      })
+      export class InterpComponent {}
+    `
+    writeFileSync(interpPath, source)
+    await transformSource(plugin, source, interpPath)
+
+    writeFileSync(interpCssPath, '.PS_INTERP_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(interpCssPath),
+      [{ id: normalizePath(interpCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${interpPath}@InterpComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_INTERP_MARKER')
   })
 })

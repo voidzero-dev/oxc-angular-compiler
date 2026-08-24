@@ -203,12 +203,34 @@ export function emptyDelimitedRange(code: string, range: [number, number]): stri
  *
  * Returns null if no qualifying field is found.
  */
-function locateFieldInsideArgs(
+/**
+ * The state of one decorator field, which is three-valued: the key may be
+ * missing entirely, present with a value this scan can read, or present with
+ * a value it cannot (an identifier, a call, a concatenation).
+ *
+ * The third state is why this exists. Collapsing it into "absent" tells a
+ * caller the component declares nothing, when in truth the value is simply
+ * beyond a text scan — the Rust extractor folds same-file constants that this
+ * cannot. Those two need opposite fallbacks.
+ */
+export type FieldValue =
+  | { kind: 'absent' }
+  | { kind: 'unreadable' }
+  | { kind: 'literal'; range: [number, number] }
+
+/**
+ * Find a top-level field of the `@Component(...)` args and classify its
+ * value. See `FieldValue` for the three outcomes.
+ *
+ * The walk is identical to `locateFieldInsideArgs`, which is expressed on top
+ * of this; only the reporting differs.
+ */
+function findFieldInArgs(
   code: string,
   argsRange: [number, number],
   field: string,
   openerChars: string,
-): [number, number] | null {
+): FieldValue {
   const [openParen, closeParen] = argsRange
   const stack: Ctx[] = ['paren']
   let i = openParen + 1
@@ -226,13 +248,25 @@ function locateFieldInsideArgs(
         while (j < closeParen && WS_RE.test(code[j])) j++
         if (j < closeParen && openerChars.includes(code[j])) {
           const end = findClosingDelim(code, j)
-          if (end !== -1 && end < closeParen) return [j, end]
+          if (end !== -1 && end < closeParen) return { kind: 'literal', range: [j, end] }
         }
+        // The key is here; its value is not a shape we can read.
+        return { kind: 'unreadable' }
       }
     }
     i = advanceOneToken(code, i, stack, closeParen)
   }
-  return null
+  return { kind: 'absent' }
+}
+
+function locateFieldInsideArgs(
+  code: string,
+  argsRange: [number, number],
+  field: string,
+  openerChars: string,
+): [number, number] | null {
+  const found = findFieldInArgs(code, argsRange, field, openerChars)
+  return found.kind === 'literal' ? found.range : null
 }
 
 /**
@@ -484,6 +518,37 @@ export function locateStyleUrlFor(code: string, className: string): [number, num
 }
 
 /**
+ * Whether a template literal's raw contents contain an unescaped `${`, i.e.
+ * the literal interpolates and its text is not the final value. A leading
+ * run of backslashes escapes the `$` only when it is odd-length.
+ */
+function hasInterpolation(raw: string): boolean {
+  for (let i = raw.indexOf('${'); i !== -1; i = raw.indexOf('${', i + 2)) {
+    let backslashes = 0
+    while (i - 1 - backslashes >= 0 && raw[i - 1 - backslashes] === '\\') backslashes++
+    if (backslashes % 2 === 0) return true
+  }
+  return false
+}
+
+/**
+ * The literals read out of a field value, and whether every element was read.
+ *
+ * `complete: false` means the value holds something this scan cannot resolve —
+ * an identifier, a spread, an interpolated template literal, an unterminated
+ * string. The literals gathered alongside it are NOT a partial answer to act
+ * on: a caller that used them would silently drop the stylesheets the
+ * unreadable elements stand for. Treat an incomplete read as unknown.
+ *
+ * An empty array is the opposite case: `complete: true` with no literals is a
+ * definitive "this field declares nothing".
+ */
+export interface StringLiteralsRead {
+  literals: string[]
+  complete: boolean
+}
+
+/**
  * Read the string literals out of a located field value, given the inclusive
  * `[start, end]` range of its outer delimiters (the shape every `locate*`
  * here returns).
@@ -494,22 +559,22 @@ export function locateStyleUrlFor(code: string, className: string): [number, num
  *
  * Inside the array body, whitespace, commas and comments are skipped, and
  * each literal is delimited with `findClosingDelim`, so escape sequences and
- * apostrophes inside comments cannot be mistaken for delimiters. Anything
- * that is not a string literal (an identifier, a spread, a nested array) is
- * skipped rather than treated as an entry.
+ * apostrophes inside comments cannot be mistaken for delimiters.
  *
  * Returns the raw inner contents — no unescaping, no trimming — because HMR
- * delivers these verbatim. An unterminated literal ends the scan, returning
- * whatever was collected before it.
+ * delivers these verbatim.
  */
-export function readStringLiterals(code: string, range: [number, number]): string[] {
+export function readStringLiterals(code: string, range: [number, number]): StringLiteralsRead {
   const [start, end] = range
   if (code[start] !== '[') {
     // Bare literal — the range already delimits it.
-    return [code.slice(start + 1, end)]
+    const raw = code.slice(start + 1, end)
+    const interpolated = code[start] === '`' && hasInterpolation(raw)
+    return { literals: interpolated ? [] : [raw], complete: !interpolated }
   }
 
   const literals: string[] = []
+  let complete = true
   let i = start + 1
   while (i < end) {
     const ch = code[i]
@@ -525,52 +590,60 @@ export function readStringLiterals(code: string, range: [number, number]): strin
     if (ch === "'" || ch === '"' || ch === '`') {
       const close = findClosingDelim(code, i)
       // Unterminated literal: nothing further can be read reliably.
-      if (close === -1 || close >= end) break
-      literals.push(code.slice(i + 1, close))
+      if (close === -1 || close >= end) {
+        complete = false
+        break
+      }
+      const raw = code.slice(i + 1, close)
+      if (ch === '`' && hasInterpolation(raw)) {
+        complete = false
+      } else {
+        literals.push(raw)
+      }
       i = close + 1
       continue
     }
-    // Not a literal (identifier, spread, nested array…) — skip this
-    // character. Every branch above advances `i`, so the scan terminates.
+    // An identifier, spread, call or nested array: this element cannot be
+    // read, so the array as a whole is unknown. Every branch above advances
+    // `i`, so the scan terminates.
+    complete = false
     i++
   }
-  return literals
+  return { literals, complete }
 }
 
 /**
- * The value ranges of the style-related fields on one `@Component(...)`.
- * A null member means the decorator does not declare that field at all —
- * which is different from declaring it with a value no literal can be read
- * from (a constant, an identifier), where the range is present but
- * `readStringLiterals` returns nothing.
+ * The style-related fields of one `@Component(...)`, each classified by
+ * `FieldValue`: absent, unreadable, or a literal range.
  */
-export interface ClassStyleFieldRanges {
+export interface ClassStyleFields {
   /** `styleUrls: [...]`, else the singular `styleUrl: '...'`. */
-  urls: [number, number] | null
+  urls: FieldValue
   /** Inline `styles: [...] | '...'`. */
-  inline: [number, number] | null
+  inline: FieldValue
 }
 
 /**
- * Locate the style fields of the `@Component(...)` decorating `className`.
+ * Classify the style fields of the `@Component(...)` decorating `className`.
  *
- * Returns null when no such decorator could be located, so a caller can tell
- * "this class declares no styles" (both members null) from "this class could
- * not be read" — the two need opposite fallbacks.
+ * Returns null when no such decorator could be located at all. Otherwise each
+ * member says whether the class declares that field, and whether its value
+ * can be read — see `FieldValue`, and note that "declares nothing" and
+ * "cannot be read" need opposite fallbacks at the call site.
  *
- * `styleUrls` wins over `styleUrl` if a decorator somehow carries both;
- * Angular itself rejects that combination, so this only makes the choice
- * deterministic. One decorator scan serves all three lookups.
+ * `styleUrls` wins over `styleUrl` when a decorator carries both, unless the
+ * plural form is absent; Angular itself rejects that combination, so this only
+ * makes the choice deterministic. One decorator scan serves all three lookups.
  */
-export function locateStyleFieldsFor(
-  code: string,
-  className: string,
-): ClassStyleFieldRanges | null {
+export function locateStyleFieldsFor(code: string, className: string): ClassStyleFields | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   if (!found) return null
+  const plural = findFieldInArgs(code, found.argsRange, 'styleUrls', STYLES_OPENERS)
   return {
     urls:
-      locateStyleUrlsInArgs(code, found.argsRange) ?? locateStyleUrlInArgs(code, found.argsRange),
-    inline: locateStylesInArgs(code, found.argsRange),
+      plural.kind === 'absent'
+        ? findFieldInArgs(code, found.argsRange, 'styleUrl', TEMPLATE_OPENERS)
+        : plural,
+    inline: findFieldInArgs(code, found.argsRange, 'styles', STYLES_OPENERS),
   }
 }
