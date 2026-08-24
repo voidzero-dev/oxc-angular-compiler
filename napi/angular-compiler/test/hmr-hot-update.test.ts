@@ -1518,4 +1518,207 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).toContain('PS_INLINE_MARKER')
     expect(body).not.toContain('PS_EXT_MARKER')
   })
+  it('serves the styleUrls of a class whose array carries a comment', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const realCssPath = join(appDir, 'ps-commented.component.css')
+    const commentedPath = join(appDir, 'ps-commented.component.ts')
+    writeFileSync(realCssPath, '.PS_COMMENTED_MARKER { color: red; }')
+
+    // An apostrophe inside a comment in the array body must not be mistaken
+    // for a string delimiter, which would swallow the real entry.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-commented',
+        template: '<p>commented</p>',
+        styleUrls: [
+          /* don't drop this */
+          './ps-commented.component.css',
+        ],
+      })
+      export class CommentedComponent {}
+    `
+    writeFileSync(commentedPath, source)
+    await transformSource(plugin, source, commentedPath)
+
+    writeFileSync(realCssPath, '.PS_COMMENTED_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(realCssPath),
+      [{ id: normalizePath(realCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${commentedPath}@CommentedComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_COMMENTED_MARKER')
+  })
+
+  it('serves the inline styles of a class whose array carries a comment', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const inlineCommentPath = join(appDir, 'ps-inline-comment.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-inline-comment',
+        template: '<p>inline</p>',
+        styles: [
+          /* it's fine */
+          '.PS_INLINE_COMMENT_MARKER { color: red; }',
+        ],
+      })
+      export class InlineCommentComponent {}
+    `
+    writeFileSync(inlineCommentPath, source)
+    await transformSource(plugin, source, inlineCommentPath)
+
+    const edited = source.replace('color: red', 'color: green')
+    writeFileSync(inlineCommentPath, edited)
+    const ctx = createMockHmrContext(
+      normalizePath(inlineCommentPath),
+      [{ id: normalizePath(inlineCommentPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${inlineCommentPath}@InlineCommentComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_INLINE_COMMENT_MARKER')
+  })
+  it('serves no styles to a class that declares none, even beside a styled sibling', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const styledCssPath = join(appDir, 'ps-bare-styled.component.css')
+    const barePath = join(appDir, 'ps-bare.component.ts')
+    writeFileSync(styledCssPath, '.PS_BARE_SIBLING_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-styled',
+        template: '<p>styled</p>',
+        styleUrls: ['./ps-bare-styled.component.css'],
+      })
+      export class StyledComponent {}
+      @Component({
+        selector: 'app-ps-bare',
+        template: '<p>bare</p>',
+      })
+      export class BareComponent {}
+    `
+    writeFileSync(barePath, source)
+    await transformSource(plugin, source, barePath)
+
+    writeFileSync(styledCssPath, '.PS_BARE_SIBLING_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(styledCssPath),
+      [{ id: normalizePath(styledCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    // BareComponent declares no styles at all: it must get NONE, not the
+    // file-level union of its sibling's scoped CSS.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${barePath}@BareComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS_BARE_SIBLING_MARKER')
+    expect(body).not.toContain('styles:')
+  })
+
+  it('serves both inline styles and styleUrls when a class declares both', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const extCssPath = join(appDir, 'ps-merge-ext.component.css')
+    const mergePath = join(appDir, 'ps-merge.component.ts')
+    writeFileSync(extCssPath, '.PS_MERGE_EXTERNAL_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-merge',
+        template: '<p>merge</p>',
+        styles: ['.PS_MERGE_INLINE_MARKER { color: blue; }'],
+        styleUrls: ['./ps-merge-ext.component.css'],
+      })
+      export class MergeComponent {}
+    `
+    writeFileSync(mergePath, source)
+    await transformSource(plugin, source, mergePath)
+
+    writeFileSync(extCssPath, '.PS_MERGE_EXTERNAL_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(extCssPath),
+      [{ id: normalizePath(extCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${mergePath}@MergeComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_MERGE_INLINE_MARKER')
+    expect(body).toContain('PS_MERGE_EXTERNAL_MARKER')
+    // Angular's order: the decorator's own inline `styles` first, then the
+    // resolved `styleUrl(s)` content appended (see `resolve_styles`).
+    expect(body.indexOf('PS_MERGE_INLINE_MARKER')).toBeLessThan(
+      body.indexOf('PS_MERGE_EXTERNAL_MARKER'),
+    )
+  })
+
+  it('falls back to the file-level styleUrls when a class uses a non-literal entry', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const constCssPath = join(appDir, 'ps-const.component.css')
+    const constPath = join(appDir, 'ps-const.component.ts')
+    writeFileSync(constCssPath, '.PS_CONST_MARKER { color: red; }')
+
+    // The URL comes from a const, so the per-class locator finds the field but
+    // reads no string literal out of it. That must fall back to the file-level
+    // list (which the Rust extractor DOES fold), not serve an empty style set.
+    const source = `
+      import { Component } from '@angular/core';
+      const STYLE_URL = './ps-const.component.css';
+      @Component({
+        selector: 'app-ps-const',
+        template: '<p>const</p>',
+        styleUrls: [STYLE_URL],
+      })
+      export class ConstComponent {}
+    `
+    writeFileSync(constPath, source)
+    await transformSource(plugin, source, constPath)
+
+    writeFileSync(constCssPath, '.PS_CONST_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(constCssPath),
+      [{ id: normalizePath(constCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${constPath}@ConstComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_CONST_MARKER')
+  })
 })

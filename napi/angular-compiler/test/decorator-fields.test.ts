@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest'
 import {
   emptyDelimitedRange,
   locateComponentDecorators,
+  locateStyleFieldsFor,
   locateStyleUrlFor,
   locateStyleUrlsFor,
   locateStylesFieldFor,
   locateTemplateStringFor,
   locateTemplateUrlFor,
+  readStringLiterals,
 } from '../vite-plugin/utils/decorator-fields.js'
 
 describe('decorator-fields utils', () => {
@@ -364,6 +366,54 @@ describe('decorator-fields utils', () => {
     })
   })
 
+  // The endpoint needs three answers, not two: a class with no styles must be
+  // served none, while a class whose styles cannot be read must fall back to
+  // the file-level list. Only a null return distinguishes them.
+  describe('locateStyleFieldsFor', () => {
+    it('returns null when className matches no decorator', () => {
+      const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Nope')).toBeNull()
+    })
+
+    it('returns both members null for a class that declares no styles', () => {
+      const src = `@Component({ template: '<p></p>' })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({ urls: null, inline: null })
+    })
+
+    it('reports a field that is present but holds no literal', () => {
+      const src = `@Component({ styleUrls: [STYLE_URL] })\nexport class Foo {}`
+      const fields = locateStyleFieldsFor(src, 'Foo')!
+      expect(fields.urls).not.toBeNull()
+      expect(readStringLiterals(src, fields.urls!)).toEqual([])
+    })
+
+    it('reports inline and url ranges together when a class declares both', () => {
+      const src = `@Component({ styles: ['.x{}'], styleUrls: ['./real.css'] })\nexport class Foo {}`
+      const fields = locateStyleFieldsFor(src, 'Foo')!
+      expect(readStringLiterals(src, fields.inline!)).toEqual(['.x{}'])
+      expect(readStringLiterals(src, fields.urls!)).toEqual(['./real.css'])
+    })
+
+    it('falls back to the singular `styleUrl` for the urls member', () => {
+      const src = `@Component({ styleUrl: './solo.css' })\nexport class Foo {}`
+      const fields = locateStyleFieldsFor(src, 'Foo')!
+      expect(readStringLiterals(src, fields.urls!)).toEqual(['./solo.css'])
+      expect(fields.inline).toBeNull()
+    })
+
+    it('resolves each class separately in a multi-component file', () => {
+      const src = `
+        @Component({ selector: 'a', styleUrls: ['./a.css'] })
+        export class StyledComponent {}
+        @Component({ selector: 'b', template: '<p></p>' })
+        export class BareComponent {}
+      `
+      const styled = locateStyleFieldsFor(src, 'StyledComponent')!
+      expect(readStringLiterals(src, styled.urls!)).toEqual(['./a.css'])
+      expect(locateStyleFieldsFor(src, 'BareComponent')).toEqual({ urls: null, inline: null })
+    })
+  })
+
   // -----------------------------------------------------------------
   // Comment-aware scanning. Without this, the walker treats `'` in a
   // `// don't ...` line comment as opening a string literal that never
@@ -371,6 +421,66 @@ describe('decorator-fields utils', () => {
   // or `/* styles: [...] */` block comment as a real field (wrong
   // range returned).
   // -----------------------------------------------------------------
+  describe('readStringLiterals', () => {
+    // Read the value of `styles:` from a one-component source, so these
+    // exercise the same path the extractors use.
+    const literalsOf = (value: string): string[] => {
+      const src = `@Component({ styles: ${value} })\nclass Foo {}`
+      return readStringLiterals(src, locateStylesFieldFor(src, 'Foo')!)
+    }
+
+    it('reads every entry of an array in order', () => {
+      expect(literalsOf(`['./a.css', './b.css']`)).toEqual(['./a.css', './b.css'])
+    })
+
+    it('reads a single-entry array', () => {
+      expect(literalsOf(`['./a.css']`)).toEqual(['./a.css'])
+    })
+
+    it('reads a bare string value as one entry', () => {
+      expect(literalsOf(`'./a.css'`)).toEqual(['./a.css'])
+    })
+
+    it('reads mixed quote styles, including template literals', () => {
+      expect(literalsOf('[\'./a.css\', "./b.css", `./c.css`]')).toEqual([
+        './a.css',
+        './b.css',
+        './c.css',
+      ])
+    })
+
+    it('returns no entries for an empty array', () => {
+      expect(literalsOf(`[]`)).toEqual([])
+    })
+
+    it('keeps an escaped quote inside a literal, unescaped', () => {
+      expect(literalsOf(`['it\\'s.css']`)).toEqual([`it\\'s.css`])
+    })
+
+    it('ignores an apostrophe inside a block comment before an entry', () => {
+      expect(literalsOf(`[/* don't drop this */ './a.css']`)).toEqual(['./a.css'])
+    })
+
+    it('ignores an apostrophe inside a line comment before an entry', () => {
+      expect(literalsOf(`[\n  // it's here\n  './a.css',\n]`)).toEqual(['./a.css'])
+    })
+
+    it('ignores a comment between two entries', () => {
+      expect(literalsOf(`['./a.css', /* don't */ './b.css']`)).toEqual(['./a.css', './b.css'])
+    })
+
+    it('skips a non-literal entry rather than failing', () => {
+      expect(literalsOf(`[SOME_CONST, './a.css']`)).toEqual(['./a.css'])
+    })
+
+    it('stops at an unterminated literal and returns what it read', () => {
+      // The locator bounds the range, so the unterminated entry is dropped.
+      const src = `@Component({ styles: ['./a.css', './b.css] })\nclass Foo {}`
+      const range = locateStylesFieldFor(src, 'Foo')
+      if (range) expect(readStringLiterals(src, range)).toEqual(['./a.css'])
+    })
+  })
+
   describe('comment handling in @Component args', () => {
     it('does not get stuck on an apostrophe inside a line comment', () => {
       const src = `@Component({

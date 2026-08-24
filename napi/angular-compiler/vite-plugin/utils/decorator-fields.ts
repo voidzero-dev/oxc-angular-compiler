@@ -482,3 +482,95 @@ export function locateStyleUrlFor(code: string, className: string): [number, num
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateStyleUrlInArgs(code, found.argsRange) : null
 }
+
+/**
+ * Read the string literals out of a located field value, given the inclusive
+ * `[start, end]` range of its outer delimiters (the shape every `locate*`
+ * here returns).
+ *
+ * Handles both shapes Angular accepts for `styles` / `styleUrls`:
+ *   - Array (`['…', "…", `…`]`, or any mix) → each literal, in order.
+ *   - Bare single literal (`'…'`, `"…"`, `` `…` ``) → a one-element array.
+ *
+ * Inside the array body, whitespace, commas and comments are skipped, and
+ * each literal is delimited with `findClosingDelim`, so escape sequences and
+ * apostrophes inside comments cannot be mistaken for delimiters. Anything
+ * that is not a string literal (an identifier, a spread, a nested array) is
+ * skipped rather than treated as an entry.
+ *
+ * Returns the raw inner contents — no unescaping, no trimming — because HMR
+ * delivers these verbatim. An unterminated literal ends the scan, returning
+ * whatever was collected before it.
+ */
+export function readStringLiterals(code: string, range: [number, number]): string[] {
+  const [start, end] = range
+  if (code[start] !== '[') {
+    // Bare literal — the range already delimits it.
+    return [code.slice(start + 1, end)]
+  }
+
+  const literals: string[] = []
+  let i = start + 1
+  while (i < end) {
+    const ch = code[i]
+    if (WS_RE.test(ch) || ch === ',') {
+      i++
+      continue
+    }
+    const afterComment = skipComment(code, i, end)
+    if (afterComment !== -1) {
+      i = afterComment
+      continue
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const close = findClosingDelim(code, i)
+      // Unterminated literal: nothing further can be read reliably.
+      if (close === -1 || close >= end) break
+      literals.push(code.slice(i + 1, close))
+      i = close + 1
+      continue
+    }
+    // Not a literal (identifier, spread, nested array…) — skip this
+    // character. Every branch above advances `i`, so the scan terminates.
+    i++
+  }
+  return literals
+}
+
+/**
+ * The value ranges of the style-related fields on one `@Component(...)`.
+ * A null member means the decorator does not declare that field at all —
+ * which is different from declaring it with a value no literal can be read
+ * from (a constant, an identifier), where the range is present but
+ * `readStringLiterals` returns nothing.
+ */
+export interface ClassStyleFieldRanges {
+  /** `styleUrls: [...]`, else the singular `styleUrl: '...'`. */
+  urls: [number, number] | null
+  /** Inline `styles: [...] | '...'`. */
+  inline: [number, number] | null
+}
+
+/**
+ * Locate the style fields of the `@Component(...)` decorating `className`.
+ *
+ * Returns null when no such decorator could be located, so a caller can tell
+ * "this class declares no styles" (both members null) from "this class could
+ * not be read" — the two need opposite fallbacks.
+ *
+ * `styleUrls` wins over `styleUrl` if a decorator somehow carries both;
+ * Angular itself rejects that combination, so this only makes the choice
+ * deterministic. One decorator scan serves all three lookups.
+ */
+export function locateStyleFieldsFor(
+  code: string,
+  className: string,
+): ClassStyleFieldRanges | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  if (!found) return null
+  return {
+    urls:
+      locateStyleUrlsInArgs(code, found.argsRange) ?? locateStyleUrlInArgs(code, found.argsRange),
+    inline: locateStylesInArgs(code, found.argsRange),
+  }
+}
