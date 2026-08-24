@@ -2150,4 +2150,99 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_SPREAD_SIB_MARKER')
   })
+  it('serves a styleUrls entry written with a JavaScript escape', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const escCssPath = join(appDir, 'ps-esc.component.css')
+    const escSibCssPath = join(appDir, 'ps-esc-sib.component.css')
+    const escPath = join(appDir, 'ps-esc.component.ts')
+    writeFileSync(escCssPath, '.PS_ESC_OWN_MARKER { color: red; }')
+    writeFileSync(escSibCssPath, '.PS_ESC_SIB_MARKER { color: blue; }')
+
+    // `\u002e` is `.` — the cooked value is `./ps-esc.component.css`, which
+    // is what the Rust extractor sees. A raw read yields a path that does
+    // not exist, and the per-style catch would swallow the failure.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-esc',
+        template: '<p>esc</p>',
+        styleUrls: ['\\u002e/ps-esc\\u002ecomponent.css'],
+      })
+      export class EscComponent {}
+      @Component({
+        selector: 'app-ps-esc-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-esc-sib.component.css'],
+      })
+      export class EscSiblingComponent {}
+    `
+    writeFileSync(escPath, source)
+    await transformSource(plugin, source, escPath)
+
+    writeFileSync(escSibCssPath, '.PS_ESC_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(escSibCssPath),
+      [{ id: normalizePath(escSibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(getMiddleware(mockServer), `${escPath}@EscComponent`)
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_ESC_OWN_MARKER')
+    expect(body).not.toContain('PS_ESC_SIB_MARKER')
+  })
+
+  it('ignores a commented-out decorator when picking the styles of a class', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const realCssPath = join(appDir, 'ps-cmt-real.component.css')
+    const oldCssPath = join(appDir, 'ps-cmt-old.component.css')
+    const cmtSibCssPath = join(appDir, 'ps-cmt-sib.component.css')
+    const cmtPath = join(appDir, 'ps-cmt.component.ts')
+    writeFileSync(realCssPath, '.PS_CMT_REAL_MARKER { color: red; }')
+    writeFileSync(oldCssPath, '.PS_CMT_OLD_MARKER { color: blue; }')
+    writeFileSync(cmtSibCssPath, '.PS_CMT_SIB_MARKER { color: teal; }')
+
+    // A leftover commented decorator sits between the real one and the class.
+    // Enumeration must not pair the class with the commented occurrence.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-cmt',
+        template: '<p>cmt</p>',
+        styleUrls: ['./ps-cmt-real.component.css'],
+      })
+      // @Component({ styleUrl: './ps-cmt-old.component.css' })
+      export class CommentedComponent {}
+      @Component({
+        selector: 'app-ps-cmt-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-cmt-sib.component.css'],
+      })
+      export class CommentedSiblingComponent {}
+    `
+    writeFileSync(cmtPath, source)
+    await transformSource(plugin, source, cmtPath)
+
+    writeFileSync(cmtSibCssPath, '.PS_CMT_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(cmtSibCssPath),
+      [{ id: normalizePath(cmtSibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${cmtPath}@CommentedComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_CMT_REAL_MARKER')
+    expect(body).not.toContain('PS_CMT_OLD_MARKER')
+    expect(body).not.toContain('PS_CMT_SIB_MARKER')
+  })
 })

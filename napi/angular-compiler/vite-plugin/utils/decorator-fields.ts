@@ -21,9 +21,11 @@
  *     literal `@Component` form is recognized.
  *   - **Parenthesized decorator expressions** like `@(Component as any)(...)`
  *     — uncommon and not supported.
- *   - **Quoted (`{ 'styles': [...] }`) or computed (`{ ['styles']: [...] }`)
- *     property keys** for the `styles`/`template` field. Almost never used
- *     in Angular; locator returns null for such forms.
+ *   - **Computed property keys** (`{ ['styles']: [...] }`) and quoted keys
+ *     carrying an escape (`{ 'style\u0055rls': [...] }`) can't be resolved
+ *     to a name here. Plain quoted keys (`{ 'styles': [...] }`) are matched;
+ *     the unresolvable forms are reported so the caller can fall back rather
+ *     than read them as a field that isn't there.
  *   - **Concatenated style strings** inside an array (`styles: ['a' + 'b']`)
  *     are extracted as two separate elements; cosmetic but harmless because
  *     the browser sees the same CSS either way.
@@ -63,6 +65,9 @@ const ASCII_WORD_RE = /[A-Za-z0-9_$]/
 /** Unicode-aware JS identifier characters. Class names can be non-ASCII. */
 const IDENT_START_RE = /[\p{L}_$]/u
 const IDENT_CONT_RE = /[\p{L}\p{N}_$]/u
+
+/** The only decorator form recognized — see the module docstring. */
+const DECORATOR_NAME = 'Component'
 
 /** Opener chars accepted as the value of `styles:` — `string | string[]`. */
 const STYLES_OPENERS = '\'"`['
@@ -322,26 +327,50 @@ export interface ComponentDecorator {
  * class (dangling, malformed, anonymous) are skipped — the caller sees only
  * well-formed component declarations.
  *
- * The class-name scan is bounded between this decorator's closing `)` and
- * either the next `@Component\s*\(` or end of file. That bound prevents one
- * decorator's scan from accidentally consuming a sibling's class identifier,
- * and combined with the comment- and string-aware walkers in
- * `findClosingDelim` and `findClassName` it correctly handles `@Component`
- * occurrences inside comments, strings, and template literals.
+ * Enumeration itself skips comments and string/template literals, so a
+ * commented-out or quoted `@Component(` is never treated as a decorator.
+ * The class-name scan is then bounded between one decorator's closing `)`
+ * and the next decorator's `@`, which stops it consuming a sibling's class
+ * identifier — a bound that is only correct because phantom occurrences
+ * were excluded first.
  *
  * See the module-level docstring for a full list of known limitations.
  */
 export function locateComponentDecorators(code: string): ComponentDecorator[] {
-  // Pass 1: find every `@Component(...)` and bound its args list.
+  // Pass 1: find every `@Component(...)` and bound its args list. The walk
+  // skips comments and string/template literals, so a commented-out or
+  // quoted `@Component(` is not mistaken for a real decorator. That matters
+  // beyond ignoring it: a phantom occurrence between a real decorator and
+  // its class would bound the real one's class-name scan in pass 2, leaving
+  // the class paired with the phantom's metadata.
   type Found = { decoratorStart: number; openParen: number; closeParen: number }
-  const decoratorRe = /@Component\s*\(/g
   const found: Found[] = []
-  let m: RegExpExecArray | null
-  while ((m = decoratorRe.exec(code)) !== null) {
-    const openParen = m.index + m[0].length - 1
-    const closeParen = findClosingDelim(code, openParen)
-    if (closeParen === -1) continue
-    found.push({ decoratorStart: m.index, openParen, closeParen })
+  let i = 0
+  while (i < code.length) {
+    const afterComment = skipComment(code, i, code.length)
+    if (afterComment !== -1) {
+      i = afterComment
+      continue
+    }
+    const ch = code[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const close = findClosingDelim(code, i)
+      i = close === -1 ? code.length : close + 1
+      continue
+    }
+    if (ch === '@' && code.startsWith(DECORATOR_NAME, i + 1)) {
+      let j = i + 1 + DECORATOR_NAME.length
+      while (j < code.length && WS_RE.test(code[j])) j++
+      if (code[j] === '(') {
+        const closeParen = findClosingDelim(code, j)
+        if (closeParen !== -1) {
+          found.push({ decoratorStart: i, openParen: j, closeParen })
+          i = closeParen + 1
+          continue
+        }
+      }
+    }
+    i++
   }
 
   // Pass 2: for each decorator, scan forward from its `)` to either the next
@@ -553,6 +582,115 @@ function hasInterpolation(raw: string): boolean {
   return false
 }
 
+const SINGLE_CHAR_ESCAPES: Record<string, string> = {
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  b: '\b',
+  f: '\f',
+  v: '\v',
+}
+
+/** Line terminators that a backslash may continue across. */
+const LINE_TERMINATORS = new Set(['\n', '\r', ' ', ' '])
+
+const HEX_ONLY_RE = /^[0-9a-fA-F]+$/
+
+/**
+ * Decode the escape sequences in a string- or template-literal's raw source
+ * text into the value it actually denotes, or null if the text holds an
+ * escape this cannot resolve.
+ *
+ * The raw text is what the source spells; the decoded text is what the Rust
+ * extractor sees and what a path or a stylesheet must be compared against.
+ * `'./a.css'` names `./a.css`, and reading it raw yields a path that
+ * does not exist.
+ *
+ * Null is returned for a malformed escape (`\xZZ`, a truncated `\u12`) and
+ * for the legacy octal forms, which are outright errors in a module. Those
+ * are cases where guessing a value would be worse than telling the caller
+ * this literal is beyond the scan.
+ *
+ * A raw text with no backslash is returned unchanged, so the overwhelmingly
+ * common literal costs nothing and reads byte for byte as before.
+ */
+function decodeEscapes(raw: string): string | null {
+  if (!raw.includes('\\')) return raw
+
+  let out = ''
+  let i = 0
+  while (i < raw.length) {
+    const ch = raw[i]
+    if (ch !== '\\') {
+      out += ch
+      i++
+      continue
+    }
+
+    const next = raw[i + 1]
+    // A trailing backslash cannot occur in a well-delimited literal, since
+    // it would have escaped the closing quote.
+    if (next === undefined) return null
+
+    // Line continuation: the backslash and the terminator both vanish.
+    if (LINE_TERMINATORS.has(next)) {
+      i += next === '\r' && raw[i + 2] === '\n' ? 3 : 2
+      continue
+    }
+
+    const single = SINGLE_CHAR_ESCAPES[next]
+    if (single !== undefined) {
+      out += single
+      i += 2
+      continue
+    }
+
+    if (next === 'x') {
+      const hex = raw.slice(i + 2, i + 4)
+      if (hex.length < 2 || !HEX_ONLY_RE.test(hex)) return null
+      out += String.fromCharCode(parseInt(hex, 16))
+      i += 4
+      continue
+    }
+
+    if (next === 'u') {
+      if (raw[i + 2] === '{') {
+        const close = raw.indexOf('}', i + 3)
+        if (close === -1) return null
+        const hex = raw.slice(i + 3, close)
+        if (!HEX_ONLY_RE.test(hex)) return null
+        const code = parseInt(hex, 16)
+        if (code > 0x10ffff) return null
+        out += String.fromCodePoint(code)
+        i = close + 1
+        continue
+      }
+      const hex = raw.slice(i + 2, i + 6)
+      if (hex.length < 4 || !HEX_ONLY_RE.test(hex)) return null
+      out += String.fromCharCode(parseInt(hex, 16))
+      i += 6
+      continue
+    }
+
+    // `\0` is NUL only when no digit follows; with one it is a legacy octal
+    // escape, which a module rejects outright. `\1`-`\9` likewise.
+    if (next >= '0' && next <= '9') {
+      if (next === '0' && !(raw[i + 2] >= '0' && raw[i + 2] <= '9')) {
+        out += '\0'
+        i += 2
+        continue
+      }
+      return null
+    }
+
+    // Anything else denotes itself: `\\`, `\'`, `\"`, `` \` ``, `\$`, and
+    // any other non-escape character.
+    out += next
+    i += 2
+  }
+  return out
+}
+
 /**
  * The literals read out of a field value, and whether every element was read.
  *
@@ -591,8 +729,11 @@ export function readStringLiterals(code: string, range: [number, number]): Strin
   if (code[start] !== '[') {
     // Bare literal — the range already delimits it.
     const raw = code.slice(start + 1, end)
-    const interpolated = code[start] === '`' && hasInterpolation(raw)
-    return { literals: interpolated ? [] : [raw], complete: !interpolated }
+    if (code[start] === '`' && hasInterpolation(raw)) return { literals: [], complete: false }
+    const decoded = decodeEscapes(raw)
+    return decoded === null
+      ? { literals: [], complete: false }
+      : { literals: [decoded], complete: true }
   }
 
   const literals: string[] = []
@@ -617,10 +758,11 @@ export function readStringLiterals(code: string, range: [number, number]): Strin
         break
       }
       const raw = code.slice(i + 1, close)
-      if (ch === '`' && hasInterpolation(raw)) {
+      const decoded = ch === '`' && hasInterpolation(raw) ? null : decodeEscapes(raw)
+      if (decoded === null) {
         complete = false
       } else {
-        literals.push(raw)
+        literals.push(decoded)
       }
       i = close + 1
       continue

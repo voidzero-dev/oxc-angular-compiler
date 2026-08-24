@@ -59,6 +59,79 @@ describe('decorator-fields utils', () => {
       expect(locateComponentDecorators(src)).toEqual([])
     })
 
+    it('ignores a commented-out decorator that follows the real one', () => {
+      // The phantom sits between the real decorator and the class. Pairing
+      // the class with it would read the stale metadata, not merely miss it.
+      const src = [
+        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `// @Component({ styleUrl: './old.css' })`,
+        `export class FooComponent {}`,
+      ].join('\n')
+      const out = locateComponentDecorators(src)
+      expect(out).toHaveLength(1)
+      expect(out[0].className).toBe('FooComponent')
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
+        './real.css',
+      ])
+    })
+
+    it('ignores a decorator inside a block comment that follows the real one', () => {
+      const src = [
+        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `/* @Component({ styleUrl: './old.css' }) */`,
+        `export class FooComponent {}`,
+      ].join('\n')
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
+        './real.css',
+      ])
+    })
+
+    it('ignores a commented-out decorator that precedes the real one', () => {
+      const src = [
+        `// @Component({ styleUrl: './old.css' })`,
+        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `export class FooComponent {}`,
+      ].join('\n')
+      const out = locateComponentDecorators(src)
+      expect(out).toHaveLength(1)
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
+        './real.css',
+      ])
+    })
+
+    it('ignores a decorator written inside a string literal', () => {
+      const src = [
+        `const doc = 'see @Component({ styleUrl: "./str.css" }) for details';`,
+        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `export class FooComponent {}`,
+      ].join('\n')
+      const out = locateComponentDecorators(src)
+      expect(out).toHaveLength(1)
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
+        './real.css',
+      ])
+    })
+
+    it('pairs each class with its own decorator when a phantom sits between them', () => {
+      const src = [
+        `@Component({ selector: 'a', styleUrls: ['./a.css'] })`,
+        `// @Component({ styleUrl: './fake.css' })`,
+        `export class AComponent {}`,
+        `@Component({ selector: 'b', styleUrls: ['./b.css'] })`,
+        `export class BComponent {}`,
+      ].join('\n')
+      expect(locateComponentDecorators(src).map((d) => d.className)).toEqual([
+        'AComponent',
+        'BComponent',
+      ])
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'AComponent')!).literals).toEqual([
+        './a.css',
+      ])
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'BComponent')!).literals).toEqual([
+        './b.css',
+      ])
+    })
+
     it('returns a single entry for a single-component file', () => {
       const src = `@Component({ selector: 'x' })\nexport class FooComponent {}`
       const out = locateComponentDecorators(src)
@@ -560,8 +633,52 @@ describe('decorator-fields utils', () => {
       expect(readOf(`[]`)).toEqual({ literals: [], complete: true })
     })
 
-    it('keeps an escaped quote inside a literal, unescaped', () => {
-      expect(literalsOf(`['it\\'s.css']`)).toEqual([`it\\'s.css`])
+    it('decodes hex and unicode escapes to the value they denote', () => {
+      // The Rust extractor reports the cooked value; a raw read would name a
+      // path that does not exist.
+      expect(literalsOf(String.raw`['.\x2fa.css', '\u{2e}/b.css']`)).toEqual(['./a.css', './b.css'])
+    })
+
+    it('decodes the standard single-character escapes', () => {
+      expect(literalsOf(String.raw`['a\nb\tc\rd\be\ff\vg']`)).toEqual(['a\nb\tc\rd\be\ff\vg'])
+    })
+
+    it('decodes a backslash escape to one backslash', () => {
+      expect(literalsOf(String.raw`['a\\b']`)).toEqual([String.raw`a\b`])
+    })
+
+    it('decodes an unrecognized escape to the character itself', () => {
+      // `\q` is a NonEscapeCharacter: it denotes `q`, which is what the Rust
+      // extractor reports too.
+      expect(literalsOf(String.raw`['./a\qb.css']`)).toEqual(['./aqb.css'])
+    })
+
+    it('drops a line continuation', () => {
+      expect(literalsOf("['a\\\nb']")).toEqual(['ab'])
+    })
+
+    it('reports a truncated unicode escape as incomplete', () => {
+      expect(readOf(String.raw`['./a\u12']`)).toEqual({ literals: [], complete: false })
+    })
+
+    it('reports a malformed hex escape as incomplete', () => {
+      expect(readOf(String.raw`['./a\xZZ']`)).toEqual({ literals: [], complete: false })
+    })
+
+    it('reports a legacy octal escape as incomplete', () => {
+      // Illegal in a module; guessing a value would be worse than falling back.
+      expect(readOf(String.raw`['./a\101']`)).toEqual({ literals: [], complete: false })
+    })
+
+    it('leaves a literal with no escapes byte for byte unchanged', () => {
+      const css = `a::before { content: "x"; } [data-x="y"] { color: red; }`
+      expect(literalsOf(`['${css}']`)).toEqual([css])
+    })
+
+    it('decodes an escaped quote inside a literal', () => {
+      // The literal denotes `it's.css`, which is what the Rust extractor
+      // reports and what has to be resolved against the filesystem.
+      expect(literalsOf(`['it\\'s.css']`)).toEqual([`it's.css`])
     })
 
     it('ignores an apostrophe inside a block comment before an entry', () => {
@@ -597,8 +714,11 @@ describe('decorator-fields utils', () => {
     })
 
     it('treats an escaped `${` in a template literal as ordinary text', () => {
+      // `hasInterpolation` reads the odd backslash as an escape, so the
+      // literal is complete; decoding then resolves `\$` to `$`, leaving the
+      // `${…}` as the literal text it denotes. The two must agree.
       expect(readOf('[`\\${NOT_INTERPOLATED}.css`]')).toEqual({
-        literals: ['\\${NOT_INTERPOLATED}.css'],
+        literals: ['${NOT_INTERPOLATED}.css'],
         complete: true,
       })
     })
