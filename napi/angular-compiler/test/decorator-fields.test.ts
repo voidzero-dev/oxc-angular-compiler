@@ -554,10 +554,11 @@ describe('decorator-fields utils', () => {
       })
     })
 
-    it('reports both fields unreadable for a quoted key carrying an escape', () => {
-      // `'style\u0055rls'` is `styleUrls` after decoding, which the Rust
-      // extractor does and this scan deliberately does not.
-      const src = `@Component({ 'style\\u0055rls': ['./a.css'] })\nexport class Foo {}`
+    it('reports both fields unreadable for a quoted key whose escape is malformed', () => {
+      // A decodable escape is resolved instead — see the `escaped keys`
+      // block. Only an escape this scan cannot decode leaves the field name
+      // unknown, and then "absent" would be a guess rather than an answer.
+      const src = `@Component({ 'style\\u00ZZrls': ['./a.css'] })\nexport class Foo {}`
       expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
         urls: { kind: 'unreadable' },
         inline: { kind: 'unreadable' },
@@ -654,6 +655,97 @@ describe('decorator-fields utils', () => {
       // No trailing comma — the key is bounded by `}` rather than `,`.
       const src = `@Component({ styleUrl })\nexport class Foo {}`
       expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+    })
+
+    // Escaped identifier keys. `style\u0055rls` IS `styleUrls` to the
+    // TypeScript parser, and the Rust extractor resolves it (verified: it
+    // reports `./x.css`). Reading it as absent told the caller the class
+    // declares no styles, which strips the component's CSS. Decoding gives
+    // an exact per-class answer, where falling back would serve the
+    // file-level union — every sibling's CSS along with this class's own.
+    describe('escaped keys', () => {
+      it('decodes a \\uHHHH escape in a bare key', () => {
+        const src = `@Component({ style\\u0055rls: ['./a.css'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
+
+      it('decodes a \\u{…} escape in a bare key', () => {
+        const src = `@Component({ style\\u{55}rls: ['./a.css'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
+
+      it('decodes an escape at the first character of a bare key', () => {
+        const src = `@Component({ \\u0073tyleUrls: ['./a.css'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
+
+      it('decodes an escaped singular `styleUrl` key', () => {
+        const src = `@Component({ style\\u0055rl: './solo.css' })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./solo.css'])
+      })
+
+      it('decodes an escaped inline `styles` key', () => {
+        const src = `@Component({ style\\u0073: ['.x{}'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.inline)).toEqual(['.x{}'])
+      })
+
+      it('decodes a quoted key carrying an escape', () => {
+        // A quoted key is a string literal, so it decodes by string rules.
+        const src = `@Component({ 'style\\u0055rls': ['./a.css'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
+
+      it('treats an escaped shorthand singular `styleUrl` like the plain one', () => {
+        const src = `@Component({ template: '<p/>', style\\u0055rl })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+      })
+
+      it('leaves an escaped shorthand `styleUrls` absent, as the compiler drops it', () => {
+        const src = `@Component({ template: '<p/>', style\\u0055rls })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+      })
+
+      it('keeps the cross-match guards for decoded keys', () => {
+        const urls = `@Component({ style\\u0055rls: ['./a.css'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(urls, 'Foo')!.inline).toEqual({ kind: 'absent' })
+        const singular = `@Component({ style\\u0055rl: './a.css' })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(singular, 'Foo')!.inline).toEqual({ kind: 'absent' })
+        const inline = `@Component({ style\\u0073: ['.x{}'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(inline, 'Foo')!.urls).toEqual({ kind: 'absent' })
+      })
+
+      it('does not match a decoded key that names something else', () => {
+        const src = `@Component({ style\\u0055rlsExtra: ['./a.css'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+      })
+
+      it('does not match a lookalike built from a non-ASCII letter', () => {
+        // Cyrillic \u0435 in place of `e` — a different identifier, and the
+        // compiler reports no styleUrls for it either.
+        const src = `@Component({ styl\u0435Urls: ['./a.css'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+      })
+
+      it('reports a malformed escape in a key as unreadable, not absent', () => {
+        const src = `@Component({ style\\u00ZZrls: ['./a.css'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+          urls: { kind: 'unreadable' },
+          inline: { kind: 'unreadable' },
+        })
+      })
+
+      it('reports a \\xHH escape in a key as unreadable — illegal in an identifier', () => {
+        const src = `@Component({ style\\x55rls: ['./a.css'] })\nexport class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+          urls: { kind: 'unreadable' },
+          inline: { kind: 'unreadable' },
+        })
+      })
+
+      it('does not let an escaped unrelated key degrade a readable field', () => {
+        const src = `@Component({ sel\\u0065ctor: 'a', styleUrls: ['./a.css'] })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
     })
   })
 

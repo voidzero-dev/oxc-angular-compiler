@@ -325,22 +325,103 @@ function locateFieldInsideArgs(
 
 /**
  * If a key for `field` starts at `position`, return the index just past it;
- * otherwise -1. Accepts the bare form (`styleUrls:`) and the quoted forms
- * (`'styleUrls':`, `"styleUrls":`), which are valid TS and which the Rust
- * extractor resolves.
+ * otherwise -1. Accepts the bare form (`styleUrls:`), the quoted forms
+ * (`'styleUrls':`, `"styleUrls":`), and either form written with escapes
+ * (`style\u0055rls`, `'style\u0055rls'`) — all of which are valid TS naming
+ * the same field, and all of which the Rust extractor resolves.
  *
- * A quoted key must match `field` character for character. One written with
- * an escape (`'style\u0055rls'`) is deliberately not decoded here — see
- * `hasUnreadableKey`, which reports it as beyond this scan rather than
- * letting it read as a key that isn't there.
+ * Escapes are decoded rather than refused. Refusing them would only be safe
+ * in the sense of falling back, and the fallback serves the file-level style
+ * union — every sibling's CSS along with this class's own. Decoding keeps the
+ * per-class answer exact. A key whose escapes cannot be decoded is not
+ * matched here; `hasUnreadableKey` reports it as beyond this scan.
+ *
+ * Decoding does not loosen the match: the decoded name must still equal
+ * `field` exactly, so `styleUrl` and `styleUrls` stay distinct.
  */
 function matchFieldKeyAt(code: string, position: number, field: string, limit: number): number {
   if (isFieldKeyAt(code, position, field, limit)) return position + field.length
   const quote = code[position]
-  if (quote !== "'" && quote !== '"') return -1
-  const close = findClosingDelim(code, position)
-  if (close === -1 || close >= limit) return -1
-  return code.slice(position + 1, close) === field ? close + 1 : -1
+  if (quote === "'" || quote === '"') {
+    const close = findClosingDelim(code, position)
+    if (close === -1 || close >= limit) return -1
+    // A quoted key is a string literal, so it decodes by string rules.
+    return decodeEscapes(code.slice(position + 1, close)) === field ? close + 1 : -1
+  }
+  const id = readIdentifierKey(code, position, limit)
+  return id !== null && id.name === field ? id.end : -1
+}
+
+/**
+ * Read an identifier starting at `position`, decoding escapes, and return the
+ * decoded name with the index just past it. Returns null when nothing
+ * identifier-like starts there.
+ *
+ * `name` is null when the identifier carries an escape this scan cannot
+ * resolve — malformed hex, a truncated `\u`, a decoded character not valid at
+ * its position, or any escape other than `\uHHHH` / `\u{…}`, which are the
+ * only two JavaScript permits inside an identifier. The caller must treat
+ * that as unknown rather than as a key that isn't there: the Rust extractor
+ * parses what this cannot, so "absent" would strip a component's real CSS.
+ */
+function readIdentifierKey(
+  code: string,
+  position: number,
+  limit: number,
+): { name: string | null; end: number } | null {
+  let i = position
+  let name = ''
+  let first = true
+  let malformed = false
+
+  while (i < limit) {
+    const ch = code[i]
+
+    if (ch === '\\') {
+      if (code[i + 1] !== 'u') {
+        // `\x41`, `\n`, … are string escapes; in an identifier they are a
+        // syntax error, so the name cannot be known from the text.
+        malformed = true
+        i += 2
+        first = false
+        continue
+      }
+      let codePoint = -1
+      let next: number
+      if (code[i + 2] === '{') {
+        const close = code.indexOf('}', i + 3)
+        if (close === -1 || close >= limit) return { name: null, end: i + 2 }
+        const hex = code.slice(i + 3, close)
+        if (HEX_ONLY_RE.test(hex)) codePoint = parseInt(hex, 16)
+        next = close + 1
+      } else {
+        const hex = code.slice(i + 2, i + 6)
+        if (hex.length === 4 && HEX_ONLY_RE.test(hex)) codePoint = parseInt(hex, 16)
+        next = i + 6
+      }
+      if (codePoint < 0 || codePoint > 0x10ffff) {
+        malformed = true
+      } else {
+        const decoded = String.fromCodePoint(codePoint)
+        if (!(first ? IDENT_START_RE : IDENT_CONT_RE).test(decoded)) malformed = true
+        name += decoded
+      }
+      i = next
+      first = false
+      continue
+    }
+
+    if ((first ? IDENT_START_RE : IDENT_CONT_RE).test(ch)) {
+      name += ch
+      i++
+      first = false
+      continue
+    }
+    break
+  }
+
+  if (i === position) return null
+  return { name: malformed ? null : name, end: i }
 }
 
 /**
@@ -879,11 +960,11 @@ export function locateStyleFieldsFor(code: string, className: string): ClassStyl
  * Whether the decorator's own object literal holds a key this scan cannot
  * resolve to a name, which makes "the class declares no styles" unknowable.
  *
- * Two forms qualify, both of which the Rust extractor DOES resolve, so
- * reading them as absent would strip a component's CSS:
- *   - a computed key (`[K]: [...]`);
- *   - a quoted key carrying an escape (`'style\u0055rls'`), which this scan
- *     matches literally and so would miss.
+ * Two forms qualify, so reading them as absent would strip a component's CSS:
+ *   - a computed key (`[K]: [...]`), which the Rust extractor DOES resolve;
+ *   - a key whose escapes cannot be decoded — a malformed `\u`, or an escape
+ *     that is illegal in an identifier. A key whose escapes DO decode is not
+ *     unreadable: `matchFieldKeyAt` resolves it to a name exactly.
  *
  * A spread (`...BASE`) deliberately does NOT qualify. The Rust extractor
  * drops it too, so the compiled component genuinely has no styles from it;
@@ -927,9 +1008,15 @@ function hasUnreadableKey(code: string, argsRange: [number, number]): boolean {
         if (ch === "'" || ch === '"') {
           const close = findClosingDelim(code, i)
           if (close === -1 || close >= closeParen) return true
-          if (code.slice(i + 1, close).includes('\\')) return true
+          if (decodeEscapes(code.slice(i + 1, close)) === null) return true
           atKey = false
           i = close + 1
+          continue
+        }
+        const id = readIdentifierKey(code, i, closeParen)
+        if (id !== null) {
+          if (id.name === null) return true
+          i = id.end
           continue
         }
       }

@@ -1805,6 +1805,57 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).toContain('PS_SINGCONST_OWN_MARKER')
   })
 
+  it('serves the own stylesheet of a class whose `styleUrls` key is escaped', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const ownCssPath = join(appDir, 'ps-esckey-own.component.css')
+    const sibCssPath = join(appDir, 'ps-esckey-sib.component.css')
+    const escKeyPath = join(appDir, 'ps-esckey.component.ts')
+    writeFileSync(ownCssPath, '.PS_ESCKEY_OWN_MARKER { color: red; }')
+    writeFileSync(sibCssPath, '.PS_ESCKEY_SIB_MARKER { color: red; }')
+
+    // `style\u0055rls` IS `styleUrls` to the TypeScript parser, and the Rust
+    // extractor resolves it. Reading the key as absent said "this class has
+    // no styles" and served none, stripping the component's CSS.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-esckey',
+        template: '<p>esc</p>',
+        style\\u0055rls: ['./ps-esckey-own.component.css'],
+      })
+      export class EscKeyComponent {}
+      @Component({
+        selector: 'app-ps-esckey-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-esckey-sib.component.css'],
+      })
+      export class EscKeySiblingComponent {}
+    `
+    writeFileSync(escKeyPath, source)
+    await transformSource(plugin, source, escKeyPath)
+
+    writeFileSync(ownCssPath, '.PS_ESCKEY_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(ownCssPath),
+      [{ id: normalizePath(ownCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+    expectDispatched(mockServer, `${escKeyPath}@EscKeyComponent`)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${escKeyPath}@EscKeyComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_ESCKEY_OWN_MARKER')
+    // Decoding the key gives an exact per-class answer, so unlike the
+    // constant-valued fallback above, the sibling's CSS does not ride along.
+    expect(body).not.toContain('PS_ESCKEY_SIB_MARKER')
+  })
+
   it('serves no styles for an explicitly empty `styleUrls` array', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithRealConfig(plugin)
