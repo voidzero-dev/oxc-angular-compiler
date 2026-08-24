@@ -1060,16 +1060,19 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           let handled = false
           // Owner files already sent an update during this invocation. The
           // `ws.send` in `dispatchComponentUpdate` is not idempotent, so an
-          // owner reachable through more than one path below would otherwise
-          // emit a second event for every class in it.
+          // owner reached more than once below would otherwise emit a second
+          // event for every class in it (issue #453).
           const dispatchedOwners = new Set<string>()
-          // Dispatch every component in one owner file. `skipIfDispatched` is
-          // set by the template loop alone: role-independent dispatch (#450)
-          // newly lets it run after the shared-dep branch, so it must not
-          // re-send. The style paths record but never skip — their overlap
-          // with the shared-dep branch predates #450 and is tracked in #453.
-          const dispatchOwner = (owner: string, skipIfDispatched = false): boolean => {
-            if (skipIfDispatched && dispatchedOwners.has(owner)) return false
+          // Dispatch every component in one owner file, at most once per
+          // invocation. An owner can be reached several times over: by two of
+          // its own styles sharing a partial, by a partial that is also one of
+          // its direct styleUrls, or by a file it uses in both decorator
+          // roles. Every repeat is redundant — the update is keyed by
+          // `file@class` alone, and the HMR endpoint rereads the component's
+          // resources from disk, so the first event already carries every
+          // change to any of them.
+          const dispatchOwner = (owner: string): boolean => {
+            if (dispatchedOwners.has(owner)) return false
             dispatchedOwners.add(owner)
             if (!dispatchAllComponentsInFile(owner)) return false
             handled = true
@@ -1135,11 +1138,10 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               }
               if (isDirectTemplate) {
                 // A template shared by several component files updates every
-                // one of them (resourceToComponent is single-valued). Skip an
-                // owner already updated above — one `.ts` can hold both roles,
-                // or reach this file transitively through its style.
+                // one of them (resourceToComponent is single-valued). An owner
+                // already updated above is skipped by `dispatchOwner`.
                 for (const owner of templateComponentOwners.get(normalizedFile) ?? []) {
-                  if (dispatchOwner(owner, true)) {
+                  if (dispatchOwner(owner)) {
                     debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
                   }
                 }

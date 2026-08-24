@@ -656,4 +656,114 @@ describe('handleHotUpdate for a resource reached through both dispatch paths', (
     expect(countOf(`${bothRolesPath}@DualStyleComponent`)).toBe(1)
     expect(countOf(`${bothRolesPath}@DualTemplateComponent`)).toBe(1)
   })
+
+  it('dispatches once per class when a transitive dep is also a direct styleUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // `_shared-style-role.scss` reaches the same owner `.ts` twice:
+    //   - transitively, because `style-role-importer.component.scss` @uses it
+    //   - directly, because a sibling component lists it as its styleUrl
+    // Both roles are style roles, so plain Sass content satisfies both.
+    const partialPath = join(appDir, '_shared-style-role.scss')
+    const importerPath = join(appDir, 'style-role-importer.component.scss')
+    const bothPathsPath = join(appDir, 'style-role-both.component.ts')
+    const transitiveOnlyPath = join(appDir, 'style-role-transitive-only.component.ts')
+
+    writeFileSync(partialPath, 'h1 { color: red; }')
+    writeFileSync(importerPath, "@use './shared-style-role';")
+
+    const bothPathsSource = `
+      import { Component } from '@angular/core';
+
+      @Component({
+        selector: 'app-style-role-transitive',
+        template: '<h1>Hello</h1>',
+        styleUrls: ['./style-role-importer.component.scss'],
+      })
+      export class TransitiveComponent {}
+
+      @Component({
+        selector: 'app-style-role-direct',
+        template: '<h1>Hello</h1>',
+        styleUrls: ['./_shared-style-role.scss'],
+      })
+      export class DirectComponent {}
+    `
+    // Reached ONLY through the shared-dep branch, so its single update proves
+    // that branch really ran.
+    const transitiveOnlySource = componentSource(
+      'app-style-role-only',
+      'style-role-importer.component.scss',
+    )
+
+    writeFileSync(bothPathsPath, bothPathsSource)
+    writeFileSync(transitiveOnlyPath, transitiveOnlySource)
+
+    await transformComponent(plugin, bothPathsSource, bothPathsPath)
+    await transformComponent(plugin, transitiveOnlySource, transitiveOnlyPath)
+
+    writeFileSync(partialPath, 'h1 { color: blue; }')
+    await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+
+    const ids = mockServer._wsMessages
+      .filter((msg: any) => msg?.event === 'angular:component-update')
+      .map((msg: any) => decodeURIComponent(msg.data.id))
+    const countOf = (id: string) => ids.filter((candidate: string) => candidate === id).length
+
+    // The shared-dep branch ran.
+    expect(countOf(`${transitiveOnlyPath}@AppComponent`)).toBe(1)
+
+    // The dual-path owner is dispatched by the shared-dep branch and again by
+    // the direct-style loop. `ws.send` is not idempotent, so each class must
+    // still see exactly one event.
+    expect(countOf(`${bothPathsPath}@TransitiveComponent`)).toBe(1)
+    expect(countOf(`${bothPathsPath}@DirectComponent`)).toBe(1)
+  })
+
+  it('dispatches once per class when two styles of one component share a partial', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Both styleUrls of ONE component @use the same partial, so
+    // `styleDepOwners` holds two owning styles that resolve to the same owner
+    // `.ts`. The shared-dep loop then visits that owner once per style.
+    const partialPath = join(appDir, '_two-styles.scss')
+    const firstStylePath = join(appDir, 'two-styles-a.component.scss')
+    const secondStylePath = join(appDir, 'two-styles-b.component.scss')
+    const ownerPath = join(appDir, 'two-styles.component.ts')
+
+    writeFileSync(partialPath, 'h1 { color: red; }')
+    writeFileSync(firstStylePath, "@use './two-styles';")
+    writeFileSync(secondStylePath, "@use './two-styles';")
+
+    const ownerSource = `
+      import { Component } from '@angular/core';
+
+      @Component({
+        selector: 'app-two-styles',
+        template: '<h1>Hello</h1>',
+        styleUrls: ['./two-styles-a.component.scss', './two-styles-b.component.scss'],
+      })
+      export class TwoStylesComponent {}
+    `
+    writeFileSync(ownerPath, ownerSource)
+
+    await transformComponent(plugin, ownerSource, ownerPath)
+
+    writeFileSync(partialPath, 'h1 { color: blue; }')
+    await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+
+    const ids = mockServer._wsMessages
+      .filter((msg: any) => msg?.event === 'angular:component-update')
+      .map((msg: any) => decodeURIComponent(msg.data.id))
+
+    expect(ids.filter((id: string) => id === `${ownerPath}@TwoStylesComponent`)).toHaveLength(1)
+  })
 })
