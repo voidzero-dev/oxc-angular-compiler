@@ -657,6 +657,92 @@ describe('decorator-fields utils', () => {
       expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
     })
 
+    // A value that merely STARTS with a literal does not denote it. Every
+    // form below was measured against the Rust extractor: it reports no
+    // styleUrls and compiles no styles for any of them. Returning the
+    // leading literal would hand the endpoint a stylesheet the component
+    // never had, and — being a confident answer — would skip the fallback
+    // that exists for exactly this case.
+    describe('a literal that is only the start of a larger expression', () => {
+      const urls = (field: string) =>
+        locateStyleFieldsFor(
+          `const SUFFIX = '.s.css';\nconst MORE: string[] = ['./m.css'];\n@Component({ template: '<p/>', ${field} })\nexport class Foo {}`,
+          'Foo',
+        )!.urls
+      const inline = (field: string) =>
+        locateStyleFieldsFor(
+          `const EXTRA = '.b{}';\n@Component({ template: '<p/>', ${field} })\nexport class Foo {}`,
+          'Foo',
+        )!.inline
+
+      it('rejects a singular `styleUrl` concatenated with an identifier', () => {
+        expect(urls(`styleUrl: './a.css' + SUFFIX`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a singular `styleUrl` concatenated with another literal', () => {
+        expect(urls(`styleUrl: './a.css' + './b.css'`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a `styleUrls` array concatenated with an identifier', () => {
+        expect(urls(`styleUrls: './a.css' + SUFFIX`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects an inline `styles` value concatenated with an identifier', () => {
+        expect(inline(`styles: '.a{}' + EXTRA`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a method call on a style literal', () => {
+        expect(urls(`styleUrl: './a.css'.replace('a', 'b')`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a method call on a `styleUrls` array literal', () => {
+        expect(urls(`styleUrls: ['./a.css'].concat(MORE)`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a method call on an inline `styles` array literal', () => {
+        expect(inline(`styles: ['.a{}'].concat(MORE)`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a TypeScript `as` assertion after a style literal', () => {
+        expect(urls(`styleUrl: './a.css' as string`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a TypeScript `as const` assertion after a `styleUrls` array', () => {
+        expect(urls(`styleUrls: ['./a.css'] as const`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a TypeScript `as` assertion after an inline `styles` array', () => {
+        expect(inline(`styles: ['.a{}'] as string[]`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a non-null assertion after a style literal', () => {
+        expect(urls(`styleUrl: './a.css'!`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a `satisfies` clause after a style literal', () => {
+        expect(urls(`styleUrl: './a.css' satisfies string`)).toEqual({ kind: 'unreadable' })
+      })
+
+      it('rejects a trailing expression hidden behind a comment', () => {
+        expect(urls(`styleUrl: './a.css' /* why */ + SUFFIX`)).toEqual({ kind: 'unreadable' })
+      })
+
+      // The other side of the rule: a value the property really does end at
+      // stays readable, whether a comma, the object's brace or a comment
+      // closes it out.
+      it.each([
+        [`styleUrl: './a.css'`, `the object's closing brace`],
+        [`styleUrl: './a.css',`, 'a trailing comma'],
+        [`styleUrl: './a.css' /* why */`, 'a block comment then the brace'],
+        [`styleUrl: './a.css' // why\n`, 'a line comment then the brace'],
+        [`styleUrls: ['./a.css']`, 'an array at the closing brace'],
+        [`styleUrls: ['./a.css'],`, 'an array with a trailing comma'],
+      ])('still reads %j, ended by %s', (field) => {
+        const src = `@Component({ template: '<p/>', ${field} })\nexport class Foo {}`
+        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      })
+    })
+
     // Escaped identifier keys. `style\u0055rls` IS `styleUrls` to the
     // TypeScript parser, and the Rust extractor resolves it (verified: it
     // reports `./x.css`). Reading it as absent told the caller the class

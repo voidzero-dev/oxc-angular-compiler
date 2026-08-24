@@ -278,7 +278,16 @@ function findFieldInArgs(
           const v = skipToToken(code, j + 1, closeParen)
           if (v < closeParen && openerChars.includes(code[v])) {
             const end = findClosingDelim(code, v)
-            if (end !== -1 && end < closeParen) return { kind: 'literal', range: [v, end] }
+            // The literal is the value only when the property ENDS at its
+            // closing delimiter. `'./a.css' + SUFFIX` opens with a literal
+            // it does not denote, and so do `['./a.css'].concat(MORE)` and
+            // `'./a.css' as const`. Returning that leading piece would name
+            // a stylesheet the compiled component never had — and, being a
+            // confident answer, would skip the fallback that exists for
+            // values this scan cannot resolve.
+            if (end !== -1 && end < closeParen && endsPropertyValue(code, end + 1, closeParen)) {
+              return { kind: 'literal', range: [v, end] }
+            }
           }
           // The key is here; its value is not a shape we can read.
           return { kind: 'unreadable' }
@@ -296,6 +305,24 @@ function findFieldInArgs(
     i = advanceOneToken(code, i, stack, closeParen)
   }
   return { kind: 'absent' }
+}
+
+/**
+ * Whether a property value ends at `i`. Inside an object literal a value is
+ * closed by `,` or the object's own `}` — or, defensively, the decorator's
+ * `)`. Whitespace and comments are skipped first, so a comment may sit
+ * between the value and its terminator.
+ *
+ * Anything else at that position means what was just read is only the LEADING
+ * part of a larger expression — a concatenation, a call, a TypeScript
+ * assertion — and so is not the value at all. Running out of text counts as
+ * ending, since nothing is left to extend the value with.
+ */
+function endsPropertyValue(code: string, i: number, end: number): boolean {
+  const j = skipToToken(code, i, end)
+  if (j >= end) return true
+  const ch = code[j]
+  return ch === ',' || ch === '}' || ch === ')'
 }
 
 /** Index of the next character at or after `i` that is not whitespace or a comment. */
