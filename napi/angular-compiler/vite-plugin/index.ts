@@ -39,6 +39,8 @@ import {
   emptyDelimitedRange,
   locateComponentDecorators,
   locateStylesFieldFor,
+  locateStyleUrlFor,
+  locateStyleUrlsFor,
   locateStylesInArgs,
   locateTemplateInArgs,
   locateTemplateStringFor,
@@ -686,10 +688,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // disk and run through Vite's preprocessCSS (so SCSS/LESS
                 // resolve correctly); inline styles are extracted from the
                 // .ts source as plain CSS strings.
-                let styles: string[] | null = null
-                if (styleUrls.length > 0) {
+                //
+                // Resolve per CLASS, like the template above: the file-level
+                // `styleUrls` is the union of every component in the file, so
+                // in a multi-component file it served a class its siblings'
+                // stylesheets — and, being non-empty, it also shadowed the
+                // inline `styles:` of a class that has no external ones.
+                // Fall back to the file-level list only for decorator shapes
+                // the per-class locator cannot parse (preserves the old
+                // behavior there).
+                const readStyles = async (urls: string[]): Promise<string[] | null> => {
                   const styleContents: string[] = []
-                  for (const styleUrl of styleUrls) {
+                  for (const styleUrl of urls) {
                     const stylePath = resolve(dir, styleUrl)
                     try {
                       let styleContent = await readFile(stylePath, 'utf-8')
@@ -706,14 +716,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                       // Style file not found, continue without this style
                     }
                   }
-                  if (styleContents.length > 0) {
-                    styles = styleContents
-                  }
+                  return styleContents.length > 0 ? styleContents : null
+                }
+                let styles: string[] | null = null
+                const classStyleUrls = extractStyleUrlsFor(source, className)
+                if (classStyleUrls !== null) {
+                  styles = await readStyles(classStyleUrls)
                 } else {
-                  // No external styleUrls — fall back to inline `styles: […]`.
                   const inlineStyles = extractInlineStyles(source, className)
                   if (inlineStyles !== null && inlineStyles.length > 0) {
                     styles = inlineStyles
+                  } else if (styleUrls.length > 0) {
+                    styles = await readStyles(styleUrls)
                   }
                 }
 
@@ -1426,6 +1440,43 @@ function extractTemplateUrlFor(code: string, className: string): string | null {
   if (!range) return null
   // Slice excludes the outer quotes/backticks — raw inner contents.
   return code.slice(range[0] + 1, range[1])
+}
+
+/**
+ * Extract the external style URLs declared by the `@Component({...})`
+ * decorator that decorates the class named `className`.
+ *
+ * Handles both Angular spellings:
+ *   - `styleUrls: ['./a.css', './b.css']` → each literal, in order.
+ *   - `styleUrl: './a.css'` (17+) → a one-element array.
+ *
+ * `styleUrls` wins if a decorator somehow carries both; Angular itself
+ * rejects that combination, so this only makes the choice deterministic.
+ *
+ * Returns null if the named decorator declares neither field, or its value
+ * is something other than a string/array literal (e.g. a variable).
+ */
+function extractStyleUrlsFor(code: string, className: string): string[] | null {
+  const pluralRange = locateStyleUrlsFor(code, className)
+  if (pluralRange) {
+    const opener = code[pluralRange[0]]
+    if (opener !== '[') {
+      // Bare string in the plural field — lenient, treat as one entry.
+      return [code.slice(pluralRange[0] + 1, pluralRange[1])]
+    }
+    // Array form — walk string literals inside the array body in order.
+    const body = code.slice(pluralRange[0] + 1, pluralRange[1])
+    const stringRe = /`([\s\S]*?)`|'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"/g
+    const urls: string[] = []
+    let m: RegExpExecArray | null
+    while ((m = stringRe.exec(body)) !== null) {
+      urls.push(m[1] ?? m[2] ?? m[3] ?? '')
+    }
+    return urls.length > 0 ? urls : null
+  }
+  const singularRange = locateStyleUrlFor(code, className)
+  if (!singularRange) return null
+  return [code.slice(singularRange[0] + 1, singularRange[1])]
 }
 
 /**

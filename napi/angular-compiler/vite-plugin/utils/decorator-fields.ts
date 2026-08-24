@@ -435,3 +435,50 @@ export function locateTemplateUrlFor(code: string, className: string): [number, 
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateTemplateUrlInArgs(code, found.argsRange) : null
 }
+
+/**
+ * Locate the `styleUrls:` field inside a specific `@Component(...)` decorator
+ * identified by its `argsRange`. See `locateStylesInArgs` for when to prefer
+ * this over the className-based variant. Field matching is word-bounded, so
+ * `styleUrls` never matches the singular `styleUrl:` or the inline `styles:`.
+ */
+export function locateStyleUrlsInArgs(
+  code: string,
+  argsRange: [number, number],
+): [number, number] | null {
+  return locateFieldInsideArgs(code, argsRange, 'styleUrls', STYLES_OPENERS)
+}
+
+/**
+ * Locate the singular `styleUrl:` string field (Angular 17+) inside a
+ * specific `@Component(...)` decorator identified by its `argsRange`. Its
+ * value is a bare string, never an array — see `locateStyleUrlsInArgs` for
+ * the plural form.
+ */
+export function locateStyleUrlInArgs(
+  code: string,
+  argsRange: [number, number],
+): [number, number] | null {
+  return locateFieldInsideArgs(code, argsRange, 'styleUrl', TEMPLATE_OPENERS)
+}
+
+/**
+ * Locate the `styleUrls:` field inside the `@Component(...)` decorator that
+ * decorates the class named `className`. Convenience wrapper that finds the
+ * decorator by className and delegates to `locateStyleUrlsInArgs`.
+ */
+export function locateStyleUrlsFor(code: string, className: string): [number, number] | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateStyleUrlsInArgs(code, found.argsRange) : null
+}
+
+/**
+ * Locate the singular `styleUrl:` field inside the `@Component(...)`
+ * decorator that decorates the class named `className`. Convenience wrapper
+ * that finds the decorator by className and delegates to
+ * `locateStyleUrlInArgs`.
+ */
+export function locateStyleUrlFor(code: string, className: string): [number, number] | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateStyleUrlInArgs(code, found.argsRange) : null
+}

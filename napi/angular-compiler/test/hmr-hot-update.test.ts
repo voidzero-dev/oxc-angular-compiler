@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Plugin, ModuleNode, HmrContext } from 'vite'
-import { normalizePath } from 'vite'
+import { normalizePath, resolveConfig } from 'vite'
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest'
 
 import { angular } from '../vite-plugin/index.js'
@@ -1333,5 +1333,189 @@ describe('@ng/component endpoint resolves the template per class', () => {
     expect(body).not.toBe('')
     expect(body).toContain('PC_INLINE_MARKER')
     expect(body).not.toContain('PC_EXT_MARKER')
+  })
+})
+
+describe('@ng/component endpoint resolves the styles per class', () => {
+  // preprocessCSS needs a REAL resolved config to run; the shared mock config
+  // makes every external stylesheet fail to preprocess, which would hide what
+  // these tests are about. Other tests in this file keep the mock.
+  async function setupPluginWithRealConfig(plugin: Plugin) {
+    const mockServer = createMockServer()
+
+    await callPluginHook(
+      plugin.config as Plugin['config'],
+      {} as any,
+      { command: 'serve', mode: 'development' } as any,
+    )
+    const resolved = await resolveConfig(
+      { configFile: false, root: tempDir, logLevel: 'silent' },
+      'serve',
+    )
+    await callPluginHook(plugin.configResolved as Plugin['configResolved'], resolved as any)
+
+    if (typeof plugin.configureServer === 'function') {
+      await (plugin.configureServer as Function)(mockServer)
+    }
+    ;(mockServer as any).__angularWatchTemplate = () => {}
+
+    return mockServer
+  }
+
+  async function transformSource(plugin: Plugin, source: string, path: string) {
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      path,
+    )
+  }
+
+  function getMiddleware(mockServer: any) {
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    expect(middleware, 'expected middleware to be registered').toBeDefined()
+    return middleware
+  }
+
+  it('serves each component its own styleUrls in a multi-component file', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const firstCssPath = join(appDir, 'ps-first.component.css')
+    const secondCssPath = join(appDir, 'ps-second.component.css')
+    const multiPath = join(appDir, 'ps-multi.component.ts')
+    writeFileSync(firstCssPath, '.PS_FIRST_MARKER { color: red; }')
+    writeFileSync(secondCssPath, '.PS_SECOND_MARKER { color: blue; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-first',
+        template: '<p>first</p>',
+        styleUrls: ['./ps-first.component.css'],
+      })
+      export class FirstComponent {}
+      @Component({
+        selector: 'app-ps-second',
+        template: '<p>second</p>',
+        styleUrls: ['./ps-second.component.css'],
+      })
+      export class SecondComponent {}
+    `
+    writeFileSync(multiPath, source)
+    await transformSource(plugin, source, multiPath)
+
+    // Edit the SECOND component's stylesheet; the fan-out queues both classes.
+    writeFileSync(secondCssPath, '.PS_SECOND_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(secondCssPath),
+      [{ id: normalizePath(secondCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    // SecondComponent's update module must carry only its OWN stylesheet, not
+    // the union of every styleUrl declared in the file.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${multiPath}@SecondComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_SECOND_MARKER')
+    expect(body).not.toContain('PS_FIRST_MARKER')
+  })
+
+  it('serves the singular `styleUrl` of the requested class', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const soloCssPath = join(appDir, 'ps-solo.component.css')
+    const otherCssPath = join(appDir, 'ps-other.component.css')
+    const singularPath = join(appDir, 'ps-singular.component.ts')
+    writeFileSync(soloCssPath, '.PS_SOLO_MARKER { color: red; }')
+    writeFileSync(otherCssPath, '.PS_OTHER_MARKER { color: blue; }')
+
+    // `styleUrl` (singular, Angular 17+) is a bare string, not an array.
+    // It is declared SECOND here so the file-level list does not happen to
+    // start with it.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-other',
+        template: '<p>other</p>',
+        styleUrl: './ps-other.component.css',
+      })
+      export class OtherComponent {}
+      @Component({
+        selector: 'app-ps-solo',
+        template: '<p>solo</p>',
+        styleUrl: './ps-solo.component.css',
+      })
+      export class SoloComponent {}
+    `
+    writeFileSync(singularPath, source)
+    await transformSource(plugin, source, singularPath)
+
+    writeFileSync(soloCssPath, '.PS_SOLO_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(soloCssPath),
+      [{ id: normalizePath(soloCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${singularPath}@SoloComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_SOLO_MARKER')
+    expect(body).not.toContain('PS_OTHER_MARKER')
+  })
+
+  it('serves the inline styles of a class whose sibling uses a styleUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const extCssPath = join(appDir, 'ps-ext.component.css')
+    const mixedPath = join(appDir, 'ps-mixed.component.ts')
+    writeFileSync(extCssPath, '.PS_EXT_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-ext',
+        template: '<p>ext</p>',
+        styleUrls: ['./ps-ext.component.css'],
+      })
+      export class ExtComponent {}
+      @Component({
+        selector: 'app-ps-inline',
+        template: '<p>inline</p>',
+        styles: ['.PS_INLINE_MARKER { color: blue; }'],
+      })
+      export class InlineComponent {}
+    `
+    writeFileSync(mixedPath, source)
+    await transformSource(plugin, source, mixedPath)
+
+    // Edit only the inline styles; the strip-equality branch queues both
+    // classes in the file.
+    const edited = source.replace('color: blue', 'color: green')
+    writeFileSync(mixedPath, edited)
+    const ctx = createMockHmrContext(mixedPath, [{ id: mixedPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    // InlineComponent must get its OWN inline styles — a sibling's styleUrl
+    // making the FILE-level list non-empty must not shadow the inline branch.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${mixedPath}@InlineComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_INLINE_MARKER')
+    expect(body).not.toContain('PS_EXT_MARKER')
   })
 })

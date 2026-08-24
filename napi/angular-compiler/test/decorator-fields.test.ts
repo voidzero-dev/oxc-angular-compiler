@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   emptyDelimitedRange,
   locateComponentDecorators,
+  locateStyleUrlFor,
+  locateStyleUrlsFor,
   locateStylesFieldFor,
   locateTemplateStringFor,
   locateTemplateUrlFor,
@@ -301,6 +303,64 @@ describe('decorator-fields utils', () => {
       const src = `@Component({ template: '<p/>', templateUrl: './real.html' })\nexport class Foo {}`
       const range = locateTemplateUrlFor(src, 'Foo')!
       expect(src.slice(range[0], range[1] + 1)).toBe(`'./real.html'`)
+    })
+  })
+
+  describe('locateStyleUrlsFor / locateStyleUrlFor', () => {
+    const multi = `
+      @Component({ selector: 'a', styleUrls: ['./first.css'] })
+      export class FirstComponent {}
+      @Component({ selector: 'b', styleUrls: ['./second.css', './extra.css'] })
+      export class SecondComponent {}
+    `
+
+    it('returns null when className matches no decorator', () => {
+      expect(locateStyleUrlsFor(multi, 'Nope')).toBeNull()
+      expect(locateStyleUrlFor(multi, 'Nope')).toBeNull()
+    })
+
+    it('returns each component its own styleUrls range in a multi-component file', () => {
+      const first = locateStyleUrlsFor(multi, 'FirstComponent')!
+      const second = locateStyleUrlsFor(multi, 'SecondComponent')!
+      expect(multi.slice(first[0], first[1] + 1)).toBe(`['./first.css']`)
+      expect(multi.slice(second[0], second[1] + 1)).toBe(`['./second.css', './extra.css']`)
+    })
+
+    it('locates the singular `styleUrl:` string form', () => {
+      const src = `@Component({ styleUrl: './solo.css' })\nexport class Foo {}`
+      const range = locateStyleUrlFor(src, 'Foo')!
+      expect(src.slice(range[0], range[1] + 1)).toBe(`'./solo.css'`)
+    })
+
+    // The four cross-match guards: `styleUrl`, `styleUrls` and `styles` are
+    // distinct fields and must never resolve to one another.
+    it('does not match `styleUrls:` when looking for the singular `styleUrl:`', () => {
+      const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(locateStyleUrlFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match the singular `styleUrl:` when looking for `styleUrls:`', () => {
+      const src = `@Component({ styleUrl: './a.css' })\nexport class Foo {}`
+      expect(locateStyleUrlsFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match an inline `styles:` field as either url field', () => {
+      const src = `@Component({ styles: ['.a { color: red }'] })\nexport class Foo {}`
+      expect(locateStyleUrlsFor(src, 'Foo')).toBeNull()
+      expect(locateStyleUrlFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match either url field as the inline `styles:` field', () => {
+      const urls = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
+      const url = `@Component({ styleUrl: './a.css' })\nexport class Foo {}`
+      expect(locateStylesFieldFor(urls, 'Foo')).toBeNull()
+      expect(locateStylesFieldFor(url, 'Foo')).toBeNull()
+    })
+
+    it('finds styleUrls when the decorator also has an inline styles field', () => {
+      const src = `@Component({ styles: ['.x{}'], styleUrls: ['./real.css'] })\nexport class Foo {}`
+      const range = locateStyleUrlsFor(src, 'Foo')!
+      expect(src.slice(range[0], range[1] + 1)).toBe(`['./real.css']`)
     })
   })
 
