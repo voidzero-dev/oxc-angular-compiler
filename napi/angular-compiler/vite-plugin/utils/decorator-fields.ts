@@ -410,3 +410,28 @@ export function locateTemplateStringFor(code: string, className: string): [numbe
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateTemplateInArgs(code, found.argsRange) : null
 }
+
+/**
+ * Locate the `templateUrl:` string field inside a specific `@Component(...)`
+ * decorator identified by its `argsRange`. See `locateStylesInArgs` for
+ * when to prefer this over the className-based variant. Field matching is
+ * word-bounded, so `templateUrl` never matches a `template:` field and
+ * vice versa.
+ */
+export function locateTemplateUrlInArgs(
+  code: string,
+  argsRange: [number, number],
+): [number, number] | null {
+  return locateFieldInsideArgs(code, argsRange, 'templateUrl', TEMPLATE_OPENERS)
+}
+
+/**
+ * Locate the `templateUrl:` string field inside the `@Component(...)`
+ * decorator that decorates the class named `className`. Convenience wrapper
+ * that finds the decorator by className and delegates to
+ * `locateTemplateUrlInArgs`.
+ */
+export function locateTemplateUrlFor(code: string, className: string): [number, number] | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateTemplateUrlInArgs(code, found.argsRange) : null
+}

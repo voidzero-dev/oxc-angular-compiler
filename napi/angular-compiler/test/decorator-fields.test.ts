@@ -5,6 +5,7 @@ import {
   locateComponentDecorators,
   locateStylesFieldFor,
   locateTemplateStringFor,
+  locateTemplateUrlFor,
 } from '../vite-plugin/utils/decorator-fields.js'
 
 describe('decorator-fields utils', () => {
@@ -259,6 +260,47 @@ describe('decorator-fields utils', () => {
       const src = `@Component({ styles: ['/* template: "fake" */'], template: '<real/>' })\nexport class Foo {}`
       const range = locateTemplateStringFor(src, 'Foo')!
       expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+    })
+
+    it('does not match a `templateUrl:` field as `template:`', () => {
+      const src = `@Component({ templateUrl: './foo.html' })\nexport class Foo {}`
+      expect(locateTemplateStringFor(src, 'Foo')).toBeNull()
+    })
+  })
+
+  describe('locateTemplateUrlFor', () => {
+    const multi = `
+      @Component({ selector: 'a', templateUrl: './first.html' })
+      export class FirstComponent {}
+      @Component({ selector: 'b', templateUrl: './second.html' })
+      export class SecondComponent {}
+    `
+
+    it('returns null when className matches no decorator', () => {
+      expect(locateTemplateUrlFor(multi, 'Nope')).toBeNull()
+    })
+
+    it('returns null when the named component has no templateUrl field', () => {
+      const src = `@Component({ template: '<p/>' })\nexport class Foo {}`
+      expect(locateTemplateUrlFor(src, 'Foo')).toBeNull()
+    })
+
+    it('returns each component its own templateUrl range in a multi-component file', () => {
+      const first = locateTemplateUrlFor(multi, 'FirstComponent')!
+      const second = locateTemplateUrlFor(multi, 'SecondComponent')!
+      expect(multi.slice(first[0], first[1] + 1)).toBe(`'./first.html'`)
+      expect(multi.slice(second[0], second[1] + 1)).toBe(`'./second.html'`)
+    })
+
+    it('does not match an inline `template:` field as `templateUrl:`', () => {
+      const src = `@Component({ template: '<p>templateUrl: fake</p>' })\nexport class Foo {}`
+      expect(locateTemplateUrlFor(src, 'Foo')).toBeNull()
+    })
+
+    it('finds templateUrl when the decorator also has an inline template field', () => {
+      const src = `@Component({ template: '<p/>', templateUrl: './real.html' })\nexport class Foo {}`
+      const range = locateTemplateUrlFor(src, 'Foo')!
+      expect(src.slice(range[0], range[1] + 1)).toBe(`'./real.html'`)
     })
   })
 

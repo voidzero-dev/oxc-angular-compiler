@@ -957,4 +957,199 @@ describe('handleHotUpdate for a templateUrl shared across component files - Issu
     expect(componentIds).toContain(`${alphaPath}@AlphaComponent`)
     expect(componentIds).toContain(`${betaPath}@BetaComponent`)
   })
+
+  it('dispatches HMR for a templateUrl that does not end in .html', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // A templateUrl may point at ANY file — resolveResources reads it with no
+    // extension check. Ownership must be tracked by ROLE (declared as a
+    // templateUrl), not by file extension. This .css file is nobody's styleUrl.
+    const oddTemplatePath = join(appDir, 'odd-tpl.view.css')
+    const htmlTemplatePath = join(appDir, 'odd-guard.component.html')
+    const oddOwnerPath = join(appDir, 'odd-owner.component.ts')
+    const htmlOwnerPath = join(appDir, 'odd-guard.component.ts')
+    writeFileSync(oddTemplatePath, '<p>ODD_TPL_MARKER</p>')
+    writeFileSync(htmlTemplatePath, '<p>ODD_GUARD_MARKER</p>')
+
+    const oddSource = componentSource('app-odd', 'OddComponent', 'odd-tpl.view.css')
+    const htmlSource = componentSource(
+      'app-odd-guard',
+      'HtmlGuardComponent',
+      'odd-guard.component.html',
+    )
+    writeFileSync(oddOwnerPath, oddSource)
+    writeFileSync(htmlOwnerPath, htmlSource)
+
+    await transformSharedComponent(plugin, oddSource, oddOwnerPath)
+    await transformSharedComponent(plugin, htmlSource, htmlOwnerPath)
+
+    // Editing the .css-named template must dispatch to its owner.
+    writeFileSync(oddTemplatePath, '<p>ODD_TPL_MARKER edited</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(oddTemplatePath),
+        [{ id: normalizePath(oddTemplatePath) }],
+        mockServer,
+      ),
+    )
+    expect(componentUpdateIds(mockServer)).toContain(`${oddOwnerPath}@OddComponent`)
+
+    // Guard: a plain .html templateUrl still dispatches through the same path.
+    writeFileSync(htmlTemplatePath, '<p>ODD_GUARD_MARKER edited</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(htmlTemplatePath),
+        [{ id: normalizePath(htmlTemplatePath) }],
+        mockServer,
+      ),
+    )
+    expect(componentUpdateIds(mockServer)).toContain(`${htmlOwnerPath}@HtmlGuardComponent`)
+  })
+})
+
+describe('@ng/component endpoint resolves the template per class', () => {
+  async function transformSource(plugin: Plugin, source: string, path: string) {
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      path,
+    )
+  }
+
+  function getMiddleware(mockServer: any) {
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    expect(middleware, 'expected middleware to be registered').toBeDefined()
+    return middleware
+  }
+
+  it('serves each templateUrl component its own template in a multi-templateUrl file', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const firstHtmlPath = join(appDir, 'pc-first.component.html')
+    const secondHtmlPath = join(appDir, 'pc-second.component.html')
+    const multiUrlPath = join(appDir, 'pc-multi-url.component.ts')
+    writeFileSync(firstHtmlPath, '<p>PC_FIRST_MARKER</p>')
+    writeFileSync(secondHtmlPath, '<p>PC_SECOND_MARKER</p>')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-pc-first', templateUrl: './pc-first.component.html' })
+      export class FirstComponent {}
+      @Component({ selector: 'app-pc-second', templateUrl: './pc-second.component.html' })
+      export class SecondComponent {}
+    `
+    writeFileSync(multiUrlPath, source)
+    await transformSource(plugin, source, multiUrlPath)
+
+    // Edit the SECOND component's template; the fan-out queues both classes.
+    writeFileSync(secondHtmlPath, '<p>PC_SECOND_MARKER edited</p>')
+    const ctx = createMockHmrContext(
+      normalizePath(secondHtmlPath),
+      [{ id: normalizePath(secondHtmlPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    // SecondComponent's update module must be compiled from second.html, not
+    // from the file's first templateUrl.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${multiUrlPath}@SecondComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PC_SECOND_MARKER')
+    expect(body).not.toContain('PC_FIRST_MARKER')
+  })
+
+  it('does not serve the shared template to a sibling with its own template', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const sharedHtmlPath = join(appDir, 'pc-shared.component.html')
+    const ownHtmlPath = join(appDir, 'pc-own.component.html')
+    const fileAPath = join(appDir, 'pc-owner-a.component.ts')
+    const fileBPath = join(appDir, 'pc-owner-b.component.ts')
+    writeFileSync(sharedHtmlPath, '<p>PC_SHARED_MARKER</p>')
+    writeFileSync(ownHtmlPath, '<p>PC_OWN_MARKER</p>')
+
+    // In fileA the shared template is declared FIRST, so templateUrls[0]
+    // points at it for every class in the file.
+    const fileASource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-pc-shared-a', templateUrl: './pc-shared.component.html' })
+      export class SharedAComponent {}
+      @Component({ selector: 'app-pc-own', templateUrl: './pc-own.component.html' })
+      export class OwnComponent {}
+    `
+    const fileBSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-pc-shared-b', templateUrl: './pc-shared.component.html' })
+      export class SharedBComponent {}
+    `
+    writeFileSync(fileAPath, fileASource)
+    writeFileSync(fileBPath, fileBSource)
+    await transformSource(plugin, fileASource, fileAPath)
+    await transformSource(plugin, fileBSource, fileBPath)
+
+    writeFileSync(sharedHtmlPath, '<p>PC_SHARED_MARKER edited</p>')
+    const ctx = createMockHmrContext(
+      normalizePath(sharedHtmlPath),
+      [{ id: normalizePath(sharedHtmlPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    // OwnComponent was queued by the intra-file fan-out; its served module
+    // must still be compiled from its OWN template, not the shared one.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${fileAPath}@OwnComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PC_OWN_MARKER')
+    expect(body).not.toContain('PC_SHARED_MARKER')
+  })
+
+  it('serves the inline template of a class whose sibling uses a templateUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const extHtmlPath = join(appDir, 'pc-ext.component.html')
+    const mixedPath = join(appDir, 'pc-mixed.component.ts')
+    writeFileSync(extHtmlPath, '<p>PC_EXT_MARKER</p>')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-pc-ext', templateUrl: './pc-ext.component.html' })
+      export class ExtComponent {}
+      @Component({ selector: 'app-pc-inline', template: '<p>PC_INLINE_MARKER</p>' })
+      export class InlineComponent {}
+    `
+    writeFileSync(mixedPath, source)
+    await transformSource(plugin, source, mixedPath)
+
+    // Edit only the inline template; the strip-equality branch queues both
+    // classes in the file.
+    const edited = source.replace('PC_INLINE_MARKER', 'PC_INLINE_MARKER edited')
+    writeFileSync(mixedPath, edited)
+    const ctx = createMockHmrContext(mixedPath, [{ id: mixedPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    // InlineComponent must get its inline template — templateUrls.length > 0
+    // for the FILE must not shadow the per-class inline branch.
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${mixedPath}@InlineComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PC_INLINE_MARKER')
+    expect(body).not.toContain('PC_EXT_MARKER')
+  })
 })
