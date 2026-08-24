@@ -437,6 +437,80 @@ describe('decorator-fields utils', () => {
         inline: { kind: 'absent' },
       })
     })
+
+    // Quoted keys are valid TS and the Rust extractor resolves them
+    // (verified: `'styleUrls'` and `"styleUrls"` both report their URL).
+    // Reading them as absent tells the caller the class declares no
+    // styles, which strips the component's CSS.
+    it('reads a single-quoted key the same as the bare form', () => {
+      const src = `@Component({ 'styleUrls': ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    it('reads a double-quoted key the same as the bare form', () => {
+      const src = `@Component({ "styleUrls": ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    it('reads a quoted singular `styleUrl` key', () => {
+      const src = `@Component({ 'styleUrl': './solo.css' })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./solo.css'])
+    })
+
+    it('reads a quoted inline `styles` key', () => {
+      const src = `@Component({ 'styles': ['.x{}'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.inline)).toEqual(['.x{}'])
+    })
+
+    it('keeps the cross-match guards for quoted keys', () => {
+      const urls = `@Component({ 'styleUrls': ['./a.css'] })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(urls, 'Foo')!.inline).toEqual({ kind: 'absent' })
+      const inline = `@Component({ 'styles': ['.x{}'] })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(inline, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    })
+
+    // A computed key hides the field name from this scan, but the Rust
+    // extractor resolves it (verified: `[K]: ['./computed.css']` reports
+    // the URL). "Absent" would be a lie, so the whole classification is
+    // unknown and the caller falls back.
+    it('reports both fields unreadable when a computed key is present', () => {
+      const src = `@Component({ [K]: ['./a.css'] })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+        urls: { kind: 'unreadable' },
+        inline: { kind: 'unreadable' },
+      })
+    })
+
+    it('reports both fields unreadable for a quoted key carrying an escape', () => {
+      // `'style\u0055rls'` is `styleUrls` after decoding, which the Rust
+      // extractor does and this scan deliberately does not.
+      const src = `@Component({ 'style\\u0055rls': ['./a.css'] })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+        urls: { kind: 'unreadable' },
+        inline: { kind: 'unreadable' },
+      })
+    })
+
+    it('does not promote a readable field to unreadable because of a computed key', () => {
+      // The visible field is still exactly what it says; only the fields
+      // this scan cannot see are unknown.
+      const src = `@Component({ [K]: 1, styleUrls: ['./a.css'] })\nexport class Foo {}`
+      const fields = locateStyleFieldsFor(src, 'Foo')!
+      expect(literalsIn(src, fields.urls)).toEqual(['./a.css'])
+      expect(fields.inline).toEqual({ kind: 'unreadable' })
+    })
+
+    // A spread is the one unreadable form the Rust extractor ALSO drops
+    // (verified: `...BASE` reports no styleUrls). Both sides see nothing,
+    // so "absent" matches what the compiled component gets; falling back
+    // would hand this class its siblings' CSS.
+    it('leaves fields absent for a spread, which the compiler also drops', () => {
+      const src = `@Component({ ...BASE })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
+        urls: { kind: 'absent' },
+        inline: { kind: 'absent' },
+      })
+    })
   })
 
   // -----------------------------------------------------------------

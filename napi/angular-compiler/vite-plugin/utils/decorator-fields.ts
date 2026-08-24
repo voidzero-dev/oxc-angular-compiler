@@ -240,8 +240,10 @@ function findFieldInArgs(
     // valid at the @Component's immediate object-literal depth
     // (`['paren', 'brace']`) — anything deeper is a nested literal that
     // isn't the component's metadata.
-    if (stack.length === 2 && stack[1] === 'brace' && isFieldKeyAt(code, i, field, closeParen)) {
-      let j = i + field.length
+    const afterKey =
+      stack.length === 2 && stack[1] === 'brace' ? matchFieldKeyAt(code, i, field, closeParen) : -1
+    if (afterKey !== -1) {
+      let j = afterKey
       while (j < closeParen && WS_RE.test(code[j])) j++
       if (code[j] === ':') {
         j++
@@ -267,6 +269,26 @@ function locateFieldInsideArgs(
 ): [number, number] | null {
   const found = findFieldInArgs(code, argsRange, field, openerChars)
   return found.kind === 'literal' ? found.range : null
+}
+
+/**
+ * If a key for `field` starts at `position`, return the index just past it;
+ * otherwise -1. Accepts the bare form (`styleUrls:`) and the quoted forms
+ * (`'styleUrls':`, `"styleUrls":`), which are valid TS and which the Rust
+ * extractor resolves.
+ *
+ * A quoted key must match `field` character for character. One written with
+ * an escape (`'style\u0055rls'`) is deliberately not decoded here — see
+ * `hasUnreadableKey`, which reports it as beyond this scan rather than
+ * letting it read as a key that isn't there.
+ */
+function matchFieldKeyAt(code: string, position: number, field: string, limit: number): number {
+  if (isFieldKeyAt(code, position, field, limit)) return position + field.length
+  const quote = code[position]
+  if (quote !== "'" && quote !== '"') return -1
+  const close = findClosingDelim(code, position)
+  if (close === -1 || close >= limit) return -1
+  return code.slice(position + 1, close) === field ? close + 1 : -1
 }
 
 /**
@@ -638,12 +660,84 @@ export interface ClassStyleFields {
 export function locateStyleFieldsFor(code: string, className: string): ClassStyleFields | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   if (!found) return null
+  // A key this scan cannot read could BE a style field, so "absent" would be
+  // a guess rather than an answer. Only absent is promoted: a field we did
+  // read says exactly what it says, whatever else the object holds.
+  const blind = hasUnreadableKey(code, found.argsRange)
+  const classify = (value: FieldValue): FieldValue =>
+    blind && value.kind === 'absent' ? { kind: 'unreadable' } : value
+
   const plural = findFieldInArgs(code, found.argsRange, 'styleUrls', STYLES_OPENERS)
   return {
-    urls:
+    urls: classify(
       plural.kind === 'absent'
         ? findFieldInArgs(code, found.argsRange, 'styleUrl', TEMPLATE_OPENERS)
         : plural,
-    inline: findFieldInArgs(code, found.argsRange, 'styles', STYLES_OPENERS),
+    ),
+    inline: classify(findFieldInArgs(code, found.argsRange, 'styles', STYLES_OPENERS)),
   }
+}
+
+/**
+ * Whether the decorator's own object literal holds a key this scan cannot
+ * resolve to a name, which makes "the class declares no styles" unknowable.
+ *
+ * Two forms qualify, both of which the Rust extractor DOES resolve, so
+ * reading them as absent would strip a component's CSS:
+ *   - a computed key (`[K]: [...]`);
+ *   - a quoted key carrying an escape (`'style\u0055rls'`), which this scan
+ *     matches literally and so would miss.
+ *
+ * A spread (`...BASE`) deliberately does NOT qualify. The Rust extractor
+ * drops it too, so the compiled component genuinely has no styles from it;
+ * treating the class as unknown would hand it its siblings' stylesheets
+ * instead, which is the contamination this classification exists to avoid.
+ */
+function hasUnreadableKey(code: string, argsRange: [number, number]): boolean {
+  const [openParen, closeParen] = argsRange
+  const stack: Ctx[] = ['paren']
+  let i = openParen + 1
+  // Position within the decorator's own object literal. Keys sit at the
+  // start and after each comma; `:` hands over to the value.
+  let atKey = true
+
+  while (i < closeParen) {
+    if (stack.length === 2 && stack[1] === 'brace') {
+      const ch = code[i]
+      if (WS_RE.test(ch)) {
+        i++
+        continue
+      }
+      const afterComment = skipComment(code, i, closeParen)
+      if (afterComment !== -1) {
+        i = afterComment
+        continue
+      }
+      if (ch === ',') {
+        atKey = true
+        i++
+        continue
+      }
+      if (ch === ':') {
+        atKey = false
+        i++
+        continue
+      }
+      if (atKey) {
+        // `[` here opens a computed key, not an array value: a value only
+        // follows a `:`, which would have cleared `atKey`.
+        if (ch === '[') return true
+        if (ch === "'" || ch === '"') {
+          const close = findClosingDelim(code, i)
+          if (close === -1 || close >= closeParen) return true
+          if (code.slice(i + 1, close).includes('\\')) return true
+          atKey = false
+          i = close + 1
+          continue
+        }
+      }
+    }
+    i = advanceOneToken(code, i, stack, closeParen)
+  }
+  return false
 }

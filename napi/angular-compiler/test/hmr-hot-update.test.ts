@@ -1972,4 +1972,182 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toBe('')
     expect(body).toContain('PS_INTERP_MARKER')
   })
+
+  // Quoted metadata keys are valid TS, and the Rust extractor resolves
+  // them (verified: `'styleUrls'` reports its URL). Reading the key as
+  // absent makes this class look styleless, which serves it nothing.
+  it('serves the own styleUrls of a class whose key is single-quoted', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const quotedCssPath = join(appDir, 'ps-quoted-own.component.css')
+    const quotedSibCssPath = join(appDir, 'ps-quoted-sib.component.css')
+    const quotedPath = join(appDir, 'ps-quoted.component.ts')
+    writeFileSync(quotedCssPath, '.PS_QUOTED_OWN_MARKER { color: red; }')
+    writeFileSync(quotedSibCssPath, '.PS_QUOTED_SIB_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-quoted',
+        template: '<p>quoted</p>',
+        'styleUrls': ['./ps-quoted-own.component.css'],
+      })
+      export class QuotedKeyComponent {}
+      @Component({
+        selector: 'app-ps-quoted-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-quoted-sib.component.css'],
+      })
+      export class QuotedKeySiblingComponent {}
+    `
+    writeFileSync(quotedPath, source)
+    await transformSource(plugin, source, quotedPath)
+
+    writeFileSync(quotedCssPath, '.PS_QUOTED_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(quotedCssPath),
+      [{ id: normalizePath(quotedCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${quotedPath}@QuotedKeyComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_QUOTED_OWN_MARKER')
+    expect(body).not.toContain('PS_QUOTED_SIB_MARKER')
+  })
+
+  it('serves the own styleUrls of a class whose key is double-quoted', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const dqCssPath = join(appDir, 'ps-dquoted-own.component.css')
+    const dqSibCssPath = join(appDir, 'ps-dquoted-sib.component.css')
+    const dqPath = join(appDir, 'ps-dquoted.component.ts')
+    writeFileSync(dqCssPath, '.PS_DQUOTED_OWN_MARKER { color: red; }')
+    writeFileSync(dqSibCssPath, '.PS_DQUOTED_SIB_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps-dquoted',
+        template: '<p>dquoted</p>',
+        "styleUrls": ['./ps-dquoted-own.component.css'],
+      })
+      export class DQuotedKeyComponent {}
+      @Component({
+        selector: 'app-ps-dquoted-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-dquoted-sib.component.css'],
+      })
+      export class DQuotedKeySiblingComponent {}
+    `
+    writeFileSync(dqPath, source)
+    await transformSource(plugin, source, dqPath)
+
+    writeFileSync(dqCssPath, '.PS_DQUOTED_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(dqCssPath),
+      [{ id: normalizePath(dqCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${dqPath}@DQuotedKeyComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_DQUOTED_OWN_MARKER')
+    expect(body).not.toContain('PS_DQUOTED_SIB_MARKER')
+  })
+
+  // A computed key hides the field from this scan while the Rust extractor
+  // still resolves it, so the class must fall back rather than be served
+  // nothing — the file-level list carries its stylesheet.
+  it('falls back when a style field is declared under a computed key', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const computedCssPath = join(appDir, 'ps-computed-own.component.css')
+    const computedPath = join(appDir, 'ps-computed.component.ts')
+    writeFileSync(computedCssPath, '.PS_COMPUTED_OWN_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      const K = 'styleUrls';
+      @Component({
+        selector: 'app-ps-computed',
+        template: '<p>computed</p>',
+        [K]: ['./ps-computed-own.component.css'],
+      })
+      export class ComputedKeyComponent {}
+    `
+    writeFileSync(computedPath, source)
+    await transformSource(plugin, source, computedPath)
+
+    writeFileSync(computedCssPath, '.PS_COMPUTED_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(computedCssPath),
+      [{ id: normalizePath(computedCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${computedPath}@ComputedKeyComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_COMPUTED_OWN_MARKER')
+  })
+
+  // A spread is the one unreadable form the compiler ALSO drops, so
+  // "declares no styles" is what the compiled component actually gets.
+  // Falling back here would hand this class its sibling's CSS instead.
+  it('serves no styles for a spread-only decorator, matching the compiler', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const spreadSibCssPath = join(appDir, 'ps-spread-sib.component.css')
+    const spreadPath = join(appDir, 'ps-spread.component.ts')
+    writeFileSync(spreadSibCssPath, '.PS_SPREAD_SIB_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      const BASE = { selector: 'app-ps-spread' };
+      @Component({
+        template: '<p>spread</p>',
+        ...BASE,
+      })
+      export class SpreadComponent {}
+      @Component({
+        selector: 'app-ps-spread-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-spread-sib.component.css'],
+      })
+      export class SpreadSiblingComponent {}
+    `
+    writeFileSync(spreadPath, source)
+    await transformSource(plugin, source, spreadPath)
+
+    writeFileSync(spreadSibCssPath, '.PS_SPREAD_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(spreadSibCssPath),
+      [{ id: normalizePath(spreadSibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${spreadPath}@SpreadComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS_SPREAD_SIB_MARKER')
+  })
 })
