@@ -911,6 +911,131 @@ class Foo {}`
       const sRange = locateStylesFieldFor(src, 'Foo')!
       expect(src.slice(sRange[0], sRange[1] + 1)).toBe(`['real']`)
     })
+
+    // A comment may sit anywhere inside a style field declaration, and the
+    // Rust extractor reads straight past it. Every placement below was
+    // measured against `extractComponentUrls`, which reports `./x.css` for
+    // each one. Reading any of them as absent would tell the caller the
+    // class declares no styles, which strips the component's CSS.
+    describe('comment placement within a style field declaration', () => {
+      const urlsOf = (src: string) => {
+        const field = locateStyleFieldsFor(src, 'Foo')!.urls
+        expect(field.kind).toBe('literal')
+        return readStringLiterals(src, (field as { range: [number, number] }).range).literals
+      }
+      const decorator = (field: string) =>
+        `@Component({ template: '<p/>', ${field} })\nexport class Foo {}`
+
+      it('reads a field with a block comment between the key and the colon', () => {
+        expect(urlsOf(decorator(`styleUrls /* why */: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads a field with a line comment between the key and the colon', () => {
+        expect(urlsOf(decorator(`styleUrls // why\n: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads a field with a comment between the colon and the value', () => {
+        expect(urlsOf(decorator(`styleUrls: /* why */ ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads a field with a comment before the key', () => {
+        expect(urlsOf(decorator(`/* why */ styleUrls: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads a field with two comments between the key and the colon', () => {
+        expect(urlsOf(decorator(`styleUrls /* a */ /* b */: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads a quoted key with a comment before the colon', () => {
+        expect(urlsOf(decorator(`'styleUrls' /* why */: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads the singular `styleUrl` with a comment before the colon', () => {
+        expect(urlsOf(decorator(`styleUrl /* why */: './x.css'`))).toEqual(['./x.css'])
+      })
+
+      it('reads the singular `styleUrl` with a comment after the colon', () => {
+        expect(urlsOf(decorator(`styleUrl: /* why */ './x.css'`))).toEqual(['./x.css'])
+      })
+
+      it('reads an array whose first literal follows a comment', () => {
+        expect(urlsOf(decorator(`styleUrls: [/* why */ './x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads an array whose first literal follows a line comment', () => {
+        expect(urlsOf(decorator(`styleUrls: [// why\n './x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('reads an array with a comment before the separating comma', () => {
+        expect(urlsOf(decorator(`styleUrls: ['./x.css' /* why */, './y.css']`))).toEqual([
+          './x.css',
+          './y.css',
+        ])
+      })
+
+      it('reads an array with a comment after the separating comma', () => {
+        expect(urlsOf(decorator(`styleUrls: ['./x.css', /* why */ './y.css']`))).toEqual([
+          './x.css',
+          './y.css',
+        ])
+      })
+
+      it('reads an array with a comment after the last literal', () => {
+        expect(urlsOf(decorator(`styleUrls: ['./x.css' /* why */]`))).toEqual(['./x.css'])
+      })
+
+      it('reads an inline `styles` field with a comment before the colon', () => {
+        const src = decorator(`styles /* why */: ['.a{}']`)
+        const field = locateStyleFieldsFor(src, 'Foo')!.inline
+        expect(field.kind).toBe('literal')
+        expect(
+          readStringLiterals(src, (field as { range: [number, number] }).range).literals,
+        ).toEqual(['.a{}'])
+      })
+
+      // An array holding only a comment is still a syntactically valid empty
+      // array: a definite "no styles", not an unreadable value.
+      it('reads an array holding only a comment as definitively empty', () => {
+        const src = decorator(`styleUrls: [/* why */]`)
+        const field = locateStyleFieldsFor(src, 'Foo')!.urls
+        expect(field.kind).toBe('literal')
+        expect(
+          readStringLiterals(src, (field as { range: [number, number] }).range).literals,
+        ).toEqual([])
+      })
+
+      // Comment *contents* must never be mistaken for structure.
+      it('ignores a colon, comma and brackets inside the comment', () => {
+        expect(urlsOf(decorator(`styleUrls /* a: b, c ] [ */: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      it('ignores a decoy style field inside the comment', () => {
+        expect(urlsOf(decorator(`styleUrls /* styleUrl: './fake.css' */: ['./x.css']`))).toEqual([
+          './x.css',
+        ])
+      })
+
+      it('ignores an apostrophe inside a comment between the key and the colon', () => {
+        expect(urlsOf(decorator(`styleUrls /* don't */: ['./x.css']`))).toEqual(['./x.css'])
+      })
+
+      // A comment must not turn a shorthand back into "absent": the compiler
+      // resolves a same-file constant behind the singular `styleUrl`
+      // (verified: `./sh.css`), so this class must still reach the fallback.
+      it('keeps a shorthand `styleUrl` unreadable when a comment precedes the closing brace', () => {
+        const src = `const styleUrl = './sh.css';
+@Component({ template: '<p/>', styleUrl /* why */ })
+export class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+      })
+
+      it('keeps a shorthand `styleUrl` unreadable when a comment precedes the comma', () => {
+        const src = `const styleUrl = './sh.css';
+@Component({ template: '<p/>', styleUrl /* why */, selector: 'a' })
+export class Foo {}`
+        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+      })
+    })
   })
 
   // -----------------------------------------------------------------
