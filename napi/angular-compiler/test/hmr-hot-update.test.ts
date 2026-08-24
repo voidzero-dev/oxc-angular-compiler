@@ -2245,4 +2245,56 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toContain('PS_CMT_OLD_MARKER')
     expect(body).not.toContain('PS_CMT_SIB_MARKER')
   })
+  it('serves the own stylesheet of a class using a shorthand `styleUrl`', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const ownCssPath = join(appDir, 'ps-shorthand-own.component.css')
+    const sibCssPath = join(appDir, 'ps-shorthand-sib.component.css')
+    const shorthandPath = join(appDir, 'ps-shorthand.component.ts')
+    writeFileSync(ownCssPath, '.PS_SHORTHAND_OWN_MARKER { color: red; }')
+    writeFileSync(sibCssPath, '.PS_SHORTHAND_SIB_MARKER { color: red; }')
+
+    // The shorthand key is a style field this scan cannot resolve, but the
+    // Rust extractor folds the constant behind it. Reading it as "declares
+    // no styles" would strip the component's CSS.
+    const source = `
+      import { Component } from '@angular/core';
+      const styleUrl = './ps-shorthand-own.component.css';
+      @Component({
+        selector: 'app-ps-shorthand',
+        template: '<p>shorthand</p>',
+        styleUrl,
+      })
+      export class ShorthandComponent {}
+      @Component({
+        selector: 'app-ps-shorthand-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-shorthand-sib.component.css'],
+      })
+      export class ShorthandSiblingComponent {}
+    `
+    writeFileSync(shorthandPath, source)
+    await transformSource(plugin, source, shorthandPath)
+
+    writeFileSync(ownCssPath, '.PS_SHORTHAND_OWN_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(ownCssPath),
+      [{ id: normalizePath(ownCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+    expectDispatched(mockServer, `${shorthandPath}@ShorthandComponent`)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${shorthandPath}@ShorthandComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_SHORTHAND_OWN_MARKER')
+    // The sibling's stylesheet rides along, because this is the file-level
+    // fallback: it is the union for the file. That is the known limitation
+    // tracked in #456, asserted the same way as the singular-constant case
+    // above. The defect fixed here is the own stylesheet going MISSING.
+  })
 })

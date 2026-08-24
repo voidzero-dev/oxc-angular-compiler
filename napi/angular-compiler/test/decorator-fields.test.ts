@@ -584,6 +584,77 @@ describe('decorator-fields utils', () => {
         inline: { kind: 'absent' },
       })
     })
+
+    // Shorthand style fields. Measured against the Rust extractor, which
+    // resolves a same-file string constant behind the singular `styleUrl`
+    // but drops the array-valued forms — so the two need opposite answers,
+    // for the same reason the spread above stays absent: match what the
+    // compiled component actually ends up with.
+    it('reports a shorthand singular `styleUrl` as unreadable, not absent', () => {
+      const src = `@Component({ template: '<p/>', styleUrl })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+    })
+
+    it('leaves a shorthand `styleUrls` absent, which the compiler also drops', () => {
+      const src = `@Component({ template: '<p/>', styleUrls })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    })
+
+    it('leaves a shorthand inline `styles` absent, which the compiler also drops', () => {
+      const src = `@Component({ template: '<p/>', styles })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.inline).toEqual({ kind: 'absent' })
+    })
+
+    it('does not let an unrelated shorthand degrade a readable field', () => {
+      const src = `@Component({ selector, styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    // The trap in accepting a bare key: an identifier used as a VALUE is not
+    // a shorthand property, and reading it as one would fall back on a field
+    // that is right there and readable.
+    it('does not mistake a style-named identifier used as a value for a shorthand', () => {
+      const src = `@Component({ selector: styleUrl, styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    it('does not let an unrelated method degrade a readable field', () => {
+      const src = `@Component({ foo() { return 1 }, styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    // A method or accessor named like a style field is not a style field:
+    // the compiler reads no styles from it either.
+    it('leaves a method named like a style field absent', () => {
+      const src = `@Component({ styleUrls() { return ['./a.css'] } })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    })
+
+    it('leaves a getter named like a style field absent', () => {
+      const src = `@Component({ get styleUrl() { return './a.css' } })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    })
+
+    it('reads the real field past a setter named like a style field', () => {
+      const src = `@Component({ set styleUrl(v) {}, styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    it('does not read a style field nested in a deeper object', () => {
+      const src = `@Component({ data: { styleUrls: ['./deep.css'] } })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    })
+
+    it('reads a field followed by a trailing comma', () => {
+      const src = `@Component({ styleUrls: ['./a.css'], })\nexport class Foo {}`
+      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    })
+
+    it('reads a shorthand style field that closes the object', () => {
+      // No trailing comma — the key is bounded by `}` rather than `,`.
+      const src = `@Component({ styleUrl })\nexport class Foo {}`
+      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+    })
   })
 
   // -----------------------------------------------------------------

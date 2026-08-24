@@ -235,35 +235,82 @@ function findFieldInArgs(
   argsRange: [number, number],
   field: string,
   openerChars: string,
+  shorthandMeans: 'absent' | 'unreadable' = 'absent',
 ): FieldValue {
   const [openParen, closeParen] = argsRange
   const stack: Ctx[] = ['paren']
   let i = openParen + 1
+  // Keys sit at the start of the object and after each comma; `:` hands over
+  // to the value. Without this, a style-named identifier used as a VALUE
+  // (`selector: styleUrl`) would read as a shorthand property.
+  let atKey = true
 
   while (i < closeParen) {
-    // Check for a field-key match BEFORE advancing. The match is only
-    // valid at the @Component's immediate object-literal depth
-    // (`['paren', 'brace']`) — anything deeper is a nested literal that
+    // A key match is only valid at the @Component's immediate object-literal
+    // depth (`['paren', 'brace']`) — anything deeper is a nested literal that
     // isn't the component's metadata.
-    const afterKey =
-      stack.length === 2 && stack[1] === 'brace' ? matchFieldKeyAt(code, i, field, closeParen) : -1
-    if (afterKey !== -1) {
-      let j = afterKey
-      while (j < closeParen && WS_RE.test(code[j])) j++
-      if (code[j] === ':') {
-        j++
-        while (j < closeParen && WS_RE.test(code[j])) j++
-        if (j < closeParen && openerChars.includes(code[j])) {
-          const end = findClosingDelim(code, j)
-          if (end !== -1 && end < closeParen) return { kind: 'literal', range: [j, end] }
+    if (stack.length === 2 && stack[1] === 'brace') {
+      const ch = code[i]
+      if (WS_RE.test(ch)) {
+        i++
+        continue
+      }
+      const afterComment = skipComment(code, i, closeParen)
+      if (afterComment !== -1) {
+        i = afterComment
+        continue
+      }
+      if (ch === ',') {
+        atKey = true
+        i++
+        continue
+      }
+      if (ch === ':') {
+        atKey = false
+        i++
+        continue
+      }
+
+      const afterKey = atKey ? matchFieldKeyAt(code, i, field, closeParen) : -1
+      if (afterKey !== -1) {
+        const j = skipToToken(code, afterKey, closeParen)
+        if (code[j] === ':') {
+          const v = skipToToken(code, j + 1, closeParen)
+          if (v < closeParen && openerChars.includes(code[v])) {
+            const end = findClosingDelim(code, v)
+            if (end !== -1 && end < closeParen) return { kind: 'literal', range: [v, end] }
+          }
+          // The key is here; its value is not a shape we can read.
+          return { kind: 'unreadable' }
         }
-        // The key is here; its value is not a shape we can read.
-        return { kind: 'unreadable' }
+        // Shorthand (`{ styleUrl }`): the key stands alone, so the value is
+        // a binding this scan cannot follow. Whether that is unknowable or
+        // genuinely nothing depends on the field — see `locateStyleFieldsFor`.
+        // Anything else after the key (`(` for a method or accessor) is not
+        // this field at all, so keep scanning.
+        if ((code[j] === ',' || code[j] === '}') && shorthandMeans === 'unreadable') {
+          return { kind: 'unreadable' }
+        }
       }
     }
     i = advanceOneToken(code, i, stack, closeParen)
   }
   return { kind: 'absent' }
+}
+
+/** Index of the next character at or after `i` that is not whitespace or a comment. */
+function skipToToken(code: string, i: number, end: number): number {
+  let j = i
+  while (j < end) {
+    if (WS_RE.test(code[j])) {
+      j++
+      continue
+    }
+    const afterComment = skipComment(code, j, end)
+    if (afterComment === -1) break
+    j = afterComment
+  }
+  return j
 }
 
 function locateFieldInsideArgs(
@@ -798,6 +845,14 @@ export interface ClassStyleFields {
  * `styleUrls` wins over `styleUrl` when a decorator carries both, unless the
  * plural form is absent; Angular itself rejects that combination, so this only
  * makes the choice deterministic. One decorator scan serves all three lookups.
+ *
+ * A shorthand property (`{ styleUrl }`) is unreadable for the singular form
+ * only. Measured against the Rust extractor: it folds a same-file string
+ * constant behind `styleUrl`, so calling that absent would strip real CSS —
+ * but it drops the array-valued `styleUrls` and `styles` shorthands, so the
+ * compiled component genuinely has no styles from them and falling back would
+ * hand the class its siblings' stylesheets. Same reasoning as the spread in
+ * `hasUnreadableKey`: match what the component actually compiles to.
  */
 export function locateStyleFieldsFor(code: string, className: string): ClassStyleFields | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
@@ -813,7 +868,7 @@ export function locateStyleFieldsFor(code: string, className: string): ClassStyl
   return {
     urls: classify(
       plural.kind === 'absent'
-        ? findFieldInArgs(code, found.argsRange, 'styleUrl', TEMPLATE_OPENERS)
+        ? findFieldInArgs(code, found.argsRange, 'styleUrl', TEMPLATE_OPENERS, 'unreadable')
         : plural,
     ),
     inline: classify(findFieldInArgs(code, found.argsRange, 'styles', STYLES_OPENERS)),
