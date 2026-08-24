@@ -1010,6 +1010,188 @@ describe('handleHotUpdate for a templateUrl shared across component files - Issu
   })
 })
 
+describe('handleHotUpdate for a resource used in two decorator roles - Issue #450', () => {
+  async function transformDualComponent(plugin: Plugin, source: string, path: string) {
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      path,
+    )
+  }
+
+  function componentUpdateIds(server: any): string[] {
+    return server._wsMessages
+      .filter((m: any) => m.event === 'angular:component-update')
+      .map((m: any) => decodeURIComponent(m.data.id))
+  }
+
+  const styleOwnerSource = (selector: string, className: string, styleUrl: string) => `
+    import { Component } from '@angular/core';
+    @Component({ selector: '${selector}', template: '<p>inline</p>', styleUrls: ['./${styleUrl}'] })
+    export class ${className} {}
+  `
+
+  const templateOwnerSource = (selector: string, className: string, templateUrl: string) => `
+    import { Component } from '@angular/core';
+    @Component({ selector: '${selector}', templateUrl: './${templateUrl}' })
+    export class ${className} {}
+  `
+
+  /**
+   * One file, two decorator roles: component A's styleUrl and component B's
+   * templateUrl. Both owners must receive an update when it changes.
+   *
+   * The file holds template markup, not CSS: the template owner must compile,
+   * and a styleUrl is registered as a direct style regardless of whether
+   * preprocessing succeeds.
+   */
+  async function runDualRoleCase(
+    plugin: Plugin,
+    mockServer: any,
+    prefix: string,
+    transformTemplateOwnerFirst: boolean,
+  ) {
+    const dualPath = join(appDir, `${prefix}-dual.css`)
+    const stylePath = join(appDir, `${prefix}-style-owner.component.ts`)
+    const templatePath = join(appDir, `${prefix}-template-owner.component.ts`)
+    writeFileSync(dualPath, '<p>DUAL_V1</p>')
+
+    const styleSource = styleOwnerSource(
+      `app-${prefix}-style`,
+      'StyleOwnerComponent',
+      `${prefix}-dual.css`,
+    )
+    const templateSource = templateOwnerSource(
+      `app-${prefix}-template`,
+      'TemplateOwnerComponent',
+      `${prefix}-dual.css`,
+    )
+    writeFileSync(stylePath, styleSource)
+    writeFileSync(templatePath, templateSource)
+
+    if (transformTemplateOwnerFirst) {
+      await transformDualComponent(plugin, templateSource, templatePath)
+      await transformDualComponent(plugin, styleSource, stylePath)
+    } else {
+      await transformDualComponent(plugin, styleSource, stylePath)
+      await transformDualComponent(plugin, templateSource, templatePath)
+    }
+
+    writeFileSync(dualPath, '<p>DUAL_V2</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(normalizePath(dualPath), [{ id: normalizePath(dualPath) }], mockServer),
+    )
+
+    return { stylePath, templatePath }
+  }
+
+  it('dispatches to the style owner and the template owner of the same file', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Template owner first: this order leaves the style owner as the only
+    // member of styleComponentOwners, so forking on `isDirectStyle` skipped
+    // the template owner entirely and it kept rendering the old template.
+    const { stylePath, templatePath } = await runDualRoleCase(plugin, mockServer, 'dr', true)
+
+    const ids = componentUpdateIds(mockServer)
+    expect(ids).toContain(`${stylePath}@StyleOwnerComponent`)
+    expect(ids).toContain(`${templatePath}@TemplateOwnerComponent`)
+  })
+
+  it('dispatches to both owners regardless of transform order', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Style owner first. The role sets are global and monotonic, so the
+    // second-transformed file registers in BOTH owner maps and the style loop
+    // alone happened to cover both. Pinned so the outcome stays order-independent.
+    const { stylePath, templatePath } = await runDualRoleCase(plugin, mockServer, 'dro', false)
+
+    const ids = componentUpdateIds(mockServer)
+    expect(ids).toContain(`${stylePath}@StyleOwnerComponent`)
+    expect(ids).toContain(`${templatePath}@TemplateOwnerComponent`)
+  })
+
+  it('dispatches exactly once per class when one file owns the resource in both roles', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Both classes live in ONE .ts file, so that file is registered as both a
+    // style owner and a template owner. Dispatching per role would send two
+    // events per class.
+    const dualPath = join(appDir, 'same-file-dual.css')
+    const ownerPath = join(appDir, 'same-file-owner.component.ts')
+    writeFileSync(dualPath, '<p>SAME_FILE_V1</p>')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-sf-style', template: '<p>inline</p>', styleUrls: ['./same-file-dual.css'] })
+      export class SameFileStyleComponent {}
+      @Component({ selector: 'app-sf-template', templateUrl: './same-file-dual.css' })
+      export class SameFileTemplateComponent {}
+    `
+    writeFileSync(ownerPath, source)
+    await transformDualComponent(plugin, source, ownerPath)
+
+    writeFileSync(dualPath, '<p>SAME_FILE_V2</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(normalizePath(dualPath), [{ id: normalizePath(dualPath) }], mockServer),
+    )
+
+    const ids = componentUpdateIds(mockServer)
+    expect(ids).toContain(`${ownerPath}@SameFileStyleComponent`)
+    expect(ids).toContain(`${ownerPath}@SameFileTemplateComponent`)
+    expect(ids.filter((id) => id === `${ownerPath}@SameFileStyleComponent`)).toHaveLength(1)
+    expect(ids.filter((id) => id === `${ownerPath}@SameFileTemplateComponent`)).toHaveLength(1)
+  })
+
+  it('dispatches exactly once per component for a plain shared styleUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Guard: a style with no template role keeps its existing behavior — one
+    // event per owning component, no duplicates.
+    const sharedCssPath = join(appDir, 'plain-shared.component.css')
+    const firstPath = join(appDir, 'plain-first.component.ts')
+    const secondPath = join(appDir, 'plain-second.component.ts')
+    writeFileSync(sharedCssPath, 'h1 { color: red; }')
+
+    const firstSource = styleOwnerSource(
+      'app-plain-first',
+      'PlainFirstComponent',
+      'plain-shared.component.css',
+    )
+    const secondSource = styleOwnerSource(
+      'app-plain-second',
+      'PlainSecondComponent',
+      'plain-shared.component.css',
+    )
+    writeFileSync(firstPath, firstSource)
+    writeFileSync(secondPath, secondSource)
+    await transformDualComponent(plugin, firstSource, firstPath)
+    await transformDualComponent(plugin, secondSource, secondPath)
+
+    writeFileSync(sharedCssPath, 'h1 { color: blue; }')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(sharedCssPath),
+        [{ id: normalizePath(sharedCssPath) }],
+        mockServer,
+      ),
+    )
+
+    const ids = componentUpdateIds(mockServer)
+    expect(ids).toEqual([`${firstPath}@PlainFirstComponent`, `${secondPath}@PlainSecondComponent`])
+  })
+})
+
 describe('@ng/component endpoint resolves the template per class', () => {
   async function transformSource(plugin: Plugin, source: string, path: string) {
     if (!plugin.transform || typeof plugin.transform === 'function') {

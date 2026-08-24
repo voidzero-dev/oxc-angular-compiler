@@ -198,6 +198,33 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(updatedIds.some((id) => id.startsWith(secondComponentPath))).toBe(true)
   })
 
+  it('dispatches exactly once per component for a transitive-only partial', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // Guard: `_shared.scss` is only ever a transitive dep, never a direct
+    // styleUrl. The shared-dep branch handles it; the direct-resource branch
+    // must not dispatch a second time for the same components.
+    await transformComponent(
+      plugin,
+      componentSource('app-first', 'first.component.scss'),
+      firstComponentPath,
+    )
+    await transformComponent(
+      plugin,
+      componentSource('app-second', 'second.component.scss'),
+      secondComponentPath,
+    )
+
+    await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(sharedScssPath, mockServer),
+    )
+
+    // Two owning components, one class each: exactly two events.
+    expect(componentUpdateCount(mockServer)).toBe(2)
+  })
+
   it('leaves untracked stylesheets to Vite', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)

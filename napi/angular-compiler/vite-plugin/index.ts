@@ -1093,12 +1093,31 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             styleComponentOwners.has(normalizedFile) ||
             templateComponentOwners.has(normalizedFile)
           ) {
-            // Stylesheets that only appear as transitive deps of other styles
-            // (never used as a direct styleUrl) were already handled by the
-            // shared-dep branch; skip them here to avoid a duplicate update.
+            // The two decorator roles are independent, not alternatives: one
+            // file can be a styleUrl of one component and a templateUrl of
+            // another, so both owner sets are dispatched (issue #450).
             const isDirectStyle = directStyleUrls.has(normalizedFile)
-            if (!(handled && !isDirectStyle)) {
+            const isDirectTemplate = directTemplateUrls.has(normalizedFile)
+            // Stylesheets that only appear as transitive deps of other styles
+            // (never used as a direct styleUrl or templateUrl) were already
+            // handled by the shared-dep branch; skip them here to avoid a
+            // duplicate update.
+            if (!(handled && !isDirectStyle && !isDirectTemplate)) {
               resourceCache.delete(normalizedFile)
+              // A single owner file can hold both roles — two components in
+              // one `.ts`, one using the file as its styleUrl and the other as
+              // its templateUrl. Dispatch each owner file at most once here:
+              // the ws send in `dispatchComponentUpdate` is not idempotent, so
+              // running both loops over it would emit two events per class.
+              const dispatchedOwners = new Set<string>()
+              const dispatchOwner = (owner: string) => {
+                if (dispatchedOwners.has(owner)) return
+                dispatchedOwners.add(owner)
+                if (dispatchAllComponentsInFile(owner)) {
+                  debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                  handled = true
+                }
+              }
               if (isDirectStyle) {
                 // Refresh dependency registration only for actual styles —
                 // never run HTML templates through the CSS preprocessor
@@ -1107,19 +1126,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // A style shared by several components updates every one of
                 // them (resourceToComponent is single-valued).
                 for (const owner of styleComponentOwners.get(normalizedFile) ?? []) {
-                  if (dispatchAllComponentsInFile(owner)) {
-                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
-                    handled = true
-                  }
+                  dispatchOwner(owner)
                 }
-              } else {
+              }
+              if (isDirectTemplate) {
                 // A template shared by several component files updates every
                 // one of them (resourceToComponent is single-valued).
                 for (const owner of templateComponentOwners.get(normalizedFile) ?? []) {
-                  if (dispatchAllComponentsInFile(owner)) {
-                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
-                    handled = true
-                  }
+                  dispatchOwner(owner)
                 }
               }
             }
