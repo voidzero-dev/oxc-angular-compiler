@@ -1058,6 +1058,23 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // deps for all of them, and their partials must reach this branch.
         if (/\.(html?|css|scss|sass|less|styl|stylus|pcss|postcss|sss)$/.test(ctx.file)) {
           let handled = false
+          // Owner files already sent an update during this invocation. The
+          // `ws.send` in `dispatchComponentUpdate` is not idempotent, so an
+          // owner reachable through more than one path below would otherwise
+          // emit a second event for every class in it.
+          const dispatchedOwners = new Set<string>()
+          // Dispatch every component in one owner file. `skipIfDispatched` is
+          // set by the template loop alone: role-independent dispatch (#450)
+          // newly lets it run after the shared-dep branch, so it must not
+          // re-send. The style paths record but never skip — their overlap
+          // with the shared-dep branch predates #450 and is tracked in #453.
+          const dispatchOwner = (owner: string, skipIfDispatched = false): boolean => {
+            if (skipIfDispatched && dispatchedOwners.has(owner)) return false
+            dispatchedOwners.add(owner)
+            if (!dispatchAllComponentsInFile(owner)) return false
+            handled = true
+            return true
+          }
           // Shared preprocessor dependency (e.g. a Sass partial): rebuild every
           // style compiled from it and HMR each owning component.
           if (styleDepOwners.has(normalizedFile)) {
@@ -1074,9 +1091,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               // A style shared by several components updates every one of
               // them (resourceToComponent is single-valued).
               for (const owner of styleComponentOwners.get(normalizePath(stylePath)) ?? []) {
-                if (dispatchAllComponentsInFile(owner)) {
+                if (dispatchOwner(owner)) {
                   debugHmr('style dep HMR: %s -> %s -> %s', normalizedFile, stylePath, owner)
-                  handled = true
                 }
               }
             }
@@ -1104,20 +1120,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             // duplicate update.
             if (!(handled && !isDirectStyle && !isDirectTemplate)) {
               resourceCache.delete(normalizedFile)
-              // A single owner file can hold both roles — two components in
-              // one `.ts`, one using the file as its styleUrl and the other as
-              // its templateUrl. Dispatch each owner file at most once here:
-              // the ws send in `dispatchComponentUpdate` is not idempotent, so
-              // running both loops over it would emit two events per class.
-              const dispatchedOwners = new Set<string>()
-              const dispatchOwner = (owner: string) => {
-                if (dispatchedOwners.has(owner)) return
-                dispatchedOwners.add(owner)
-                if (dispatchAllComponentsInFile(owner)) {
-                  debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
-                  handled = true
-                }
-              }
               if (isDirectStyle) {
                 // Refresh dependency registration only for actual styles —
                 // never run HTML templates through the CSS preprocessor
@@ -1126,14 +1128,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // A style shared by several components updates every one of
                 // them (resourceToComponent is single-valued).
                 for (const owner of styleComponentOwners.get(normalizedFile) ?? []) {
-                  dispatchOwner(owner)
+                  if (dispatchOwner(owner)) {
+                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                  }
                 }
               }
               if (isDirectTemplate) {
                 // A template shared by several component files updates every
-                // one of them (resourceToComponent is single-valued).
+                // one of them (resourceToComponent is single-valued). Skip an
+                // owner already updated above — one `.ts` can hold both roles,
+                // or reach this file transitively through its style.
                 for (const owner of templateComponentOwners.get(normalizedFile) ?? []) {
-                  dispatchOwner(owner)
+                  if (dispatchOwner(owner, true)) {
+                    debugHmr('external resource HMR: %s -> %s', normalizedFile, owner)
+                  }
                 }
               }
             }

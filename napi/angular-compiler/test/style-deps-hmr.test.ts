@@ -582,3 +582,78 @@ describe('handleHotUpdate for transitive style dependencies', () => {
     expect(componentUpdateCount(mockServer)).toBe(1)
   })
 })
+
+describe('handleHotUpdate for a resource reached through both dispatch paths', () => {
+  it('dispatches once per class when a transitive dep is also a direct templateUrl', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // `_dual-role.scss` wears two hats at once:
+    //   - transitive dep: `dual-importer.component.scss` @uses it, so it
+    //     reaches components through the shared-dep branch.
+    //   - direct templateUrl: a component renders it directly, so it also
+    //     reaches components through the direct-resource branch.
+    // Its contents must parse as BOTH Sass and an Angular template, so a
+    // comment is the one body that satisfies both grammars (a CSS rule fails
+    // the template parser; bare text fails Sass).
+    const partialPath = join(appDir, '_dual-role.scss')
+    const importerPath = join(appDir, 'dual-importer.component.scss')
+    const bothRolesPath = join(appDir, 'dual-both.component.ts')
+    const transitiveOnlyPath = join(appDir, 'dual-transitive-only.component.ts')
+
+    writeFileSync(partialPath, '/* DUAL_ROLE_MARKER */')
+    writeFileSync(importerPath, "@use './dual-role';")
+
+    // One `.ts` owning BOTH paths: its style pulls the partial in
+    // transitively, and its sibling uses the same partial as a template.
+    const bothRolesSource = `
+      import { Component } from '@angular/core';
+
+      @Component({
+        selector: 'app-dual-style',
+        template: '<h1>Hello</h1>',
+        styleUrls: ['./dual-importer.component.scss'],
+      })
+      export class DualStyleComponent {}
+
+      @Component({
+        selector: 'app-dual-template',
+        templateUrl: './_dual-role.scss',
+      })
+      export class DualTemplateComponent {}
+    `
+    // A second owner reached ONLY through the shared-dep branch. Its update
+    // proves that branch really ran, so the assertions below are not just the
+    // template branch firing twice.
+    const transitiveOnlySource = componentSource(
+      'app-dual-transitive',
+      'dual-importer.component.scss',
+    )
+
+    writeFileSync(bothRolesPath, bothRolesSource)
+    writeFileSync(transitiveOnlyPath, transitiveOnlySource)
+
+    await transformComponent(plugin, bothRolesSource, bothRolesPath)
+    await transformComponent(plugin, transitiveOnlySource, transitiveOnlyPath)
+
+    writeFileSync(partialPath, '/* DUAL_ROLE_MARKER edited */')
+    await (plugin.handleHotUpdate as Function).call(
+      plugin,
+      createMockHmrContext(partialPath, mockServer),
+    )
+
+    const ids = mockServer._wsMessages
+      .filter((msg: any) => msg?.event === 'angular:component-update')
+      .map((msg: any) => decodeURIComponent(msg.data.id))
+    const countOf = (id: string) => ids.filter((candidate: string) => candidate === id).length
+
+    // The shared-dep branch ran: the transitive-only owner was updated.
+    expect(countOf(`${transitiveOnlyPath}@AppComponent`)).toBe(1)
+
+    // The dual-path owner is dispatched by the shared-dep branch and would be
+    // dispatched again by the direct-template loop. `ws.send` is not
+    // idempotent, so each class must still see exactly one event.
+    expect(countOf(`${bothRolesPath}@DualStyleComponent`)).toBe(1)
+    expect(countOf(`${bothRolesPath}@DualTemplateComponent`)).toBe(1)
+  })
+})
