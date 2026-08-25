@@ -948,8 +948,194 @@ describe('decorator-fields utils', () => {
       expect(readOf(`[SOME_CONST, './a.css']`).complete).toBe(false)
     })
 
-    it('reports a spread entry as incomplete', () => {
-      expect(readOf(`[...SHARED, './a.css']`).complete).toBe(false)
+    // -----------------------------------------------------------------
+    // Spread elements (`...X`) and elisions (holes).
+    //
+    // `extract_string_array` asks every array element for `as_expression()`,
+    // and `ArrayExpressionElement::is_expression()` enumerates neither
+    // `SpreadElement` nor `Elision`. Both are therefore dropped BEFORE the
+    // value resolver runs, for every possible program — the const table is
+    // never consulted for them. Dropping them here keeps the array complete
+    // and matches what the component actually compiles to; calling it
+    // unknown would hand the class its siblings' stylesheets instead.
+    //
+    // Measured against the Rust extractor:
+    //   [...SHARED, './own.css']       -> ["./own.css"]
+    //   [...SHARED]                    -> []
+    //   [S, './own.css']  (S a const)  -> ["./shared.css", "./own.css"]
+    //
+    // Every OTHER element IS an expression the resolver may fold from
+    // constants this scan cannot read, so those still mark the array
+    // unknown. Same reasoning as the decorator-level spread in
+    // `hasUnreadableKey`; the two now agree.
+    // -----------------------------------------------------------------
+    it('drops a leading spread and reads the rest, like the compiler', () => {
+      expect(readOf(`[...SHARED, './a.css']`)).toEqual({
+        literals: ['./a.css'],
+        complete: true,
+      })
+    })
+
+    it('drops a trailing spread and reads the rest', () => {
+      expect(readOf(`['./a.css', ...SHARED]`)).toEqual({
+        literals: ['./a.css'],
+        complete: true,
+      })
+    })
+
+    it('reads a spread-only array as declaring nothing', () => {
+      expect(readOf(`[...SHARED]`)).toEqual({ literals: [], complete: true })
+    })
+
+    it('reads an array of two spreads as declaring nothing', () => {
+      expect(readOf(`[...S1, ...S2]`)).toEqual({ literals: [], complete: true })
+    })
+
+    it('drops a spread of an inline array literal', () => {
+      // The compiler drops the element whole, so a literal INSIDE the spread
+      // is not part of this component's styles.
+      expect(readOf(`[...['./shared.css'], './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('never leaks a literal used as a computed member inside a spread', () => {
+      expect(readOf(`[...obj['./leak.css'], './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('never leaks a literal passed as a call argument inside a spread', () => {
+      expect(readOf(`[...f('./leak.css'), './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('never leaks a literal inside an object literal in a spread', () => {
+      expect(readOf(`[...Object.values({ k: './leak.css' }), './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('keeps a comma inside parens from ending the spread element', () => {
+      expect(readOf(`[...f(a, b), './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('keeps a comma inside a nested array from ending the spread element', () => {
+      expect(readOf(`[...['./x.css', './y.css'], './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('ignores a block comment inside a spread', () => {
+      expect(readOf(`[.../* , './leak.css' */ SHARED, './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('ignores an apostrophe and a comma inside a line comment in a spread', () => {
+      expect(readOf(`[...SHARED // don't , './leak.css'\n, './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('skips an interpolated template literal inside a spread', () => {
+      // The `${...}` pushes a brace context, so the comma inside the template
+      // does not end the element.
+      expect(readOf("[...tag`${DIR}/a, b`, './own.css']")).toEqual({
+        literals: ['./own.css'],
+        complete: true,
+      })
+    })
+
+    it('drops a spread in a `styleUrls` array too', () => {
+      const src = `@Component({ styleUrls: [...SHARED, './a.css'] })\nclass Foo {}`
+      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'Foo')!)).toEqual({
+        literals: ['./a.css'],
+        complete: true,
+      })
+    })
+
+    it('drops a spread in an inline `styles` array', () => {
+      expect(readOf(`[...SHARED_INLINE, ':host{}']`)).toEqual({
+        literals: [':host{}'],
+        complete: true,
+      })
+    })
+
+    it('reports an unterminated string inside a spread as incomplete', () => {
+      // The quote never closes, so where the element ends is unknowable.
+      // A real file cannot produce this range (the locator needs a balanced
+      // `]`), but the scan must refuse to guess rather than run off.
+      const src = `[...f('./leak.css)]`
+      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
+        literals: [],
+        complete: false,
+      })
+    })
+
+    it('reports an unclosed paren inside a spread as incomplete', () => {
+      const src = `[...f(a]`
+      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
+        literals: [],
+        complete: false,
+      })
+    })
+
+    it('reports a spread ending in an escape as incomplete', () => {
+      // The trailing escape consumes the array's own `]`, so the scan
+      // overshoots the range: incomplete, not a guess.
+      const src = String.raw`[...'a\]`
+      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
+        literals: [],
+        complete: false,
+      })
+    })
+
+    it('does not treat a leading decimal point as a spread', () => {
+      expect(readOf(`[.5, './a.css']`).complete).toBe(false)
+    })
+
+    it('does not treat two dots as a spread', () => {
+      expect(readOf(`[..X, './a.css']`).complete).toBe(false)
+    })
+
+    it('does not treat a member access as a spread', () => {
+      expect(readOf(`[STYLES.a, './a.css']`).complete).toBe(false)
+    })
+
+    it('does not treat an optional chain as a spread', () => {
+      expect(readOf(`[STYLES?.a, './a.css']`).complete).toBe(false)
+    })
+
+    it('still reports a bare identifier element as incomplete, unlike a spread', () => {
+      // Measured: the Rust extractor DOES fold `S` from the const table, so
+      // the literals gathered here are not the component's full style list.
+      expect(readOf(`[S, './own.css']`)).toEqual({
+        literals: ['./own.css'],
+        complete: false,
+      })
+    })
+
+    it('reads across a leading elision, which the compiler also drops', () => {
+      expect(readOf(`[, './a.css']`)).toEqual({ literals: ['./a.css'], complete: true })
+    })
+
+    it('reads across an elision between two entries', () => {
+      expect(readOf(`['./a.css', , './b.css']`)).toEqual({
+        literals: ['./a.css', './b.css'],
+        complete: true,
+      })
     })
 
     it('reports an interpolated template literal as incomplete', () => {

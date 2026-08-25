@@ -2201,6 +2201,57 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_SPREAD_SIB_MARKER')
   })
+
+  // A spread INSIDE a `styleUrls` array is dropped by the compiler the same
+  // way, before any constant is resolved — so this class compiles to exactly
+  // the one path it spells out. Reading the array as unknown would fall back
+  // to the file-level list and serve it its sibling's CSS as well.
+  it('serves only the spelled-out entry of a styleUrls array with a spread', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const ownCssPath = join(appDir, 'ps-spreadarr-own.component.css')
+    const sibCssPath = join(appDir, 'ps-spreadarr-sib.component.css')
+    const spreadArrPath = join(appDir, 'ps-spreadarr.component.ts')
+    writeFileSync(ownCssPath, '.PS_SPREADARR_OWN_MARKER { color: red; }')
+    writeFileSync(sibCssPath, '.PS_SPREADARR_SIB_MARKER { color: blue; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      const SHARED = [];
+      @Component({
+        selector: 'app-ps-spreadarr',
+        template: '<p>own</p>',
+        styleUrls: [...SHARED, './ps-spreadarr-own.component.css'],
+      })
+      export class SpreadArrayComponent {}
+      @Component({
+        selector: 'app-ps-spreadarr-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-spreadarr-sib.component.css'],
+      })
+      export class SpreadArraySiblingComponent {}
+    `
+    writeFileSync(spreadArrPath, source)
+    await transformSource(plugin, source, spreadArrPath)
+
+    // Edit the SIBLING's stylesheet; the fan-out queues both classes.
+    writeFileSync(sibCssPath, '.PS_SPREADARR_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(sibCssPath),
+      [{ id: normalizePath(sibCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${spreadArrPath}@SpreadArrayComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS_SPREADARR_OWN_MARKER')
+    expect(body).not.toContain('PS_SPREADARR_SIB_MARKER')
+  })
   it('serves a styleUrls entry written with a JavaScript escape', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithRealConfig(plugin)

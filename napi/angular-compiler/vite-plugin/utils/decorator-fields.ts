@@ -850,10 +850,14 @@ function decodeEscapes(raw: string): string | null {
  * The literals read out of a field value, and whether every element was read.
  *
  * `complete: false` means the value holds something this scan cannot resolve —
- * an identifier, a spread, an interpolated template literal, an unterminated
- * string. The literals gathered alongside it are NOT a partial answer to act
- * on: a caller that used them would silently drop the stylesheets the
- * unreadable elements stand for. Treat an incomplete read as unknown.
+ * an identifier, an interpolated template literal, an unterminated string.
+ * The literals gathered alongside it are NOT a partial answer to act on: a
+ * caller that used them would silently drop the stylesheets the unreadable
+ * elements stand for. Treat an incomplete read as unknown.
+ *
+ * A spread element (`...X`) and an elision are the exceptions: the Rust
+ * extractor drops both before resolving anything, so skipping them leaves
+ * the read complete.
  *
  * An empty array is the opposite case: `complete: true` with no literals is a
  * definitive "this field declares nothing".
@@ -874,7 +878,9 @@ export interface StringLiteralsRead {
  *
  * Inside the array body, whitespace, commas and comments are skipped, and
  * each literal is delimited with `findClosingDelim`, so escape sequences and
- * apostrophes inside comments cannot be mistaken for delimiters.
+ * apostrophes inside comments cannot be mistaken for delimiters. A spread
+ * element is skipped whole — see the branch below for why that keeps the
+ * read complete.
  *
  * Returns the raw inner contents — no unescaping, no trimming — because HMR
  * delivers these verbatim.
@@ -922,7 +928,39 @@ export function readStringLiterals(code: string, range: [number, number]): Strin
       i = close + 1
       continue
     }
-    // An identifier, spread, call or nested array: this element cannot be
+    if (ch === '.' && code[i + 1] === '.' && code[i + 2] === '.') {
+      // A spread element (`...X`). The Rust extractor asks each element for
+      // `as_expression()`, and `ArrayExpressionElement::is_expression()`
+      // enumerates neither `SpreadElement` nor `Elision` — so a spread is
+      // dropped BEFORE any value resolution, for every possible program,
+      // with the const table never consulted. Dropping it here too leaves
+      // the array complete and matches what the class compiles to; calling
+      // it unknown would hand the class its siblings' stylesheets instead.
+      // (An elision needs no branch: the comma skip above already reads
+      // past a hole.) Same reasoning as the spread in `hasUnreadableKey`.
+      //
+      // The whole element is skipped, so a literal nested inside it is
+      // never mistaken for one of this class's styles. `advanceOneToken`
+      // does the delimiter tracking, so nesting, strings, template
+      // interpolations and comments all hold a comma harmlessly.
+      const spreadStack: Ctx[] = []
+      let j = i + 3
+      while (j < end) {
+        if (spreadStack.length === 0 && code[j] === ',') break
+        j = advanceOneToken(code, j, spreadStack, end)
+      }
+      // Ran past the array's closer, or ended inside an unclosed string,
+      // comment or bracket: where this element stops is unknowable, so
+      // report unknown rather than guess. `j > i`, so `i` still advances.
+      if (j > end || spreadStack.length > 0) {
+        complete = false
+        break
+      }
+      i = j
+      continue
+    }
+    // An identifier, call or nested array: this element IS an expression,
+    // which the Rust resolver may fold from constants this scan cannot
     // read, so the array as a whole is unknown. Every branch above advances
     // `i`, so the scan terminates.
     complete = false
