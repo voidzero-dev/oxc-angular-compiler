@@ -2607,4 +2607,97 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).toContain('two')
     expect(body).not.toContain('styles:')
   })
+  it('keeps the styles of a class with an unreadable style field when the file-level stylesheet is empty', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const fbEmptyCssPath = join(appDir, 'ps457-fb-empty.component.css')
+    const fbEmptyPath = join(appDir, 'ps457-fb-empty.component.ts')
+    // Empty, but read SUCCESSFULLY — it contributes an empty string, which is
+    // the exact shape the class-level branch treats as a definitive clear.
+    writeFileSync(fbEmptyCssPath, '')
+
+    // Two classes. `FbEmptyOwnerComponent` declares `styles: PS457_FB_STYLES`,
+    // which the text scan cannot read, so the endpoint falls back to the
+    // FILE-LEVEL `styleUrls` union — and that union holds only the SIBLING's
+    // stylesheet. The fallback knows nothing about this class's decorator, so
+    // an empty read there is "no answer", never "no styles"; clearing on it
+    // would wipe the CSS the Rust extractor folded out of the constant.
+    const source = `
+      import { Component } from '@angular/core';
+      const PS457_FB_STYLES = ['.PS457_FB_MARKER { color: red; }'];
+      @Component({
+        selector: 'app-ps457-fb-empty',
+        template: '<p>one</p>',
+        styles: PS457_FB_STYLES,
+      })
+      export class FbEmptyOwnerComponent {}
+      @Component({
+        selector: 'app-ps457-fb-empty-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps457-fb-empty.component.css'],
+      })
+      export class FbEmptySiblingComponent {}
+    `
+    writeFileSync(fbEmptyPath, source)
+    await transformSource(plugin, source, fbEmptyPath)
+
+    const edited = source.replace('<p>one</p>', '<p>two</p>')
+    writeFileSync(fbEmptyPath, edited)
+    const ctx = createMockHmrContext(fbEmptyPath, [{ id: fbEmptyPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${fbEmptyPath}@FbEmptyOwnerComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${fbEmptyPath}@FbEmptyOwnerComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
+  })
+
+  it('keeps the styles of a class with an unreadable style field when the file-level stylesheet is whitespace', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const fbWsCssPath = join(appDir, 'ps457-fb-ws.component.css')
+    const fbWsPath = join(appDir, 'ps457-fb-ws.component.ts')
+    // Whitespace-only reads back as a whitespace-only string, which the
+    // binding drops just like an empty one — same trap, one step later.
+    writeFileSync(fbWsCssPath, '\n   \n\t\n')
+
+    const source = `
+      import { Component } from '@angular/core';
+      const PS457_FB_WS_STYLES = ['.PS457_FB_WS_MARKER { color: red; }'];
+      @Component({
+        selector: 'app-ps457-fb-ws',
+        template: '<p>one</p>',
+        styles: PS457_FB_WS_STYLES,
+      })
+      export class FbWsOwnerComponent {}
+      @Component({
+        selector: 'app-ps457-fb-ws-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps457-fb-ws.component.css'],
+      })
+      export class FbWsSiblingComponent {}
+    `
+    writeFileSync(fbWsPath, source)
+    await transformSource(plugin, source, fbWsPath)
+
+    const edited = source.replace('<p>one</p>', '<p>two</p>')
+    writeFileSync(fbWsPath, edited)
+    const ctx = createMockHmrContext(fbWsPath, [{ id: fbWsPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${fbWsPath}@FbWsOwnerComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${fbWsPath}@FbWsOwnerComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
+  })
 })

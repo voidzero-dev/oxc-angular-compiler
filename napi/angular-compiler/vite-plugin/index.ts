@@ -769,8 +769,19 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   // file-level list, preserving the old behavior there. This
                   // branch never clears: the decorator is unknown, so an empty
                   // read here means "no answer", not "no styles".
+                  //
+                  // Which is why the whitespace-only filter has to run BEFORE
+                  // the null check, not after the call like the branch above.
+                  // A stylesheet that reads fine but holds nothing yields
+                  // `['']` — one entry, so a bare `length > 0` would pass it
+                  // on, and the binding, which treats any non-null array as
+                  // definitive and drops whitespace-only entries, would turn
+                  // it into `styles: []` and clear. That is the opposite of
+                  // what this branch promises, and the CSS it would wipe
+                  // belongs to a decorator nobody here could read.
                   const fallback = await readStyles(styleUrls)
-                  styles = fallback.contents.length > 0 ? fallback.contents : null
+                  const usable = fallback.contents.filter((style) => style.trim().length > 0)
+                  styles = usable.length > 0 ? usable : null
                 }
 
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
