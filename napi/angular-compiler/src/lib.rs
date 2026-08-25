@@ -1544,6 +1544,7 @@ pub struct ExtractedComponentMetadata {
 /// # Returns
 ///
 /// A vector of `ExtractedComponentMetadata` for each component found.
+#[napi]
 pub fn extract_component_metadata_sync(
     source: String,
     file_path: String,

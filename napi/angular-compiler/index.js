@@ -902,6 +902,7 @@ const {
   encapsulateStyle,
   encodeComponentId,
   extractAngularComponentByAst,
+  extractComponentMetadataSync,
   extractComponentUrls,
   generateHmrModule,
   generateStyleModule,
@@ -922,6 +923,7 @@ export { decodeComponentId }
 export { encapsulateStyle }
 export { encodeComponentId }
 export { extractAngularComponentByAst }
+export { extractComponentMetadataSync }
 export { extractComponentUrls }
 export { generateHmrModule }
 export { generateStyleModule }
