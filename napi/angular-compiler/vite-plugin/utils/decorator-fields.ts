@@ -21,9 +21,11 @@
  *     literal `@Component` form is recognized.
  *   - **Parenthesized decorator expressions** like `@(Component as any)(...)`
  *     — uncommon and not supported.
- *   - **Quoted (`{ 'styles': [...] }`) or computed (`{ ['styles']: [...] }`)
- *     property keys** for the `styles`/`template` field. Almost never used
- *     in Angular; locator returns null for such forms.
+ *   - **Computed property keys** (`{ ['styles']: [...] }`) and quoted keys
+ *     carrying an escape (`{ 'style\u0055rls': [...] }`) can't be resolved
+ *     to a name here. Plain quoted keys (`{ 'styles': [...] }`) are matched;
+ *     the unresolvable forms are reported so the caller can fall back rather
+ *     than read them as a field that isn't there.
  *   - **Concatenated style strings** inside an array (`styles: ['a' + 'b']`)
  *     are extracted as two separate elements; cosmetic but harmless because
  *     the browser sees the same CSS either way.
@@ -63,6 +65,9 @@ const ASCII_WORD_RE = /[A-Za-z0-9_$]/
 /** Unicode-aware JS identifier characters. Class names can be non-ASCII. */
 const IDENT_START_RE = /[\p{L}_$]/u
 const IDENT_CONT_RE = /[\p{L}\p{N}_$]/u
+
+/** The only decorator form recognized — see the module docstring. */
+const DECORATOR_NAME = 'Component'
 
 /** Opener chars accepted as the value of `styles:` — `string | string[]`. */
 const STYLES_OPENERS = '\'"`['
@@ -203,36 +208,247 @@ export function emptyDelimitedRange(code: string, range: [number, number]): stri
  *
  * Returns null if no qualifying field is found.
  */
+/**
+ * The state of one decorator field, which is three-valued: the key may be
+ * missing entirely, present with a value this scan can read, or present with
+ * a value it cannot (an identifier, a call, a concatenation).
+ *
+ * The third state is why this exists. Collapsing it into "absent" tells a
+ * caller the component declares nothing, when in truth the value is simply
+ * beyond a text scan — the Rust extractor folds same-file constants that this
+ * cannot. Those two need opposite fallbacks.
+ */
+export type FieldValue =
+  | { kind: 'absent' }
+  | { kind: 'unreadable' }
+  | { kind: 'literal'; range: [number, number] }
+
+/**
+ * Find a top-level field of the `@Component(...)` args and classify its
+ * value. See `FieldValue` for the three outcomes.
+ *
+ * The walk is identical to `locateFieldInsideArgs`, which is expressed on top
+ * of this; only the reporting differs.
+ */
+function findFieldInArgs(
+  code: string,
+  argsRange: [number, number],
+  field: string,
+  openerChars: string,
+  shorthandMeans: 'absent' | 'unreadable' = 'absent',
+): FieldValue {
+  const [openParen, closeParen] = argsRange
+  const stack: Ctx[] = ['paren']
+  let i = openParen + 1
+  // Keys sit at the start of the object and after each comma; `:` hands over
+  // to the value. Without this, a style-named identifier used as a VALUE
+  // (`selector: styleUrl`) would read as a shorthand property.
+  let atKey = true
+
+  while (i < closeParen) {
+    // A key match is only valid at the @Component's immediate object-literal
+    // depth (`['paren', 'brace']`) — anything deeper is a nested literal that
+    // isn't the component's metadata.
+    if (stack.length === 2 && stack[1] === 'brace') {
+      const ch = code[i]
+      if (WS_RE.test(ch)) {
+        i++
+        continue
+      }
+      const afterComment = skipComment(code, i, closeParen)
+      if (afterComment !== -1) {
+        i = afterComment
+        continue
+      }
+      if (ch === ',') {
+        atKey = true
+        i++
+        continue
+      }
+      if (ch === ':') {
+        atKey = false
+        i++
+        continue
+      }
+
+      const afterKey = atKey ? matchFieldKeyAt(code, i, field, closeParen) : -1
+      if (afterKey !== -1) {
+        const j = skipToToken(code, afterKey, closeParen)
+        if (code[j] === ':') {
+          const v = skipToToken(code, j + 1, closeParen)
+          if (v < closeParen && openerChars.includes(code[v])) {
+            const end = findClosingDelim(code, v)
+            // The literal is the value only when the property ENDS at its
+            // closing delimiter. `'./a.css' + SUFFIX` opens with a literal
+            // it does not denote, and so do `['./a.css'].concat(MORE)` and
+            // `'./a.css' as const`. Returning that leading piece would name
+            // a stylesheet the compiled component never had — and, being a
+            // confident answer, would skip the fallback that exists for
+            // values this scan cannot resolve.
+            if (end !== -1 && end < closeParen && endsPropertyValue(code, end + 1, closeParen)) {
+              return { kind: 'literal', range: [v, end] }
+            }
+          }
+          // The key is here; its value is not a shape we can read.
+          return { kind: 'unreadable' }
+        }
+        // Shorthand (`{ styleUrl }`): the key stands alone, so the value is
+        // a binding this scan cannot follow. Whether that is unknowable or
+        // genuinely nothing depends on the field — see `locateStyleFieldsFor`.
+        // Anything else after the key (`(` for a method or accessor) is not
+        // this field at all, so keep scanning.
+        if ((code[j] === ',' || code[j] === '}') && shorthandMeans === 'unreadable') {
+          return { kind: 'unreadable' }
+        }
+      }
+    }
+    i = advanceOneToken(code, i, stack, closeParen)
+  }
+  return { kind: 'absent' }
+}
+
+/**
+ * Whether a property value ends at `i`. Inside an object literal a value is
+ * closed by `,` or the object's own `}` — or, defensively, the decorator's
+ * `)`. Whitespace and comments are skipped first, so a comment may sit
+ * between the value and its terminator.
+ *
+ * Anything else at that position means what was just read is only the LEADING
+ * part of a larger expression — a concatenation, a call, a TypeScript
+ * assertion — and so is not the value at all. Running out of text counts as
+ * ending, since nothing is left to extend the value with.
+ */
+function endsPropertyValue(code: string, i: number, end: number): boolean {
+  const j = skipToToken(code, i, end)
+  if (j >= end) return true
+  const ch = code[j]
+  return ch === ',' || ch === '}' || ch === ')'
+}
+
+/** Index of the next character at or after `i` that is not whitespace or a comment. */
+function skipToToken(code: string, i: number, end: number): number {
+  let j = i
+  while (j < end) {
+    if (WS_RE.test(code[j])) {
+      j++
+      continue
+    }
+    const afterComment = skipComment(code, j, end)
+    if (afterComment === -1) break
+    j = afterComment
+  }
+  return j
+}
+
 function locateFieldInsideArgs(
   code: string,
   argsRange: [number, number],
   field: string,
   openerChars: string,
 ): [number, number] | null {
-  const [openParen, closeParen] = argsRange
-  const stack: Ctx[] = ['paren']
-  let i = openParen + 1
+  const found = findFieldInArgs(code, argsRange, field, openerChars)
+  return found.kind === 'literal' ? found.range : null
+}
 
-  while (i < closeParen) {
-    // Check for a field-key match BEFORE advancing. The match is only
-    // valid at the @Component's immediate object-literal depth
-    // (`['paren', 'brace']`) — anything deeper is a nested literal that
-    // isn't the component's metadata.
-    if (stack.length === 2 && stack[1] === 'brace' && isFieldKeyAt(code, i, field, closeParen)) {
-      let j = i + field.length
-      while (j < closeParen && WS_RE.test(code[j])) j++
-      if (code[j] === ':') {
-        j++
-        while (j < closeParen && WS_RE.test(code[j])) j++
-        if (j < closeParen && openerChars.includes(code[j])) {
-          const end = findClosingDelim(code, j)
-          if (end !== -1 && end < closeParen) return [j, end]
-        }
-      }
-    }
-    i = advanceOneToken(code, i, stack, closeParen)
+/**
+ * If a key for `field` starts at `position`, return the index just past it;
+ * otherwise -1. Accepts the bare form (`styleUrls:`), the quoted forms
+ * (`'styleUrls':`, `"styleUrls":`), and either form written with escapes
+ * (`style\u0055rls`, `'style\u0055rls'`) — all of which are valid TS naming
+ * the same field, and all of which the Rust extractor resolves.
+ *
+ * Escapes are decoded rather than refused. Refusing them would only be safe
+ * in the sense of falling back, and the fallback serves the file-level style
+ * union — every sibling's CSS along with this class's own. Decoding keeps the
+ * per-class answer exact. A key whose escapes cannot be decoded is not
+ * matched here; `hasUnreadableKey` reports it as beyond this scan.
+ *
+ * Decoding does not loosen the match: the decoded name must still equal
+ * `field` exactly, so `styleUrl` and `styleUrls` stay distinct.
+ */
+function matchFieldKeyAt(code: string, position: number, field: string, limit: number): number {
+  if (isFieldKeyAt(code, position, field, limit)) return position + field.length
+  const quote = code[position]
+  if (quote === "'" || quote === '"') {
+    const close = findClosingDelim(code, position)
+    if (close === -1 || close >= limit) return -1
+    // A quoted key is a string literal, so it decodes by string rules.
+    return decodeEscapes(code.slice(position + 1, close)) === field ? close + 1 : -1
   }
-  return null
+  const id = readIdentifierKey(code, position, limit)
+  return id !== null && id.name === field ? id.end : -1
+}
+
+/**
+ * Read an identifier starting at `position`, decoding escapes, and return the
+ * decoded name with the index just past it. Returns null when nothing
+ * identifier-like starts there.
+ *
+ * `name` is null when the identifier carries an escape this scan cannot
+ * resolve — malformed hex, a truncated `\u`, a decoded character not valid at
+ * its position, or any escape other than `\uHHHH` / `\u{…}`, which are the
+ * only two JavaScript permits inside an identifier. The caller must treat
+ * that as unknown rather than as a key that isn't there: the Rust extractor
+ * parses what this cannot, so "absent" would strip a component's real CSS.
+ */
+function readIdentifierKey(
+  code: string,
+  position: number,
+  limit: number,
+): { name: string | null; end: number } | null {
+  let i = position
+  let name = ''
+  let first = true
+  let malformed = false
+
+  while (i < limit) {
+    const ch = code[i]
+
+    if (ch === '\\') {
+      if (code[i + 1] !== 'u') {
+        // `\x41`, `\n`, … are string escapes; in an identifier they are a
+        // syntax error, so the name cannot be known from the text.
+        malformed = true
+        i += 2
+        first = false
+        continue
+      }
+      let codePoint = -1
+      let next: number
+      if (code[i + 2] === '{') {
+        const close = code.indexOf('}', i + 3)
+        if (close === -1 || close >= limit) return { name: null, end: i + 2 }
+        const hex = code.slice(i + 3, close)
+        if (HEX_ONLY_RE.test(hex)) codePoint = parseInt(hex, 16)
+        next = close + 1
+      } else {
+        const hex = code.slice(i + 2, i + 6)
+        if (hex.length === 4 && HEX_ONLY_RE.test(hex)) codePoint = parseInt(hex, 16)
+        next = i + 6
+      }
+      if (codePoint < 0 || codePoint > 0x10ffff) {
+        malformed = true
+      } else {
+        const decoded = String.fromCodePoint(codePoint)
+        if (!(first ? IDENT_START_RE : IDENT_CONT_RE).test(decoded)) malformed = true
+        name += decoded
+      }
+      i = next
+      first = false
+      continue
+    }
+
+    if ((first ? IDENT_START_RE : IDENT_CONT_RE).test(ch)) {
+      name += ch
+      i++
+      first = false
+      continue
+    }
+    break
+  }
+
+  if (i === position) return null
+  return { name: malformed ? null : name, end: i }
 }
 
 /**
@@ -266,26 +482,50 @@ export interface ComponentDecorator {
  * class (dangling, malformed, anonymous) are skipped — the caller sees only
  * well-formed component declarations.
  *
- * The class-name scan is bounded between this decorator's closing `)` and
- * either the next `@Component\s*\(` or end of file. That bound prevents one
- * decorator's scan from accidentally consuming a sibling's class identifier,
- * and combined with the comment- and string-aware walkers in
- * `findClosingDelim` and `findClassName` it correctly handles `@Component`
- * occurrences inside comments, strings, and template literals.
+ * Enumeration itself skips comments and string/template literals, so a
+ * commented-out or quoted `@Component(` is never treated as a decorator.
+ * The class-name scan is then bounded between one decorator's closing `)`
+ * and the next decorator's `@`, which stops it consuming a sibling's class
+ * identifier — a bound that is only correct because phantom occurrences
+ * were excluded first.
  *
  * See the module-level docstring for a full list of known limitations.
  */
 export function locateComponentDecorators(code: string): ComponentDecorator[] {
-  // Pass 1: find every `@Component(...)` and bound its args list.
+  // Pass 1: find every `@Component(...)` and bound its args list. The walk
+  // skips comments and string/template literals, so a commented-out or
+  // quoted `@Component(` is not mistaken for a real decorator. That matters
+  // beyond ignoring it: a phantom occurrence between a real decorator and
+  // its class would bound the real one's class-name scan in pass 2, leaving
+  // the class paired with the phantom's metadata.
   type Found = { decoratorStart: number; openParen: number; closeParen: number }
-  const decoratorRe = /@Component\s*\(/g
   const found: Found[] = []
-  let m: RegExpExecArray | null
-  while ((m = decoratorRe.exec(code)) !== null) {
-    const openParen = m.index + m[0].length - 1
-    const closeParen = findClosingDelim(code, openParen)
-    if (closeParen === -1) continue
-    found.push({ decoratorStart: m.index, openParen, closeParen })
+  let i = 0
+  while (i < code.length) {
+    const afterComment = skipComment(code, i, code.length)
+    if (afterComment !== -1) {
+      i = afterComment
+      continue
+    }
+    const ch = code[i]
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const close = findClosingDelim(code, i)
+      i = close === -1 ? code.length : close + 1
+      continue
+    }
+    if (ch === '@' && code.startsWith(DECORATOR_NAME, i + 1)) {
+      let j = i + 1 + DECORATOR_NAME.length
+      while (j < code.length && WS_RE.test(code[j])) j++
+      if (code[j] === '(') {
+        const closeParen = findClosingDelim(code, j)
+        if (closeParen !== -1) {
+          found.push({ decoratorStart: i, openParen: j, closeParen })
+          i = closeParen + 1
+          continue
+        }
+      }
+    }
+    i++
   }
 
   // Pass 2: for each decorator, scan forward from its `)` to either the next
@@ -434,4 +674,419 @@ export function locateTemplateUrlInArgs(
 export function locateTemplateUrlFor(code: string, className: string): [number, number] | null {
   const found = locateComponentDecorators(code).find((d) => d.className === className)
   return found ? locateTemplateUrlInArgs(code, found.argsRange) : null
+}
+
+/**
+ * Locate the `styleUrls:` field inside a specific `@Component(...)` decorator
+ * identified by its `argsRange`. See `locateStylesInArgs` for when to prefer
+ * this over the className-based variant. Field matching is word-bounded, so
+ * `styleUrls` never matches the singular `styleUrl:` or the inline `styles:`.
+ */
+export function locateStyleUrlsInArgs(
+  code: string,
+  argsRange: [number, number],
+): [number, number] | null {
+  return locateFieldInsideArgs(code, argsRange, 'styleUrls', STYLES_OPENERS)
+}
+
+/**
+ * Locate the singular `styleUrl:` string field (Angular 17+) inside a
+ * specific `@Component(...)` decorator identified by its `argsRange`. Its
+ * value is a bare string, never an array — see `locateStyleUrlsInArgs` for
+ * the plural form.
+ */
+export function locateStyleUrlInArgs(
+  code: string,
+  argsRange: [number, number],
+): [number, number] | null {
+  return locateFieldInsideArgs(code, argsRange, 'styleUrl', TEMPLATE_OPENERS)
+}
+
+/**
+ * Locate the `styleUrls:` field inside the `@Component(...)` decorator that
+ * decorates the class named `className`. Convenience wrapper that finds the
+ * decorator by className and delegates to `locateStyleUrlsInArgs`.
+ */
+export function locateStyleUrlsFor(code: string, className: string): [number, number] | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateStyleUrlsInArgs(code, found.argsRange) : null
+}
+
+/**
+ * Locate the singular `styleUrl:` field inside the `@Component(...)`
+ * decorator that decorates the class named `className`. Convenience wrapper
+ * that finds the decorator by className and delegates to
+ * `locateStyleUrlInArgs`.
+ */
+export function locateStyleUrlFor(code: string, className: string): [number, number] | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateStyleUrlInArgs(code, found.argsRange) : null
+}
+
+/**
+ * Whether a template literal's raw contents contain an unescaped `${`, i.e.
+ * the literal interpolates and its text is not the final value. A leading
+ * run of backslashes escapes the `$` only when it is odd-length.
+ */
+function hasInterpolation(raw: string): boolean {
+  for (let i = raw.indexOf('${'); i !== -1; i = raw.indexOf('${', i + 2)) {
+    let backslashes = 0
+    while (i - 1 - backslashes >= 0 && raw[i - 1 - backslashes] === '\\') backslashes++
+    if (backslashes % 2 === 0) return true
+  }
+  return false
+}
+
+const SINGLE_CHAR_ESCAPES: Record<string, string> = {
+  n: '\n',
+  t: '\t',
+  r: '\r',
+  b: '\b',
+  f: '\f',
+  v: '\v',
+}
+
+/** Line terminators that a backslash may continue across. */
+const LINE_TERMINATORS = new Set(['\n', '\r', ' ', ' '])
+
+const HEX_ONLY_RE = /^[0-9a-fA-F]+$/
+
+/**
+ * Decode the escape sequences in a string- or template-literal's raw source
+ * text into the value it actually denotes, or null if the text holds an
+ * escape this cannot resolve.
+ *
+ * The raw text is what the source spells; the decoded text is what the Rust
+ * extractor sees and what a path or a stylesheet must be compared against.
+ * `'./a.css'` names `./a.css`, and reading it raw yields a path that
+ * does not exist.
+ *
+ * Null is returned for a malformed escape (`\xZZ`, a truncated `\u12`) and
+ * for the legacy octal forms, which are outright errors in a module. Those
+ * are cases where guessing a value would be worse than telling the caller
+ * this literal is beyond the scan.
+ *
+ * A raw text with no backslash is returned unchanged, so the overwhelmingly
+ * common literal costs nothing and reads byte for byte as before.
+ */
+function decodeEscapes(raw: string): string | null {
+  if (!raw.includes('\\')) return raw
+
+  let out = ''
+  let i = 0
+  while (i < raw.length) {
+    const ch = raw[i]
+    if (ch !== '\\') {
+      out += ch
+      i++
+      continue
+    }
+
+    const next = raw[i + 1]
+    // A trailing backslash cannot occur in a well-delimited literal, since
+    // it would have escaped the closing quote.
+    if (next === undefined) return null
+
+    // Line continuation: the backslash and the terminator both vanish.
+    if (LINE_TERMINATORS.has(next)) {
+      i += next === '\r' && raw[i + 2] === '\n' ? 3 : 2
+      continue
+    }
+
+    const single = SINGLE_CHAR_ESCAPES[next]
+    if (single !== undefined) {
+      out += single
+      i += 2
+      continue
+    }
+
+    if (next === 'x') {
+      const hex = raw.slice(i + 2, i + 4)
+      if (hex.length < 2 || !HEX_ONLY_RE.test(hex)) return null
+      out += String.fromCharCode(parseInt(hex, 16))
+      i += 4
+      continue
+    }
+
+    if (next === 'u') {
+      if (raw[i + 2] === '{') {
+        const close = raw.indexOf('}', i + 3)
+        if (close === -1) return null
+        const hex = raw.slice(i + 3, close)
+        if (!HEX_ONLY_RE.test(hex)) return null
+        const code = parseInt(hex, 16)
+        if (code > 0x10ffff) return null
+        out += String.fromCodePoint(code)
+        i = close + 1
+        continue
+      }
+      const hex = raw.slice(i + 2, i + 6)
+      if (hex.length < 4 || !HEX_ONLY_RE.test(hex)) return null
+      out += String.fromCharCode(parseInt(hex, 16))
+      i += 6
+      continue
+    }
+
+    // `\0` is NUL only when no digit follows; with one it is a legacy octal
+    // escape, which a module rejects outright. `\1`-`\9` likewise.
+    if (next >= '0' && next <= '9') {
+      if (next === '0' && !(raw[i + 2] >= '0' && raw[i + 2] <= '9')) {
+        out += '\0'
+        i += 2
+        continue
+      }
+      return null
+    }
+
+    // Anything else denotes itself: `\\`, `\'`, `\"`, `` \` ``, `\$`, and
+    // any other non-escape character.
+    out += next
+    i += 2
+  }
+  return out
+}
+
+/**
+ * The literals read out of a field value, and whether every element was read.
+ *
+ * `complete: false` means the value holds something this scan cannot resolve —
+ * an identifier, an interpolated template literal, an unterminated string.
+ * The literals gathered alongside it are NOT a partial answer to act on: a
+ * caller that used them would silently drop the stylesheets the unreadable
+ * elements stand for. Treat an incomplete read as unknown.
+ *
+ * A spread element (`...X`) and an elision are the exceptions: the Rust
+ * extractor drops both before resolving anything, so skipping them leaves
+ * the read complete.
+ *
+ * An empty array is the opposite case: `complete: true` with no literals is a
+ * definitive "this field declares nothing".
+ */
+export interface StringLiteralsRead {
+  literals: string[]
+  complete: boolean
+}
+
+/**
+ * Read the string literals out of a located field value, given the inclusive
+ * `[start, end]` range of its outer delimiters (the shape every `locate*`
+ * here returns).
+ *
+ * Handles both shapes Angular accepts for `styles` / `styleUrls`:
+ *   - Array (`['…', "…", `…`]`, or any mix) → each literal, in order.
+ *   - Bare single literal (`'…'`, `"…"`, `` `…` ``) → a one-element array.
+ *
+ * Inside the array body, whitespace, commas and comments are skipped, and
+ * each literal is delimited with `findClosingDelim`, so escape sequences and
+ * apostrophes inside comments cannot be mistaken for delimiters. A spread
+ * element is skipped whole — see the branch below for why that keeps the
+ * read complete.
+ *
+ * Returns the raw inner contents — no unescaping, no trimming — because HMR
+ * delivers these verbatim.
+ */
+export function readStringLiterals(code: string, range: [number, number]): StringLiteralsRead {
+  const [start, end] = range
+  if (code[start] !== '[') {
+    // Bare literal — the range already delimits it.
+    const raw = code.slice(start + 1, end)
+    if (code[start] === '`' && hasInterpolation(raw)) return { literals: [], complete: false }
+    const decoded = decodeEscapes(raw)
+    return decoded === null
+      ? { literals: [], complete: false }
+      : { literals: [decoded], complete: true }
+  }
+
+  const literals: string[] = []
+  let complete = true
+  let i = start + 1
+  while (i < end) {
+    const ch = code[i]
+    if (WS_RE.test(ch) || ch === ',') {
+      i++
+      continue
+    }
+    const afterComment = skipComment(code, i, end)
+    if (afterComment !== -1) {
+      i = afterComment
+      continue
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const close = findClosingDelim(code, i)
+      // Unterminated literal: nothing further can be read reliably.
+      if (close === -1 || close >= end) {
+        complete = false
+        break
+      }
+      const raw = code.slice(i + 1, close)
+      const decoded = ch === '`' && hasInterpolation(raw) ? null : decodeEscapes(raw)
+      if (decoded === null) {
+        complete = false
+      } else {
+        literals.push(decoded)
+      }
+      i = close + 1
+      continue
+    }
+    if (ch === '.' && code[i + 1] === '.' && code[i + 2] === '.') {
+      // A spread element (`...X`). The Rust extractor asks each element for
+      // `as_expression()`, and `ArrayExpressionElement::is_expression()`
+      // enumerates neither `SpreadElement` nor `Elision` — so a spread is
+      // dropped BEFORE any value resolution, for every possible program,
+      // with the const table never consulted. Dropping it here too leaves
+      // the array complete and matches what the class compiles to; calling
+      // it unknown would hand the class its siblings' stylesheets instead.
+      // (An elision needs no branch: the comma skip above already reads
+      // past a hole.) Same reasoning as the spread in `hasUnreadableKey`.
+      //
+      // The whole element is skipped, so a literal nested inside it is
+      // never mistaken for one of this class's styles. `advanceOneToken`
+      // does the delimiter tracking, so nesting, strings, template
+      // interpolations and comments all hold a comma harmlessly.
+      const spreadStack: Ctx[] = []
+      let j = i + 3
+      while (j < end) {
+        if (spreadStack.length === 0 && code[j] === ',') break
+        j = advanceOneToken(code, j, spreadStack, end)
+      }
+      // Ran past the array's closer, or ended inside an unclosed string,
+      // comment or bracket: where this element stops is unknowable, so
+      // report unknown rather than guess. `j > i`, so `i` still advances.
+      if (j > end || spreadStack.length > 0) {
+        complete = false
+        break
+      }
+      i = j
+      continue
+    }
+    // An identifier, call or nested array: this element IS an expression,
+    // which the Rust resolver may fold from constants this scan cannot
+    // read, so the array as a whole is unknown. Every branch above advances
+    // `i`, so the scan terminates.
+    complete = false
+    i++
+  }
+  return { literals, complete }
+}
+
+/**
+ * The style-related fields of one `@Component(...)`, each classified by
+ * `FieldValue`: absent, unreadable, or a literal range.
+ */
+export interface ClassStyleFields {
+  /** `styleUrls: [...]`, else the singular `styleUrl: '...'`. */
+  urls: FieldValue
+  /** Inline `styles: [...] | '...'`. */
+  inline: FieldValue
+}
+
+/**
+ * Classify the style fields of the `@Component(...)` decorating `className`.
+ *
+ * Returns null when no such decorator could be located at all. Otherwise each
+ * member says whether the class declares that field, and whether its value
+ * can be read — see `FieldValue`, and note that "declares nothing" and
+ * "cannot be read" need opposite fallbacks at the call site.
+ *
+ * `styleUrls` wins over `styleUrl` when a decorator carries both, unless the
+ * plural form is absent; Angular itself rejects that combination, so this only
+ * makes the choice deterministic. One decorator scan serves all three lookups.
+ *
+ * A shorthand property (`{ styleUrl }`) is unreadable for the singular form
+ * only. Measured against the Rust extractor: it folds a same-file string
+ * constant behind `styleUrl`, so calling that absent would strip real CSS —
+ * but it drops the array-valued `styleUrls` and `styles` shorthands, so the
+ * compiled component genuinely has no styles from them and falling back would
+ * hand the class its siblings' stylesheets. Same reasoning as the spread in
+ * `hasUnreadableKey`: match what the component actually compiles to.
+ */
+export function locateStyleFieldsFor(code: string, className: string): ClassStyleFields | null {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  if (!found) return null
+  // A key this scan cannot read could BE a style field, so "absent" would be
+  // a guess rather than an answer. Only absent is promoted: a field we did
+  // read says exactly what it says, whatever else the object holds.
+  const blind = hasUnreadableKey(code, found.argsRange)
+  const classify = (value: FieldValue): FieldValue =>
+    blind && value.kind === 'absent' ? { kind: 'unreadable' } : value
+
+  const plural = findFieldInArgs(code, found.argsRange, 'styleUrls', STYLES_OPENERS)
+  return {
+    urls: classify(
+      plural.kind === 'absent'
+        ? findFieldInArgs(code, found.argsRange, 'styleUrl', TEMPLATE_OPENERS, 'unreadable')
+        : plural,
+    ),
+    inline: classify(findFieldInArgs(code, found.argsRange, 'styles', STYLES_OPENERS)),
+  }
+}
+
+/**
+ * Whether the decorator's own object literal holds a key this scan cannot
+ * resolve to a name, which makes "the class declares no styles" unknowable.
+ *
+ * Two forms qualify, so reading them as absent would strip a component's CSS:
+ *   - a computed key (`[K]: [...]`), which the Rust extractor DOES resolve;
+ *   - a key whose escapes cannot be decoded — a malformed `\u`, or an escape
+ *     that is illegal in an identifier. A key whose escapes DO decode is not
+ *     unreadable: `matchFieldKeyAt` resolves it to a name exactly.
+ *
+ * A spread (`...BASE`) deliberately does NOT qualify. The Rust extractor
+ * drops it too, so the compiled component genuinely has no styles from it;
+ * treating the class as unknown would hand it its siblings' stylesheets
+ * instead, which is the contamination this classification exists to avoid.
+ */
+function hasUnreadableKey(code: string, argsRange: [number, number]): boolean {
+  const [openParen, closeParen] = argsRange
+  const stack: Ctx[] = ['paren']
+  let i = openParen + 1
+  // Position within the decorator's own object literal. Keys sit at the
+  // start and after each comma; `:` hands over to the value.
+  let atKey = true
+
+  while (i < closeParen) {
+    if (stack.length === 2 && stack[1] === 'brace') {
+      const ch = code[i]
+      if (WS_RE.test(ch)) {
+        i++
+        continue
+      }
+      const afterComment = skipComment(code, i, closeParen)
+      if (afterComment !== -1) {
+        i = afterComment
+        continue
+      }
+      if (ch === ',') {
+        atKey = true
+        i++
+        continue
+      }
+      if (ch === ':') {
+        atKey = false
+        i++
+        continue
+      }
+      if (atKey) {
+        // `[` here opens a computed key, not an array value: a value only
+        // follows a `:`, which would have cleared `atKey`.
+        if (ch === '[') return true
+        if (ch === "'" || ch === '"') {
+          const close = findClosingDelim(code, i)
+          if (close === -1 || close >= closeParen) return true
+          if (decodeEscapes(code.slice(i + 1, close)) === null) return true
+          atKey = false
+          i = close + 1
+          continue
+        }
+        const id = readIdentifierKey(code, i, closeParen)
+        if (id !== null) {
+          if (id.name === null) return true
+          i = id.end
+          continue
+        }
+      }
+    }
+    i = advanceOneToken(code, i, stack, closeParen)
+  }
+  return false
 }

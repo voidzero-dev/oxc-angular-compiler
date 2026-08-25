@@ -39,10 +39,12 @@ import {
   emptyDelimitedRange,
   locateComponentDecorators,
   locateStylesFieldFor,
+  locateStyleFieldsFor,
   locateStylesInArgs,
   locateTemplateInArgs,
   locateTemplateStringFor,
   locateTemplateUrlFor,
+  readStringLiterals,
 } from './utils/decorator-fields.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
@@ -686,10 +688,18 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // disk and run through Vite's preprocessCSS (so SCSS/LESS
                 // resolve correctly); inline styles are extracted from the
                 // .ts source as plain CSS strings.
-                let styles: string[] | null = null
-                if (styleUrls.length > 0) {
+                //
+                // Resolve per CLASS, like the template above: the file-level
+                // `styleUrls` is the union of every component in the file, so
+                // in a multi-component file it served a class its siblings'
+                // stylesheets — including a class declaring no styles at all —
+                // and, being non-empty, it also shadowed the inline `styles:`
+                // of a class that has no external ones. Fall back to the
+                // file-level list only when the class's own styles cannot be
+                // read (preserves the old behavior there).
+                const readStyles = async (urls: string[]): Promise<string[] | null> => {
                   const styleContents: string[] = []
-                  for (const styleUrl of styleUrls) {
+                  for (const styleUrl of urls) {
                     const stylePath = resolve(dir, styleUrl)
                     try {
                       let styleContent = await readFile(stylePath, 'utf-8')
@@ -706,15 +716,28 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                       // Style file not found, continue without this style
                     }
                   }
-                  if (styleContents.length > 0) {
-                    styles = styleContents
-                  }
-                } else {
-                  // No external styleUrls — fall back to inline `styles: […]`.
-                  const inlineStyles = extractInlineStyles(source, className)
-                  if (inlineStyles !== null && inlineStyles.length > 0) {
-                    styles = inlineStyles
-                  }
+                  return styleContents.length > 0 ? styleContents : null
+                }
+                let styles: string[] | null = null
+                const classStyles = extractClassStylesFor(source, className)
+                if (classStyles !== null) {
+                  // Inline `styles` first, then the resolved `styleUrl(s)`
+                  // content appended — the order `resolve_styles` produces in
+                  // the compiler, which pushes resolved content onto the
+                  // decorator's own `styles`. Whitespace-only entries are
+                  // dropped to match Angular's `style.trim().length > 0`.
+                  const external =
+                    classStyles.urls.length > 0 ? ((await readStyles(classStyles.urls)) ?? []) : []
+                  const merged = [...classStyles.inline, ...external].filter(
+                    (style) => style.trim().length > 0,
+                  )
+                  styles = merged.length > 0 ? merged : null
+                } else if (styleUrls.length > 0) {
+                  // The class's own styles could not be read — a decorator
+                  // shape this text scan cannot parse, e.g. a styleUrl built
+                  // from a constant the Rust extractor folds. Fall back to the
+                  // file-level list, preserving the old behavior there.
+                  styles = await readStyles(styleUrls)
                 }
 
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
@@ -1429,6 +1452,42 @@ function extractTemplateUrlFor(code: string, className: string): string | null {
 }
 
 /**
+ * The styles one class declares in its own `@Component({...})`, split by
+ * source: inline `styles` and external `styleUrl(s)`.
+ *
+ * Handles every shape Angular accepts — `styles` and `styleUrls` as an array
+ * or a bare literal, plus the singular `styleUrl` (17+). Both arrays are
+ * empty for a class that declares no styles at all, which is a real answer:
+ * that component must be served nothing.
+ *
+ * Returns null when the answer is *unknown* rather than empty — the class's
+ * decorator could not be located, or it declares a style field whose value
+ * holds no string literal (a constant, an identifier, an unresolved
+ * interpolation). The caller falls back to the file-level list there, since
+ * the Rust extractor folds constants this text scan cannot.
+ */
+function extractClassStylesFor(
+  code: string,
+  className: string,
+): { inline: string[]; urls: string[] } | null {
+  const fields = locateStyleFieldsFor(code, className)
+  if (!fields) return null
+
+  const read = (field: (typeof fields)['inline']): string[] | null => {
+    if (field.kind === 'absent') return []
+    if (field.kind === 'unreadable') return null
+    const { literals, complete } = readStringLiterals(code, field.range)
+    // A partial read is unknown, not partial knowledge: acting on the
+    // literals alone would drop whatever the unreadable elements name.
+    return complete ? literals : null
+  }
+  const inline = read(fields.inline)
+  const urls = read(fields.urls)
+  if (inline === null || urls === null) return null
+  return { inline, urls }
+}
+
+/**
  * Extract the inline styles from the `@Component({...})` decorator that
  * decorates the class named `className`, as a positional array.
  *
@@ -1444,20 +1503,8 @@ function extractTemplateUrlFor(code: string, className: string): string | null {
 function extractInlineStyles(code: string, className: string): string[] | null {
   const range = locateStylesFieldFor(code, className)
   if (!range) return null
-  const opener = code[range[0]]
-  if (opener !== '[') {
-    // Bare string form — return the inner contents as a single element.
-    return [code.slice(range[0] + 1, range[1])]
-  }
-  // Array form — walk string literals inside the array body in order.
-  const body = code.slice(range[0] + 1, range[1])
-  const stringRe = /`([\s\S]*?)`|'((?:\\.|[^'\\])*)'|"((?:\\.|[^"\\])*)"/g
-  const styles: string[] = []
-  let m: RegExpExecArray | null
-  while ((m = stringRe.exec(body)) !== null) {
-    styles.push(m[1] ?? m[2] ?? m[3] ?? '')
-  }
-  return styles.length > 0 ? styles : null
+  const { literals } = readStringLiterals(code, range)
+  return literals.length > 0 ? literals : null
 }
 
 /**
