@@ -1671,7 +1671,12 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_BARE_SIBLING_MARKER')
-    expect(body).not.toContain('styles:')
+    // Served an explicitly EMPTY array, not silence. Omitting the key would
+    // also keep the sibling's CSS off this class, but only because the module
+    // spreads `...\u0275cmp` and leaves whatever was there — which is the
+    // #457 bug: a class that declares nothing must be able to CLEAR styles it
+    // used to have, not merely avoid gaining new ones.
+    expect(body).toContain('styles: []')
   })
 
   it('serves both inline styles and styleUrls when a class declares both', async () => {
@@ -1898,6 +1903,8 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_EMPTYURLS_SIB_MARKER')
+    // Definitive and empty: the module clears the class's styles outright.
+    expect(body).toContain('styles: []')
   })
 
   it('serves no styles for an explicitly empty inline `styles` array', async () => {
@@ -1940,6 +1947,8 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     )
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_EMPTYINLINE_SIB_MARKER')
+    // Definitive and empty: the module clears the class's styles outright.
+    expect(body).toContain('styles: []')
   })
 
   it('falls back when a `styleUrls` array mixes a constant with a literal', async () => {
@@ -2398,5 +2407,204 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     // fallback: it is the union for the file. That is the known limitation
     // tracked in #456, asserted the same way as the singular-constant case
     // above. The defect fixed here is the own stylesheet going MISSING.
+  })
+
+  // ----------------------------------------------------------------
+  // Issue #457 — a component that LOSES its last style must be cleared
+  // ----------------------------------------------------------------
+  // The HMR module opens with `...ClassName.\u0275cmp`, so any property it
+  // does not emit keeps its previous value. Omitting `styles` therefore
+  // leaves the old CSS applied until a full reload. An empty answer has to
+  // travel all the way to an explicit `styles: []`.
+  //
+  // The counterweight is that a FAILED read is not an empty one: an editor's
+  // atomic write leaves a window where the stylesheet is missing, and
+  // reporting the component styleless there would wipe live CSS. Those cases
+  // must still omit the key.
+
+  it('clears an inline `styles` array that lost its last entry', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const inlineDropPath = join(appDir, 'ps457-inline-drop.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-inline-drop',
+        template: '<p>drop</p>',
+        styles: ['.PS457_INLINE_MARKER { color: red; }'],
+      })
+      export class InlineDropComponent {}
+    `
+    writeFileSync(inlineDropPath, source)
+    await transformSource(plugin, source, inlineDropPath)
+
+    // The last inline style is removed. `styles: []` is a definitive answer.
+    const edited = source.replace(`['.PS457_INLINE_MARKER { color: red; }']`, '[]')
+    writeFileSync(inlineDropPath, edited)
+    const ctx = createMockHmrContext(inlineDropPath, [{ id: inlineDropPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${inlineDropPath}@InlineDropComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${inlineDropPath}@InlineDropComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS457_INLINE_MARKER')
+    expect(body).toContain('styles: []')
+  })
+
+  it('clears the styles of a class whose only stylesheet became empty', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const emptyCssPath = join(appDir, 'ps457-empty.component.css')
+    const emptyPath = join(appDir, 'ps457-empty.component.ts')
+    writeFileSync(emptyCssPath, '.PS457_EMPTY_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-empty',
+        template: '<p>empty</p>',
+        styleUrls: ['./ps457-empty.component.css'],
+      })
+      export class EmptyCssComponent {}
+    `
+    writeFileSync(emptyPath, source)
+    await transformSource(plugin, source, emptyPath)
+
+    // Read successfully, holds nothing: definitively styleless.
+    writeFileSync(emptyCssPath, '')
+    const ctx = createMockHmrContext(
+      normalizePath(emptyCssPath),
+      [{ id: normalizePath(emptyCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${emptyPath}@EmptyCssComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS457_EMPTY_MARKER')
+    expect(body).toContain('styles: []')
+  })
+
+  it('clears the styles of a class whose only stylesheet became whitespace', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const wsCssPath = join(appDir, 'ps457-ws.component.css')
+    const wsPath = join(appDir, 'ps457-ws.component.ts')
+    writeFileSync(wsCssPath, '.PS457_WS_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-ws',
+        template: '<p>ws</p>',
+        styleUrls: ['./ps457-ws.component.css'],
+      })
+      export class WhitespaceCssComponent {}
+    `
+    writeFileSync(wsPath, source)
+    await transformSource(plugin, source, wsPath)
+
+    // Angular drops whitespace-only styles (`style.trim().length > 0`), so a
+    // file holding only blank lines is styleless too, not "unknown".
+    writeFileSync(wsCssPath, '\n   \n\t\n')
+    const ctx = createMockHmrContext(
+      normalizePath(wsCssPath),
+      [{ id: normalizePath(wsCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${wsPath}@WhitespaceCssComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('PS457_WS_MARKER')
+    expect(body).toContain('styles: []')
+  })
+
+  it('keeps the styles of a class whose stylesheet cannot be read', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const goneCssPath = join(appDir, 'ps457-gone.component.css')
+    const gonePath = join(appDir, 'ps457-gone.component.ts')
+    writeFileSync(goneCssPath, '.PS457_GONE_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-gone',
+        template: '<p>gone</p>',
+        styleUrls: ['./ps457-gone.component.css'],
+      })
+      export class GoneCssComponent {}
+    `
+    writeFileSync(gonePath, source)
+    await transformSource(plugin, source, gonePath)
+
+    // The file is unreadable, which is what the truncate window of an atomic
+    // write looks like. A read failure is not evidence of stylelessness, so
+    // the module must say nothing about `styles` and leave the live CSS on.
+    rmSync(goneCssPath, { force: true })
+    const ctx = createMockHmrContext(
+      normalizePath(goneCssPath),
+      [{ id: normalizePath(goneCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${gonePath}@GoneCssComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).not.toContain('styles:')
+  })
+
+  it('keeps the styles of a class whose style field cannot be read', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const constPath = join(appDir, 'ps457-const.component.ts')
+    // `styles: PS457_STYLES` holds no string literal, so the text scan reports
+    // the field unreadable — the class's styles are UNKNOWN, not absent. There
+    // is no file-level `styleUrls` to fall back to either. Clearing here would
+    // wipe the CSS the Rust extractor folded out of the constant.
+    const source = `
+      import { Component } from '@angular/core';
+      const PS457_STYLES = ['.PS457_CONST_MARKER { color: red; }'];
+      @Component({
+        selector: 'app-ps457-const',
+        template: '<p>one</p>',
+        styles: PS457_STYLES,
+      })
+      export class ConstStylesComponent {}
+    `
+    writeFileSync(constPath, source)
+    await transformSource(plugin, source, constPath)
+
+    const edited = source.replace('<p>one</p>', '<p>two</p>')
+    writeFileSync(constPath, edited)
+    const ctx = createMockHmrContext(constPath, [{ id: constPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${constPath}@ConstStylesComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${constPath}@ConstStylesComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
   })
 })

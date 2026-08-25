@@ -472,7 +472,8 @@ pub fn compile_template(
 ///
 /// * `component_id` - The component ID (path@ClassName)
 /// * `template_js` - The compiled template function as JavaScript
-/// * `styles` - Optional array of CSS styles
+/// * `styles` - The component's CSS styles, or `None` when unknown. An empty
+///   array is definitive and emits `styles: []`, clearing the old styles.
 ///
 /// # Returns
 ///
@@ -522,7 +523,11 @@ pub fn generate_style_module(component_id: String, styles: Vec<String>) -> Strin
 /// * `template` - The template HTML string
 /// * `component_name` - The name of the component class
 /// * `file_path` - The path to the component file
-/// * `styles` - Optional array of CSS styles
+/// * `styles` - The component's CSS styles, or `None` when the caller cannot
+///   tell. `Some` is a definitive answer — an EMPTY array means "this component
+///   has no styles" and makes the generated module emit `styles: []`, clearing
+///   whatever it had. `None` omits the key, so the module's `...ɵcmp` spread
+///   keeps the previous styles.
 ///
 /// # Returns
 ///
@@ -551,31 +556,43 @@ pub fn compile_for_hmr_sync(
                 Some(output.declarations_js.as_str())
             };
 
+            // The caller's `Option` carries whether it KNOWS the answer, and
+            // that has to survive to the generated module: `Some` (even
+            // `Some([])`) is definitive, so the module emits `styles: [...]`
+            // and clears whatever the component had; `None` is "unknown", so
+            // the module omits the key and the spread keeps the old value.
+            // Collapsing an empty-but-definitive answer to `None` here is what
+            // left a component's last stylesheet applied after HMR.
+            let caller_is_definitive = styles.is_some();
+
             // Merge external styles with styles extracted from template <style> tags
             let mut all_styles: Vec<String> = styles.unwrap_or_default();
             all_styles.extend(output.styles);
 
             // Apply style encapsulation for ViewEncapsulation.Emulated
             // Angular uses %COMP% as a placeholder that the runtime replaces with the component ID
-            let encapsulated_styles: Option<Vec<String>> = if all_styles.is_empty() {
-                None
-            } else {
-                let styles: Vec<String> = all_styles
-                    .iter()
-                    .map(|style| {
-                        oxc_angular_compiler::styles::finalize_component_style(
-                            style,
-                            true,
-                            "_ngcontent-%COMP%",
-                            "_nghost-%COMP%",
-                            opts.minify_component_styles,
-                        )
-                    })
-                    .filter(|style| !style.trim().is_empty())
-                    .collect();
+            let encapsulated: Vec<String> = all_styles
+                .iter()
+                .map(|style| {
+                    oxc_angular_compiler::styles::finalize_component_style(
+                        style,
+                        true,
+                        "_ngcontent-%COMP%",
+                        "_nghost-%COMP%",
+                        opts.minify_component_styles,
+                    )
+                })
+                .filter(|style| !style.trim().is_empty())
+                .collect();
 
-                if styles.is_empty() { None } else { Some(styles) }
-            };
+            // Emit the array when it is an answer: the caller was definitive,
+            // or the template's own <style> tags produced content.
+            let encapsulated_styles: Option<Vec<String>> =
+                if caller_is_definitive || !encapsulated.is_empty() {
+                    Some(encapsulated)
+                } else {
+                    None
+                };
 
             // Generate HMR module with declarations, encapsulated styles, and consts
             let hmr_module = generate_hmr_update_module_from_js(

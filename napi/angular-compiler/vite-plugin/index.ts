@@ -697,8 +697,20 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // of a class that has no external ones. Fall back to the
                 // file-level list only when the class's own styles cannot be
                 // read (preserves the old behavior there).
-                const readStyles = async (urls: string[]): Promise<string[] | null> => {
-                  const styleContents: string[] = []
+                //
+                // A read FAILURE is not evidence of stylelessness, so it has
+                // to stay distinguishable from a successful read of an empty
+                // file: `complete` is false as soon as one stylesheet could
+                // not be read, and the caller downgrades the whole answer to
+                // "unknown" rather than reporting the component styleless and
+                // wiping its live CSS (an editor's atomic write leaves exactly
+                // such a window). A file read successfully but holding nothing
+                // contributes an empty string, which IS a definitive answer.
+                const readStyles = async (
+                  urls: string[],
+                ): Promise<{ contents: string[]; complete: boolean }> => {
+                  const contents: string[] = []
+                  let complete = true
                   for (const styleUrl of urls) {
                     const stylePath = resolve(dir, styleUrl)
                     try {
@@ -711,13 +723,23 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                         )
                         styleContent = processed.code
                       }
-                      styleContents.push(styleContent)
+                      contents.push(styleContent)
                     } catch {
-                      // Style file not found, continue without this style
+                      // Missing, unreadable, or failed to preprocess — what
+                      // this stylesheet holds is unknown, not empty.
+                      complete = false
                     }
                   }
-                  return styleContents.length > 0 ? styleContents : null
+                  return { contents, complete }
                 }
+                // Three-valued, and every value reaches `compileForHmrSync`
+                // verbatim: a non-empty array is the component's styles, `[]`
+                // says it definitively has none (the HMR module emits
+                // `styles: []` and the runtime drops the old CSS), and `null`
+                // says the answer is unknown so the module omits the key and
+                // whatever the component already has survives. `null` is the
+                // default because "we did not find out" is the honest starting
+                // point.
                 let styles: string[] | null = null
                 const classStyles = extractClassStylesFor(source, className)
                 if (classStyles !== null) {
@@ -727,17 +749,28 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   // decorator's own `styles`. Whitespace-only entries are
                   // dropped to match Angular's `style.trim().length > 0`.
                   const external =
-                    classStyles.urls.length > 0 ? ((await readStyles(classStyles.urls)) ?? []) : []
-                  const merged = [...classStyles.inline, ...external].filter(
-                    (style) => style.trim().length > 0,
-                  )
-                  styles = merged.length > 0 ? merged : null
+                    classStyles.urls.length > 0
+                      ? await readStyles(classStyles.urls)
+                      : { contents: [] as string[], complete: true }
+                  // Definitive only when the class's own decorator was read
+                  // (`classStyles !== null`) AND every stylesheet it names was
+                  // read too. An empty result then means the component really
+                  // has no styles and must be cleared — including the case
+                  // where its one stylesheet is now empty or whitespace.
+                  if (external.complete) {
+                    styles = [...classStyles.inline, ...external.contents].filter(
+                      (style) => style.trim().length > 0,
+                    )
+                  }
                 } else if (styleUrls.length > 0) {
                   // The class's own styles could not be read — a decorator
                   // shape this text scan cannot parse, e.g. a styleUrl built
                   // from a constant the Rust extractor folds. Fall back to the
-                  // file-level list, preserving the old behavior there.
-                  styles = await readStyles(styleUrls)
+                  // file-level list, preserving the old behavior there. This
+                  // branch never clears: the decorator is unknown, so an empty
+                  // read here means "no answer", not "no styles".
+                  const fallback = await readStyles(styleUrls)
+                  styles = fallback.contents.length > 0 ? fallback.contents : null
                 }
 
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
