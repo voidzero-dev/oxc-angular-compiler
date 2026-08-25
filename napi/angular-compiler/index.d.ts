@@ -77,7 +77,11 @@ export declare function compileForHmr(
  * * `template` - The template HTML string
  * * `component_name` - The name of the component class
  * * `file_path` - The path to the component file
- * * `styles` - Optional array of CSS styles
+ * * `styles` - The component's CSS styles, or `None` when the caller cannot
+ *   tell. `Some` is a definitive answer — an EMPTY array means "this component
+ *   has no styles" and makes the generated module emit `styles: []`, clearing
+ *   whatever it had. `None` omits the key, so the module's `...ɵcmp` spread
+ *   keeps the previous styles.
  *
  * # Returns
  *
@@ -447,7 +451,8 @@ export interface FactoryNapiCompileResult {
  *
  * * `component_id` - The component ID (path@ClassName)
  * * `template_js` - The compiled template function as JavaScript
- * * `styles` - Optional array of CSS styles
+ * * `styles` - The component's CSS styles, or `None` when unknown. An empty
+ *   array is definitive and emits `styles: []`, clearing the old styles.
  *
  * # Returns
  *

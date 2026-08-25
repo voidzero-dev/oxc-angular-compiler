@@ -177,9 +177,16 @@ fn generate_hmr_update_module_internal(
         output.push_str(",\n");
     }
 
-    // Add styles if present
+    // Add styles whenever the caller has an answer — an EMPTY list included.
+    // The definition above spreads `...ClassName.ɵcmp`, so every key this
+    // module does not emit keeps its previous value. A component that lost its
+    // last stylesheet therefore needs an explicit `styles: []` to clear it;
+    // omitting the key would leave the old CSS applied until a full reload.
+    // `None` stays omitted: that is "the caller does not know", not "empty".
     if let Some(styles) = styles {
-        if !styles.is_empty() {
+        if styles.is_empty() {
+            output.push_str("    styles: [],\n");
+        } else {
             output.push_str("    styles: [\n");
             for style in styles {
                 output.push_str("      ");
@@ -231,6 +238,23 @@ mod tests {
         assert!(result.contains("export default function AppComponent_UpdateMetadata"));
         assert!(result.contains("template:"));
         assert!(!result.contains("styles:"));
+    }
+
+    #[test]
+    fn test_generate_hmr_update_module_empty_styles_clears() {
+        // An EMPTY list is a definitive answer, not silence. The module opens
+        // with `...ClassName.ɵcmp`, so a key it does not emit keeps its old
+        // value — omitting `styles` here would leave the component's last
+        // stylesheet applied until a full reload.
+        let result = generate_hmr_update_module_from_js(
+            "src/app/app.component.ts@AppComponent",
+            "function AppComponent_Template(rf, ctx) { }",
+            Some(&[]),
+            None,
+            None,
+        );
+
+        assert!(result.contains("styles: [],"));
     }
 
     #[test]
