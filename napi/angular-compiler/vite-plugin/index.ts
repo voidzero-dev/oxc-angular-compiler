@@ -39,13 +39,8 @@ import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 import {
   emptyDelimitedRange,
   locateComponentDecorators,
-  locateStylesFieldFor,
-  locateStyleFieldsFor,
   locateStylesInArgs,
   locateTemplateInArgs,
-  locateTemplateStringFor,
-  locateTemplateUrlFor,
-  readStringLiterals,
 } from './utils/decorator-fields.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
@@ -385,11 +380,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // is detected, and consumed by the `@ng/component` HTTP endpoint, which reads
   // it to decide whether to serve the update module or an empty response.
   const pendingHmrUpdates = new Set<string>()
-
-  // Per-component caches keyed by `filePath@ClassName`. A multi-component file
-  // contributes one entry per component to each map.
-  const inlineTemplateCache = new Map<string, string>()
-  const inlineStylesCache = new Map<string, string[]>()
 
   // Cache the source of each component .ts file with its `template:` and
   // `styles:` decorator fields stripped. If the stripped form is byte-identical
@@ -1004,18 +994,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               if (atIdx === -1) continue
               classNamesInFile.add(componentId.slice(atIdx + 1))
             }
-            // Prune cache entries for components that USED to be in this file
-            // but no longer are (e.g. a class was renamed or removed). Without
-            // this, the HMR endpoint could find a stale `pendingHmrUpdates`
-            // entry pointing at a className that's gone, fail to extract a
-            // template for it, and orphan the slot forever.
+            // Prune pending updates for components that USED to be in this
+            // file but no longer are (e.g. a class was renamed or removed).
+            // Without this, the HMR endpoint could find a stale
+            // `pendingHmrUpdates` entry pointing at a className that's gone,
+            // resolve no metadata for it, and orphan the slot forever.
             const previouslyInFile = componentsByFile.get(actualId)
             if (previouslyInFile) {
               for (const oldClass of previouslyInFile) {
                 if (classNamesInFile.has(oldClass)) continue
                 const staleKey = `${actualId}@${oldClass}`
-                inlineTemplateCache.delete(staleKey)
-                inlineStylesCache.delete(staleKey)
                 pendingHmrUpdates.delete(staleKey)
                 debugHmr('pruned stale cache entries for %s', staleKey)
               }
@@ -1026,25 +1014,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               debugHmr('registered: %s -> %s', actualId, className)
             }
 
-            // Cache per-component inline template / styles for detecting
-            // template/styles-only changes in handleHotUpdate, and the
-            // metadata-stripped (whole-file) source for cheaply diffing
-            // whether anything else changed.
-            for (const className of classNamesInFile) {
-              const cacheKey = `${actualId}@${className}`
-              const inlineTemplate = extractInlineTemplate(code, className)
-              if (inlineTemplate !== null) {
-                inlineTemplateCache.set(cacheKey, inlineTemplate)
-              } else {
-                inlineTemplateCache.delete(cacheKey)
-              }
-              const inlineStyles = extractInlineStyles(code, className)
-              if (inlineStyles !== null) {
-                inlineStylesCache.set(cacheKey, inlineStyles)
-              } else {
-                inlineStylesCache.delete(cacheKey)
-              }
-            }
+            // Cache the metadata-stripped (whole-file) source for cheaply
+            // diffing whether anything besides template/styles changed.
             componentMetadataCache.set(actualId, stripComponentMetadata(code))
           }
 
@@ -1295,22 +1266,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const newStripped = stripComponentMetadata(newContent)
             if (newStripped === cachedStripped) {
               debugHmr('inline template/styles-only change, dispatching HMR for %s', ctx.file)
-              // Refresh per-component caches with the new contents.
-              for (const className of fileClassNames) {
-                const cacheKey = `${ctx.file}@${className}`
-                const newTemplate = extractInlineTemplate(newContent, className)
-                if (newTemplate !== null) {
-                  inlineTemplateCache.set(cacheKey, newTemplate)
-                } else {
-                  inlineTemplateCache.delete(cacheKey)
-                }
-                const newStyles = extractInlineStyles(newContent, className)
-                if (newStyles !== null) {
-                  inlineStylesCache.set(cacheKey, newStyles)
-                } else {
-                  inlineStylesCache.delete(cacheKey)
-                }
-              }
               componentMetadataCache.set(ctx.file, newStripped)
               // Conservatively dispatch HMR for every component in the file —
               // Angular's runtime no-ops if a component's metadata didn't
@@ -1464,86 +1419,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       ssrEntry: options.ssrEntry,
     }),
   ].filter(Boolean) as Plugin[]
-}
-
-/**
- * Extract the inline template from the `@Component({...})` decorator that
- * decorates the class named `className`. Returns null if no such decorator
- * exists or the decorator has no inline `template:` string literal.
- */
-function extractInlineTemplate(code: string, className: string): string | null {
-  const range = locateTemplateStringFor(code, className)
-  if (!range) return null
-  // Slice excludes the outer quotes/backticks — raw inner contents.
-  return code.slice(range[0] + 1, range[1])
-}
-
-/**
- * Extract the `templateUrl` string from the `@Component({...})` decorator
- * that decorates the class named `className`. Returns null if no such
- * decorator exists or the decorator has no `templateUrl:` string literal.
- */
-function extractTemplateUrlFor(code: string, className: string): string | null {
-  const range = locateTemplateUrlFor(code, className)
-  if (!range) return null
-  // Slice excludes the outer quotes/backticks — raw inner contents.
-  return code.slice(range[0] + 1, range[1])
-}
-
-/**
- * The styles one class declares in its own `@Component({...})`, split by
- * source: inline `styles` and external `styleUrl(s)`.
- *
- * Handles every shape Angular accepts — `styles` and `styleUrls` as an array
- * or a bare literal, plus the singular `styleUrl` (17+). Both arrays are
- * empty for a class that declares no styles at all, which is a real answer:
- * that component must be served nothing.
- *
- * Returns null when the answer is *unknown* rather than empty — the class's
- * decorator could not be located, or it declares a style field whose value
- * holds no string literal (a constant, an identifier, an unresolved
- * interpolation). The caller falls back to the file-level list there, since
- * the Rust extractor folds constants this text scan cannot.
- */
-function extractClassStylesFor(
-  code: string,
-  className: string,
-): { inline: string[]; urls: string[] } | null {
-  const fields = locateStyleFieldsFor(code, className)
-  if (!fields) return null
-
-  const read = (field: (typeof fields)['inline']): string[] | null => {
-    if (field.kind === 'absent') return []
-    if (field.kind === 'unreadable') return null
-    const { literals, complete } = readStringLiterals(code, field.range)
-    // A partial read is unknown, not partial knowledge: acting on the
-    // literals alone would drop whatever the unreadable elements name.
-    return complete ? literals : null
-  }
-  const inline = read(fields.inline)
-  const urls = read(fields.urls)
-  if (inline === null || urls === null) return null
-  return { inline, urls }
-}
-
-/**
- * Extract the inline styles from the `@Component({...})` decorator that
- * decorates the class named `className`, as a positional array.
- *
- * Handles both Angular forms — `styles: string | string[]`:
- *   - Array of literals (`['…']`, `["…"]`, `` [`…`] ``, or any mix) → each
- *     literal becomes one element, preserving order (HMR delivery is positional).
- *   - Bare single literal (`'…'`, `"…"`, or `` `…` ``) → returned as a
- *     one-element array.
- *
- * Returns null if the named decorator has no `styles:` field or its value is
- * something other than a string/array literal (e.g. a variable reference).
- */
-function extractInlineStyles(code: string, className: string): string[] | null {
-  const range = locateStylesFieldFor(code, className)
-  if (!range) return null
-  const { literals } = readStringLiterals(code, range)
-  return literals.length > 0 ? literals : null
 }
 
 /**

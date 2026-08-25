@@ -6,9 +6,9 @@ import { test, expect } from '../fixtures/test-fixture.js'
  *   - receive its own per-component HMR update when its template or styles
  *     change (NO full reload), without disturbing the sibling component.
  *
- * Guards the per-component cache + dispatch wiring (componentsByFile,
- * filePath@ClassName-keyed inlineTemplateCache / inlineStylesCache,
- * pendingHmrUpdates per componentId).
+ * Guards the per-component dispatch wiring (componentsByFile, one
+ * `filePath@ClassName` entry in pendingHmrUpdates per componentId, and the
+ * per-class metadata the `@ng/component` endpoint resolves for each).
  */
 test.describe('Multi-component file HMR', () => {
   test.beforeEach(async ({ page }) => {

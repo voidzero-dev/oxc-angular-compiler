@@ -3,14 +3,28 @@ import { describe, expect, it } from 'vitest'
 import {
   emptyDelimitedRange,
   locateComponentDecorators,
-  locateStyleFieldsFor,
-  locateStyleUrlFor,
-  locateStyleUrlsFor,
-  locateStylesFieldFor,
-  locateTemplateStringFor,
-  locateTemplateUrlFor,
-  readStringLiterals,
+  locateStylesInArgs,
+  locateTemplateInArgs,
 } from '../vite-plugin/utils/decorator-fields.js'
+
+// The className-keyed wrappers that used to live in decorator-fields.ts went
+// away with the text-scan HMR path — per-class resources now come from the
+// Rust extractor. What survives is the metadata *strip* that decides HMR
+// versus full reload, which reaches the same locators through
+// `locateComponentDecorators`. These two mirror what the removed wrappers
+// did, so the tests below still pin behaviour that ships.
+const stylesFieldFor = (code: string, className: string): [number, number] | null => {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateStylesInArgs(code, found.argsRange) : null
+}
+
+const templateFieldFor = (code: string, className: string): [number, number] | null => {
+  const found = locateComponentDecorators(code).find((d) => d.className === className)
+  return found ? locateTemplateInArgs(code, found.argsRange) : null
+}
+
+/** The source text a located range covers, outer delimiters included. */
+const textOf = (code: string, range: [number, number]): string => code.slice(range[0], range[1] + 1)
 
 describe('decorator-fields utils', () => {
   describe('emptyDelimitedRange', () => {
@@ -63,73 +77,61 @@ describe('decorator-fields utils', () => {
       // The phantom sits between the real decorator and the class. Pairing
       // the class with it would read the stale metadata, not merely miss it.
       const src = [
-        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
-        `// @Component({ styleUrl: './old.css' })`,
+        `@Component({ selector: 'x', styles: ['.real{}'] })`,
+        `// @Component({ styles: ['.old{}'] })`,
         `export class FooComponent {}`,
       ].join('\n')
       const out = locateComponentDecorators(src)
       expect(out).toHaveLength(1)
       expect(out[0].className).toBe('FooComponent')
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
-        './real.css',
-      ])
+      expect(textOf(src, stylesFieldFor(src, 'FooComponent')!)).toBe(`['.real{}']`)
     })
 
     it('ignores a decorator inside a block comment that follows the real one', () => {
       const src = [
-        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
-        `/* @Component({ styleUrl: './old.css' }) */`,
+        `@Component({ selector: 'x', styles: ['.real{}'] })`,
+        `/* @Component({ styles: ['.old{}'] }) */`,
         `export class FooComponent {}`,
       ].join('\n')
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
-        './real.css',
-      ])
+      expect(textOf(src, stylesFieldFor(src, 'FooComponent')!)).toBe(`['.real{}']`)
     })
 
     it('ignores a commented-out decorator that precedes the real one', () => {
       const src = [
-        `// @Component({ styleUrl: './old.css' })`,
-        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `// @Component({ styles: ['.old{}'] })`,
+        `@Component({ selector: 'x', styles: ['.real{}'] })`,
         `export class FooComponent {}`,
       ].join('\n')
       const out = locateComponentDecorators(src)
       expect(out).toHaveLength(1)
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
-        './real.css',
-      ])
+      expect(textOf(src, stylesFieldFor(src, 'FooComponent')!)).toBe(`['.real{}']`)
     })
 
     it('ignores a decorator written inside a string literal', () => {
       const src = [
-        `const doc = 'see @Component({ styleUrl: "./str.css" }) for details';`,
-        `@Component({ selector: 'x', styleUrls: ['./real.css'] })`,
+        `const doc = 'see @Component({ styles: [".str{}"] }) for details';`,
+        `@Component({ selector: 'x', styles: ['.real{}'] })`,
         `export class FooComponent {}`,
       ].join('\n')
       const out = locateComponentDecorators(src)
       expect(out).toHaveLength(1)
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'FooComponent')!).literals).toEqual([
-        './real.css',
-      ])
+      expect(textOf(src, stylesFieldFor(src, 'FooComponent')!)).toBe(`['.real{}']`)
     })
 
     it('pairs each class with its own decorator when a phantom sits between them', () => {
       const src = [
-        `@Component({ selector: 'a', styleUrls: ['./a.css'] })`,
-        `// @Component({ styleUrl: './fake.css' })`,
+        `@Component({ selector: 'a', styles: ['.a{}'] })`,
+        `// @Component({ styles: ['.fake{}'] })`,
         `export class AComponent {}`,
-        `@Component({ selector: 'b', styleUrls: ['./b.css'] })`,
+        `@Component({ selector: 'b', styles: ['.b{}'] })`,
         `export class BComponent {}`,
       ].join('\n')
       expect(locateComponentDecorators(src).map((d) => d.className)).toEqual([
         'AComponent',
         'BComponent',
       ])
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'AComponent')!).literals).toEqual([
-        './a.css',
-      ])
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'BComponent')!).literals).toEqual([
-        './b.css',
-      ])
+      expect(textOf(src, stylesFieldFor(src, 'AComponent')!)).toBe(`['.a{}']`)
+      expect(textOf(src, stylesFieldFor(src, 'BComponent')!)).toBe(`['.b{}']`)
     })
 
     it('returns a single entry for a single-component file', () => {
@@ -233,7 +235,7 @@ describe('decorator-fields utils', () => {
     })
   })
 
-  describe('locateStylesFieldFor', () => {
+  describe('locateStylesInArgs', () => {
     const multi = `
       @Component({ selector: 'a', styles: ['.first {}'] })
       export class FirstComponent {}
@@ -242,22 +244,20 @@ describe('decorator-fields utils', () => {
     `
 
     it('returns null when className matches no decorator', () => {
-      expect(locateStylesFieldFor(multi, 'Nope')).toBeNull()
+      expect(stylesFieldFor(multi, 'Nope')).toBeNull()
     })
 
     it('returns null when the named component has no styles field', () => {
       const src = `@Component({ template: '<p/>' })\nexport class Foo {}`
-      expect(locateStylesFieldFor(src, 'Foo')).toBeNull()
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
     it('returns the FirstComponent styles range when asked for FirstComponent', () => {
-      const range = locateStylesFieldFor(multi, 'FirstComponent')!
-      expect(multi.slice(range[0], range[1] + 1)).toBe(`['.first {}']`)
+      expect(textOf(multi, stylesFieldFor(multi, 'FirstComponent')!)).toBe(`['.first {}']`)
     })
 
     it('returns the SecondComponent styles range when asked for SecondComponent', () => {
-      const range = locateStylesFieldFor(multi, 'SecondComponent')!
-      expect(multi.slice(range[0], range[1] + 1)).toBe(`['.second {}']`)
+      expect(textOf(multi, stylesFieldFor(multi, 'SecondComponent')!)).toBe(`['.second {}']`)
     })
 
     it('supports the bare-string styles form per component', () => {
@@ -267,8 +267,7 @@ describe('decorator-fields utils', () => {
         @Component({ styles: '.second {}' })
         export class SecondComponent {}
       `
-      const range = locateStylesFieldFor(src, 'SecondComponent')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'.second {}'`)
+      expect(textOf(src, stylesFieldFor(src, 'SecondComponent')!)).toBe(`'.second {}'`)
     })
 
     // The next four guard against false-matches: a `styles:` key occurring
@@ -276,13 +275,12 @@ describe('decorator-fields utils', () => {
     it('ignores `styles:` text inside a template literal that precedes the real styles', () => {
       const src =
         "@Component({ template: `<pre>const cfg = { styles: ['fake'] }</pre>`, styles: ['real'] })\nexport class Foo {}"
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('returns null when the only `styles:` text in the args is inside a template literal', () => {
       const src = "@Component({ template: `<pre>{ styles: ['fake'] }</pre>` })\nexport class Bar {}"
-      expect(locateStylesFieldFor(src, 'Bar')).toBeNull()
+      expect(stylesFieldFor(src, 'Bar')).toBeNull()
     })
 
     it("ignores `styles:` inside a `${...}` interpolation's nested object literal", () => {
@@ -290,20 +288,28 @@ describe('decorator-fields utils', () => {
       // be treated as a top-level @Component metadata property.
       const src =
         "@Component({ template: `${doThing({ styles: ['fake'] })}`, styles: ['real'] })\nexport class Baz {}"
-      const range = locateStylesFieldFor(src, 'Baz')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Baz')!)).toBe(`['real']`)
     })
 
     it('ignores `styles:` inside a nested non-metadata object literal', () => {
       // `metadata: { styles: ['nested'] }` is not the component's `styles`
       // field; only top-level properties of the @Component argument count.
       const src = `@Component({ host: { '[styles]': 'expr', styles: 'irrelevant' }, styles: ['real'] })\nexport class Qux {}`
-      const range = locateStylesFieldFor(src, 'Qux')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Qux')!)).toBe(`['real']`)
+    })
+
+    it('does not match a `styleUrls:` field as the inline `styles:` field', () => {
+      const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match the singular `styleUrl:` field as the inline `styles:` field', () => {
+      const src = `@Component({ styleUrl: './a.css' })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
   })
 
-  describe('locateTemplateStringFor', () => {
+  describe('locateTemplateInArgs', () => {
     const multi = `
       @Component({ selector: 'a', template: '<first/>' })
       export class FirstComponent {}
@@ -312,22 +318,20 @@ describe('decorator-fields utils', () => {
     `
 
     it('returns null when className matches no decorator', () => {
-      expect(locateTemplateStringFor(multi, 'Nope')).toBeNull()
+      expect(templateFieldFor(multi, 'Nope')).toBeNull()
     })
 
     it('returns null when the named component has no template field', () => {
       const src = `@Component({ styles: [] })\nexport class Foo {}`
-      expect(locateTemplateStringFor(src, 'Foo')).toBeNull()
+      expect(templateFieldFor(src, 'Foo')).toBeNull()
     })
 
     it('returns the FirstComponent template range when asked for FirstComponent', () => {
-      const range = locateTemplateStringFor(multi, 'FirstComponent')!
-      expect(multi.slice(range[0], range[1] + 1)).toBe(`'<first/>'`)
+      expect(textOf(multi, templateFieldFor(multi, 'FirstComponent')!)).toBe(`'<first/>'`)
     })
 
     it('returns the SecondComponent template range when asked for SecondComponent', () => {
-      const range = locateTemplateStringFor(multi, 'SecondComponent')!
-      expect(multi.slice(range[0], range[1] + 1)).toBe(`'<second/>'`)
+      expect(textOf(multi, templateFieldFor(multi, 'SecondComponent')!)).toBe(`'<second/>'`)
     })
 
     it("ignores `template:` text appearing inside another field's string literal", () => {
@@ -335,503 +339,271 @@ describe('decorator-fields utils', () => {
       // the real `template:` field comes after. The naive regex would match
       // the inner one first.
       const src = `@Component({ styles: ['/* template: "fake" */'], template: '<real/>' })\nexport class Foo {}`
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
 
     it('does not match a `templateUrl:` field as `template:`', () => {
       const src = `@Component({ templateUrl: './foo.html' })\nexport class Foo {}`
-      expect(locateTemplateStringFor(src, 'Foo')).toBeNull()
+      expect(templateFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('finds the inline template when the decorator also has a templateUrl field', () => {
+      const src = `@Component({ templateUrl: './real.html', template: '<p/>' })\nexport class Foo {}`
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<p/>'`)
     })
   })
 
-  describe('locateTemplateUrlFor', () => {
-    const multi = `
-      @Component({ selector: 'a', templateUrl: './first.html' })
-      export class FirstComponent {}
-      @Component({ selector: 'b', templateUrl: './second.html' })
-      export class SecondComponent {}
-    `
-
-    it('returns null when className matches no decorator', () => {
-      expect(locateTemplateUrlFor(multi, 'Nope')).toBeNull()
+  // -----------------------------------------------------------------
+  // Which property keys count as the field, and which must not. The
+  // strip has to empty exactly the component's own `template:`/`styles:`
+  // — emptying anything else, or missing the real one, changes the
+  // stripped bytes and flips the HMR / full-reload decision.
+  // -----------------------------------------------------------------
+  describe('which keys count as the field', () => {
+    it('does not locate a field whose value has no literal shape', () => {
+      const src = `@Component({ styles: STYLES })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
-    it('returns null when the named component has no templateUrl field', () => {
-      const src = `@Component({ template: '<p/>' })\nexport class Foo {}`
-      expect(locateTemplateUrlFor(src, 'Foo')).toBeNull()
-    })
-
-    it('returns each component its own templateUrl range in a multi-component file', () => {
-      const first = locateTemplateUrlFor(multi, 'FirstComponent')!
-      const second = locateTemplateUrlFor(multi, 'SecondComponent')!
-      expect(multi.slice(first[0], first[1] + 1)).toBe(`'./first.html'`)
-      expect(multi.slice(second[0], second[1] + 1)).toBe(`'./second.html'`)
-    })
-
-    it('does not match an inline `template:` field as `templateUrl:`', () => {
-      const src = `@Component({ template: '<p>templateUrl: fake</p>' })\nexport class Foo {}`
-      expect(locateTemplateUrlFor(src, 'Foo')).toBeNull()
-    })
-
-    it('finds templateUrl when the decorator also has an inline template field', () => {
-      const src = `@Component({ template: '<p/>', templateUrl: './real.html' })\nexport class Foo {}`
-      const range = locateTemplateUrlFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'./real.html'`)
-    })
-  })
-
-  describe('locateStyleUrlsFor / locateStyleUrlFor', () => {
-    const multi = `
-      @Component({ selector: 'a', styleUrls: ['./first.css'] })
-      export class FirstComponent {}
-      @Component({ selector: 'b', styleUrls: ['./second.css', './extra.css'] })
-      export class SecondComponent {}
-    `
-
-    it('returns null when className matches no decorator', () => {
-      expect(locateStyleUrlsFor(multi, 'Nope')).toBeNull()
-      expect(locateStyleUrlFor(multi, 'Nope')).toBeNull()
-    })
-
-    it('returns each component its own styleUrls range in a multi-component file', () => {
-      const first = locateStyleUrlsFor(multi, 'FirstComponent')!
-      const second = locateStyleUrlsFor(multi, 'SecondComponent')!
-      expect(multi.slice(first[0], first[1] + 1)).toBe(`['./first.css']`)
-      expect(multi.slice(second[0], second[1] + 1)).toBe(`['./second.css', './extra.css']`)
-    })
-
-    it('locates the singular `styleUrl:` string form', () => {
-      const src = `@Component({ styleUrl: './solo.css' })\nexport class Foo {}`
-      const range = locateStyleUrlFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'./solo.css'`)
-    })
-
-    // The four cross-match guards: `styleUrl`, `styleUrls` and `styles` are
-    // distinct fields and must never resolve to one another.
-    it('does not match `styleUrls:` when looking for the singular `styleUrl:`', () => {
-      const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(locateStyleUrlFor(src, 'Foo')).toBeNull()
-    })
-
-    it('does not match the singular `styleUrl:` when looking for `styleUrls:`', () => {
-      const src = `@Component({ styleUrl: './a.css' })\nexport class Foo {}`
-      expect(locateStyleUrlsFor(src, 'Foo')).toBeNull()
-    })
-
-    it('does not match an inline `styles:` field as either url field', () => {
-      const src = `@Component({ styles: ['.a { color: red }'] })\nexport class Foo {}`
-      expect(locateStyleUrlsFor(src, 'Foo')).toBeNull()
-      expect(locateStyleUrlFor(src, 'Foo')).toBeNull()
-    })
-
-    it('does not match either url field as the inline `styles:` field', () => {
-      const urls = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
-      const url = `@Component({ styleUrl: './a.css' })\nexport class Foo {}`
-      expect(locateStylesFieldFor(urls, 'Foo')).toBeNull()
-      expect(locateStylesFieldFor(url, 'Foo')).toBeNull()
-    })
-
-    it('finds styleUrls when the decorator also has an inline styles field', () => {
-      const src = `@Component({ styles: ['.x{}'], styleUrls: ['./real.css'] })\nexport class Foo {}`
-      const range = locateStyleUrlsFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['./real.css']`)
-    })
-  })
-
-  // The endpoint needs three answers, not two: a class with no styles must be
-  // served none, while a class whose styles cannot be read must fall back to
-  // the file-level list. Only a null return distinguishes them.
-  describe('locateStyleFieldsFor', () => {
-    // Read the literals out of a located field, for the tests that care
-    // about the value rather than the classification.
-    const literalsIn = (src: string, field: { kind: string; range?: [number, number] }) => {
-      expect(field.kind).toBe('literal')
-      return readStringLiterals(src, (field as { range: [number, number] }).range).literals
-    }
-
-    it('returns null when className matches no decorator', () => {
-      const src = `@Component({ styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Nope')).toBeNull()
-    })
-
-    it('reports both fields absent for a class that declares no styles', () => {
-      const src = `@Component({ template: '<p></p>' })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-        urls: { kind: 'absent' },
-        inline: { kind: 'absent' },
-      })
-    })
-
-    it('reports a field whose value has no literal shape as unreadable', () => {
-      const src = `@Component({ styleUrls: STYLE_URLS })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
-    })
-
-    it('reports a singular `styleUrl` identifier value as unreadable, not absent', () => {
-      // The regression this guards: reporting it absent tells the caller
-      // "this class has no styles", which strips the component's CSS.
-      const src = `@Component({ styleUrl: STYLE_URL })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
-    })
-
-    it('reports inline and url ranges together when a class declares both', () => {
-      const src = `@Component({ styles: ['.x{}'], styleUrls: ['./real.css'] })\nexport class Foo {}`
-      const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(literalsIn(src, fields.inline)).toEqual(['.x{}'])
-      expect(literalsIn(src, fields.urls)).toEqual(['./real.css'])
-    })
-
-    it('falls back to the singular `styleUrl` for the urls member', () => {
-      const src = `@Component({ styleUrl: './solo.css' })\nexport class Foo {}`
-      const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(literalsIn(src, fields.urls)).toEqual(['./solo.css'])
-      expect(fields.inline).toEqual({ kind: 'absent' })
-    })
-
-    it('reports the urls member unreadable when only the singular form is unreadable', () => {
-      const src = `@Component({ styleUrl: STYLE_URL, styles: ['.x{}'] })\nexport class Foo {}`
-      const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(fields.urls).toEqual({ kind: 'unreadable' })
-      expect(literalsIn(src, fields.inline)).toEqual(['.x{}'])
-    })
-
-    it('resolves each class separately in a multi-component file', () => {
-      const src = `
-        @Component({ selector: 'a', styleUrls: ['./a.css'] })
-        export class StyledComponent {}
-        @Component({ selector: 'b', template: '<p></p>' })
-        export class BareComponent {}
-      `
-      const styled = locateStyleFieldsFor(src, 'StyledComponent')!
-      expect(literalsIn(src, styled.urls)).toEqual(['./a.css'])
-      expect(locateStyleFieldsFor(src, 'BareComponent')).toEqual({
-        urls: { kind: 'absent' },
-        inline: { kind: 'absent' },
-      })
-    })
-
-    // Quoted keys are valid TS and the Rust extractor resolves them
-    // (verified: `'styleUrls'` and `"styleUrls"` both report their URL).
-    // Reading them as absent tells the caller the class declares no
-    // styles, which strips the component's CSS.
     it('reads a single-quoted key the same as the bare form', () => {
-      const src = `@Component({ 'styleUrls': ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      const src = `@Component({ 'styles': ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
     it('reads a double-quoted key the same as the bare form', () => {
-      const src = `@Component({ "styleUrls": ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      const src = `@Component({ "styles": ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    it('reads a quoted singular `styleUrl` key', () => {
-      const src = `@Component({ 'styleUrl': './solo.css' })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./solo.css'])
-    })
-
-    it('reads a quoted inline `styles` key', () => {
-      const src = `@Component({ 'styles': ['.x{}'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.inline)).toEqual(['.x{}'])
+    it('reads a quoted `template` key', () => {
+      const src = `@Component({ 'template': '<p/>' })\nexport class Foo {}`
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<p/>'`)
     })
 
     it('keeps the cross-match guards for quoted keys', () => {
       const urls = `@Component({ 'styleUrls': ['./a.css'] })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(urls, 'Foo')!.inline).toEqual({ kind: 'absent' })
-      const inline = `@Component({ 'styles': ['.x{}'] })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(inline, 'Foo')!.urls).toEqual({ kind: 'absent' })
+      expect(stylesFieldFor(urls, 'Foo')).toBeNull()
+      const tplUrl = `@Component({ 'templateUrl': './a.html' })\nexport class Foo {}`
+      expect(templateFieldFor(tplUrl, 'Foo')).toBeNull()
     })
 
-    // A computed key hides the field name from this scan, but the Rust
-    // extractor resolves it (verified: `[K]: ['./computed.css']` reports
-    // the URL). "Absent" would be a lie, so the whole classification is
-    // unknown and the caller falls back.
-    it('reports both fields unreadable when a computed key is present', () => {
-      const src = `@Component({ [K]: ['./a.css'] })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-        urls: { kind: 'unreadable' },
-        inline: { kind: 'unreadable' },
-      })
+    it('reads the real field past a computed key', () => {
+      // A computed key hides its name from this scan, but it is not the
+      // field we are after, and the visible field is still exactly what it
+      // says it is.
+      const src = `@Component({ [K]: 1, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    it('reports both fields unreadable for a quoted key whose escape is malformed', () => {
-      // A decodable escape is resolved instead — see the `escaped keys`
-      // block. Only an escape this scan cannot decode leaves the field name
-      // unknown, and then "absent" would be a guess rather than an answer.
-      const src = `@Component({ 'style\\u00ZZrls': ['./a.css'] })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-        urls: { kind: 'unreadable' },
-        inline: { kind: 'unreadable' },
-      })
+    it('does not locate a computed key as a field', () => {
+      const src = `@Component({ [K]: ['.x{}'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
-    it('does not promote a readable field to unreadable because of a computed key', () => {
-      // The visible field is still exactly what it says; only the fields
-      // this scan cannot see are unknown.
-      const src = `@Component({ [K]: 1, styleUrls: ['./a.css'] })\nexport class Foo {}`
-      const fields = locateStyleFieldsFor(src, 'Foo')!
-      expect(literalsIn(src, fields.urls)).toEqual(['./a.css'])
-      expect(fields.inline).toEqual({ kind: 'unreadable' })
+    it('reads the real field past a spread', () => {
+      const src = `@Component({ ...BASE, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    // A spread is the one unreadable form the Rust extractor ALSO drops
-    // (verified: `...BASE` reports no styleUrls). Both sides see nothing,
-    // so "absent" matches what the compiled component gets; falling back
-    // would hand this class its siblings' CSS.
-    it('leaves fields absent for a spread, which the compiler also drops', () => {
-      const src = `@Component({ ...BASE })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-        urls: { kind: 'absent' },
-        inline: { kind: 'absent' },
-      })
-    })
-
-    // Shorthand style fields. Measured against the Rust extractor, which
-    // resolves a same-file string constant behind the singular `styleUrl`
-    // but drops the array-valued forms — so the two need opposite answers,
-    // for the same reason the spread above stays absent: match what the
-    // compiled component actually ends up with.
-    it('reports a shorthand singular `styleUrl` as unreadable, not absent', () => {
-      const src = `@Component({ template: '<p/>', styleUrl })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
-    })
-
-    it('leaves a shorthand `styleUrls` absent, which the compiler also drops', () => {
-      const src = `@Component({ template: '<p/>', styleUrls })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
-    })
-
-    it('leaves a shorthand inline `styles` absent, which the compiler also drops', () => {
+    it('does not locate a shorthand style field, which has no value to empty', () => {
       const src = `@Component({ template: '<p/>', styles })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.inline).toEqual({ kind: 'absent' })
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
     it('does not let an unrelated shorthand degrade a readable field', () => {
-      const src = `@Component({ selector, styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      const src = `@Component({ selector, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    // The trap in accepting a bare key: an identifier used as a VALUE is not
-    // a shorthand property, and reading it as one would fall back on a field
-    // that is right there and readable.
-    it('does not mistake a style-named identifier used as a value for a shorthand', () => {
-      const src = `@Component({ selector: styleUrl, styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    it('reads the real field past a field-named identifier used as a value', () => {
+      const src = `@Component({ selector: styles, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
     it('does not let an unrelated method degrade a readable field', () => {
-      const src = `@Component({ foo() { return 1 }, styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      const src = `@Component({ foo() { return 1 }, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    // A method or accessor named like a style field is not a style field:
-    // the compiler reads no styles from it either.
-    it('leaves a method named like a style field absent', () => {
-      const src = `@Component({ styleUrls() { return ['./a.css'] } })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    // A method or accessor named like the field is not the field: there is
+    // no value literal to empty, and emptying its body would be wrong.
+    it('does not locate a method named like the field', () => {
+      const src = `@Component({ styles() { return ['.x{}'] } })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
-    it('leaves a getter named like a style field absent', () => {
-      const src = `@Component({ get styleUrl() { return './a.css' } })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    it('does not locate a getter named like the field', () => {
+      const src = `@Component({ get template() { return '<p/>' } })\nexport class Foo {}`
+      expect(templateFieldFor(src, 'Foo')).toBeNull()
     })
 
-    it('reads the real field past a setter named like a style field', () => {
-      const src = `@Component({ set styleUrl(v) {}, styleUrls: ['./a.css'] })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+    it('reads the real field past a setter named like it', () => {
+      const src = `@Component({ set styles(v) {}, styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
 
-    it('does not read a style field nested in a deeper object', () => {
-      const src = `@Component({ data: { styleUrls: ['./deep.css'] } })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
+    it('does not read a field nested in a deeper object', () => {
+      const src = `@Component({ data: { styles: ['.deep{}'] } })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
     it('reads a field followed by a trailing comma', () => {
-      const src = `@Component({ styleUrls: ['./a.css'], })\nexport class Foo {}`
-      expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
+      const src = `@Component({ styles: ['.x{}'], })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
+    })
+  })
+
+  // A value that merely STARTS with a literal does not denote it. Emptying
+  // that leading piece would leave the rest of the expression in the
+  // stripped source, so an edit to the expression would read as a
+  // non-metadata change — or worse, an edit elsewhere would not.
+  describe('a literal that is only the start of a larger expression', () => {
+    const styles = (field: string) =>
+      stylesFieldFor(`@Component({ selector: 'a', ${field} })\nexport class Foo {}`, 'Foo')
+    const template = (field: string) =>
+      templateFieldFor(`@Component({ selector: 'a', ${field} })\nexport class Foo {}`, 'Foo')
+
+    it('rejects an inline `styles` string concatenated with an identifier', () => {
+      expect(styles(`styles: '.a{}' + EXTRA`)).toBeNull()
     })
 
-    it('reads a shorthand style field that closes the object', () => {
-      // No trailing comma — the key is bounded by `}` rather than `,`.
-      const src = `@Component({ styleUrl })\nexport class Foo {}`
-      expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+    it('rejects a `template` concatenated with another literal', () => {
+      expect(template(`template: '<p/>' + '<q/>'`)).toBeNull()
     })
 
-    // A value that merely STARTS with a literal does not denote it. Every
-    // form below was measured against the Rust extractor: it reports no
-    // styleUrls and compiles no styles for any of them. Returning the
-    // leading literal would hand the endpoint a stylesheet the component
-    // never had, and — being a confident answer — would skip the fallback
-    // that exists for exactly this case.
-    describe('a literal that is only the start of a larger expression', () => {
-      const urls = (field: string) =>
-        locateStyleFieldsFor(
-          `const SUFFIX = '.s.css';\nconst MORE: string[] = ['./m.css'];\n@Component({ template: '<p/>', ${field} })\nexport class Foo {}`,
-          'Foo',
-        )!.urls
-      const inline = (field: string) =>
-        locateStyleFieldsFor(
-          `const EXTRA = '.b{}';\n@Component({ template: '<p/>', ${field} })\nexport class Foo {}`,
-          'Foo',
-        )!.inline
-
-      it('rejects a singular `styleUrl` concatenated with an identifier', () => {
-        expect(urls(`styleUrl: './a.css' + SUFFIX`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a singular `styleUrl` concatenated with another literal', () => {
-        expect(urls(`styleUrl: './a.css' + './b.css'`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a `styleUrls` array concatenated with an identifier', () => {
-        expect(urls(`styleUrls: './a.css' + SUFFIX`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects an inline `styles` value concatenated with an identifier', () => {
-        expect(inline(`styles: '.a{}' + EXTRA`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a method call on a style literal', () => {
-        expect(urls(`styleUrl: './a.css'.replace('a', 'b')`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a method call on a `styleUrls` array literal', () => {
-        expect(urls(`styleUrls: ['./a.css'].concat(MORE)`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a method call on an inline `styles` array literal', () => {
-        expect(inline(`styles: ['.a{}'].concat(MORE)`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a TypeScript `as` assertion after a style literal', () => {
-        expect(urls(`styleUrl: './a.css' as string`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a TypeScript `as const` assertion after a `styleUrls` array', () => {
-        expect(urls(`styleUrls: ['./a.css'] as const`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a TypeScript `as` assertion after an inline `styles` array', () => {
-        expect(inline(`styles: ['.a{}'] as string[]`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a non-null assertion after a style literal', () => {
-        expect(urls(`styleUrl: './a.css'!`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a `satisfies` clause after a style literal', () => {
-        expect(urls(`styleUrl: './a.css' satisfies string`)).toEqual({ kind: 'unreadable' })
-      })
-
-      it('rejects a trailing expression hidden behind a comment', () => {
-        expect(urls(`styleUrl: './a.css' /* why */ + SUFFIX`)).toEqual({ kind: 'unreadable' })
-      })
-
-      // The other side of the rule: a value the property really does end at
-      // stays readable, whether a comma, the object's brace or a comment
-      // closes it out.
-      it.each([
-        [`styleUrl: './a.css'`, `the object's closing brace`],
-        [`styleUrl: './a.css',`, 'a trailing comma'],
-        [`styleUrl: './a.css' /* why */`, 'a block comment then the brace'],
-        [`styleUrl: './a.css' // why\n`, 'a line comment then the brace'],
-        [`styleUrls: ['./a.css']`, 'an array at the closing brace'],
-        [`styleUrls: ['./a.css'],`, 'an array with a trailing comma'],
-      ])('still reads %j, ended by %s', (field) => {
-        const src = `@Component({ template: '<p/>', ${field} })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('rejects a `template` concatenated with an identifier', () => {
+      expect(template(`template: '<p/>' + SUFFIX`)).toBeNull()
     })
 
-    // Escaped identifier keys. `style\u0055rls` IS `styleUrls` to the
-    // TypeScript parser, and the Rust extractor resolves it (verified: it
-    // reports `./x.css`). Reading it as absent told the caller the class
-    // declares no styles, which strips the component's CSS. Decoding gives
-    // an exact per-class answer, where falling back would serve the
-    // file-level union — every sibling's CSS along with this class's own.
-    describe('escaped keys', () => {
-      it('decodes a \\uHHHH escape in a bare key', () => {
-        const src = `@Component({ style\\u0055rls: ['./a.css'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('rejects a `styles` array concatenated with an identifier', () => {
+      expect(styles(`styles: ['.a{}'] + EXTRA`)).toBeNull()
+    })
 
-      it('decodes a \\u{…} escape in a bare key', () => {
-        const src = `@Component({ style\\u{55}rls: ['./a.css'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('rejects a method call on an inline `styles` string literal', () => {
+      expect(styles(`styles: '.a{}'.replace('a', 'b')`)).toBeNull()
+    })
 
-      it('decodes an escape at the first character of a bare key', () => {
-        const src = `@Component({ \\u0073tyleUrls: ['./a.css'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('rejects a method call on a `styles` array literal', () => {
+      expect(styles(`styles: ['.a{}'].concat(MORE)`)).toBeNull()
+    })
 
-      it('decodes an escaped singular `styleUrl` key', () => {
-        const src = `@Component({ style\\u0055rl: './solo.css' })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./solo.css'])
-      })
+    it('rejects a method call on a `template` literal', () => {
+      expect(template(`template: '<p/>'.replace('a', 'b')`)).toBeNull()
+    })
 
-      it('decodes an escaped inline `styles` key', () => {
-        const src = `@Component({ style\\u0073: ['.x{}'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.inline)).toEqual(['.x{}'])
-      })
+    it('rejects a TypeScript `as` assertion after an inline `styles` string', () => {
+      expect(styles(`styles: '.a{}' as string`)).toBeNull()
+    })
 
-      it('decodes a quoted key carrying an escape', () => {
-        // A quoted key is a string literal, so it decodes by string rules.
-        const src = `@Component({ 'style\\u0055rls': ['./a.css'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('rejects a TypeScript `as const` assertion after a `styles` array', () => {
+      expect(styles(`styles: ['.a{}'] as const`)).toBeNull()
+    })
 
-      it('treats an escaped shorthand singular `styleUrl` like the plain one', () => {
-        const src = `@Component({ template: '<p/>', style\\u0055rl })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
-      })
+    it('rejects a TypeScript `as` assertion after a `template`', () => {
+      expect(template(`template: '<p/>' as string`)).toBeNull()
+    })
 
-      it('leaves an escaped shorthand `styleUrls` absent, as the compiler drops it', () => {
-        const src = `@Component({ template: '<p/>', style\\u0055rls })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
-      })
+    it('rejects a non-null assertion after an inline `styles` string', () => {
+      expect(styles(`styles: '.a{}'!`)).toBeNull()
+    })
 
-      it('keeps the cross-match guards for decoded keys', () => {
-        const urls = `@Component({ style\\u0055rls: ['./a.css'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(urls, 'Foo')!.inline).toEqual({ kind: 'absent' })
-        const singular = `@Component({ style\\u0055rl: './a.css' })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(singular, 'Foo')!.inline).toEqual({ kind: 'absent' })
-        const inline = `@Component({ style\\u0073: ['.x{}'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(inline, 'Foo')!.urls).toEqual({ kind: 'absent' })
-      })
+    it('rejects a `satisfies` clause after an inline `styles` string', () => {
+      expect(styles(`styles: '.a{}' satisfies string`)).toBeNull()
+    })
 
-      it('does not match a decoded key that names something else', () => {
-        const src = `@Component({ style\\u0055rlsExtra: ['./a.css'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
-      })
+    it('rejects a trailing expression hidden behind a comment', () => {
+      expect(styles(`styles: '.a{}' /* why */ + EXTRA`)).toBeNull()
+    })
 
-      it('does not match a lookalike built from a non-ASCII letter', () => {
-        // Cyrillic \u0435 in place of `e` — a different identifier, and the
-        // compiler reports no styleUrls for it either.
-        const src = `@Component({ styl\u0435Urls: ['./a.css'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'absent' })
-      })
+    // The other side of the rule: a value the property really does end at
+    // stays readable, whether a comma, the object's brace or a comment
+    // closes it out.
+    it.each([
+      [`styles: ['.a{}']`, `the object's closing brace`, `['.a{}']`],
+      [`styles: ['.a{}'],`, 'a trailing comma', `['.a{}']`],
+      [`styles: '.a{}' /* why */`, 'a block comment then the brace', `'.a{}'`],
+      [`styles: '.a{}' // why\n`, 'a line comment then the brace', `'.a{}'`],
+    ])('still reads %j, ended by %s', (field, _why, expected) => {
+      const src = `@Component({ selector: 'a', ${field} })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(expected)
+    })
 
-      it('reports a malformed escape in a key as unreadable, not absent', () => {
-        const src = `@Component({ style\\u00ZZrls: ['./a.css'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-          urls: { kind: 'unreadable' },
-          inline: { kind: 'unreadable' },
-        })
-      })
+    it.each([
+      [`template: '<p/>'`, `the object's closing brace`],
+      [`template: '<p/>',`, 'a trailing comma'],
+    ])('still reads %j, ended by %s', (field) => {
+      const src = `@Component({ selector: 'a', ${field} })\nexport class Foo {}`
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<p/>'`)
+    })
+  })
 
-      it('reports a \\xHH escape in a key as unreadable — illegal in an identifier', () => {
-        const src = `@Component({ style\\x55rls: ['./a.css'] })\nexport class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')).toEqual({
-          urls: { kind: 'unreadable' },
-          inline: { kind: 'unreadable' },
-        })
-      })
+  // Escaped identifier keys. `styles` IS `styles` to the TypeScript
+  // parser, so the strip has to empty it like any other spelling of the
+  // field. Decoding keeps the match exact where refusing would silently
+  // leave a real `styles:` field in the stripped source.
+  describe('escaped keys', () => {
+    it('decodes a \\uHHHH escape in a bare key', () => {
+      const src = `@Component({ style\\u0073: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
+    })
 
-      it('does not let an escaped unrelated key degrade a readable field', () => {
-        const src = `@Component({ sel\\u0065ctor: 'a', styleUrls: ['./a.css'] })\nexport class Foo {}`
-        expect(literalsIn(src, locateStyleFieldsFor(src, 'Foo')!.urls)).toEqual(['./a.css'])
-      })
+    it('decodes a \\u{…} escape in a bare key', () => {
+      const src = `@Component({ style\\u{73}: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
+    })
+
+    it('decodes an escape at the first character of a bare key', () => {
+      const src = `@Component({ \\u0073tyles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
+    })
+
+    it('decodes an escaped `template` key', () => {
+      const src = `@Component({ templat\\u0065: '<p/>' })\nexport class Foo {}`
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<p/>'`)
+    })
+
+    it('decodes a quoted key carrying an escape', () => {
+      // A quoted key is a string literal, so it decodes by string rules.
+      const src = `@Component({ 'style\\u0073': ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
+    })
+
+    it('does not locate an escaped shorthand, which has no value to empty', () => {
+      const src = `@Component({ template: '<p/>', style\\u0073 })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match a decoded key that names something else', () => {
+      const src = `@Component({ style\\u0073Extra: ['.x{}'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('keeps the cross-match guards for decoded keys', () => {
+      const urls = `@Component({ style\\u0055rls: ['./a.css'] })\nexport class Foo {}`
+      expect(stylesFieldFor(urls, 'Foo')).toBeNull()
+      const tplUrl = `@Component({ templat\\u0065Url: './a.html' })\nexport class Foo {}`
+      expect(templateFieldFor(tplUrl, 'Foo')).toBeNull()
+    })
+
+    it('does not match a lookalike built from a non-ASCII letter', () => {
+      // Cyrillic е in place of `e` — a different identifier entirely.
+      const src = `@Component({ stylеs: ['.x{}'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match a key whose \\u escape is malformed', () => {
+      const src = `@Component({ style\\u00ZZs: ['.x{}'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not match a key carrying a \\xHH escape — illegal in an identifier', () => {
+      const src = `@Component({ style\\x73: ['.x{}'] })\nexport class Foo {}`
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
+    })
+
+    it('does not let an escaped unrelated key degrade a readable field', () => {
+      const src = `@Component({ sel\\u0065ctor: 'a', styles: ['.x{}'] })\nexport class Foo {}`
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['.x{}']`)
     })
   })
 
@@ -841,342 +613,7 @@ describe('decorator-fields utils', () => {
   // closes (real field missed), and a `// styles: [...]` line comment
   // or `/* styles: [...] */` block comment as a real field (wrong
   // range returned).
-  //
-  // `complete` reports whether every element was read. A caller acting
-  // on a partial list silently drops stylesheets.
   // -----------------------------------------------------------------
-  describe('readStringLiterals', () => {
-    // Read the value of `styles:` from a one-component source, so these
-    // exercise the same path the extractors use.
-    const readOf = (value: string) => {
-      const src = `@Component({ styles: ${value} })\nclass Foo {}`
-      return readStringLiterals(src, locateStylesFieldFor(src, 'Foo')!)
-    }
-    const literalsOf = (value: string): string[] => readOf(value).literals
-
-    it('reads every entry of an array in order', () => {
-      expect(readOf(`['./a.css', './b.css']`)).toEqual({
-        literals: ['./a.css', './b.css'],
-        complete: true,
-      })
-    })
-
-    it('reads a single-entry array', () => {
-      expect(literalsOf(`['./a.css']`)).toEqual(['./a.css'])
-    })
-
-    it('reads a bare string value as one entry', () => {
-      expect(readOf(`'./a.css'`)).toEqual({ literals: ['./a.css'], complete: true })
-    })
-
-    it('reads mixed quote styles, including template literals', () => {
-      expect(literalsOf('[\'./a.css\', "./b.css", `./c.css`]')).toEqual([
-        './a.css',
-        './b.css',
-        './c.css',
-      ])
-    })
-
-    it('reports an empty array as complete, not unknown', () => {
-      // `styles: []` is a definitive answer: this class has no styles.
-      expect(readOf(`[]`)).toEqual({ literals: [], complete: true })
-    })
-
-    it('decodes hex and unicode escapes to the value they denote', () => {
-      // The Rust extractor reports the cooked value; a raw read would name a
-      // path that does not exist.
-      expect(literalsOf(String.raw`['.\x2fa.css', '\u{2e}/b.css']`)).toEqual(['./a.css', './b.css'])
-    })
-
-    it('decodes the standard single-character escapes', () => {
-      expect(literalsOf(String.raw`['a\nb\tc\rd\be\ff\vg']`)).toEqual(['a\nb\tc\rd\be\ff\vg'])
-    })
-
-    it('decodes a backslash escape to one backslash', () => {
-      expect(literalsOf(String.raw`['a\\b']`)).toEqual([String.raw`a\b`])
-    })
-
-    it('decodes an unrecognized escape to the character itself', () => {
-      // `\q` is a NonEscapeCharacter: it denotes `q`, which is what the Rust
-      // extractor reports too.
-      expect(literalsOf(String.raw`['./a\qb.css']`)).toEqual(['./aqb.css'])
-    })
-
-    it('drops a line continuation', () => {
-      expect(literalsOf("['a\\\nb']")).toEqual(['ab'])
-    })
-
-    it('reports a truncated unicode escape as incomplete', () => {
-      expect(readOf(String.raw`['./a\u12']`)).toEqual({ literals: [], complete: false })
-    })
-
-    it('reports a malformed hex escape as incomplete', () => {
-      expect(readOf(String.raw`['./a\xZZ']`)).toEqual({ literals: [], complete: false })
-    })
-
-    it('reports a legacy octal escape as incomplete', () => {
-      // Illegal in a module; guessing a value would be worse than falling back.
-      expect(readOf(String.raw`['./a\101']`)).toEqual({ literals: [], complete: false })
-    })
-
-    it('leaves a literal with no escapes byte for byte unchanged', () => {
-      const css = `a::before { content: "x"; } [data-x="y"] { color: red; }`
-      expect(literalsOf(`['${css}']`)).toEqual([css])
-    })
-
-    it('decodes an escaped quote inside a literal', () => {
-      // The literal denotes `it's.css`, which is what the Rust extractor
-      // reports and what has to be resolved against the filesystem.
-      expect(literalsOf(`['it\\'s.css']`)).toEqual([`it's.css`])
-    })
-
-    it('ignores an apostrophe inside a block comment before an entry', () => {
-      expect(literalsOf(`[/* don't drop this */ './a.css']`)).toEqual(['./a.css'])
-    })
-
-    it('ignores an apostrophe inside a line comment before an entry', () => {
-      expect(literalsOf(`[\n  // it's here\n  './a.css',\n]`)).toEqual(['./a.css'])
-    })
-
-    it('ignores a comment between two entries', () => {
-      expect(literalsOf(`['./a.css', /* don't */ './b.css']`)).toEqual(['./a.css', './b.css'])
-    })
-
-    it('reports a non-literal entry as incomplete', () => {
-      // The literal alongside it is not a partial answer to act on: acting
-      // on it would drop the stylesheet the constant resolves to.
-      expect(readOf(`[SOME_CONST, './a.css']`).complete).toBe(false)
-    })
-
-    // -----------------------------------------------------------------
-    // Spread elements (`...X`) and elisions (holes).
-    //
-    // `extract_string_array` asks every array element for `as_expression()`,
-    // and `ArrayExpressionElement::is_expression()` enumerates neither
-    // `SpreadElement` nor `Elision`. Both are therefore dropped BEFORE the
-    // value resolver runs, for every possible program — the const table is
-    // never consulted for them. Dropping them here keeps the array complete
-    // and matches what the component actually compiles to; calling it
-    // unknown would hand the class its siblings' stylesheets instead.
-    //
-    // Measured against the Rust extractor:
-    //   [...SHARED, './own.css']       -> ["./own.css"]
-    //   [...SHARED]                    -> []
-    //   [S, './own.css']  (S a const)  -> ["./shared.css", "./own.css"]
-    //
-    // Every OTHER element IS an expression the resolver may fold from
-    // constants this scan cannot read, so those still mark the array
-    // unknown. Same reasoning as the decorator-level spread in
-    // `hasUnreadableKey`; the two now agree.
-    // -----------------------------------------------------------------
-    it('drops a leading spread and reads the rest, like the compiler', () => {
-      expect(readOf(`[...SHARED, './a.css']`)).toEqual({
-        literals: ['./a.css'],
-        complete: true,
-      })
-    })
-
-    it('drops a trailing spread and reads the rest', () => {
-      expect(readOf(`['./a.css', ...SHARED]`)).toEqual({
-        literals: ['./a.css'],
-        complete: true,
-      })
-    })
-
-    it('reads a spread-only array as declaring nothing', () => {
-      expect(readOf(`[...SHARED]`)).toEqual({ literals: [], complete: true })
-    })
-
-    it('reads an array of two spreads as declaring nothing', () => {
-      expect(readOf(`[...S1, ...S2]`)).toEqual({ literals: [], complete: true })
-    })
-
-    it('drops a spread of an inline array literal', () => {
-      // The compiler drops the element whole, so a literal INSIDE the spread
-      // is not part of this component's styles.
-      expect(readOf(`[...['./shared.css'], './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('never leaks a literal used as a computed member inside a spread', () => {
-      expect(readOf(`[...obj['./leak.css'], './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('never leaks a literal passed as a call argument inside a spread', () => {
-      expect(readOf(`[...f('./leak.css'), './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('never leaks a literal inside an object literal in a spread', () => {
-      expect(readOf(`[...Object.values({ k: './leak.css' }), './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('keeps a comma inside parens from ending the spread element', () => {
-      expect(readOf(`[...f(a, b), './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('keeps a comma inside a nested array from ending the spread element', () => {
-      expect(readOf(`[...['./x.css', './y.css'], './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('ignores a block comment inside a spread', () => {
-      expect(readOf(`[.../* , './leak.css' */ SHARED, './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('ignores an apostrophe and a comma inside a line comment in a spread', () => {
-      expect(readOf(`[...SHARED // don't , './leak.css'\n, './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('skips an interpolated template literal inside a spread', () => {
-      // The `${...}` pushes a brace context, so the comma inside the template
-      // does not end the element.
-      expect(readOf("[...tag`${DIR}/a, b`, './own.css']")).toEqual({
-        literals: ['./own.css'],
-        complete: true,
-      })
-    })
-
-    it('drops a spread in a `styleUrls` array too', () => {
-      const src = `@Component({ styleUrls: [...SHARED, './a.css'] })\nclass Foo {}`
-      expect(readStringLiterals(src, locateStyleUrlsFor(src, 'Foo')!)).toEqual({
-        literals: ['./a.css'],
-        complete: true,
-      })
-    })
-
-    it('drops a spread in an inline `styles` array', () => {
-      expect(readOf(`[...SHARED_INLINE, ':host{}']`)).toEqual({
-        literals: [':host{}'],
-        complete: true,
-      })
-    })
-
-    it('reports an unterminated string inside a spread as incomplete', () => {
-      // The quote never closes, so where the element ends is unknowable.
-      // A real file cannot produce this range (the locator needs a balanced
-      // `]`), but the scan must refuse to guess rather than run off.
-      const src = `[...f('./leak.css)]`
-      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
-        literals: [],
-        complete: false,
-      })
-    })
-
-    it('reports an unclosed paren inside a spread as incomplete', () => {
-      const src = `[...f(a]`
-      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
-        literals: [],
-        complete: false,
-      })
-    })
-
-    it('reports a spread ending in an escape as incomplete', () => {
-      // The trailing escape consumes the array's own `]`, so the scan
-      // overshoots the range: incomplete, not a guess.
-      const src = String.raw`[...'a\]`
-      expect(readStringLiterals(src, [0, src.length - 1])).toEqual({
-        literals: [],
-        complete: false,
-      })
-    })
-
-    it('does not treat a leading decimal point as a spread', () => {
-      expect(readOf(`[.5, './a.css']`).complete).toBe(false)
-    })
-
-    it('does not treat two dots as a spread', () => {
-      expect(readOf(`[..X, './a.css']`).complete).toBe(false)
-    })
-
-    it('does not treat a member access as a spread', () => {
-      expect(readOf(`[STYLES.a, './a.css']`).complete).toBe(false)
-    })
-
-    it('does not treat an optional chain as a spread', () => {
-      expect(readOf(`[STYLES?.a, './a.css']`).complete).toBe(false)
-    })
-
-    it('still reports a bare identifier element as incomplete, unlike a spread', () => {
-      // Measured: the Rust extractor DOES fold `S` from the const table, so
-      // the literals gathered here are not the component's full style list.
-      expect(readOf(`[S, './own.css']`)).toEqual({
-        literals: ['./own.css'],
-        complete: false,
-      })
-    })
-
-    it('reads across a leading elision, which the compiler also drops', () => {
-      expect(readOf(`[, './a.css']`)).toEqual({ literals: ['./a.css'], complete: true })
-    })
-
-    it('reads across an elision between two entries', () => {
-      expect(readOf(`['./a.css', , './b.css']`)).toEqual({
-        literals: ['./a.css', './b.css'],
-        complete: true,
-      })
-    })
-
-    it('reports an interpolated template literal as incomplete', () => {
-      // The raw slice is `${DIR}/a.css`, not a real path. The Rust extractor
-      // folds it; this scan cannot.
-      expect(readOf('[`${DIR}/a.css`]').complete).toBe(false)
-    })
-
-    it('reports a bare interpolated template literal as incomplete', () => {
-      expect(readOf('`${DIR}/a.css`').complete).toBe(false)
-    })
-
-    it('treats an escaped `${` in a template literal as ordinary text', () => {
-      // `hasInterpolation` reads the odd backslash as an escape, so the
-      // literal is complete; decoding then resolves `\$` to `$`, leaving the
-      // `${…}` as the literal text it denotes. The two must agree.
-      expect(readOf('[`\\${NOT_INTERPOLATED}.css`]')).toEqual({
-        literals: ['${NOT_INTERPOLATED}.css'],
-        complete: true,
-      })
-    })
-
-    it('treats `${` inside a quoted string as ordinary text', () => {
-      expect(readOf(`['\${DIR}/a.css']`)).toEqual({
-        literals: ['${DIR}/a.css'],
-        complete: true,
-      })
-    })
-
-    it('stops at an unterminated literal and reports incomplete', () => {
-      // The locator bounds the range, so the unterminated entry is dropped.
-      const src = `@Component({ styles: ['./a.css', './b.css] })\nclass Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')
-      if (range) {
-        const read = readStringLiterals(src, range)
-        expect(read.literals).toEqual(['./a.css'])
-        expect(read.complete).toBe(false)
-      }
-    })
-  })
-
   describe('comment handling in @Component args', () => {
     it('does not get stuck on an apostrophe inside a line comment', () => {
       const src = `@Component({
@@ -1184,8 +621,7 @@ describe('decorator-fields utils', () => {
   styles: ['real']
 })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('does not get stuck on apostrophes inside a block comment', () => {
@@ -1194,8 +630,7 @@ class Foo {}`
   styles: ['real']
 })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('ignores `styles:` inside a line comment', () => {
@@ -1204,8 +639,7 @@ class Foo {}`
   styles: ['real']
 })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('ignores `styles:` inside a block comment', () => {
@@ -1214,8 +648,7 @@ class Foo {}`
   styles: ['real']
 })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('ignores `template:` inside a block comment', () => {
@@ -1224,8 +657,7 @@ class Foo {}`
   template: '<real/>'
 })
 class Foo {}`
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
 
     it('returns null when the only `styles:` is inside a comment', () => {
@@ -1234,7 +666,7 @@ class Foo {}`
   selector: 'app-foo'
 })
 class Foo {}`
-      expect(locateStylesFieldFor(src, 'Foo')).toBeNull()
+      expect(stylesFieldFor(src, 'Foo')).toBeNull()
     })
 
     it('handles a block comment spanning multiple lines', () => {
@@ -1246,8 +678,7 @@ class Foo {}`
   styles: ['real']
 })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('handles a comment between @Component(...) and the class declaration', () => {
@@ -1263,141 +694,105 @@ export class Foo {}`
       // `'http://x'` is a URL in a value, not a comment.
       const src = `@Component({ template: 'http://x', styles: ['real'] })
 class Foo {}`
-      const tRange = locateTemplateStringFor(src, 'Foo')!
-      const sRange = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(tRange[0], tRange[1] + 1)).toBe(`'http://x'`)
-      expect(src.slice(sRange[0], sRange[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'http://x'`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('does NOT treat `/*` inside a string as a block comment', () => {
       const src = `@Component({ template: '/* not a comment */', styles: ['real'] })
 class Foo {}`
-      const sRange = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(sRange[0], sRange[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
-    // A comment may sit anywhere inside a style field declaration, and the
-    // Rust extractor reads straight past it. Every placement below was
-    // measured against `extractComponentUrls`, which reports `./x.css` for
-    // each one. Reading any of them as absent would tell the caller the
-    // class declares no styles, which strips the component's CSS.
-    describe('comment placement within a style field declaration', () => {
-      const urlsOf = (src: string) => {
-        const field = locateStyleFieldsFor(src, 'Foo')!.urls
-        expect(field.kind).toBe('literal')
-        return readStringLiterals(src, (field as { range: [number, number] }).range).literals
-      }
+    // A comment may sit anywhere inside a field declaration, and the strip
+    // has to read straight past it — both to find the field at all, and to
+    // put the range's closing delimiter in the right place.
+    describe('comment placement within a field declaration', () => {
       const decorator = (field: string) =>
-        `@Component({ template: '<p/>', ${field} })\nexport class Foo {}`
+        `@Component({ selector: 'a', ${field} })\nexport class Foo {}`
+      const stylesText = (field: string) => {
+        const src = decorator(field)
+        return textOf(src, stylesFieldFor(src, 'Foo')!)
+      }
+      const templateText = (field: string) => {
+        const src = decorator(field)
+        return textOf(src, templateFieldFor(src, 'Foo')!)
+      }
 
       it('reads a field with a block comment between the key and the colon', () => {
-        expect(urlsOf(decorator(`styleUrls /* why */: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`styles /* why */: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('reads a field with a line comment between the key and the colon', () => {
-        expect(urlsOf(decorator(`styleUrls // why\n: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`styles // why\n: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('reads a field with a comment between the colon and the value', () => {
-        expect(urlsOf(decorator(`styleUrls: /* why */ ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`styles: /* why */ ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('reads a field with a comment before the key', () => {
-        expect(urlsOf(decorator(`/* why */ styleUrls: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`/* why */ styles: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('reads a field with two comments between the key and the colon', () => {
-        expect(urlsOf(decorator(`styleUrls /* a */ /* b */: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`styles /* a */ /* b */: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('reads a quoted key with a comment before the colon', () => {
-        expect(urlsOf(decorator(`'styleUrls' /* why */: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`'styles' /* why */: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
-      it('reads the singular `styleUrl` with a comment before the colon', () => {
-        expect(urlsOf(decorator(`styleUrl /* why */: './x.css'`))).toEqual(['./x.css'])
+      it('reads `template` with a comment before the colon', () => {
+        expect(templateText(`template /* why */: '<p/>'`)).toBe(`'<p/>'`)
       })
 
-      it('reads the singular `styleUrl` with a comment after the colon', () => {
-        expect(urlsOf(decorator(`styleUrl: /* why */ './x.css'`))).toEqual(['./x.css'])
+      it('reads `template` with a comment after the colon', () => {
+        expect(templateText(`template: /* why */ '<p/>'`)).toBe(`'<p/>'`)
       })
 
-      it('reads an array whose first literal follows a comment', () => {
-        expect(urlsOf(decorator(`styleUrls: [/* why */ './x.css']`))).toEqual(['./x.css'])
+      // The range has to span the whole array, comments included — the strip
+      // empties everything between the brackets.
+      it('spans an array whose first entry follows a block comment', () => {
+        expect(stylesText(`styles: [/* why */ '.x{}']`)).toBe(`[/* why */ '.x{}']`)
       })
 
-      it('reads an array whose first literal follows a line comment', () => {
-        expect(urlsOf(decorator(`styleUrls: [// why\n './x.css']`))).toEqual(['./x.css'])
+      it('spans an array whose first entry follows a line comment', () => {
+        expect(stylesText(`styles: [// why\n '.x{}']`)).toBe(`[// why\n '.x{}']`)
       })
 
-      it('reads an array with a comment before the separating comma', () => {
-        expect(urlsOf(decorator(`styleUrls: ['./x.css' /* why */, './y.css']`))).toEqual([
-          './x.css',
-          './y.css',
-        ])
+      it('spans an array with a comment before the separating comma', () => {
+        expect(stylesText(`styles: ['.x{}' /* why */, '.y{}']`)).toBe(`['.x{}' /* why */, '.y{}']`)
       })
 
-      it('reads an array with a comment after the separating comma', () => {
-        expect(urlsOf(decorator(`styleUrls: ['./x.css', /* why */ './y.css']`))).toEqual([
-          './x.css',
-          './y.css',
-        ])
+      it('spans an array with a comment after the last entry', () => {
+        expect(stylesText(`styles: ['.x{}' /* why */]`)).toBe(`['.x{}' /* why */]`)
       })
 
-      it('reads an array with a comment after the last literal', () => {
-        expect(urlsOf(decorator(`styleUrls: ['./x.css' /* why */]`))).toEqual(['./x.css'])
-      })
-
-      it('reads an inline `styles` field with a comment before the colon', () => {
-        const src = decorator(`styles /* why */: ['.a{}']`)
-        const field = locateStyleFieldsFor(src, 'Foo')!.inline
-        expect(field.kind).toBe('literal')
-        expect(
-          readStringLiterals(src, (field as { range: [number, number] }).range).literals,
-        ).toEqual(['.a{}'])
+      it('does not let a `]` inside a comment close the array early', () => {
+        expect(stylesText(`styles: ['.x{}' /* ] */]`)).toBe(`['.x{}' /* ] */]`)
       })
 
       // An array holding only a comment is still a syntactically valid empty
-      // array: a definite "no styles", not an unreadable value.
-      it('reads an array holding only a comment as definitively empty', () => {
-        const src = decorator(`styleUrls: [/* why */]`)
-        const field = locateStyleFieldsFor(src, 'Foo')!.urls
-        expect(field.kind).toBe('literal')
-        expect(
-          readStringLiterals(src, (field as { range: [number, number] }).range).literals,
-        ).toEqual([])
+      // array, and emptying it is still the right answer.
+      it('spans an array holding only a comment, which strips to `[]`', () => {
+        const src = decorator(`styles: [/* why */]`)
+        const range = stylesFieldFor(src, 'Foo')!
+        expect(textOf(src, range)).toBe(`[/* why */]`)
+        expect(emptyDelimitedRange(src, range)).toContain(`styles: []`)
       })
 
       // Comment *contents* must never be mistaken for structure.
       it('ignores a colon, comma and brackets inside the comment', () => {
-        expect(urlsOf(decorator(`styleUrls /* a: b, c ] [ */: ['./x.css']`))).toEqual(['./x.css'])
+        expect(stylesText(`styles /* a: b, c ] [ */: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
-      it('ignores a decoy style field inside the comment', () => {
-        expect(urlsOf(decorator(`styleUrls /* styleUrl: './fake.css' */: ['./x.css']`))).toEqual([
-          './x.css',
-        ])
+      it('ignores a decoy field inside the comment', () => {
+        expect(stylesText(`styles /* styles: './fake.css' */: ['.x{}']`)).toBe(`['.x{}']`)
       })
 
       it('ignores an apostrophe inside a comment between the key and the colon', () => {
-        expect(urlsOf(decorator(`styleUrls /* don't */: ['./x.css']`))).toEqual(['./x.css'])
-      })
-
-      // A comment must not turn a shorthand back into "absent": the compiler
-      // resolves a same-file constant behind the singular `styleUrl`
-      // (verified: `./sh.css`), so this class must still reach the fallback.
-      it('keeps a shorthand `styleUrl` unreadable when a comment precedes the closing brace', () => {
-        const src = `const styleUrl = './sh.css';
-@Component({ template: '<p/>', styleUrl /* why */ })
-export class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
-      })
-
-      it('keeps a shorthand `styleUrl` unreadable when a comment precedes the comma', () => {
-        const src = `const styleUrl = './sh.css';
-@Component({ template: '<p/>', styleUrl /* why */, selector: 'a' })
-export class Foo {}`
-        expect(locateStyleFieldsFor(src, 'Foo')!.urls).toEqual({ kind: 'unreadable' })
+        expect(stylesText(`styles /* don't */: ['.x{}']`)).toBe(`['.x{}']`)
       })
     })
   })
@@ -1416,58 +811,50 @@ export class Foo {}`
  */
 @Component({ template: '<real/>' })
 export class Foo {}`
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
 
     it('ignores `@Component(...)` text inside a string literal preceding the real decorator', () => {
       const src = `const docs = "use @Component({ template: 'fake' }) to declare"
 @Component({ template: '<real/>' })
 class Foo {}`
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
 
     it('ignores `@Component(...)` text inside a backtick template preceding the real decorator', () => {
       const src =
         "`Use @Component({ template: 'fake' })`\n@Component({ template: '<real/>' })\nclass Foo {}"
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
 
     it('does not get confused by a `template:` literal that mentions the word "styles:"', () => {
       const src = `@Component({ template: 'styles: ["fake"]', styles: ['real'] })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('handles unbalanced braces or brackets inside template string content', () => {
       const src = `@Component({ template: 'has { and ] literally', styles: ['real'] })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('treats CRLF line endings the same as LF', () => {
       const src = `@Component({\r\n  // a comment with an apostrophe: I'm here\r\n  styles: ['real']\r\n})\r\nclass Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('handles `...spread` followed by a real `styles:` field', () => {
       const src = `const base = { selector: 'app' }
 @Component({ ...base, styles: ['real'] })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('handles a selector value that contains parens', () => {
       const src = `@Component({ selector: 'foo(bar)', styles: ['real'] })
 class Foo {}`
-      const range = locateStylesFieldFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`['real']`)
+      expect(textOf(src, stylesFieldFor(src, 'Foo')!)).toBe(`['real']`)
     })
 
     it('ignores a class member method named `Component`', () => {
@@ -1488,16 +875,13 @@ const helper = () => '@Component({...})'
 class Second {}`
       const out = locateComponentDecorators(src)
       expect(out.map((d) => d.className)).toEqual(['First', 'Second'])
-      const fRange = locateTemplateStringFor(src, 'First')!
-      const sRange = locateTemplateStringFor(src, 'Second')!
-      expect(src.slice(fRange[0], fRange[1] + 1)).toBe(`'<a/>'`)
-      expect(src.slice(sRange[0], sRange[1] + 1)).toBe(`'<b/>'`)
+      expect(textOf(src, templateFieldFor(src, 'First')!)).toBe(`'<a/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Second')!)).toBe(`'<b/>'`)
     })
 
     it('handles literal `$` followed by `${...}` interpolation in a template literal', () => {
       const src = '@Component({ template: `cost $5 or $${price}` })\nclass Foo {}'
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe('`cost $5 or $${price}`')
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe('`cost $5 or $${price}`')
     })
 
     it('coexists with other class-level decorators like @SignalComponent', () => {
@@ -1507,8 +891,7 @@ class Foo {}`
       // Only @Component is recognized; @SignalComponent is ignored entirely.
       const out = locateComponentDecorators(src)
       expect(out).toHaveLength(1)
-      const range = locateTemplateStringFor(src, 'Foo')!
-      expect(src.slice(range[0], range[1] + 1)).toBe(`'<real/>'`)
+      expect(textOf(src, templateFieldFor(src, 'Foo')!)).toBe(`'<real/>'`)
     })
   })
 
