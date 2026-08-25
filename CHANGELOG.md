@@ -1,9 +1,7 @@
-# Changelog for Oxlint
+# Changelog
 
-See [Oxlint GitHub Release](https://github.com/oxc-project/oxc/releases)
+## 0.0.38 - 2026-08-25
 
-# Changelog for published crates
-
-See each `./crates/*/CHANGELOG.md`
-
-See [summarized release PR](https://github.com/oxc-project/oxc/pulls?q=is%3Apr+is%3Aclosed+release%28crates%29)
+- Fixed template HMR so changes reach every component that shares a template without forcing a full-page reload.
+- Fixed style HMR for shared resources, multiple components in one file, imported resources, and components that remove their last style.
+- Updated Oxc and related dependencies.
