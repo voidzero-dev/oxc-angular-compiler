@@ -2700,4 +2700,138 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).toContain('two')
     expect(body).not.toContain('styles:')
   })
+
+  // A read that FAILED on one stylesheet but succeeded on another is not the
+  // same as a read that found nothing. The `complete` flag exists to stop an
+  // unknown answer from becoming a definitive `styles: []` and wiping live
+  // CSS — it must not also throw away content that WAS read. A permanently
+  // unreadable stylesheet (missing, a permission error, a preprocessor
+  // failure) would otherwise make every edit to its healthy sibling a no-op,
+  // and the pending slot is consumed either way, so nothing retries.
+
+  it('serves the readable stylesheet of a class whose other stylesheet is missing', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const partialOkCssPath = join(appDir, 'ps457-partial-ok.component.css')
+    const partialGoneCssPath = join(appDir, 'ps457-partial-gone.component.css')
+    const partialPath = join(appDir, 'ps457-partial.component.ts')
+    writeFileSync(partialOkCssPath, '.PS457_PARTIAL_MARKER { color: red; }')
+    // Never written: this one is unreadable on every attempt, so the read is
+    // permanently incomplete and there is nothing a retry could recover.
+    rmSync(partialGoneCssPath, { force: true })
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-partial',
+        template: '<p>partial</p>',
+        styleUrls: [
+          './ps457-partial-ok.component.css',
+          './ps457-partial-gone.component.css',
+        ],
+      })
+      export class PartialCssComponent {}
+    `
+    writeFileSync(partialPath, source)
+    await transformSource(plugin, source, partialPath)
+
+    // The user edits the HEALTHY stylesheet. A partial answer that still holds
+    // content is an UPDATE, which is what main did; only the empty one has to
+    // stay unknown.
+    writeFileSync(partialOkCssPath, '.PS457_PARTIAL_MARKER { color: green; }')
+    const ctx = createMockHmrContext(
+      normalizePath(partialOkCssPath),
+      [{ id: normalizePath(partialOkCssPath) }],
+      mockServer,
+    )
+    await callHandleHotUpdate(plugin, ctx)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${partialPath}@PartialCssComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('PS457_PARTIAL_MARKER')
+    expect(body).toContain('green')
+    // Delivering a partial read must never be confused with clearing.
+    expect(body).not.toContain('styles: []')
+  })
+
+  it('serves the inline styles of a class whose styleUrl is missing', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const inlineKeptCssPath = join(appDir, 'ps457-inline-kept.component.css')
+    const inlineKeptPath = join(appDir, 'ps457-inline-kept.component.ts')
+    rmSync(inlineKeptCssPath, { force: true })
+
+    // The external stylesheet is unreadable, but the inline `styles` entry was
+    // read straight out of the decorator and is not in doubt.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-inline-kept',
+        template: '<p>one</p>',
+        styles: ['.PS457_INLINE_KEPT_MARKER { color: red; }'],
+        styleUrls: ['./ps457-inline-kept.component.css'],
+      })
+      export class InlineKeptComponent {}
+    `
+    writeFileSync(inlineKeptPath, source)
+    await transformSource(plugin, source, inlineKeptPath)
+
+    const edited = source.replace('<p>one</p>', '<p>two</p>')
+    writeFileSync(inlineKeptPath, edited)
+    const ctx = createMockHmrContext(inlineKeptPath, [{ id: inlineKeptPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${inlineKeptPath}@InlineKeptComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${inlineKeptPath}@InlineKeptComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).toContain('PS457_INLINE_KEPT_MARKER')
+    expect(body).not.toContain('styles: []')
+  })
+
+  it('still omits `styles` when the incomplete read produced nothing at all', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const onlyGoneCssPath = join(appDir, 'ps457-only-gone.component.css')
+    const onlyGonePath = join(appDir, 'ps457-only-gone.component.ts')
+    rmSync(onlyGoneCssPath, { force: true })
+
+    // The guard on the other side of the same branch: an incomplete read that
+    // yields NO content stays unknown. `[]` here would clear the CSS the
+    // missing stylesheet used to supply.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps457-only-gone',
+        template: '<p>one</p>',
+        styleUrls: ['./ps457-only-gone.component.css'],
+      })
+      export class OnlyGoneComponent {}
+    `
+    writeFileSync(onlyGonePath, source)
+    await transformSource(plugin, source, onlyGonePath)
+
+    const edited = source.replace('<p>one</p>', '<p>two</p>')
+    writeFileSync(onlyGonePath, edited)
+    const ctx = createMockHmrContext(onlyGonePath, [{ id: onlyGonePath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    expectDispatched(mockServer, `${onlyGonePath}@OnlyGoneComponent`)
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${onlyGonePath}@OnlyGoneComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
+  })
 })

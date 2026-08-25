@@ -752,16 +752,24 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                     classStyles.urls.length > 0
                       ? await readStyles(classStyles.urls)
                       : { contents: [] as string[], complete: true }
-                  // Definitive only when the class's own decorator was read
-                  // (`classStyles !== null`) AND every stylesheet it names was
-                  // read too. An empty result then means the component really
-                  // has no styles and must be cleared — including the case
-                  // where its one stylesheet is now empty or whitespace.
-                  if (external.complete) {
-                    styles = [...classStyles.inline, ...external.contents].filter(
-                      (style) => style.trim().length > 0,
-                    )
-                  }
+                  const merged = [...classStyles.inline, ...external.contents].filter(
+                    (style) => style.trim().length > 0,
+                  )
+                  // `complete` guards exactly ONE thing: turning an unknown
+                  // answer into a definitive `[]` that wipes live CSS. It is
+                  // not a reason to throw away content that WAS read. A
+                  // stylesheet that failed while a sibling succeeded is a
+                  // PARTIAL update — which is what main always delivered,
+                  // because the old `readStyles` swallowed failures in a
+                  // `catch` and returned whatever it got. Dropping it would
+                  // silently lose every edit to the healthy sibling of a
+                  // permanently unreadable stylesheet, and the pending slot is
+                  // consumed either way, so nothing retries.
+                  //
+                  // So: a complete read is definitive and may clear; an
+                  // incomplete one falls back to main's rule exactly — send
+                  // what was read when it is non-empty, and never send `[]`.
+                  styles = external.complete || merged.length > 0 ? merged : null
                 } else if (styleUrls.length > 0) {
                   // The class's own styles could not be read — a decorator
                   // shape this text scan cannot parse, e.g. a styleUrl built
