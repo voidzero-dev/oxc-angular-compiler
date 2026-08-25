@@ -23,6 +23,7 @@ const debugTransform = createDebug('vite:oxc-angular:transform')
 
 import {
   transformAngularFile,
+  extractComponentMetadataSync,
   extractComponentUrls,
   encapsulateStyle,
   compileForHmrSync,
@@ -38,13 +39,8 @@ import { ssrManifestPlugin } from './angular-ssr-manifest-plugin.js'
 import {
   emptyDelimitedRange,
   locateComponentDecorators,
-  locateStylesFieldFor,
-  locateStyleFieldsFor,
   locateStylesInArgs,
   locateTemplateInArgs,
-  locateTemplateStringFor,
-  locateTemplateUrlFor,
-  readStringLiterals,
 } from './utils/decorator-fields.js'
 import { injectDtsDeclarations } from './utils/dts.js'
 
@@ -385,11 +381,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // it to decide whether to serve the update module or an empty response.
   const pendingHmrUpdates = new Set<string>()
 
-  // Per-component caches keyed by `filePath@ClassName`. A multi-component file
-  // contributes one entry per component to each map.
-  const inlineTemplateCache = new Map<string, string>()
-  const inlineStylesCache = new Map<string, string[]>()
-
   // Cache the source of each component .ts file with its `template:` and
   // `styles:` decorator fields stripped. If the stripped form is byte-identical
   // before and after a save, we know only the template / styles changed and
@@ -653,17 +644,34 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
             try {
               const source = await readFile(resolvedId, 'utf-8')
-              const { templateUrls, styleUrls } = await extractComponentUrls(source, resolvedId)
               const dir = dirname(resolvedId)
 
-              // Read fresh template content (bypass cache for HMR). Resolve
-              // it per CLASS: in a multi-component file, templateUrls[0] is
-              // the FILE's first external template, which may belong to a
-              // sibling — serving it would replace this class's template with
-              // the sibling's markup. Prefer the requested class's own
-              // templateUrl, then its inline template; fall back to
-              // templateUrls[0] only for decorator shapes the per-class
-              // locator cannot parse (preserves the old behavior there).
+              // Resolve this class's resources from the SAME extractor the
+              // compiler runs. `extract_component_metadata` — with the same
+              // `collect_string_consts` table — is what `transform.rs` calls
+              // to build the `ɵcmp`, so `templateUrl` / `template` /
+              // `styleUrls` / `styles` here ARE the ones the component
+              // compiles with: same-file constants folded, template literals
+              // interpolated, quoted and computed keys resolved.
+              //
+              // That makes a per-class answer definitive, which retires the
+              // file-level fallback this endpoint used to need. The union of
+              // every component's URLs in the file was only ever a guess for
+              // decorator shapes a text scan could not read, and in a
+              // multi-component file it served a class its SIBLINGS' template
+              // and stylesheets (#456).
+              //
+              // A class MISSING from the metadata is equally definitive: the
+              // compiler skipped it too — no `ɵfac`, no `ɵcmp` — so there is
+              // nothing to hot-update. (`componentsByFile` already filtered
+              // those out above; it is built from classes that compiled.)
+              const classMetadata = extractComponentMetadataSync(source, resolvedId).find(
+                (candidate) => candidate.className === className,
+              )
+
+              // Read fresh template content (bypass cache for HMR), from the
+              // requested class's own `templateUrl`, else its own inline
+              // `template`.
               const readTemplate = async (url: string) => {
                 const templatePath = resolve(dir, url)
                 let content = await readFile(templatePath, 'utf-8')
@@ -673,30 +681,17 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 return content
               }
               let templateContent: string | null = null
-              const classTemplateUrl = extractTemplateUrlFor(source, className)
-              if (classTemplateUrl !== null) {
-                templateContent = await readTemplate(classTemplateUrl)
-              } else {
-                templateContent = extractInlineTemplate(source, className)
-                if (templateContent === null && templateUrls.length > 0) {
-                  templateContent = await readTemplate(templateUrls[0])
-                }
+              if (classMetadata?.templateUrl != null) {
+                templateContent = await readTemplate(classMetadata.templateUrl)
+              } else if (classMetadata?.template != null) {
+                templateContent = classMetadata.template
               }
 
-              if (templateContent) {
-                // Read fresh style content. External styleUrls are read from
-                // disk and run through Vite's preprocessCSS (so SCSS/LESS
-                // resolve correctly); inline styles are extracted from the
-                // .ts source as plain CSS strings.
-                //
-                // Resolve per CLASS, like the template above: the file-level
-                // `styleUrls` is the union of every component in the file, so
-                // in a multi-component file it served a class its siblings'
-                // stylesheets — including a class declaring no styles at all —
-                // and, being non-empty, it also shadowed the inline `styles:`
-                // of a class that has no external ones. Fall back to the
-                // file-level list only when the class's own styles cannot be
-                // read (preserves the old behavior there).
+              if (classMetadata && templateContent) {
+                // Read fresh style content. The class's own `styleUrls` are
+                // read from disk and run through Vite's preprocessCSS (so
+                // SCSS/LESS resolve correctly); its own inline `styles` come
+                // straight from the metadata as plain CSS strings.
                 //
                 // A read FAILURE is not evidence of stylelessness, so it has
                 // to stay distinguishable from a successful read of an empty
@@ -740,57 +735,72 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // whatever the component already has survives. `null` is the
                 // default because "we did not find out" is the honest starting
                 // point.
-                let styles: string[] | null = null
-                const classStyles = extractClassStylesFor(source, className)
-                if (classStyles !== null) {
-                  // Inline `styles` first, then the resolved `styleUrl(s)`
-                  // content appended — the order `resolve_styles` produces in
-                  // the compiler, which pushes resolved content onto the
-                  // decorator's own `styles`. Whitespace-only entries are
-                  // dropped to match Angular's `style.trim().length > 0`.
-                  const external =
-                    classStyles.urls.length > 0
-                      ? await readStyles(classStyles.urls)
-                      : { contents: [] as string[], complete: true }
-                  const merged = [...classStyles.inline, ...external.contents].filter(
-                    (style) => style.trim().length > 0,
+                //
+                // Inline `styles` first, then the resolved `styleUrl(s)`
+                // content appended — the order `resolve_styles` produces in
+                // the compiler, which pushes resolved content onto the
+                // decorator's own `styles`. Whitespace-only entries are
+                // dropped to match Angular's `style.trim().length > 0`.
+                const external =
+                  classMetadata.styleUrls.length > 0
+                    ? await readStyles(classMetadata.styleUrls)
+                    : { contents: [] as string[], complete: true }
+                const merged = [...classMetadata.styles, ...external.contents].filter(
+                  (style) => style.trim().length > 0,
+                )
+                // `complete` guards exactly ONE thing: turning an unknown
+                // answer into a definitive `[]` that wipes live CSS. It is
+                // not a reason to throw away content that WAS read. A
+                // stylesheet that failed while a sibling succeeded is a
+                // PARTIAL update — which is what main always delivered,
+                // because the old `readStyles` swallowed failures in a
+                // `catch` and returned whatever it got. Dropping it would
+                // silently lose every edit to the healthy sibling of a
+                // permanently unreadable stylesheet, and the pending slot is
+                // consumed either way, so nothing retries.
+                //
+                // So: a complete read is definitive and may clear; an
+                // incomplete one falls back to main's rule exactly — send
+                // what was read when it is non-empty, and never send `[]`.
+                //
+                // `complete` speaks only about the filesystem. One more
+                // thing has to hold before an empty answer may CLEAR, and it
+                // is about the SOURCE: this endpoint re-parses `resolvedId`
+                // from disk, while the component was compiled from the `code`
+                // Vite handed `transform`. Those differ whenever another
+                // plugin's `load` / pre-`transform` rewrote the module, or
+                // `fileReplacements` pointed `actualId` at a different file.
+                //
+                // On a disk source the compiler never saw, every `styles`
+                // shape the extractor cannot fold — an array constant, an
+                // imported one, a `.concat(...)` — resolves to nothing. Read
+                // as definitive that emits `styles: []` and wipes CSS the
+                // running component genuinely has, from a template edit that
+                // never touched the styles at all.
+                //
+                // `componentMetadataCache` already holds the transform-time
+                // source with the `template:` / `styles:` field VALUES
+                // blanked, and blanking only ever empties a DELIMITED range —
+                // so an expression the strip cannot open survives verbatim
+                // and the two stripped forms disagree exactly when the two
+                // sources disagree outside those fields. Matching strips is
+                // the evidence that the styles read here are the styles the
+                // component compiled with.
+                //
+                // This gates the destructive answer ONLY. Content that WAS
+                // read is still served on a mismatch — no worse than main,
+                // which scanned the same disk source.
+                const compiledFromThisSource = () => {
+                  const cachedStripped = componentMetadataCache.get(resolvedId)
+                  return (
+                    cachedStripped !== undefined &&
+                    cachedStripped === stripComponentMetadata(source)
                   )
-                  // `complete` guards exactly ONE thing: turning an unknown
-                  // answer into a definitive `[]` that wipes live CSS. It is
-                  // not a reason to throw away content that WAS read. A
-                  // stylesheet that failed while a sibling succeeded is a
-                  // PARTIAL update — which is what main always delivered,
-                  // because the old `readStyles` swallowed failures in a
-                  // `catch` and returned whatever it got. Dropping it would
-                  // silently lose every edit to the healthy sibling of a
-                  // permanently unreadable stylesheet, and the pending slot is
-                  // consumed either way, so nothing retries.
-                  //
-                  // So: a complete read is definitive and may clear; an
-                  // incomplete one falls back to main's rule exactly — send
-                  // what was read when it is non-empty, and never send `[]`.
-                  styles = external.complete || merged.length > 0 ? merged : null
-                } else if (styleUrls.length > 0) {
-                  // The class's own styles could not be read — a decorator
-                  // shape this text scan cannot parse, e.g. a styleUrl built
-                  // from a constant the Rust extractor folds. Fall back to the
-                  // file-level list, preserving the old behavior there. This
-                  // branch never clears: the decorator is unknown, so an empty
-                  // read here means "no answer", not "no styles".
-                  //
-                  // Which is why the whitespace-only filter has to run BEFORE
-                  // the null check, not after the call like the branch above.
-                  // A stylesheet that reads fine but holds nothing yields
-                  // `['']` — one entry, so a bare `length > 0` would pass it
-                  // on, and the binding, which treats any non-null array as
-                  // definitive and drops whitespace-only entries, would turn
-                  // it into `styles: []` and clear. That is the opposite of
-                  // what this branch promises, and the CSS it would wipe
-                  // belongs to a decorator nobody here could read.
-                  const fallback = await readStyles(styleUrls)
-                  const usable = fallback.contents.filter((style) => style.trim().length > 0)
-                  styles = usable.length > 0 ? usable : null
                 }
+                const styles: string[] | null =
+                  merged.length > 0 || (external.complete && compiledFromThisSource())
+                    ? merged
+                    : null
 
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
                   angularVersion: pluginOptions.angularVersion,
@@ -1017,18 +1027,16 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               if (atIdx === -1) continue
               classNamesInFile.add(componentId.slice(atIdx + 1))
             }
-            // Prune cache entries for components that USED to be in this file
-            // but no longer are (e.g. a class was renamed or removed). Without
-            // this, the HMR endpoint could find a stale `pendingHmrUpdates`
-            // entry pointing at a className that's gone, fail to extract a
-            // template for it, and orphan the slot forever.
+            // Prune pending updates for components that USED to be in this
+            // file but no longer are (e.g. a class was renamed or removed).
+            // Without this, the HMR endpoint could find a stale
+            // `pendingHmrUpdates` entry pointing at a className that's gone,
+            // resolve no metadata for it, and orphan the slot forever.
             const previouslyInFile = componentsByFile.get(actualId)
             if (previouslyInFile) {
               for (const oldClass of previouslyInFile) {
                 if (classNamesInFile.has(oldClass)) continue
                 const staleKey = `${actualId}@${oldClass}`
-                inlineTemplateCache.delete(staleKey)
-                inlineStylesCache.delete(staleKey)
                 pendingHmrUpdates.delete(staleKey)
                 debugHmr('pruned stale cache entries for %s', staleKey)
               }
@@ -1039,25 +1047,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               debugHmr('registered: %s -> %s', actualId, className)
             }
 
-            // Cache per-component inline template / styles for detecting
-            // template/styles-only changes in handleHotUpdate, and the
-            // metadata-stripped (whole-file) source for cheaply diffing
-            // whether anything else changed.
-            for (const className of classNamesInFile) {
-              const cacheKey = `${actualId}@${className}`
-              const inlineTemplate = extractInlineTemplate(code, className)
-              if (inlineTemplate !== null) {
-                inlineTemplateCache.set(cacheKey, inlineTemplate)
-              } else {
-                inlineTemplateCache.delete(cacheKey)
-              }
-              const inlineStyles = extractInlineStyles(code, className)
-              if (inlineStyles !== null) {
-                inlineStylesCache.set(cacheKey, inlineStyles)
-              } else {
-                inlineStylesCache.delete(cacheKey)
-              }
-            }
+            // Cache the metadata-stripped (whole-file) source for cheaply
+            // diffing whether anything besides template/styles changed.
             componentMetadataCache.set(actualId, stripComponentMetadata(code))
           }
 
@@ -1308,22 +1299,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             const newStripped = stripComponentMetadata(newContent)
             if (newStripped === cachedStripped) {
               debugHmr('inline template/styles-only change, dispatching HMR for %s', ctx.file)
-              // Refresh per-component caches with the new contents.
-              for (const className of fileClassNames) {
-                const cacheKey = `${ctx.file}@${className}`
-                const newTemplate = extractInlineTemplate(newContent, className)
-                if (newTemplate !== null) {
-                  inlineTemplateCache.set(cacheKey, newTemplate)
-                } else {
-                  inlineTemplateCache.delete(cacheKey)
-                }
-                const newStyles = extractInlineStyles(newContent, className)
-                if (newStyles !== null) {
-                  inlineStylesCache.set(cacheKey, newStyles)
-                } else {
-                  inlineStylesCache.delete(cacheKey)
-                }
-              }
               componentMetadataCache.set(ctx.file, newStripped)
               // Conservatively dispatch HMR for every component in the file —
               // Angular's runtime no-ops if a component's metadata didn't
@@ -1477,86 +1452,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       ssrEntry: options.ssrEntry,
     }),
   ].filter(Boolean) as Plugin[]
-}
-
-/**
- * Extract the inline template from the `@Component({...})` decorator that
- * decorates the class named `className`. Returns null if no such decorator
- * exists or the decorator has no inline `template:` string literal.
- */
-function extractInlineTemplate(code: string, className: string): string | null {
-  const range = locateTemplateStringFor(code, className)
-  if (!range) return null
-  // Slice excludes the outer quotes/backticks — raw inner contents.
-  return code.slice(range[0] + 1, range[1])
-}
-
-/**
- * Extract the `templateUrl` string from the `@Component({...})` decorator
- * that decorates the class named `className`. Returns null if no such
- * decorator exists or the decorator has no `templateUrl:` string literal.
- */
-function extractTemplateUrlFor(code: string, className: string): string | null {
-  const range = locateTemplateUrlFor(code, className)
-  if (!range) return null
-  // Slice excludes the outer quotes/backticks — raw inner contents.
-  return code.slice(range[0] + 1, range[1])
-}
-
-/**
- * The styles one class declares in its own `@Component({...})`, split by
- * source: inline `styles` and external `styleUrl(s)`.
- *
- * Handles every shape Angular accepts — `styles` and `styleUrls` as an array
- * or a bare literal, plus the singular `styleUrl` (17+). Both arrays are
- * empty for a class that declares no styles at all, which is a real answer:
- * that component must be served nothing.
- *
- * Returns null when the answer is *unknown* rather than empty — the class's
- * decorator could not be located, or it declares a style field whose value
- * holds no string literal (a constant, an identifier, an unresolved
- * interpolation). The caller falls back to the file-level list there, since
- * the Rust extractor folds constants this text scan cannot.
- */
-function extractClassStylesFor(
-  code: string,
-  className: string,
-): { inline: string[]; urls: string[] } | null {
-  const fields = locateStyleFieldsFor(code, className)
-  if (!fields) return null
-
-  const read = (field: (typeof fields)['inline']): string[] | null => {
-    if (field.kind === 'absent') return []
-    if (field.kind === 'unreadable') return null
-    const { literals, complete } = readStringLiterals(code, field.range)
-    // A partial read is unknown, not partial knowledge: acting on the
-    // literals alone would drop whatever the unreadable elements name.
-    return complete ? literals : null
-  }
-  const inline = read(fields.inline)
-  const urls = read(fields.urls)
-  if (inline === null || urls === null) return null
-  return { inline, urls }
-}
-
-/**
- * Extract the inline styles from the `@Component({...})` decorator that
- * decorates the class named `className`, as a positional array.
- *
- * Handles both Angular forms — `styles: string | string[]`:
- *   - Array of literals (`['…']`, `["…"]`, `` [`…`] ``, or any mix) → each
- *     literal becomes one element, preserving order (HMR delivery is positional).
- *   - Bare single literal (`'…'`, `"…"`, or `` `…` ``) → returned as a
- *     one-element array.
- *
- * Returns null if the named decorator has no `styles:` field or its value is
- * something other than a string/array literal (e.g. a variable reference).
- */
-function extractInlineStyles(code: string, className: string): string[] | null {
-  const range = locateStylesFieldFor(code, className)
-  if (!range) return null
-  const { literals } = readStringLiterals(code, range)
-  return literals.length > 0 ? literals : null
 }
 
 /**

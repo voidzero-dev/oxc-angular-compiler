@@ -272,6 +272,26 @@ export declare function extractAngularComponentByAst(
 ): ComponentExtractionResult
 
 /**
+ * Extract component metadata from all `@Component` decorated classes in a TypeScript file.
+ *
+ * This parses the file and extracts metadata from `@Component` decorators
+ * on class declarations.
+ *
+ * # Arguments
+ *
+ * * `source` - The TypeScript source code
+ * * `file_path` - The file path (for error messages and source type detection)
+ *
+ * # Returns
+ *
+ * A vector of `ExtractedComponentMetadata` for each component found.
+ */
+export declare function extractComponentMetadataSync(
+  source: string,
+  filePath: string,
+): Array<ExtractedComponentMetadata>
+
+/**
  * Extract templateUrl and styleUrls from all @Component decorators in a file (async).
  *
  * This is the async version of `extractComponentUrlsSync`. Use this when
