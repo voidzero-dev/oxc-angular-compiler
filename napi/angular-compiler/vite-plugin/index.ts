@@ -763,11 +763,44 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // incomplete one falls back to main's rule exactly — send
                 // what was read when it is non-empty, and never send `[]`.
                 //
-                // The RESOLVED list itself is never in doubt any more, so
-                // there is no second, weaker branch: `complete` now speaks
-                // only about the filesystem.
+                // `complete` speaks only about the filesystem. One more
+                // thing has to hold before an empty answer may CLEAR, and it
+                // is about the SOURCE: this endpoint re-parses `resolvedId`
+                // from disk, while the component was compiled from the `code`
+                // Vite handed `transform`. Those differ whenever another
+                // plugin's `load` / pre-`transform` rewrote the module, or
+                // `fileReplacements` pointed `actualId` at a different file.
+                //
+                // On a disk source the compiler never saw, every `styles`
+                // shape the extractor cannot fold — an array constant, an
+                // imported one, a `.concat(...)` — resolves to nothing. Read
+                // as definitive that emits `styles: []` and wipes CSS the
+                // running component genuinely has, from a template edit that
+                // never touched the styles at all.
+                //
+                // `componentMetadataCache` already holds the transform-time
+                // source with the `template:` / `styles:` field VALUES
+                // blanked, and blanking only ever empties a DELIMITED range —
+                // so an expression the strip cannot open survives verbatim
+                // and the two stripped forms disagree exactly when the two
+                // sources disagree outside those fields. Matching strips is
+                // the evidence that the styles read here are the styles the
+                // component compiled with.
+                //
+                // This gates the destructive answer ONLY. Content that WAS
+                // read is still served on a mismatch — no worse than main,
+                // which scanned the same disk source.
+                const compiledFromThisSource = () => {
+                  const cachedStripped = componentMetadataCache.get(resolvedId)
+                  return (
+                    cachedStripped !== undefined &&
+                    cachedStripped === stripComponentMetadata(source)
+                  )
+                }
                 const styles: string[] | null =
-                  external.complete || merged.length > 0 ? merged : null
+                  merged.length > 0 || (external.complete && compiledFromThisSource())
+                    ? merged
+                    : null
 
                 const result = compileForHmrSync(templateContent, className, resolvedId, styles, {
                   angularVersion: pluginOptions.angularVersion,

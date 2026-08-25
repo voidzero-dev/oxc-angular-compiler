@@ -3150,4 +3150,217 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).toContain('PS456_INV_OWN_MARKER')
     expect(body).not.toContain('PS456_INV_SIB_MARKER')
   })
+
+  // ----------------------------------------------------------------
+  // The endpoint re-parses the file from DISK; `transform` compiled the
+  // `code` Vite handed it. Those are different byte streams whenever an
+  // upstream `load` / `transform: { order: 'pre' }` rewrote the module, or
+  // this plugin's own `fileReplacements` pointed `actualId` at another file.
+  //
+  // For every form the extractor cannot fold, the disk parse yields NO
+  // styles — which, taken as definitive, emits `styles: []` and wipes CSS
+  // the component really does have. So an empty answer may only clear when
+  // the stripped disk source matches the stripped source the component
+  // compiled from; otherwise it is unknown and `styles` is omitted.
+  // ----------------------------------------------------------------
+
+  it('keeps the styles of a class whose disk `styles` names an array constant the transform never saw', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const arrHtmlPath = join(appDir, 'ps458-arr.component.html')
+    const arrPath = join(appDir, 'ps458-arr.component.ts')
+    writeFileSync(arrHtmlPath, '<p>one</p>')
+
+    // What is ON DISK: `collect_string_consts` folds string consts only, so
+    // re-parsing this shape resolves no styles at all.
+    const diskSource = `
+      import { Component } from '@angular/core';
+      const PS458_ARR = ['.PS458_ARR_MARKER { color: red; }'];
+      @Component({
+        selector: 'app-ps458-arr',
+        templateUrl: './ps458-arr.component.html',
+        styles: PS458_ARR,
+      })
+      export class ArrConstComponent {}
+    `
+    writeFileSync(arrPath, diskSource)
+
+    // What VITE HANDS `transform`: an upstream rewrite already expanded the
+    // reference, so the compiled component really does carry the style.
+    const transformCode = diskSource.replace(
+      'styles: PS458_ARR',
+      `styles: ['.PS458_ARR_MARKER { color: red; }']`,
+    )
+    const transformed = await transformSource(plugin, transformCode, arrPath)
+    expect(transformed?.code ?? '', 'expected the compile to carry the style').toContain(
+      'PS458_ARR_MARKER',
+    )
+
+    // Edit the external template alone — nothing about the styles changed.
+    writeFileSync(arrHtmlPath, '<p>two</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(arrHtmlPath),
+        [{ id: normalizePath(arrHtmlPath) }],
+        mockServer,
+      ),
+    )
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${arrPath}@ArrConstComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body, 'an unreadable `styles` must stay unknown, not clear the live CSS').not.toContain(
+      'styles:',
+    )
+  })
+
+  it('keeps the styles of a class whose disk `styles` names an imported constant', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const impHtmlPath = join(appDir, 'ps458-imp.component.html')
+    const impPath = join(appDir, 'ps458-imp.component.ts')
+    writeFileSync(impHtmlPath, '<p>one</p>')
+    writeFileSync(
+      join(appDir, 'ps458-imp-styles.ts'),
+      `export const PS458_IMP = ['.PS458_IMP_MARKER { color: red; }'];\n`,
+    )
+
+    // A cross-file reference is unreadable to the extractor for the same
+    // reason a same-file array constant is.
+    const diskSource = `
+      import { Component } from '@angular/core';
+      import { PS458_IMP } from './ps458-imp-styles';
+      @Component({
+        selector: 'app-ps458-imp',
+        templateUrl: './ps458-imp.component.html',
+        styles: PS458_IMP,
+      })
+      export class ImportedConstComponent {}
+    `
+    writeFileSync(impPath, diskSource)
+
+    const transformCode = diskSource.replace(
+      'styles: PS458_IMP',
+      `styles: ['.PS458_IMP_MARKER { color: red; }']`,
+    )
+    const transformed = await transformSource(plugin, transformCode, impPath)
+    expect(transformed?.code ?? '').toContain('PS458_IMP_MARKER')
+
+    writeFileSync(impHtmlPath, '<p>two</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(impHtmlPath),
+        [{ id: normalizePath(impHtmlPath) }],
+        mockServer,
+      ),
+    )
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${impPath}@ImportedConstComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
+  })
+
+  it('keeps the styles of a class whose disk `styles` is a `.concat(...)` call', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const catHtmlPath = join(appDir, 'ps458-cat.component.html')
+    const catPath = join(appDir, 'ps458-cat.component.ts')
+    writeFileSync(catHtmlPath, '<p>one</p>')
+
+    // A call expression is unreadable to the extractor AND unreadable to the
+    // strip (its value has no `[` / quote opener), so the stripped disk form
+    // keeps the call verbatim while the stripped transform form is `styles: []`.
+    const diskSource = `
+      import { Component } from '@angular/core';
+      const PS458_CAT_BASE = ['.PS458_CAT_MARKER { color: red; }'];
+      @Component({
+        selector: 'app-ps458-cat',
+        templateUrl: './ps458-cat.component.html',
+        styles: PS458_CAT_BASE.concat(['.PS458_CAT_EXTRA { color: blue; }']),
+      })
+      export class ConcatStylesComponent {}
+    `
+    writeFileSync(catPath, diskSource)
+
+    const transformCode = diskSource.replace(
+      `styles: PS458_CAT_BASE.concat(['.PS458_CAT_EXTRA { color: blue; }']),`,
+      `styles: ['.PS458_CAT_MARKER { color: red; }', '.PS458_CAT_EXTRA { color: blue; }'],`,
+    )
+    const transformed = await transformSource(plugin, transformCode, catPath)
+    expect(transformed?.code ?? '').toContain('PS458_CAT_MARKER')
+
+    writeFileSync(catHtmlPath, '<p>two</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(catHtmlPath),
+        [{ id: normalizePath(catHtmlPath) }],
+        mockServer,
+      ),
+    )
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${catPath}@ConcatStylesComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body).not.toContain('styles:')
+  })
+
+  // The counterweight: when the endpoint IS looking at the source the
+  // component compiled from, a genuinely styleless class must still clear.
+  // The gate adds evidence for the destructive answer; it does not retire it.
+  it('still clears via the external-resource path when the disk source is the compiled one', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const sameHtmlPath = join(appDir, 'ps458-same.component.html')
+    const samePath = join(appDir, 'ps458-same.component.ts')
+    writeFileSync(sameHtmlPath, '<p>one</p>')
+
+    // Disk and transform code are byte-identical, and the class has already
+    // lost its last inline style. Nothing is unknown here.
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({
+        selector: 'app-ps458-same',
+        templateUrl: './ps458-same.component.html',
+        styles: [],
+      })
+      export class SameSourceComponent {}
+    `
+    writeFileSync(samePath, source)
+    await transformSource(plugin, source, samePath)
+
+    writeFileSync(sameHtmlPath, '<p>two</p>')
+    await callHandleHotUpdate(
+      plugin,
+      createMockHmrContext(
+        normalizePath(sameHtmlPath),
+        [{ id: normalizePath(sameHtmlPath) }],
+        mockServer,
+      ),
+    )
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${samePath}@SameSourceComponent`,
+    )
+    expect(body).not.toBe('')
+    expect(body).toContain('two')
+    expect(body, 'a definitively styleless class must still be cleared').toContain('styles: []')
+  })
 })
