@@ -1971,7 +1971,7 @@ fn remove_parameter_property_fields(
 fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
     let source_type = SourceType::from_path(path).unwrap_or_default();
     let parser_ret = Parser::new(allocator, code, source_type).parse();
-    if parser_ret.panicked {
+    if parser_ret.fatal_error {
         return code.to_string();
     }
 
