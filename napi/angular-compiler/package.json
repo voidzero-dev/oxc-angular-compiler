@@ -65,7 +65,7 @@
     "prepublishOnly": "napi pre-publish -t npm"
   },
   "dependencies": {
-    "obug": "^2.1.1"
+    "obug": "^3.0.0"
   },
   "devDependencies": {
     "@angular/compiler": "^22.0.0-rc.2",
