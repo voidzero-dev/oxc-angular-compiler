@@ -8,8 +8,9 @@ mod trusted_types_sinks;
 
 pub use dom_security_schema::{
     calc_security_context_for_unknown_element, get_security_context, get_security_context_for,
-    host_binding_security_context, host_binding_security_context_for, is_known_element,
-    rejects_iframe_src_i18n, strips_namespaced_svg_script, strips_namespaced_svg_style,
+    host_binding_security_context, host_binding_security_context_for,
+    is_iframe_security_sensitive_attr, is_known_element, rejects_iframe_src_i18n,
+    strips_namespaced_svg_script, strips_namespaced_svg_style, uses_iframe_attr_validation,
     uses_namespaced_schema,
 };
 pub use trusted_types_sinks::{is_trusted_types_sink, is_trusted_types_sink_at};

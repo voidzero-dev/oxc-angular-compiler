@@ -25,8 +25,8 @@ enum SchemaKind {
     /// 21.0.0 / 21.0.1 and everything below 20.3.15. Old URL set with
     /// `*|ping`, `*|cite`, `applet|code`, `media|src`, etc.
     Legacy,
-    /// 20.3.15, 21.0.2–21.0.5. Adds MathML hrefs, `attributeName` no-binding,
-    /// and iframe sandbox keys on top of the old URL set.
+    /// 19.2.17, 20.3.15, 21.0.2–21.0.5. Adds MathML hrefs, `attributeName`
+    /// no-binding, and iframe sandbox keys on top of the old URL set.
     V20_3_15,
     /// 21.0.6 only. The hardening without the legacy URL keys, and before
     /// `script|href` landed in 21.0.7.
@@ -34,14 +34,15 @@ enum SchemaKind {
     /// 20.3.16–20.3.21 and 21.0.7 through 21.2.6. Adds `script|href`; the
     /// `ping`/`cite`/`applet`/`media` keys are gone from 21.0.6 on.
     V21_1,
-    /// Same as `V21_1` but still carrying the legacy URL keys: only
-    /// 20.3.16–20.3.21 (the key removal was never backported to 20.3).
+    /// Same as `V21_1` but still carrying the legacy URL keys: 19.2.18–19.2.22
+    /// and 20.3.16–20.3.21 (the key removal was never backported to either
+    /// maintained line).
     V20_3_16,
     /// 21.2.7 through 21.2.13. Animation `to` / `from` / `values` are bare keys.
     V21_2_7,
     /// 21.2.14 only. Namespaced keys but no `:svg:a|href` yet.
     V21_2_14,
-    /// 20.3.22+, 21.2.15+, 22+. Namespaced keys with `:svg:a|href`.
+    /// 19.2.23+, 20.3.22+, 21.2.15+, 22+. Namespaced keys with `:svg:a|href`.
     /// `script|src` and `script|href` are gone.
     V22,
 }
@@ -52,12 +53,17 @@ struct SecurityProfile {
     namespaced: bool,
     /// The preparser strips `:svg:script` as well as `script`.
     strip_svg_script: bool,
-    /// The preparser also strips `:svg:style`. Only 20.3.22 and 21.2.14 did
-    /// this; it was reverted everywhere else.
+    /// The preparser also strips `:svg:style`. Only 19.2.23, 20.3.22 and
+    /// 21.2.14 did this; it was reverted everywhere else.
     strip_svg_style: bool,
-    /// `iframe|src` joined Trusted Types sinks (20.3.18–21, 21.2.4+; never on
-    /// the 21.0.x / 21.1.x lines).
+    /// `iframe|src` joined Trusted Types sinks (19.2.20+, 20.3.18–21, 21.2.4+;
+    /// never on the 21.0.x / 21.1.x lines).
     iframe_src_i18n: bool,
+    /// `resolve_sanitizers` falls back to `ɵɵvalidateIframeAttribute` for
+    /// security-sensitive iframe attributes with no other sanitizer. Upstream
+    /// removed this when the iframe `attributeNoBinding` keys landed
+    /// (19.2.17 / 20.3.15 / 21.0.2), so it only exists on the legacy schema.
+    iframe_attr_validation: bool,
 }
 
 fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
@@ -69,6 +75,14 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     }
 
     let (kind, iframe_src_i18n) = match version.major {
+        19 if version.minor >= 2 => match version.patch {
+            0..=16 => (SchemaKind::Legacy, false),
+            17 => (SchemaKind::V20_3_15, false),
+            18..=19 => (SchemaKind::V20_3_16, false),
+            20..=22 => (SchemaKind::V20_3_16, true),
+            // 19.2.23+ has the namespaced schema with `:svg:a|href`.
+            _ => (SchemaKind::V22, true),
+        },
         20 if version.minor >= 3 => match version.patch {
             0..=14 => (SchemaKind::Legacy, false),
             15 => (SchemaKind::V20_3_15, false),
@@ -94,15 +108,17 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     };
 
     let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22);
-    // `:svg:style` stripping existed only in 20.3.22 and 21.2.14.
+    // `:svg:style` stripping existed only in 19.2.23, 20.3.22 and 21.2.14.
     let strip_svg_style = matches!(kind, SchemaKind::V21_2_14)
-        || (version.major == 20 && version.minor == 3 && version.patch == 22);
+        || (version.major == 20 && version.minor == 3 && version.patch == 22)
+        || (version.major == 19 && version.minor == 2 && version.patch == 23);
     SecurityProfile {
         kind,
         namespaced,
         strip_svg_script: namespaced,
         strip_svg_style,
         iframe_src_i18n,
+        iframe_attr_validation: matches!(kind, SchemaKind::Legacy),
     }
 }
 
@@ -113,6 +129,7 @@ fn v22_profile() -> SecurityProfile {
         strip_svg_script: true,
         strip_svg_style: false,
         iframe_src_i18n: true,
+        iframe_attr_validation: false,
     }
 }
 
@@ -138,6 +155,24 @@ pub fn uses_namespaced_schema(version: Option<crate::AngularVersion>) -> bool {
 /// Whether i18n must reject `iframe` `src` as a Trusted Types sink.
 pub fn rejects_iframe_src_i18n(version: Option<crate::AngularVersion>) -> bool {
     security_profile(version).iframe_src_i18n
+}
+
+/// Whether `resolve_sanitizers` applies the `ɵɵvalidateIframeAttribute`
+/// fallback. Upstream kept it on versions without the iframe
+/// `attributeNoBinding` schema keys (everything before 19.2.17 / 20.3.15 /
+/// 21.0.2) and dropped it once those keys covered the same attributes.
+pub fn uses_iframe_attr_validation(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).iframe_attr_validation
+}
+
+/// Whether `attr_name` is a security-sensitive `<iframe>` attribute
+/// (`IFRAME_SECURITY_SENSITIVE_ATTRS`). The comparison is case-insensitive
+/// because `setAttribute` lowercases names.
+pub fn is_iframe_security_sensitive_attr(attr_name: &str) -> bool {
+    matches!(
+        attr_name.to_ascii_lowercase().as_str(),
+        "sandbox" | "allow" | "allowfullscreen" | "referrerpolicy" | "csp" | "fetchpriority"
+    )
 }
 
 fn build_v22_schema(with_svg_a: bool) -> FxHashMap<String, SecurityContext> {
@@ -1330,5 +1365,92 @@ mod tests {
         assert!(strips_namespaced_svg_style(Some(crate::AngularVersion::new(20, 3, 22))));
         assert!(!strips_namespaced_svg_style(Some(crate::AngularVersion::new(20, 3, 23))));
         assert!(!strips_namespaced_svg_style(None));
+    }
+
+    #[test]
+    fn v19_2_follows_the_same_backported_cutovers() {
+        // The 19.2 line received the same security backports as 20.3/21.x.
+        let v19_2_16 = Some(crate::AngularVersion::new(19, 2, 16));
+        assert_eq!(
+            get_security_context_for("media", "src", v19_2_16),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("a", "xlink:href", v19_2_16), SecurityContext::None);
+        assert_eq!(get_security_context_for("script", "href", v19_2_16), SecurityContext::None);
+
+        // 19.2.17 hardened (MathML hrefs, attrNoBinding) but kept legacy keys.
+        let v19_2_17 = Some(crate::AngularVersion::new(19, 2, 17));
+        assert_eq!(get_security_context_for("a", "xlink:href", v19_2_17), SecurityContext::Url);
+        assert_eq!(get_security_context_for("mi", "href", v19_2_17), SecurityContext::Url);
+        assert_eq!(
+            get_security_context_for("iframe", "sandbox", v19_2_17),
+            SecurityContext::AttributeNoBinding
+        );
+        assert_eq!(
+            get_security_context_for("media", "src", v19_2_17),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("script", "href", v19_2_17), SecurityContext::None);
+        assert!(!rejects_iframe_src_i18n(v19_2_17));
+
+        // 19.2.18+ added `script|href`; `iframe|src` joined the Trusted Types
+        // sinks at 19.2.20.
+        let v19_2_19 = Some(crate::AngularVersion::new(19, 2, 19));
+        assert_eq!(
+            get_security_context_for("script", "href", v19_2_19),
+            SecurityContext::ResourceUrl
+        );
+        assert!(!rejects_iframe_src_i18n(v19_2_19));
+        assert!(rejects_iframe_src_i18n(Some(crate::AngularVersion::new(19, 2, 20))));
+
+        // 19.2.23+ has the namespaced schema with `:svg:a|href`; `:svg:style`
+        // was stripped in exactly 19.2.23.
+        let v19_2_23 = Some(crate::AngularVersion::new(19, 2, 23));
+        assert!(uses_namespaced_schema(v19_2_23));
+        assert_eq!(get_security_context_for(":svg:a", "href", v19_2_23), SecurityContext::Url);
+        assert_eq!(get_security_context_for("script", "src", v19_2_23), SecurityContext::None);
+        assert!(strips_namespaced_svg_script(v19_2_23));
+        assert!(strips_namespaced_svg_style(v19_2_23));
+        let v19_2_24 = Some(crate::AngularVersion::new(19, 2, 24));
+        assert!(uses_namespaced_schema(v19_2_24));
+        assert!(!strips_namespaced_svg_style(v19_2_24));
+
+        // 19.0 / 19.1 are the legacy schema.
+        for version in [crate::AngularVersion::new(19, 0, 0), crate::AngularVersion::new(19, 1, 4)]
+        {
+            let version = Some(version);
+            assert!(!uses_namespaced_schema(version));
+            assert_eq!(
+                get_security_context_for("media", "src", version),
+                SecurityContext::ResourceUrl
+            );
+        }
+    }
+
+    #[test]
+    fn iframe_attr_validation_only_on_the_legacy_schema() {
+        assert!(uses_iframe_attr_validation(Some(crate::AngularVersion::new(19, 0, 0))));
+        assert!(uses_iframe_attr_validation(Some(crate::AngularVersion::new(19, 2, 16))));
+        assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(19, 2, 17))));
+        assert!(uses_iframe_attr_validation(Some(crate::AngularVersion::new(20, 3, 14))));
+        assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(20, 3, 15))));
+        assert!(uses_iframe_attr_validation(Some(crate::AngularVersion::new(21, 0, 1))));
+        assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(21, 0, 2))));
+        assert!(!uses_iframe_attr_validation(None));
+        assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(22, 0, 0))));
+    }
+
+    #[test]
+    fn iframe_security_sensitive_attrs_match_case_insensitively() {
+        for attr in
+            ["sandbox", "allow", "allowfullscreen", "referrerpolicy", "csp", "fetchpriority"]
+        {
+            assert!(is_iframe_security_sensitive_attr(attr));
+        }
+        // `setAttribute` lowercases the name, so upstream compares lowercase.
+        assert!(is_iframe_security_sensitive_attr("SandBox"));
+        assert!(is_iframe_security_sensitive_attr("allowFullScreen"));
+        assert!(!is_iframe_security_sensitive_attr("src"));
+        assert!(!is_iframe_security_sensitive_attr("srcdoc"));
     }
 }
