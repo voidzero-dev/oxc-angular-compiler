@@ -41,7 +41,11 @@ fn compile_template_to_js_with_version(
     }
 
     // Stage 2: Transform HTML AST to R3 AST
-    let transformer = HtmlToR3Transform::new(&allocator, template, TransformOptions::default());
+    let transformer = HtmlToR3Transform::new(
+        &allocator,
+        template,
+        TransformOptions { angular_version, ..TransformOptions::default() },
+    );
     let r3_result = transformer.transform(&html_result.nodes);
 
     // Check for transform errors
@@ -10335,6 +10339,61 @@ fn test_property_singleton_interpolation_with_sanitizer_angular_v19() {
     // Must include sanitizer function
     assert!(js.contains("ɵɵsanitizeUrl"), "Should include ɵɵsanitizeUrl sanitizer. Got:\n{js}");
     insta::assert_snapshot!("property_singleton_interpolation_with_sanitizer_v19", js);
+}
+
+#[test]
+fn test_iframe_sensitive_attr_validation_legacy_versions() {
+    // Upstream resolve_sanitizers.ts falls back to ɵɵvalidateIframeAttribute for
+    // security-sensitive iframe attributes that got no sanitizer. It existed on
+    // versions before the iframe attributeNoBinding schema keys (removed in
+    // 19.2.17 / 20.3.15 / 21.0.2).
+    for version in [AngularVersion::new(19, 0, 0), AngularVersion::new(21, 0, 1)] {
+        let js = compile_template_to_js_with_version(
+            r#"<iframe [sandbox]="expr"></iframe>"#,
+            "TestComponent",
+            Some(version),
+        );
+        assert!(
+            js.contains("ɵɵvalidateIframeAttribute"),
+            "v{version:?} should emit ɵɵvalidateIframeAttribute for iframe [sandbox]. Got:\n{js}"
+        );
+    }
+    // Once the schema covers iframe|sandbox as attributeNoBinding, the generic
+    // ɵɵvalidateAttribute is used instead.
+    for version in [AngularVersion::new(19, 2, 17), AngularVersion::new(21, 0, 2)] {
+        let js = compile_template_to_js_with_version(
+            r#"<iframe [sandbox]="expr"></iframe>"#,
+            "TestComponent",
+            Some(version),
+        );
+        assert!(
+            js.contains("ɵɵvalidateAttribute"),
+            "v{version:?} should emit ɵɵvalidateAttribute for iframe [sandbox]. Got:\n{js}"
+        );
+        assert!(
+            !js.contains("ɵɵvalidateIframeAttribute"),
+            "v{version:?} should not emit the legacy iframe validator. Got:\n{js}"
+        );
+    }
+    // The validator only applies to iframes and only to the sensitive attrs.
+    let js = compile_template_to_js_with_version(
+        r#"<div [sandbox]="expr"></div>"#,
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 1)),
+    );
+    assert!(
+        !js.contains("ɵɵvalidateIframeAttribute"),
+        "Non-iframe host should not get the iframe validator. Got:\n{js}"
+    );
+    let js = compile_template_to_js_with_version(
+        r#"<iframe [title]="expr"></iframe>"#,
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 1)),
+    );
+    assert!(
+        !js.contains("ɵɵvalidateIframeAttribute"),
+        "Non-sensitive attribute should not get the iframe validator. Got:\n{js}"
+    );
 }
 
 // ============================================================================

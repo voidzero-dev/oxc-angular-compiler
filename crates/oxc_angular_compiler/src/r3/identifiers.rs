@@ -912,6 +912,9 @@ impl Identifiers {
     /// Validate attribute.
     pub const VALIDATE_ATTRIBUTE: &'static str = "ɵɵvalidateAttribute";
 
+    /// Validate iframe attribute.
+    pub const VALIDATE_IFRAME_ATTRIBUTE: &'static str = "ɵɵvalidateIframeAttribute";
+
     /// Sanitize resource URL.
     pub const SANITIZE_RESOURCE_URL: &'static str = "ɵɵsanitizeResourceUrl";
 
