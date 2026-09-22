@@ -28,8 +28,8 @@ use crate::ast::r3::{
 use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
-use crate::parser::html::decode_entities_in_string;
-use crate::schema::get_security_context;
+use crate::parser::html::{decode_entities_in_string, split_ns_name};
+use crate::schema::{get_security_context, is_trusted_types_sink};
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
 
@@ -308,16 +308,31 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Check for special elements. `<script>`/`<style>` are only treated
-        // specially in the HTML namespace: Angular classifies them by the
-        // lowercased element name, so a namespaced SVG `<style>` (`:svg:style`)
-        // is a normal element, not a stylesheet to extract (v22 conformance).
-        let in_html_namespace = self.current_namespace() == ElementNamespace::Html;
-        if in_html_namespace && raw_name == "script" {
+        // Namespace is resolved before attribute security lookup. Angular stores
+        // implicit SVG/MathML children as `:svg:name` / `:math:name`, and
+        // `securityContext` keeps that prefix. The HTML parser here keeps the
+        // local name and tracks the namespace on a stack, so the lookup name is
+        // qualified explicitly.
+        let parent_namespace = self.current_namespace();
+        let child_namespace = self.resolve_namespace(raw_name, parent_namespace);
+        let element_namespace = if parent_namespace == ElementNamespace::Svg
+            && raw_name.eq_ignore_ascii_case("foreignObject")
+        {
+            ElementNamespace::Svg
+        } else {
+            child_namespace
+        };
+        let local_name = split_ns_name(raw_name).1.to_ascii_lowercase();
+
+        // `<script>` and `:svg:script` are stripped (`SCRIPT_ELEMENTS` in
+        // `template_preparser.ts`). `<style>` is extracted only in HTML;
+        // `:svg:style` stays a normal element.
+        if local_name == "script"
+            && matches!(element_namespace, ElementNamespace::Html | ElementNamespace::Svg)
+        {
             return None;
         }
-        if in_html_namespace && raw_name == "style" {
-            // Extract style content
+        if local_name == "style" && element_namespace == ElementNamespace::Html {
             if let Some(content) = self.get_text_content(element) {
                 self.styles.push(content);
             }
@@ -335,25 +350,12 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Parse attributes
+        let security_name = Self::security_element_name(raw_name, element_namespace);
         let (attributes, inputs, outputs, references, variables, template_attr) =
-            self.parse_attributes(&element.attrs, raw_name, raw_name == "ng-template");
+            self.parse_attributes(&element.attrs, &security_name, raw_name == "ng-template");
 
-        // Resolve namespace for this element and its children.
-        // Note: foreignObject is an SVG element but its children use HTML namespace.
-        // We need to distinguish between the element's own namespace (for naming) and
-        // the namespace for its children (pushed to stack).
-        let parent_namespace = self.current_namespace();
-        let child_namespace = self.resolve_namespace(raw_name, parent_namespace);
-
-        // For foreignObject in SVG context: the element itself is SVG, only children are HTML.
-        // For all other elements: element namespace equals child namespace.
-        let element_namespace = if parent_namespace == ElementNamespace::Svg
-            && raw_name.eq_ignore_ascii_case("foreignObject")
-        {
-            ElementNamespace::Svg
-        } else {
-            child_namespace
-        };
+        // foreignObject is SVG, but its children are HTML. `child_namespace` is
+        // what gets pushed; `element_namespace` was used for this element's name.
         self.namespace_stack.push(child_namespace);
 
         // Check if element has ngNonBindable attribute
@@ -818,6 +820,23 @@ impl<'a> HtmlToR3Transform<'a> {
         };
         let qualified = format!(":{ns}:{name_str}");
         Ident::from_in(&qualified, &self.allocator)
+    }
+
+    /// Element name passed to `securityContext` / `isTrustedTypesSink`.
+    ///
+    /// Matches `normalizeTagName` plus the namespace Angular's HTML parser bakes
+    /// into the node name (`:svg:animate`, `:math:mi`).
+    fn security_element_name(raw_name: &str, namespace: ElementNamespace) -> String {
+        let lower = raw_name.to_ascii_lowercase();
+        let (ns, local) = split_ns_name(&lower);
+        if let Some(ns @ ("svg" | "math")) = ns {
+            return format!(":{ns}:{local}");
+        }
+        match namespace {
+            ElementNamespace::Svg => format!(":svg:{local}"),
+            ElementNamespace::Math => format!(":math:{local}"),
+            ElementNamespace::Html => local.to_string(),
+        }
     }
 
     /// Transforms HTML directives to R3 directives.
@@ -2932,6 +2951,16 @@ impl<'a> HtmlToR3Transform<'a> {
         for attr in attrs {
             let name = attr.name.as_str();
             if let Some(target_attr) = name.strip_prefix("i18n-") {
+                // `isTrustedTypesSink` lowercases and does not strip `:svg:` / `:math:`.
+                if is_trusted_types_sink(element_name, target_attr) {
+                    self.report_error(
+                        &format!(
+                            "Translating attribute '{target_attr}' is disallowed for security reasons."
+                        ),
+                        attr.span,
+                    );
+                    continue;
+                }
                 let instance_id = self.allocate_i18n_message_instance_id();
                 let meta = parse_i18n_meta(self.allocator, attr.value.as_str(), instance_id);
                 i18n_attrs_meta.insert(target_attr, meta);
@@ -4839,4 +4868,83 @@ pub fn html_ast_to_r3_ast<'a>(
 ) -> R3ParseResult<'a> {
     let transformer = HtmlToR3Transform::new(allocator, source_text, options);
     transformer.transform(html_nodes)
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use crate::parser::html::HtmlParser;
+    use oxc_allocator::Allocator;
+
+    fn compile(
+        source: &str,
+    ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
+    {
+        let allocator = Allocator::default();
+        let parsed = HtmlParser::new(&allocator, source, "test.html").parse();
+        let result =
+            html_ast_to_r3_ast(&allocator, source, &parsed.nodes, TransformOptions::default());
+        let mut names = std::vec::Vec::new();
+        let mut contexts = std::vec::Vec::new();
+        fn walk<'a>(
+            nodes: &[R3Node<'a>],
+            names: &mut std::vec::Vec<String>,
+            contexts: &mut std::vec::Vec<(String, SecurityContext)>,
+        ) {
+            for node in nodes {
+                if let R3Node::Element(element) = node {
+                    names.push(element.name.as_str().to_string());
+                    for input in &element.inputs {
+                        contexts.push((input.name.as_str().to_string(), input.security_context));
+                    }
+                    walk(&element.children, names, contexts);
+                }
+            }
+        }
+        walk(&result.nodes, &mut names, &mut contexts);
+        let errors = result.errors.iter().map(|err| err.msg.clone()).collect::<std::vec::Vec<_>>();
+        (names, contexts, errors)
+    }
+
+    #[test]
+    fn svg_script_is_stripped_and_animate_to_is_validated() {
+        let (names, contexts, errors) =
+            compile(r#"<svg><script>alert(1)</script><animate [attr.to]="url"></animate></svg>"#);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(names.iter().any(|name| name == ":svg:svg" || name == "svg"));
+        assert!(!names.iter().any(|name| name.contains("script")));
+        assert!(names.iter().any(|name| name.contains("animate")));
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
+            "{names:?} {contexts:?}"
+        );
+    }
+
+    #[test]
+    fn math_href_is_a_url() {
+        let (names, contexts, _) = compile(r#"<math><mi [attr.href]="url"></mi></math>"#);
+        assert!(names.iter().any(|name| name.contains("mi")), "{names:?}");
+        assert!(
+            contexts.iter().any(|(name, ctx)| name == "href" && *ctx == SecurityContext::Url),
+            "{contexts:?}"
+        );
+    }
+
+    #[test]
+    fn iframe_i18n_src_is_rejected() {
+        let (_, _, errors) = compile(r#"<iframe i18n-src src="https://example.com"></iframe>"#);
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn namespaced_iframe_i18n_src_stays_allowed() {
+        let (_, _, errors) =
+            compile(r#"<svg><iframe i18n-src src="https://example.com"></iframe></svg>"#);
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
 }

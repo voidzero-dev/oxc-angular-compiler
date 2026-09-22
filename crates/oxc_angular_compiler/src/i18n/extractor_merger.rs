@@ -17,6 +17,7 @@ use crate::i18n::ast::{
 };
 use crate::i18n::parser::{I18nMessageFactory, create_i18n_message_factory};
 use crate::i18n::translation_bundle::TranslationBundle;
+use crate::schema::is_trusted_types_sink;
 use crate::util::{ParseSourceFile, ParseSourceSpan};
 
 // ============================================================================
@@ -1083,7 +1084,7 @@ impl<'a> I18nVisitor<'a> {
 
     /// Translates attributes for merge mode, handling i18n-* attributes.
     fn translate_attributes_for_merge(
-        &self,
+        &mut self,
         element_name: &str,
         attrs: &[HtmlAttrRef<'_>],
     ) -> Vec<TranslatedAttribute> {
@@ -1095,6 +1096,15 @@ impl<'a> I18nVisitor<'a> {
         for attr in attrs {
             if attr.name.starts_with(I18N_ATTR_PREFIX) {
                 let target_name = &attr.name[I18N_ATTR_PREFIX.len()..];
+                if is_trusted_types_sink(element_name, target_name) {
+                    self.report_error(
+                        attr.span,
+                        &format!(
+                            "Translating attribute '{target_name}' is disallowed for security reasons."
+                        ),
+                    );
+                    continue;
+                }
                 explicit_attr_meta.insert(target_name.to_string(), attr.value.to_string());
             }
         }
@@ -1235,10 +1245,20 @@ impl<'a> I18nVisitor<'a> {
         let implicit_attr_names =
             self.implicit_attrs.get(element_name).cloned().unwrap_or_default();
 
-        // Collect explicit i18n-* attributes
+        // Collect explicit i18n-* attributes. Trusted Types sinks are rejected
+        // and not extracted (`i18n/meta.ts`).
         for attr in attrs {
             if attr.name.starts_with(I18N_ATTR_PREFIX) {
                 let target_name = &attr.name[I18N_ATTR_PREFIX.len()..];
+                if is_trusted_types_sink(element_name, target_name) {
+                    self.report_error(
+                        attr.span,
+                        &format!(
+                            "Translating attribute '{target_name}' is disallowed for security reasons."
+                        ),
+                    );
+                    continue;
+                }
                 explicit_attr_names.insert(target_name.to_string(), attr.value.to_string());
             }
         }
@@ -1792,6 +1812,61 @@ mod tests {
         let result = extract_messages(&[], &[], &FxHashMap::default(), true, source_file);
         assert!(result.messages.is_empty());
         assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn test_iframe_src_i18n_is_rejected() {
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let span = Span::default();
+        let nodes = vec![HtmlNodeRef::Element {
+            name: "iframe",
+            attrs: vec![
+                HtmlAttrRef {
+                    name: "i18n-src",
+                    value: "translated url",
+                    span,
+                    is_interpolation_only: false,
+                },
+                HtmlAttrRef {
+                    name: "src",
+                    value: "https://example.com",
+                    span,
+                    is_interpolation_only: false,
+                },
+            ],
+            children: vec![],
+            span,
+            start_span: span,
+            end_span: None,
+        }];
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(result.messages.is_empty());
+        assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
+    }
+
+    #[test]
+    fn test_plain_title_i18n_is_still_extracted() {
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let span = Span::default();
+        let nodes = vec![HtmlNodeRef::Element {
+            name: "div",
+            attrs: vec![
+                HtmlAttrRef {
+                    name: "i18n-title",
+                    value: "meaning|desc",
+                    span,
+                    is_interpolation_only: false,
+                },
+                HtmlAttrRef { name: "title", value: "Hello", span, is_interpolation_only: false },
+            ],
+            children: vec![],
+            span,
+            start_span: span,
+            end_span: None,
+        }];
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        assert!(result.errors.is_empty());
+        assert!(!result.messages.is_empty());
     }
 
     #[test]

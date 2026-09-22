@@ -27,10 +27,8 @@ fn get_sanitizer_fn(security_context: SecurityContext) -> Option<&'static str> {
         // selects the actual sanitizer at runtime based on the tag name.
         SecurityContext::UrlOrResourceUrl => Some(Identifiers::SANITIZE_URL_OR_RESOURCE_URL),
         SecurityContext::None => None,
-        // AttributeNoBinding means the attribute should not be bound at all.
-        // This should produce a compile-time error in the HTML-to-R3 transform.
-        // For now, return None but the binding should have been rejected earlier.
-        SecurityContext::AttributeNoBinding => None,
+        // `resolve_sanitizers.ts` maps ATTRIBUTE_NO_BINDING to `ɵɵvalidateAttribute`.
+        SecurityContext::AttributeNoBinding => Some(Identifiers::VALIDATE_ATTRIBUTE),
     }
 }
 
