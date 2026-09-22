@@ -149,7 +149,9 @@ pub struct HtmlToR3Transform<'a> {
     ng_content_selectors: Vec<'a, Ident<'a>>,
     comment_nodes: Option<Vec<'a, R3Comment<'a>>>,
     processed_nodes: FxHashSet<usize>,
-    namespace_stack: std::vec::Vec<ElementNamespace>,
+    /// Prefix each open element passes to its children (`svg`, `math`, `xml`,
+    /// or empty), matching `getNsPrefix(parentName)` in `_getPrefix`.
+    namespace_stack: std::vec::Vec<String>,
     /// Depth counter for ngNonBindable. When > 0, bindings are suppressed.
     non_bindable_depth: u32,
     /// Depth counter for i18n context. When > 0, ICU expansions are emitted.
@@ -171,13 +173,6 @@ pub struct HtmlToR3Transform<'a> {
     /// (e.g., by `ingestControlFlowInsertionPoint` and `ingestStaticAttributes`), both
     /// can share the same i18n context.
     i18n_message_instance_counter: u32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ElementNamespace {
-    Html,
-    Svg,
-    Math,
 }
 
 impl<'a> HtmlToR3Transform<'a> {
@@ -321,50 +316,47 @@ impl<'a> HtmlToR3Transform<'a> {
     fn visit_element(&mut self, element: &HtmlElement<'a>) -> Option<R3Node<'a>> {
         let raw_name = element.name.as_str();
 
-        // Namespace is resolved before attribute security lookup. Angular stores
-        // implicit SVG/MathML children as `:svg:name` / `:math:name`, and
-        // `securityContext` keeps that prefix. The HTML parser here keeps the
-        // local name and tracks the namespace on a stack, so the lookup name is
-        // qualified explicitly.
-        let parent_namespace = self.current_namespace();
+        // Angular's parser bakes the namespace into the element name with
+        // `_getPrefix` + `mergeNsAndName` (`:svg:rect`, `:xml:div`). The parser
+        // here keeps the local name plus an explicit `:ns:` prefix, so the
+        // upstream name is reconstructed and the inherited prefix is tracked
+        // on a stack.
+        let parent_prefix = self.current_prefix();
         // `<MyComp:iframe>` keeps the class in `name`. The host tag is what
         // `isTrustedTypesSink` and the binding security lookup see, including an
-        // explicit prefix and a namespace inherited from `<svg>` / `<math>`
+        // explicit prefix and a prefix inherited from the parent
         // (`:svg:ng-component`, `:svg:iframe`). No prefix and no local tag is
         // `tagName === null`.
         let host_tag = if element.is_component {
-            Self::selectorless_host_tag(element, parent_namespace)
+            Self::selectorless_host_tag(element, parent_prefix)
         } else {
             None
         };
-        // For a component the host tag drives both namespaces: the element's own
-        // namespace is the host's, and children inherit it unless the host tag
-        // prevents namespace inheritance (`foreignObject`). `tagName === null`
-        // resets to HTML (`_getPrefix` skips a null parent tagName).
-        let (element_namespace, child_namespace) = if element.is_component {
-            let host_namespace = Self::component_host_namespace(host_tag.as_deref());
-            let child = Self::component_children_namespace(host_tag.as_deref(), host_namespace);
-            (host_namespace, child)
+        // `_getPrefix`: the explicit `:ns:` prefix wins, then the tag's implicit
+        // namespace (`svg`, `math`, `foreignObject`), then the parent's prefix —
+        // kept verbatim, so arbitrary prefixes like `:xml:` inherit too.
+        let resolved_name = if element.is_component {
+            String::new()
         } else {
-            let child = self.resolve_namespace(raw_name, parent_namespace);
-            let own = if parent_namespace == ElementNamespace::Svg
-                && raw_name.eq_ignore_ascii_case("foreignObject")
-            {
-                ElementNamespace::Svg
-            } else {
-                child
-            };
-            (own, child)
+            Self::resolve_element_name(raw_name, parent_prefix)
         };
         let security_name = if element.is_component {
             Self::component_security_name(host_tag.as_deref())
         } else {
-            Self::security_element_name(raw_name, element_namespace)
+            Self::security_lookup_name(&resolved_name)
         };
         // Trusted Types and the script/style sets use the parser's full name.
-        // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
+        // `security_lookup_name` drops non-svg/math prefixes (`:xml:iframe` →
         // `iframe`), which is correct for the security schema and wrong here.
-        let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
+        let qualified_name = resolved_name.to_ascii_lowercase();
+        // Children inherit this element's own resolved prefix, or nothing when
+        // its tag definition prevents namespace inheritance (`foreignObject`) or
+        // the host tag is `tagName === null`.
+        let child_prefix = if element.is_component {
+            Self::component_child_prefix(host_tag.as_deref())
+        } else {
+            Self::inheritable_prefix(&resolved_name)
+        };
 
         if element.is_component {
             // `visitComponent` does not run the element preparser. A class named
@@ -424,9 +416,9 @@ impl<'a> HtmlToR3Transform<'a> {
                 raw_name == "ng-template",
             );
 
-        // foreignObject is SVG, but its children are HTML. `child_namespace` is
-        // what gets pushed; `element_namespace` was used for this element's name.
-        self.namespace_stack.push(child_namespace);
+        // `child_prefix` is what children inherit; `foreignObject` already
+        // resolves to `:svg:foreignObject` and passes nothing on.
+        self.namespace_stack.push(child_prefix);
 
         // Check if element has ngNonBindable attribute
         let has_non_bindable =
@@ -593,7 +585,7 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // Check for ng-template
         if raw_name == "ng-template" {
-            let name = self.qualify_element_name(element.name, element_namespace);
+            let name = Ident::from_in(resolved_name.as_str(), &self.allocator);
             let template = R3Template {
                 tag_name: Some(name),
                 attributes,
@@ -634,7 +626,7 @@ impl<'a> HtmlToR3Transform<'a> {
             }
         }
 
-        let name = self.qualify_element_name(element.name, element_namespace);
+        let name = Ident::from_in(resolved_name.as_str(), &self.allocator);
 
         // Check if this is a component (uppercase first letter or underscore)
         let first_char = raw_name.chars().next().unwrap_or('a');
@@ -657,20 +649,9 @@ impl<'a> HtmlToR3Transform<'a> {
             // Validate selectorless references
             self.validate_selectorless_references(&references);
 
-            // Compute tag_name from component_prefix and component_tag_name
-            // Format: ":prefix:tag_name" (e.g., ":svg:rect") or just "tag_name"
-            let tag_name = match (&element.component_prefix, &element.component_tag_name) {
-                (None, None) => None,
-                (None, Some(tag)) => Some(*tag),
-                (Some(prefix), None) => {
-                    // Has prefix but no tag name - use "ng-component" as default
-                    Some(Ident::from_in(&format!(":{prefix}:ng-component"), &self.allocator))
-                }
-                (Some(prefix), Some(tag)) => {
-                    // Both prefix and tag name: ":prefix:tag_name"
-                    Some(Ident::from_in(&format!(":{prefix}:{tag}"), &self.allocator))
-                }
-            };
+            // `tagName` is the resolved host tag (`_getComponentTagName`), so it
+            // carries an explicit, implicit, or inherited prefix.
+            let tag_name = host_tag.map(|tag| Ident::from_in(tag.as_str(), &self.allocator));
 
             // Compute full_name: "ComponentName:prefix:tag_name" or "ComponentName:tag_name"
             let full_name = match &tag_name {
@@ -717,7 +698,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 source_span: element.span,
                 start_source_span: element.start_span,
                 end_source_span: element.end_span,
-                is_void: self.is_void_element(element.name.as_str()),
+                is_void: self.is_void_element(resolved_name.as_str()),
                 i18n: i18n_meta,
             };
             R3Node::Element(Box::new_in(r3_element, &self.allocator))
@@ -733,8 +714,8 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Visits an HTML component (selectorless component AST node).
     fn visit_html_component(&mut self, component: &HtmlComponent<'a>) -> Option<R3Node<'a>> {
-        let parent_namespace = self.current_namespace();
-        let host_tag = Self::component_node_host_tag(component, parent_namespace);
+        let parent_prefix = self.current_prefix();
+        let host_tag = Self::component_node_host_tag(component, parent_prefix);
         if let Some(tag) = host_tag.as_deref()
             && UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag)
         {
@@ -751,13 +732,10 @@ impl<'a> HtmlToR3Transform<'a> {
         let (attributes, inputs, outputs, references, _variables, template_attr) =
             self.parse_attributes(&component.attrs, &security_name, i18n_element_name, false);
 
-        // Children inherit the host tag's namespace (`_getPrefix` uses
+        // Children inherit the host tag's prefix verbatim (`_getPrefix` uses
         // `component.tagName` as the parent name), honoring
         // `preventNamespaceInheritance` on hosts like `foreignObject`.
-        let element_namespace = Self::component_host_namespace(host_tag.as_deref());
-        let child_namespace =
-            Self::component_children_namespace(host_tag.as_deref(), element_namespace);
-        self.namespace_stack.push(child_namespace);
+        self.namespace_stack.push(Self::component_child_prefix(host_tag.as_deref()));
 
         // Check if component has ngNonBindable attribute
         let has_non_bindable =
@@ -830,140 +808,77 @@ impl<'a> HtmlToR3Transform<'a> {
         Some(result)
     }
 
-    fn current_namespace(&self) -> ElementNamespace {
-        self.namespace_stack.last().copied().unwrap_or(ElementNamespace::Html)
+    /// Prefix inherited from the innermost open element (`""` at the root).
+    fn current_prefix(&self) -> &str {
+        self.namespace_stack.last().map_or("", String::as_str)
     }
 
-    fn resolve_namespace(&self, raw_name: &str, parent: ElementNamespace) -> ElementNamespace {
-        if let Some(explicit) = Self::namespace_from_prefixed_name(raw_name) {
-            return explicit;
+    /// `_getPrefix` + `mergeNsAndName`: explicit `:ns:` prefix, then the tag's
+    /// `implicitNamespacePrefix`, then the parent's prefix kept verbatim so
+    /// arbitrary prefixes (`:xml:div`) inherit.
+    fn resolve_element_name(raw_name: &str, parent_prefix: &str) -> String {
+        let (explicit_ns, local) = split_ns_name(raw_name);
+        if let Some(prefix) = explicit_ns {
+            return format!(":{prefix}:{local}");
         }
-
-        if raw_name.eq_ignore_ascii_case("svg") {
-            return ElementNamespace::Svg;
-        }
-        if raw_name.eq_ignore_ascii_case("math") {
-            return ElementNamespace::Math;
-        }
-
-        match parent {
-            ElementNamespace::Svg => {
-                if raw_name.eq_ignore_ascii_case("foreignObject") {
-                    ElementNamespace::Html
-                } else {
-                    ElementNamespace::Svg
-                }
-            }
-            ElementNamespace::Math => ElementNamespace::Math,
-            ElementNamespace::Html => ElementNamespace::Html,
-        }
+        let prefix = get_html_tag_definition(local)
+            .implicit_namespace_prefix
+            .map_or_else(|| parent_prefix.to_string(), str::to_string);
+        if prefix.is_empty() { local.to_string() } else { format!(":{prefix}:{local}") }
     }
 
-    fn namespace_from_prefixed_name(raw_name: &str) -> Option<ElementNamespace> {
-        if raw_name.starts_with(':')
-            && let Some((prefix, _)) = raw_name[1..].split_once(':')
-        {
-            return Self::namespace_from_prefix(prefix);
+    /// Prefix this element passes on to its children. `foreignObject` (and any
+    /// other tag with `preventNamespaceInheritance`) passes nothing.
+    fn inheritable_prefix(resolved_name: &str) -> String {
+        let (ns, local) = split_ns_name(resolved_name);
+        if get_html_tag_definition(local).prevent_namespace_inheritance {
+            return String::new();
         }
-
-        if let Some((prefix, _)) = raw_name.split_once(':') {
-            return Self::namespace_from_prefix(prefix);
-        }
-
-        None
+        ns.unwrap_or("").to_string()
     }
 
-    fn namespace_from_prefix(prefix: &str) -> Option<ElementNamespace> {
-        if prefix.eq_ignore_ascii_case("svg") {
-            Some(ElementNamespace::Svg)
-        } else if prefix.eq_ignore_ascii_case("math") {
-            Some(ElementNamespace::Math)
-        } else {
-            None
-        }
-    }
-
-    fn qualify_element_name(&self, name: Ident<'a>, namespace: ElementNamespace) -> Ident<'a> {
-        if namespace == ElementNamespace::Html {
-            return name;
-        }
-
-        let name_str = name.as_str();
-        if name_str.starts_with(':') {
-            return name;
-        }
-
-        if let Some((prefix, local)) = name_str.split_once(':')
-            && Self::namespace_from_prefix(prefix).is_some()
-        {
-            let qualified = format!(":{prefix}:{local}");
-            return Ident::from_in(&qualified, &self.allocator);
-        }
-
-        let ns = match namespace {
-            ElementNamespace::Svg => "svg",
-            ElementNamespace::Math => "math",
-            ElementNamespace::Html => return name,
-        };
-        let qualified = format!(":{ns}:{name_str}");
-        Ident::from_in(&qualified, &self.allocator)
-    }
-
-    /// Element name passed to `securityContext` / `isTrustedTypesSink`.
+    /// Element name passed to the security schema (`normalizeTagName`).
     ///
-    /// Matches `normalizeTagName` plus the namespace Angular's HTML parser bakes
-    /// into the node name (`:svg:animate`, `:math:mi`). An explicit non-svg/math
-    /// prefix is dropped (`:xml:iframe` → `iframe`); the parent namespace is not
-    /// inherited by an already-prefixed name.
-    fn security_element_name(raw_name: &str, namespace: ElementNamespace) -> String {
-        let lower = raw_name.to_ascii_lowercase();
+    /// `:svg:` and `:math:` are kept; any other prefix is dropped
+    /// (`:xml:iframe` → `iframe`).
+    fn security_lookup_name(resolved_name: &str) -> String {
+        let lower = resolved_name.to_ascii_lowercase();
         let (ns, local) = split_ns_name(&lower);
-        if let Some(ns @ ("svg" | "math")) = ns {
-            return format!(":{ns}:{local}");
-        }
-        if ns.is_some() {
-            return local.to_string();
-        }
-        match namespace {
-            ElementNamespace::Svg => format!(":svg:{local}"),
-            ElementNamespace::Math => format!(":math:{local}"),
-            ElementNamespace::Html => local.to_string(),
+        match ns {
+            Some(ns @ ("svg" | "math")) => format!(":{ns}:{local}"),
+            _ => local.to_string(),
         }
     }
 
     /// Host tag of a selectorless component, matching Angular's `tagName`.
     ///
     /// Prefix order matches `_getPrefix`: explicit prefix, then the host tag's
-    /// implicit namespace (`svg`, `math`, `foreignObject`), then the parent
-    /// namespace. `foreignObject` already resets that parent to HTML. A prefix
-    /// with no local tag becomes `ng-component`. No prefix and no local tag is
-    /// `tagName === null`.
-    fn selectorless_host_tag(
-        element: &HtmlElement<'a>,
-        parent_namespace: ElementNamespace,
-    ) -> Option<String> {
+    /// implicit namespace (`svg`, `math`, `foreignObject`), then the parent's
+    /// prefix verbatim. A prefix with no local tag becomes `ng-component`. No
+    /// prefix and no local tag is `tagName === null`.
+    fn selectorless_host_tag(element: &HtmlElement<'a>, parent_prefix: &str) -> Option<String> {
         Self::canonical_host_tag(
             element.component_prefix.as_ref().map(|prefix| prefix.as_str()),
             element.component_tag_name.as_ref().map(|tag| tag.as_str()),
-            parent_namespace,
+            parent_prefix,
         )
     }
 
     /// `HtmlComponent.tag_name` is either already `:ns:local` or a local name.
     fn component_node_host_tag(
         component: &HtmlComponent<'a>,
-        parent_namespace: ElementNamespace,
+        parent_prefix: &str,
     ) -> Option<String> {
         match component.tag_name.as_ref().map(|tag| tag.as_str()) {
             Some(tag) if tag.starts_with(':') => Some(tag.to_string()),
-            other => Self::canonical_host_tag(None, other, parent_namespace),
+            other => Self::canonical_host_tag(None, other, parent_prefix),
         }
     }
 
     fn canonical_host_tag(
         explicit_prefix: Option<&str>,
         local_tag: Option<&str>,
-        parent_namespace: ElementNamespace,
+        parent_prefix: &str,
     ) -> Option<String> {
         let mut prefix = explicit_prefix.unwrap_or("").to_string();
         if prefix.is_empty()
@@ -973,11 +888,7 @@ impl<'a> HtmlToR3Transform<'a> {
             prefix = implicit.to_string();
         }
         if prefix.is_empty() {
-            prefix = match parent_namespace {
-                ElementNamespace::Svg => "svg".to_string(),
-                ElementNamespace::Math => "math".to_string(),
-                ElementNamespace::Html => String::new(),
-            };
+            prefix = parent_prefix.to_string();
         }
         match (prefix.is_empty(), local_tag) {
             (true, None) => None,
@@ -989,33 +900,17 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// The namespace a selectorless host tag itself belongs to, from its
-    /// resolved `:ns:` prefix. Bare local tags and `tagName === null` are HTML.
-    fn component_host_namespace(host_tag: Option<&str>) -> ElementNamespace {
-        host_tag
-            .and_then(|tag| {
-                let (ns, _) = split_ns_name(tag);
-                ns.and_then(Self::namespace_from_prefix)
-            })
-            .unwrap_or(ElementNamespace::Html)
-    }
-
-    /// Namespace pushed for children of a selectorless component.
-    ///
-    /// `_getPrefix` inherits the parent namespace unless the parent's tag
-    /// definition sets `preventNamespaceInheritance` (`foreignObject`). The
-    /// local part of the resolved host tag is what upstream looks up.
-    fn component_children_namespace(
-        host_tag: Option<&str>,
-        host_namespace: ElementNamespace,
-    ) -> ElementNamespace {
-        let prevents_inheritance = host_tag
-            .map(|tag| {
-                let (_, local) = split_ns_name(tag);
-                get_html_tag_definition(local).prevent_namespace_inheritance
-            })
-            .unwrap_or(false);
-        if prevents_inheritance { ElementNamespace::Html } else { host_namespace }
+    /// Prefix a selectorless component passes to its children. `tagName ===
+    /// null` and hosts with `preventNamespaceInheritance` pass nothing.
+    fn component_child_prefix(host_tag: Option<&str>) -> String {
+        let Some(tag) = host_tag else {
+            return String::new();
+        };
+        let (ns, local) = split_ns_name(tag);
+        if get_html_tag_definition(local).prevent_namespace_inheritance {
+            return String::new();
+        }
+        ns.unwrap_or("").to_string()
     }
 
     /// Security-schema name for a selectorless component, matching
@@ -1043,27 +938,6 @@ impl<'a> HtmlToR3Transform<'a> {
             }
         }
         tag.to_string()
-    }
-
-    /// Full element name for Trusted Types on real elements, and for the script/style sets.
-    ///
-    /// Keeps every `:prefix:name`, and applies an inherited `svg` or `math`
-    /// prefix the way the Angular HTML parser stores the node. Unlike
-    /// `security_element_name`, a non-svg/math prefix is not reduced to the
-    /// local name.
-    fn qualified_element_name(raw_name: &str, namespace: ElementNamespace) -> String {
-        let lower = raw_name.to_ascii_lowercase();
-        let (ns, local) = split_ns_name(&lower);
-        if let Some(ns) = ns
-            && !ns.is_empty()
-        {
-            return format!(":{ns}:{local}");
-        }
-        match namespace {
-            ElementNamespace::Svg => format!(":svg:{local}"),
-            ElementNamespace::Math => format!(":math:{local}"),
-            ElementNamespace::Html => lower,
-        }
     }
 
     /// Transforms HTML directives to R3 directives.
@@ -5434,6 +5308,27 @@ mod security_tests {
                 .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
             "{contexts:?}"
         );
+    }
+
+    #[test]
+    fn children_inherit_an_arbitrary_prefix() {
+        // `_getPrefix` inherits `getNsPrefix(parentName)` verbatim, so `<iframe>`
+        // inside `<xml:div>` resolves to `:xml:iframe`. `normalizeTagName` drops
+        // the `xml` prefix and the `iframe|src` resource-URL sanitizer applies.
+        let (names, contexts, _) =
+            compile(r#"<svg><xml:div><iframe [src]="url"></iframe></xml:div></svg>"#);
+        assert!(names.iter().any(|name| name == ":xml:iframe"), "{names:?}");
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{names:?} {contexts:?}"
+        );
+
+        // The same inheritance drives selectorless host tags (`tagName`).
+        let (names, _, _) =
+            compile_selectorless(r#"<xml:div><MyComp [innerHTML]="html"></MyComp></xml:div>"#);
+        assert!(names.iter().any(|name| name == "host::xml:ng-component"), "{names:?}");
     }
 
     #[test]
