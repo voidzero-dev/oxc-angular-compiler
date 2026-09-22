@@ -614,7 +614,9 @@ fn register_uniform(
     }
 }
 
-fn is_known_element(name: &str) -> bool {
+/// Whether `name` is in the DOM element schema (`allKnownElementNames`),
+/// including `:svg:`/`:math:`-prefixed entries.
+pub fn is_known_element(name: &str) -> bool {
     KNOWN_ELEMENT_SET.contains(name.to_ascii_lowercase().as_str())
 }
 
@@ -707,12 +709,28 @@ fn collect_namespaced_contexts(
             .collect();
     }
 
-    let (namespace_key, base_selector) = split_ns_name(selector);
+    // `splitNsName` treats any leading `:x:` as a namespace, including the
+    // `:not(` of a pseudo-class. Only a plain identifier is a namespace, so a
+    // selector like `:not(img):not(video)` reaches `CssSelector::parse` whole
+    // instead of parsing `not(video)` as the element.
+    let (namespace_key, base_selector) = match split_ns_name(selector) {
+        (Some(ns), _) if !ns.is_empty() && ns.bytes().all(is_selector_ident_byte) => {
+            split_ns_name(selector)
+        }
+        _ => (None, selector),
+    };
     let mut contexts = Vec::new();
     for css in CssSelector::parse(base_selector) {
         let excluded = not_element_names(&css);
         let element_names: Vec<String> = if let Some(element) = &css.element {
-            resolve_concrete_element(element)
+            if element == "*" && !excluded.is_empty() {
+                // `*` on a `:not(...)` selector means "any element". Expanding it
+                // lets the exclusions apply; a literal `*|attr` lookup would
+                // silently drop the sanitizer.
+                KNOWN_ELEMENT_NAMES.iter().map(|name| (*name).to_string()).collect()
+            } else {
+                resolve_concrete_element(element)
+            }
         } else {
             KNOWN_ELEMENT_NAMES.iter().map(|name| (*name).to_string()).collect()
         };
@@ -797,6 +815,10 @@ fn qualify_with_selector_namespace(element_name: &str, namespace_key: Option<&st
         Some(ns) if !ns.is_empty() => format!(":{ns}:{name}"),
         _ => name.to_string(),
     }
+}
+
+fn is_selector_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'-' || b == b'_'
 }
 
 fn not_element_names(css: &CssSelector) -> FxHashSet<String> {
@@ -991,6 +1013,20 @@ mod tests {
         assert_eq!(
             host_binding_security_context("[x]:not(img):not(video)", "src"),
             SecurityContext::ResourceUrl
+        );
+    }
+
+    #[test]
+    fn test_host_selector_leading_not_is_not_a_namespace() {
+        // `:not(...)` is a pseudo-class, not a `:ns:` prefix.
+        assert_eq!(
+            host_binding_security_context(":not(img):not(video)", "src"),
+            SecurityContext::ResourceUrl
+        );
+        // A real `:svg:` prefix still namespaces the lookup.
+        assert_eq!(
+            host_binding_security_context(":svg:animate", "to"),
+            SecurityContext::AttributeNoBinding
         );
     }
 

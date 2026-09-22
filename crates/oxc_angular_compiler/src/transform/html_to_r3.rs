@@ -31,7 +31,8 @@ use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
-    get_security_context_for, is_trusted_types_sink_at, strips_namespaced_svg_script,
+    get_security_context_for, is_known_element, is_trusted_types_sink_at,
+    strips_namespaced_svg_script,
 };
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
@@ -334,20 +335,25 @@ impl<'a> HtmlToR3Transform<'a> {
         } else {
             child_namespace
         };
-        let security_name = Self::security_element_name(raw_name, element_namespace);
-        // Trusted Types and the script/style sets use the parser's full name.
-        // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
-        // `iframe`), which is correct for the security schema and wrong here.
-        let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
         // `<MyComp:iframe>` keeps the class in `name`. The host tag is what
-        // `isTrustedTypesSink` sees, including an explicit prefix and a namespace
-        // inherited from `<svg>` / `<math>` (`:svg:ng-component`, `:svg:iframe`).
-        // No prefix and no local tag is `tagName === null`.
+        // `isTrustedTypesSink` and the binding security lookup see, including an
+        // explicit prefix and a namespace inherited from `<svg>` / `<math>`
+        // (`:svg:ng-component`, `:svg:iframe`). No prefix and no local tag is
+        // `tagName === null`.
         let host_tag = if element.is_component {
             Self::selectorless_host_tag(element, parent_namespace)
         } else {
             None
         };
+        let security_name = if element.is_component {
+            Self::component_security_name(host_tag.as_deref())
+        } else {
+            Self::security_element_name(raw_name, element_namespace)
+        };
+        // Trusted Types and the script/style sets use the parser's full name.
+        // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
+        // `iframe`), which is correct for the security schema and wrong here.
+        let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
 
         if element.is_component {
             // `visitComponent` does not run the element preparser. A class named
@@ -510,7 +516,7 @@ impl<'a> HtmlToR3Transform<'a> {
         self.namespace_stack.pop();
 
         // Transform selectorless directives from HTML AST
-        let directives = self.transform_directives(&element.directives, raw_name);
+        let directives = self.transform_directives(&element.directives, &security_name);
 
         // Determine if element is self-closing (explicitly closed with />)
         let is_self_closing = element.is_self_closing;
@@ -724,13 +730,9 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // `tagName === null` is not a Trusted Types sink. `full_name` is the class.
         let i18n_element_name = host_tag.as_deref();
-        let (attributes, inputs, outputs, references, _variables, template_attr) = self
-            .parse_attributes(
-                &component.attrs,
-                component.full_name.as_str(),
-                i18n_element_name,
-                false,
-            );
+        let security_name = Self::component_security_name(host_tag.as_deref());
+        let (attributes, inputs, outputs, references, _variables, template_attr) =
+            self.parse_attributes(&component.attrs, &security_name, i18n_element_name, false);
 
         // Resolve namespace for this component and its children.
         let element_namespace =
@@ -775,10 +777,8 @@ impl<'a> HtmlToR3Transform<'a> {
         self.namespace_stack.pop();
 
         // Transform selectorless directives from HTML AST
-        // For components, tag_name may be None (e.g., `<MyComp>`), in which case we use empty string
-        // which matches TypeScript's behavior where elementName can be null.
-        let element_name = component.tag_name.as_ref().map_or("", Ident::as_str);
-        let directives = self.transform_directives(&component.directives, element_name);
+        // `security_name` is empty when the host tag is `tagName === null`.
+        let directives = self.transform_directives(&component.directives, &security_name);
 
         // Validate selectorless references
         self.validate_selectorless_references(&references);
@@ -892,12 +892,17 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Element name passed to `securityContext` / `isTrustedTypesSink`.
     ///
     /// Matches `normalizeTagName` plus the namespace Angular's HTML parser bakes
-    /// into the node name (`:svg:animate`, `:math:mi`).
+    /// into the node name (`:svg:animate`, `:math:mi`). An explicit non-svg/math
+    /// prefix is dropped (`:xml:iframe` → `iframe`); the parent namespace is not
+    /// inherited by an already-prefixed name.
     fn security_element_name(raw_name: &str, namespace: ElementNamespace) -> String {
         let lower = raw_name.to_ascii_lowercase();
         let (ns, local) = split_ns_name(&lower);
         if let Some(ns @ ("svg" | "math")) = ns {
             return format!(":{ns}:{local}");
+        }
+        if ns.is_some() {
+            return local.to_string();
         }
         match namespace {
             ElementNamespace::Svg => format!(":svg:{local}"),
@@ -962,6 +967,33 @@ impl<'a> HtmlToR3Transform<'a> {
                 Some(format!(":{prefix}:{local}"))
             }
         }
+    }
+
+    /// Security-schema name for a selectorless component, matching
+    /// `calcPossibleSecurityContexts(component.tagName, ...)`.
+    ///
+    /// A bare host tag that is not an HTML element is rewritten to its known
+    /// `:svg:`/`:math:` form (`animate` → `:svg:animate`). `tagName === null`
+    /// resolves over every known element upstream; the empty name reproduces
+    /// that through the `*|attr` fallback (`src` → `NONE`, `innerHTML` →
+    /// `HTML`).
+    fn component_security_name(host_tag: Option<&str>) -> String {
+        let Some(tag) = host_tag else {
+            return String::new();
+        };
+        let lower = tag.to_ascii_lowercase();
+        let (ns, local) = split_ns_name(&lower);
+        if ns.is_none() && !is_known_element(local) {
+            let svg = format!(":svg:{local}");
+            if is_known_element(&svg) {
+                return svg;
+            }
+            let math = format!(":math:{local}");
+            if is_known_element(&math) {
+                return math;
+            }
+        }
+        tag.to_string()
     }
 
     /// Full element name for Trusted Types on real elements, and for the script/style sets.
@@ -5097,6 +5129,10 @@ mod security_tests {
                         if let Some(tag) = component.tag_name {
                             names.push(format!("host:{}", tag.as_str()));
                         }
+                        for input in &component.inputs {
+                            contexts
+                                .push((input.name.as_str().to_string(), input.security_context));
+                        }
                         walk(&component.children, names, contexts);
                     }
                     R3Node::Template(template) => walk(&template.children, names, contexts),
@@ -5298,5 +5334,56 @@ mod security_tests {
             Some(AngularVersion::new(21, 2, 3)),
         );
         assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
+    #[test]
+    fn selectorless_binding_security_uses_the_host_tag() {
+        // `iframe|src` is a resource URL on the resolved host tag.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp:iframe [src]="url"></MyComp:iframe>"#);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
+
+        // The `:svg:` host hits the namespaced animation schema.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp:svg:animate [attr.to]="v"></MyComp:svg:animate>"#);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
+            "{contexts:?}"
+        );
+
+        // A namespaced host does not fall back to the bare iframe sink.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp:svg:iframe [src]="url"></MyComp:svg:iframe>"#);
+        assert!(
+            contexts.iter().all(|(name, ctx)| name != "src" || *ctx == SecurityContext::None),
+            "{contexts:?}"
+        );
+
+        // `tagName === null` resolves over every element: `*|innerHTML`.
+        let (_, contexts, _) = compile_selectorless(r#"<MyComp [innerHTML]="html"></MyComp>"#);
+        assert!(
+            contexts.iter().any(|(name, ctx)| name == "innerHTML" && *ctx == SecurityContext::Html),
+            "{contexts:?}"
+        );
+    }
+
+    #[test]
+    fn prefixed_element_does_not_inherit_the_parent_namespace_for_security() {
+        // `normalizeTagName` drops a non-svg/math prefix, so `<xml:iframe>`
+        // inside `<svg>` still requires the resource-URL sanitizer.
+        let (_, contexts, _) = compile(r#"<svg><xml:iframe [src]="url"></xml:iframe></svg>"#);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
     }
 }
