@@ -897,15 +897,11 @@ fn collect_namespaced_contexts(
     let mut contexts = Vec::new();
     for css in CssSelector::parse(base_selector) {
         let excluded = not_element_names(&css);
+        // A literal `*` element (only produced for a `:not(...)`-only selector)
+        // is looked up as the `*|attr` key, matching upstream: upstream expands
+        // `element === null` over all known elements but keeps `*` verbatim.
         let element_names: Vec<String> = if let Some(element) = &css.element {
-            if element == "*" && !excluded.is_empty() {
-                // `*` on a `:not(...)` selector means "any element". Expanding it
-                // lets the exclusions apply; a literal `*|attr` lookup would
-                // silently drop the sanitizer.
-                KNOWN_ELEMENT_NAMES.iter().map(|name| (*name).to_string()).collect()
-            } else {
-                resolve_concrete_element(element)
-            }
+            if element == "*" { vec![element.clone()] } else { resolve_concrete_element(element) }
         } else {
             KNOWN_ELEMENT_NAMES.iter().map(|name| (*name).to_string()).collect()
         };
@@ -966,7 +962,7 @@ fn collect_bare_contexts(
 /// A bare selector element that is not in the DOM schema is rewritten to
 /// `:svg:name` or `:math:name` when that namespaced element exists.
 fn resolve_concrete_element(element: &str) -> Vec<String> {
-    if element == "*" || is_known_element(element) {
+    if is_known_element(element) {
         return vec![element.to_string()];
     }
     let lower = element.to_ascii_lowercase();
@@ -1192,11 +1188,42 @@ mod tests {
     }
 
     #[test]
+    fn test_host_universal_selector_expands_to_known_elements() {
+        // `*` never produces an element name upstream, so `*` / `*[x]` behave
+        // like an attribute-only selector and scan every known element.
+        for selector in ["*", "*[x]", "[x]"] {
+            assert_eq!(
+                host_binding_security_context(selector, "src"),
+                SecurityContext::UrlOrResourceUrl,
+                "{selector}"
+            );
+            assert_eq!(
+                host_binding_security_context(selector, "formAction"),
+                SecurityContext::Url,
+                "{selector}"
+            );
+        }
+        // Same expansion on the pre-namespaced lookup path.
+        let version = Some(crate::AngularVersion::new(21, 0, 1));
+        assert_eq!(
+            host_binding_security_context_for("*[x]", "src", version),
+            SecurityContext::UrlOrResourceUrl
+        );
+        // A `:not(...)`-only selector parses to a literal `*` element upstream
+        // and is looked up as the `*|attr` key, which has no `src` entry.
+        assert_eq!(host_binding_security_context("*:not(img)", "src"), SecurityContext::None);
+        assert_eq!(
+            host_binding_security_context(":not(img):not(video)", "src"),
+            SecurityContext::None
+        );
+    }
+
+    #[test]
     fn test_host_selector_leading_not_is_not_a_namespace() {
         // `:not(...)` is a pseudo-class, not a `:ns:` prefix.
         assert_eq!(
             host_binding_security_context(":not(img):not(video)", "src"),
-            SecurityContext::ResourceUrl
+            SecurityContext::None
         );
         // A real `:svg:` prefix still namespaces the lookup.
         assert_eq!(

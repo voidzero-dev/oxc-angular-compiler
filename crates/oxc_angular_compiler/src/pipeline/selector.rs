@@ -245,9 +245,10 @@ impl CssSelector {
                 continue;
             }
 
-            // Handle * wildcard element
+            // `*` is a wildcard, not an element name: upstream's regexp has no
+            // `*` production, so `element` stays unset and selector consumers
+            // treat it as "any element".
             if c == '*' {
-                target.set_element("*");
                 i += 1;
                 continue;
             }
