@@ -125,6 +125,9 @@ pub struct HtmlElement<'a> {
     /// Whether this is a void element (area, base, br, col, embed, hr, img, input, link, meta, param, source, track, wbr).
     /// Void elements cannot have content and do not have end tags.
     pub is_void: bool,
+    /// Parsed from a selectorless component tag (`<MyComp>`, `<MyComp:iframe>`).
+    /// The class is `name`; the host element is `component_prefix` / `component_tag_name`.
+    pub is_component: bool,
 }
 
 /// A selectorless component in the HTML AST.
@@ -518,6 +521,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let child2 = HtmlElement {
@@ -532,6 +536,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let mut children = Vec::new_in(&&allocator);
@@ -550,6 +555,7 @@ mod tests {
             end_span: None,
             is_self_closing: false,
             is_void: false,
+            is_component: false,
         };
 
         let mut nodes = Vec::new_in(&&allocator);

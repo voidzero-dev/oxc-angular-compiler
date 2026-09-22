@@ -339,38 +339,61 @@ impl<'a> HtmlToR3Transform<'a> {
         // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
         // `iframe`), which is correct for the security schema and wrong here.
         let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
+        // `<MyComp:iframe>` keeps the class in `name`. The host tag, including an
+        // explicit namespace (`:svg:iframe`, `:svg:ng-component`), is what
+        // `isTrustedTypesSink` sees. No host tag means `tagName === null`.
+        let host_tag =
+            if element.is_component { Self::selectorless_host_tag(element) } else { None };
 
-        // HTML `<script>` is always stripped. `:svg:script` is stripped from
-        // v22 (`SCRIPT_ELEMENTS`). Other prefixes, such as `:xml:script`, stay.
-        if qualified_name == "script"
-            || (strips_namespaced_svg_script(self.angular_version)
-                && qualified_name == ":svg:script")
-        {
-            return None;
-        }
-        if qualified_name == "style" {
-            if let Some(content) = self.get_text_content(element) {
-                self.styles.push(content);
-            }
-            return None;
-        }
-        if raw_name == "link" {
-            // Collect stylesheet URLs
-            if let Some(href) = self.get_stylesheet_href(element) {
-                self.style_urls.push(href);
-            }
-            // Filter out <link rel="stylesheet"> inside ngNonBindable elements
-            if self.non_bindable_depth > 0 && self.is_stylesheet_link(element) {
+        if element.is_component {
+            // `visitComponent` does not run the element preparser. A class named
+            // `Script` is not an HTML script. Unsupported hosts are the host tag
+            // (`<MyComp:script>`), not the class.
+            if let Some(tag) = host_tag.as_deref()
+                && UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag)
+            {
+                self.report_error(
+                    &format!("Tag name \"{tag}\" cannot be used as a component tag"),
+                    element.start_span,
+                );
                 return None;
             }
+        } else {
+            // HTML `<script>` is always stripped. `:svg:script` is stripped from
+            // v22 (`SCRIPT_ELEMENTS`). Other prefixes, such as `:xml:script`, stay.
+            if qualified_name == "script"
+                || (strips_namespaced_svg_script(self.angular_version)
+                    && qualified_name == ":svg:script")
+            {
+                return None;
+            }
+            if qualified_name == "style" {
+                if let Some(content) = self.get_text_content(element) {
+                    self.styles.push(content);
+                }
+                return None;
+            }
+            if raw_name == "link" {
+                // Collect stylesheet URLs
+                if let Some(href) = self.get_stylesheet_href(element) {
+                    self.style_urls.push(href);
+                }
+                // Filter out <link rel="stylesheet"> inside ngNonBindable elements
+                if self.non_bindable_depth > 0 && self.is_stylesheet_link(element) {
+                    return None;
+                }
+            }
         }
+
+        let i18n_element_name =
+            if element.is_component { host_tag.as_deref() } else { Some(qualified_name.as_str()) };
 
         // Parse attributes
         let (attributes, inputs, outputs, references, variables, template_attr) = self
             .parse_attributes(
                 &element.attrs,
                 &security_name,
-                &qualified_name,
+                i18n_element_name,
                 raw_name == "ng-template",
             );
 
@@ -591,14 +614,17 @@ impl<'a> HtmlToR3Transform<'a> {
         let is_component = first_char.is_ascii_uppercase() || first_char == '_';
 
         let mut result = if is_component {
-            // Validate selectorless component - check for unsupported tags
-            let tag_name_lower = raw_name.to_ascii_lowercase();
-            if UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag_name_lower.as_str()) {
-                self.report_error(
-                    &format!("Tag name \"{raw_name}\" cannot be used as a component tag"),
-                    element.start_span,
-                );
-                return None;
+            // Parsed components already checked the host tag. An uppercase element
+            // from a non-selectorless parse (`<Link>`) still uses the element name.
+            if !element.is_component {
+                let tag_name_lower = raw_name.to_ascii_lowercase();
+                if UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag_name_lower.as_str()) {
+                    self.report_error(
+                        &format!("Tag name \"{raw_name}\" cannot be used as a component tag"),
+                        element.start_span,
+                    );
+                    return None;
+                }
             }
 
             // Validate selectorless references
@@ -680,12 +706,23 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Visits an HTML component (selectorless component AST node).
     fn visit_html_component(&mut self, component: &HtmlComponent<'a>) -> Option<R3Node<'a>> {
-        // Parse attributes
+        if let Some(tag) = component.tag_name.as_ref()
+            && UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag.as_str())
+        {
+            self.report_error(
+                &format!("Tag name \"{}\" cannot be used as a component tag", tag.as_str()),
+                component.start_span,
+            );
+            return None;
+        }
+
+        // `tagName === null` is not a Trusted Types sink. `full_name` is the class.
+        let i18n_element_name = component.tag_name.as_ref().map(|tag| tag.as_str());
         let (attributes, inputs, outputs, references, _variables, template_attr) = self
             .parse_attributes(
                 &component.attrs,
                 component.full_name.as_str(),
-                component.full_name.as_str(),
+                i18n_element_name,
                 false,
             );
 
@@ -864,7 +901,20 @@ impl<'a> HtmlToR3Transform<'a> {
         }
     }
 
-    /// Full element name for Trusted Types and for the script/style sets.
+    /// Host tag of a selectorless component, matching Angular's `tagName`.
+    ///
+    /// `None` is `<MyComp>` (`tagName === null`). An explicit prefix is kept
+    /// (`:svg:iframe`, or `:svg:ng-component` when the prefix has no local name).
+    fn selectorless_host_tag(element: &HtmlElement<'a>) -> Option<String> {
+        match (&element.component_prefix, &element.component_tag_name) {
+            (None, None) => None,
+            (None, Some(tag)) => Some(tag.as_str().to_string()),
+            (Some(prefix), None) => Some(format!(":{}:ng-component", prefix.as_str())),
+            (Some(prefix), Some(tag)) => Some(format!(":{}:{}", prefix.as_str(), tag.as_str())),
+        }
+    }
+
+    /// Full element name for Trusted Types on real elements, and for the script/style sets.
     ///
     /// Keeps every `:prefix:name`, and applies an inherited `svg` or `math`
     /// prefix the way the Angular HTML parser stores the node. Unlike
@@ -2974,7 +3024,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &mut self,
         attrs: &[HtmlAttribute<'a>],
         element_name: &str,
-        i18n_element_name: &str,
+        i18n_element_name: Option<&str>,
         is_template: bool,
     ) -> (
         Vec<'a, R3TextAttribute<'a>>,  // Static attributes
@@ -2999,8 +3049,11 @@ impl<'a> HtmlToR3Transform<'a> {
             let name = attr.name.as_str();
             if let Some(target_attr) = name.strip_prefix("i18n-") {
                 // `isTrustedTypesSink` lowercases the parser's full name and does
-                // not strip a namespace prefix.
-                if is_trusted_types_sink_at(i18n_element_name, target_attr, self.angular_version) {
+                // not strip a namespace prefix. `None` is a selectorless component
+                // with no host tag (`tagName === null`), which is not a sink.
+                if i18n_element_name.is_some_and(|element_name| {
+                    is_trusted_types_sink_at(element_name, target_attr, self.angular_version)
+                }) {
                     self.report_error(
                         &format!(
                             "Translating attribute '{target_attr}' is disallowed for security reasons."
@@ -4936,8 +4989,36 @@ mod security_tests {
         angular_version: Option<AngularVersion>,
     ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
     {
+        compile_with(source, angular_version, false)
+    }
+
+    fn compile_selectorless(
+        source: &str,
+    ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
+    {
+        compile_with(source, None, true)
+    }
+
+    fn compile_selectorless_at(
+        source: &str,
+        angular_version: Option<AngularVersion>,
+    ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
+    {
+        compile_with(source, angular_version, true)
+    }
+
+    fn compile_with(
+        source: &str,
+        angular_version: Option<AngularVersion>,
+        selectorless: bool,
+    ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
+    {
         let allocator = Allocator::default();
-        let parsed = HtmlParser::new(&allocator, source, "test.html").parse();
+        let parsed = if selectorless {
+            HtmlParser::with_selectorless(&allocator, source, "test.html").parse()
+        } else {
+            HtmlParser::new(&allocator, source, "test.html").parse()
+        };
         let result = html_ast_to_r3_ast(
             &allocator,
             source,
@@ -4952,12 +5033,25 @@ mod security_tests {
             contexts: &mut std::vec::Vec<(String, SecurityContext)>,
         ) {
             for node in nodes {
-                if let R3Node::Element(element) = node {
-                    names.push(element.name.as_str().to_string());
-                    for input in &element.inputs {
-                        contexts.push((input.name.as_str().to_string(), input.security_context));
+                match node {
+                    R3Node::Element(element) => {
+                        names.push(element.name.as_str().to_string());
+                        for input in &element.inputs {
+                            contexts
+                                .push((input.name.as_str().to_string(), input.security_context));
+                        }
+                        walk(&element.children, names, contexts);
                     }
-                    walk(&element.children, names, contexts);
+                    R3Node::Component(component) => {
+                        names.push(format!("component:{}", component.component_name.as_str()));
+                        if let Some(tag) = component.tag_name {
+                            names.push(format!("host:{}", tag.as_str()));
+                        }
+                        walk(&component.children, names, contexts);
+                    }
+                    R3Node::Template(template) => walk(&template.children, names, contexts),
+                    R3Node::Content(content) => walk(&content.children, names, contexts),
+                    _ => {}
                 }
             }
         }
@@ -5023,7 +5117,6 @@ mod security_tests {
     }
 
     #[test]
-    #[test]
     fn xml_script_is_kept_and_xml_iframe_src_stays_translatable() {
         let (names, _, _) = compile(r#"<xml:script>alert(1)</xml:script>"#);
         assert!(names.iter().any(|name| name.contains("script")), "{names:?}");
@@ -5032,9 +5125,78 @@ mod security_tests {
         assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
     }
 
+    #[test]
     fn v21_2_3_allows_iframe_src_translation() {
         let (_, _, errors) = compile_at(
             r#"<iframe i18n-src src="https://example.com"></iframe>"#,
+            Some(AngularVersion::new(21, 2, 3)),
+        );
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
+    #[test]
+    fn selectorless_iframe_host_rejects_i18n_src() {
+        let (_, _, errors) = compile_selectorless(
+            r#"<MyComp:iframe i18n-src src="https://example.com"></MyComp:iframe>"#,
+        );
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_svg_iframe_host_is_not_the_iframe_sink() {
+        let (_, _, errors) = compile_selectorless(
+            r#"<MyComp:svg:iframe i18n-src src="https://example.com"></MyComp:svg:iframe>"#,
+        );
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
+    #[test]
+    fn selectorless_without_host_tag_is_not_a_sink() {
+        let (_, _, errors) =
+            compile_selectorless(r#"<MyComp i18n-innerHTML innerHTML="<b>x</b>"></MyComp>"#);
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
+    #[test]
+    fn selectorless_script_class_is_kept_and_script_host_is_rejected() {
+        let (names, _, errors) = compile_selectorless(r#"<Script>alert(1)</Script>"#);
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(names.iter().any(|name| name == "component:Script"), "{names:?}");
+
+        let (names, _, errors) = compile_selectorless(
+            r#"<Script:iframe i18n-src src="https://example.com"></Script:iframe>"#,
+        );
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?} {names:?}"
+        );
+        assert!(names.iter().any(|name| name == "component:Script"), "{names:?}");
+
+        let (_, _, errors) = compile_selectorless(r#"<MyComp:script></MyComp:script>"#);
+        assert!(
+            errors
+                .iter()
+                .any(|msg| msg.contains("Tag name \"script\" cannot be used as a component tag")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn element_script_class_is_still_stripped() {
+        let (names, _, _) = compile(r#"<Script>alert(1)</Script>"#);
+        assert!(
+            !names.iter().any(|name| name.to_ascii_lowercase().contains("script")),
+            "{names:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_iframe_src_i18n_follows_version() {
+        let (_, _, errors) = compile_selectorless_at(
+            r#"<MyComp:iframe i18n-src src="https://example.com"></MyComp:iframe>"#,
             Some(AngularVersion::new(21, 2, 3)),
         );
         assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");

@@ -227,6 +227,7 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
+                            is_component: false,
                             attrs: Vec::new_in(&self.allocator),
                             directives: Vec::new_in(&self.allocator),
                             children: Vec::new_in(&self.allocator),
@@ -376,6 +377,7 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
+                            is_component: false,
                             attrs: Vec::new_in(&self.allocator),
                             directives: Vec::new_in(&self.allocator),
                             children: Vec::new_in(&self.allocator),
@@ -421,6 +423,7 @@ impl<'a> HtmlParser<'a> {
                 name: Ident::from(""),
                 component_prefix: None,
                 component_tag_name: None,
+                is_component: false,
                 attrs: Vec::new_in(&self.allocator),
                 directives: Vec::new_in(&self.allocator),
                 children: Vec::new_in(&self.allocator),
@@ -568,10 +571,11 @@ impl<'a> HtmlParser<'a> {
             return; // No token to consume
         };
         let start = start_token.start;
+        let is_component = start_token.token_type == HtmlTokenType::ComponentOpenStart;
         // TagOpenStart has parts [prefix, name]
         // ComponentOpenStart has parts [component_name, prefix, tag_name]
         let (tag_name, local_name, has_ns_prefix, component_prefix, component_tag_name) =
-            if start_token.token_type == HtmlTokenType::ComponentOpenStart {
+            if is_component {
                 // For components, extract all three parts:
                 // parts[0] = component_name, parts[1] = prefix, parts[2] = tag_name
                 let component_name = start_token.parts.first().cloned().unwrap_or_default();
@@ -656,6 +660,7 @@ impl<'a> HtmlParser<'a> {
             name: Ident::from_in(tag_name.clone(), &self.allocator),
             component_prefix: component_prefix.map(|p| Ident::from_in(p, &self.allocator)),
             component_tag_name: component_tag_name.map(|t| Ident::from_in(t, &self.allocator)),
+            is_component,
             attrs,
             directives,
             children: Vec::new_in(&self.allocator),
@@ -1148,6 +1153,7 @@ impl<'a> HtmlParser<'a> {
             name: Ident::from_in(tag_name.clone(), &self.allocator),
             component_prefix: None,
             component_tag_name: None,
+            is_component: false,
             attrs: Vec::new_in(&self.allocator),
             directives: Vec::new_in(&self.allocator),
             children: Vec::new_in(&self.allocator),
@@ -1461,6 +1467,7 @@ impl<'a> HtmlParser<'a> {
                             name: Ident::from(""),
                             component_prefix: None,
                             component_tag_name: None,
+                            is_component: false,
                             attrs: Vec::new_in(&self.allocator),
                             directives: Vec::new_in(&self.allocator),
                             children: Vec::new_in(&self.allocator),
