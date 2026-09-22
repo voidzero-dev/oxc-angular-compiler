@@ -39,7 +39,7 @@ minimumReleaseAgeExclude:
   - oxlint-tsgolint
 
 catalog:
-  '@napi-rs/cli': 3.10.4
+  '@napi-rs/cli': 3.10.5
   '@oxc-node/cli': 0.1.2
   '@oxc-node/core': 0.1.2
   '@tailwindcss/vite': 4.3.3
