@@ -871,6 +871,33 @@ pub fn host_binding_security_context_for(
     reduce_security_contexts(&contexts)
 }
 
+/// Security context of a property/attribute binding on a concrete element,
+/// for a specific Angular version.
+///
+/// Upstream routes element bindings through `calcPossibleSecurityContexts`
+/// with the element name as the selector, so a bare element missing from the
+/// DOM schema is promoted to its `:svg:`/`:math:` form (e.g. `<animate>` →
+/// `:svg:animate`) on the namespaced schema, and a `tagName === null`
+/// selectorless host expands over every known element. The bound attribute
+/// keeps `securityContexts[0]` — the numerically lowest context after
+/// upstream's sort, which keeps `NONE` ahead of `URL`/`RESOURCE_URL`.
+pub fn element_security_context_for(
+    element: &str,
+    prop_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> SecurityContext {
+    let contexts = if security_profile(version).namespaced {
+        collect_namespaced_contexts(element, prop_name, version)
+    } else {
+        collect_bare_contexts(element, prop_name, version)
+    };
+    contexts
+        .iter()
+        .copied()
+        .min_by_key(|ctx| security_context_rank(*ctx))
+        .unwrap_or(SecurityContext::None)
+}
+
 fn collect_namespaced_contexts(
     selector: &str,
     prop_name: &str,
@@ -916,8 +943,12 @@ fn collect_namespaced_contexts(
     contexts
 }
 
-/// v21 `calcPossibleSecurityContexts`: no namespace rewrite, and `:not(element)`
-/// matches the element string exactly, including case.
+/// Pre-namespaced `calcPossibleSecurityContexts` (everything before the
+/// 19.2.23 / 20.3.22 / 21.2.14 / v22 schema): no `splitNsName`, no element
+/// promotion — the whole selector goes through `CssSelector.parse`, so
+/// `:svg:animate` parses to element `animate` and hits the bare
+/// `animate|to` key, and `:not(element)` matches the element string
+/// exactly, including case.
 fn collect_bare_contexts(
     selector: &str,
     prop_name: &str,
@@ -1230,6 +1261,53 @@ mod tests {
             host_binding_security_context(":svg:animate", "to"),
             SecurityContext::AttributeNoBinding
         );
+    }
+
+    #[test]
+    fn test_element_binding_promotes_unknown_bare_element() {
+        // Element bindings go through `calcPossibleSecurityContexts` upstream:
+        // a bare element missing from the DOM schema is looked up as its
+        // `:svg:`/`:math:` form on the namespaced schema.
+        assert_eq!(
+            element_security_context_for("animate", "to", None),
+            SecurityContext::AttributeNoBinding
+        );
+        assert_eq!(
+            element_security_context_for("set", "to", None),
+            SecurityContext::AttributeNoBinding
+        );
+        // The local name promotes even under a different namespace, matching
+        // upstream (`hasElement(':math:animate')` misses, so it tries
+        // `:svg:animate` / `:math:animate` and keeps the hit's own prefix).
+        assert_eq!(
+            element_security_context_for(":math:animate", "to", None),
+            SecurityContext::AttributeNoBinding
+        );
+        // No promotion before the namespaced schema (19.2.23 / 20.3.22 /
+        // 21.2.14 / v22): `animate|to` is a verbatim miss.
+        let version = Some(crate::AngularVersion::new(21, 0, 1));
+        assert_eq!(element_security_context_for("animate", "to", version), SecurityContext::None);
+        // Known elements resolve directly on every version.
+        assert_eq!(
+            element_security_context_for("iframe", "src", None),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(
+            element_security_context_for("iframe", "src", version),
+            SecurityContext::ResourceUrl
+        );
+        // Unknown in every namespace stays a miss.
+        assert_eq!(element_security_context_for("bogus", "src", None), SecurityContext::None);
+        // `tagName === null` expands over every known element upstream, and
+        // the binding keeps `securityContexts[0]` — the numerically lowest,
+        // so `NONE` wins over URL/RESOURCE_URL.
+        assert_eq!(element_security_context_for("", "src", None), SecurityContext::None);
+        // `formAction` hits the `*|formAction` URL wildcard key, so the
+        // lowest context is URL.
+        assert_eq!(element_security_context_for("", "formAction", None), SecurityContext::Url);
+        // `innerHTML` hits the `*|innerHTML` HTML key for every element, so
+        // the lowest context is HTML.
+        assert_eq!(element_security_context_for("", "innerHTML", None), SecurityContext::Html);
     }
 
     #[test]

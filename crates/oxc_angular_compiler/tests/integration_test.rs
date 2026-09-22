@@ -10396,6 +10396,36 @@ fn test_iframe_sensitive_attr_validation_legacy_versions() {
     );
 }
 
+#[test]
+fn test_svg_animation_attr_binding_validates_on_namespaced_schema() {
+    // Upstream routes element bindings through calcPossibleSecurityContexts,
+    // which promotes a bare element missing from the DOM schema to its
+    // `:svg:`/`:math:` form. `<animate [attr.to]>` therefore resolves to
+    // `:svg:animate|to` → attributeNoBinding → ɵɵvalidateAttribute.
+    for version in [None, Some(AngularVersion::new(21, 2, 14))] {
+        let js = compile_template_to_js_with_version(
+            r#"<animate [attr.to]="expr"></animate>"#,
+            "TestComponent",
+            version,
+        );
+        assert!(
+            js.contains("ɵɵvalidateAttribute"),
+            "v{version:?} should emit ɵɵvalidateAttribute for <animate [attr.to]>. Got:\n{js}"
+        );
+    }
+    // Before the namespaced schema (19.2.23 / 20.3.22 / 21.2.14 / v22) there is
+    // no promotion and `animate|to` is a verbatim miss.
+    let js = compile_template_to_js_with_version(
+        r#"<animate [attr.to]="expr"></animate>"#,
+        "TestComponent",
+        Some(AngularVersion::new(21, 0, 1)),
+    );
+    assert!(
+        !js.contains("ɵɵvalidateAttribute"),
+        "v21.0.1 should not emit ɵɵvalidateAttribute for <animate [attr.to]>. Got:\n{js}"
+    );
+}
+
 // ============================================================================
 // Host Directive Alias Tests
 // ============================================================================

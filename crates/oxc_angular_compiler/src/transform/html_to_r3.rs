@@ -31,7 +31,7 @@ use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
-    get_security_context_for, is_known_element, is_trusted_types_sink_at,
+    element_security_context_for, is_known_element, is_trusted_types_sink_at,
     strips_namespaced_svg_script, strips_namespaced_svg_style, uses_namespaced_schema,
 };
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
@@ -203,7 +203,11 @@ impl<'a> HtmlToR3Transform<'a> {
     }
 
     fn security_context(&self, element: &str, property: &str) -> SecurityContext {
-        get_security_context_for(element, property, self.angular_version)
+        // Element bindings go through `calcPossibleSecurityContexts` upstream,
+        // which promotes a bare element missing from the DOM schema to its
+        // `:svg:`/`:math:` form (`<animate>` → `:svg:animate`) on the
+        // namespaced schema.
+        element_security_context_for(element, property, self.angular_version)
     }
 
     /// Allocates a new unique instance ID for an i18n message.
@@ -5105,7 +5109,10 @@ mod security_tests {
     }
 
     #[test]
-    fn v21_keeps_svg_script_and_does_not_validate_namespaced_animate() {
+    fn v21_keeps_svg_script_and_validates_namespaced_animate() {
+        // `:svg:animate` parses to element `animate` on the pre-namespaced
+        // selector path (upstream has no `splitNsName` there), so `to` hits
+        // the bare `animate|to` attributeNoBinding key at 21.2.7.
         let version = Some(AngularVersion::new(21, 2, 7));
         let (names, contexts, _) = compile_at(
             r#"<svg><script>alert(1)</script><animate [attr.to]="url"></animate></svg>"#,
@@ -5113,7 +5120,9 @@ mod security_tests {
         );
         assert!(names.iter().any(|name| name.contains("script")), "{names:?}");
         assert!(
-            contexts.iter().any(|(name, ctx)| name == "to" && *ctx == SecurityContext::None),
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
             "{contexts:?}"
         );
     }
@@ -5406,16 +5415,19 @@ mod security_tests {
 
     #[test]
     fn prefixed_element_lookup_matches_the_versions_normalize_tag_name() {
-        // `normalizeTagName` in `securityContext` only exists at 19.2.23 /
-        // 20.3.22 / 21.2.15 and later. Before that the tag is lowercased
-        // verbatim, so `:xml:iframe|src` is not the `iframe|src` sink.
+        // Pre-namespaced versions feed `:xml:iframe` to `CssSelector.parse`
+        // verbatim, which yields element `iframe`, so `src` resolves to
+        // `iframe|src` — the sink still applies. The namespaced schema splits
+        // the `:xml:` prefix; only versions with `normalizeTagName` (19.2.23 /
+        // 20.3.22 / 21.2.15+) strip it back to `iframe`, while 21.2.14 looks
+        // up `:xml:iframe|src` verbatim and misses.
         for (major, minor, patch, expected) in [
-            (21, 2, 13, SecurityContext::None),
+            (21, 2, 13, SecurityContext::ResourceUrl),
             (21, 2, 14, SecurityContext::None),
             (21, 2, 15, SecurityContext::ResourceUrl),
-            (19, 2, 22, SecurityContext::None),
+            (19, 2, 22, SecurityContext::ResourceUrl),
             (19, 2, 23, SecurityContext::ResourceUrl),
-            (20, 3, 21, SecurityContext::None),
+            (20, 3, 21, SecurityContext::ResourceUrl),
             (20, 3, 22, SecurityContext::ResourceUrl),
         ] {
             let (_, contexts, _) = compile_at(
