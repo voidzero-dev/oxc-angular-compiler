@@ -17,7 +17,7 @@ use crate::i18n::ast::{
 };
 use crate::i18n::parser::{I18nMessageFactory, create_i18n_message_factory};
 use crate::i18n::translation_bundle::TranslationBundle;
-use crate::schema::is_trusted_types_sink;
+use crate::schema::is_trusted_types_sink_at;
 use crate::util::{ParseSourceFile, ParseSourceSpan};
 
 // ============================================================================
@@ -368,18 +368,22 @@ enum VisitorMode {
 /// * `implicit_tags` - Tag names that are implicitly translatable.
 /// * `implicit_attrs` - Attribute names that are implicitly translatable per element.
 /// * `preserve_significant_whitespace` - Whether to preserve significant whitespace.
+/// * `angular_version` - The Angular version being targeted; gates which
+///   Trusted Types sinks reject translation.
 pub fn extract_messages(
     nodes: &[HtmlNodeRef<'_>],
     implicit_tags: &[String],
     implicit_attrs: &FxHashMap<String, Vec<String>>,
     preserve_significant_whitespace: bool,
     source_file: Arc<ParseSourceFile>,
+    angular_version: Option<crate::AngularVersion>,
 ) -> ExtractionResult {
     let mut visitor = I18nVisitor::new(
         implicit_tags,
         implicit_attrs,
         preserve_significant_whitespace,
         source_file,
+        angular_version,
     );
     visitor.extract(nodes)
 }
@@ -391,14 +395,18 @@ pub fn extract_messages(
 /// * `translations` - The translation bundle.
 /// * `implicit_tags` - Tag names that are implicitly translatable.
 /// * `implicit_attrs` - Attribute names that are implicitly translatable per element.
+/// * `angular_version` - The Angular version being targeted; gates which
+///   Trusted Types sinks reject translation.
 pub fn merge_translations(
     nodes: &[HtmlNodeRef<'_>],
     translations: &TranslationBundle,
     implicit_tags: &[String],
     implicit_attrs: &FxHashMap<String, Vec<String>>,
     source_file: Arc<ParseSourceFile>,
+    angular_version: Option<crate::AngularVersion>,
 ) -> MergeResult {
-    let mut visitor = I18nVisitor::new(implicit_tags, implicit_attrs, true, source_file);
+    let mut visitor =
+        I18nVisitor::new(implicit_tags, implicit_attrs, true, source_file, angular_version);
     visitor.merge(nodes, translations)
 }
 
@@ -568,6 +576,9 @@ struct I18nVisitor<'a> {
     translations: Option<&'a TranslationBundle>,
     /// Source file for span conversion.
     source_file: Arc<ParseSourceFile>,
+    /// The Angular version being targeted; gates which Trusted Types sinks
+    /// reject translation.
+    angular_version: Option<crate::AngularVersion>,
 }
 
 impl<'a> I18nVisitor<'a> {
@@ -581,6 +592,7 @@ impl<'a> I18nVisitor<'a> {
         implicit_attrs: &'a FxHashMap<String, Vec<String>>,
         preserve_significant_whitespace: bool,
         source_file: Arc<ParseSourceFile>,
+        angular_version: Option<crate::AngularVersion>,
     ) -> Self {
         Self {
             implicit_tags,
@@ -604,6 +616,7 @@ impl<'a> I18nVisitor<'a> {
             ),
             translations: None,
             source_file,
+            angular_version,
         }
     }
 
@@ -1096,7 +1109,7 @@ impl<'a> I18nVisitor<'a> {
         for attr in attrs {
             if attr.name.starts_with(I18N_ATTR_PREFIX) {
                 let target_name = &attr.name[I18N_ATTR_PREFIX.len()..];
-                if is_trusted_types_sink(element_name, target_name) {
+                if is_trusted_types_sink_at(element_name, target_name, self.angular_version) {
                     self.report_error(
                         attr.span,
                         &format!(
@@ -1124,7 +1137,9 @@ impl<'a> I18nVisitor<'a> {
 
                 // Implicit config can name a sink (`iframe` → `src`) without an
                 // `i18n-*` marker. The marker loop above never sees that case.
-                if needs_translation && is_trusted_types_sink(element_name, attr.name) {
+                if needs_translation
+                    && is_trusted_types_sink_at(element_name, attr.name, self.angular_version)
+                {
                     if implicit && i18n_meta.is_none() {
                         self.report_error(
                             attr.span,
@@ -1269,7 +1284,7 @@ impl<'a> I18nVisitor<'a> {
         for attr in attrs {
             if attr.name.starts_with(I18N_ATTR_PREFIX) {
                 let target_name = &attr.name[I18N_ATTR_PREFIX.len()..];
-                if is_trusted_types_sink(element_name, target_name) {
+                if is_trusted_types_sink_at(element_name, target_name, self.angular_version) {
                     self.report_error(
                         attr.span,
                         &format!(
@@ -1293,7 +1308,7 @@ impl<'a> I18nVisitor<'a> {
                     attr.is_interpolation_only,
                 );
             } else if implicit_attr_names.iter().any(|n| n == attr.name) {
-                if is_trusted_types_sink(element_name, attr.name) {
+                if is_trusted_types_sink_at(element_name, attr.name, self.angular_version) {
                     self.report_error(
                         attr.span,
                         &format!(
@@ -1838,7 +1853,7 @@ mod tests {
     #[test]
     fn test_extract_messages_empty() {
         let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
-        let result = extract_messages(&[], &[], &FxHashMap::default(), true, source_file);
+        let result = extract_messages(&[], &[], &FxHashMap::default(), true, source_file, None);
         assert!(result.messages.is_empty());
         assert!(result.errors.is_empty());
     }
@@ -1868,7 +1883,7 @@ mod tests {
             start_span: span,
             end_span: None,
         }];
-        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file, None);
         assert!(result.messages.is_empty());
         assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
     }
@@ -1893,7 +1908,7 @@ mod tests {
             start_span: span,
             end_span: None,
         }];
-        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
+        let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file, None);
         assert!(result.errors.is_empty());
         assert!(!result.messages.is_empty());
     }
@@ -1917,7 +1932,7 @@ mod tests {
             start_span: span,
             end_span: None,
         }];
-        let result = extract_messages(&nodes, &[], &implicit_attrs, true, source_file);
+        let result = extract_messages(&nodes, &[], &implicit_attrs, true, source_file, None);
         assert!(result.messages.is_empty());
         assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
     }
@@ -1946,7 +1961,7 @@ mod tests {
             crate::i18n::i18n_html_parser::MissingTranslationStrategy::Ignore,
             None,
         );
-        let result = merge_translations(&nodes, &bundle, &[], &implicit_attrs, source_file);
+        let result = merge_translations(&nodes, &bundle, &[], &implicit_attrs, source_file, None);
         assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
         match &result.nodes[0] {
             TranslatedNode::Element { attrs, .. } => {
@@ -1955,6 +1970,79 @@ mod tests {
             }
             _ => panic!("expected an element"),
         }
+    }
+
+    #[test]
+    fn test_iframe_src_i18n_allowed_before_21_2_4() {
+        // `iframe|src` joined the Trusted Types sinks at 21.2.4; standalone
+        // extraction and merge must follow the same cutoff as compilation.
+        let span = Span::default();
+        let nodes = || {
+            vec![HtmlNodeRef::Element {
+                name: "iframe",
+                attrs: vec![
+                    HtmlAttrRef {
+                        name: "i18n-src",
+                        value: "translated url",
+                        span,
+                        is_interpolation_only: false,
+                    },
+                    HtmlAttrRef {
+                        name: "src",
+                        value: "https://example.com",
+                        span,
+                        is_interpolation_only: false,
+                    },
+                ],
+                children: vec![],
+                span,
+                start_span: span,
+                end_span: None,
+            }]
+        };
+
+        let allowed = extract_messages(
+            &nodes(),
+            &[],
+            &FxHashMap::default(),
+            true,
+            Arc::new(ParseSourceFile::new("", "<test>")),
+            Some(crate::AngularVersion::new(21, 2, 3)),
+        );
+        assert!(allowed.errors.is_empty(), "{:?}", allowed.errors);
+        assert!(!allowed.messages.is_empty());
+
+        let rejected = extract_messages(
+            &nodes(),
+            &[],
+            &FxHashMap::default(),
+            true,
+            Arc::new(ParseSourceFile::new("", "<test>")),
+            Some(crate::AngularVersion::new(21, 2, 4)),
+        );
+        assert!(rejected.messages.is_empty());
+        assert!(rejected.errors.iter().any(|err| err.message.contains("disallowed")));
+
+        // Merge follows the same cutoff: on 21.2.3 the i18n-src marker is
+        // collected and the attribute is translatable.
+        let bundle = crate::i18n::translation_bundle::TranslationBundle::new_empty(
+            crate::i18n::digest::compute_digest,
+            crate::i18n::i18n_html_parser::MissingTranslationStrategy::Ignore,
+            None,
+        );
+        let merged = merge_translations(
+            &nodes(),
+            &bundle,
+            &[],
+            &FxHashMap::default(),
+            Arc::new(ParseSourceFile::new("", "<test>")),
+            Some(crate::AngularVersion::new(21, 2, 3)),
+        );
+        assert!(
+            !merged.errors.iter().any(|err| err.message.contains("disallowed")),
+            "{:?}",
+            merged.errors
+        );
     }
 
     #[test]
