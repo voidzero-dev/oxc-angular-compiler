@@ -334,18 +334,21 @@ impl<'a> HtmlToR3Transform<'a> {
         } else {
             child_namespace
         };
-        let local_name = split_ns_name(raw_name).1.to_ascii_lowercase();
         let security_name = Self::security_element_name(raw_name, element_namespace);
+        // Trusted Types and the script/style sets use the parser's full name.
+        // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
+        // `iframe`), which is correct for the security schema and wrong here.
+        let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
 
         // HTML `<script>` is always stripped. `:svg:script` is stripped from
-        // v22 (`SCRIPT_ELEMENTS`). v21 only matches the bare name `script`.
-        if security_name == "script"
+        // v22 (`SCRIPT_ELEMENTS`). Other prefixes, such as `:xml:script`, stay.
+        if qualified_name == "script"
             || (strips_namespaced_svg_script(self.angular_version)
-                && security_name == ":svg:script")
+                && qualified_name == ":svg:script")
         {
             return None;
         }
-        if local_name == "style" && element_namespace == ElementNamespace::Html {
+        if qualified_name == "style" {
             if let Some(content) = self.get_text_content(element) {
                 self.styles.push(content);
             }
@@ -363,8 +366,13 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Parse attributes
-        let (attributes, inputs, outputs, references, variables, template_attr) =
-            self.parse_attributes(&element.attrs, &security_name, raw_name == "ng-template");
+        let (attributes, inputs, outputs, references, variables, template_attr) = self
+            .parse_attributes(
+                &element.attrs,
+                &security_name,
+                &qualified_name,
+                raw_name == "ng-template",
+            );
 
         // foreignObject is SVG, but its children are HTML. `child_namespace` is
         // what gets pushed; `element_namespace` was used for this element's name.
@@ -673,8 +681,13 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Visits an HTML component (selectorless component AST node).
     fn visit_html_component(&mut self, component: &HtmlComponent<'a>) -> Option<R3Node<'a>> {
         // Parse attributes
-        let (attributes, inputs, outputs, references, _variables, template_attr) =
-            self.parse_attributes(&component.attrs, component.full_name.as_str(), false);
+        let (attributes, inputs, outputs, references, _variables, template_attr) = self
+            .parse_attributes(
+                &component.attrs,
+                component.full_name.as_str(),
+                component.full_name.as_str(),
+                false,
+            );
 
         // Resolve namespace for this component and its children.
         let parent_namespace = self.current_namespace();
@@ -848,6 +861,27 @@ impl<'a> HtmlToR3Transform<'a> {
             ElementNamespace::Svg => format!(":svg:{local}"),
             ElementNamespace::Math => format!(":math:{local}"),
             ElementNamespace::Html => local.to_string(),
+        }
+    }
+
+    /// Full element name for Trusted Types and for the script/style sets.
+    ///
+    /// Keeps every `:prefix:name`, and applies an inherited `svg` or `math`
+    /// prefix the way the Angular HTML parser stores the node. Unlike
+    /// `security_element_name`, a non-svg/math prefix is not reduced to the
+    /// local name.
+    fn qualified_element_name(raw_name: &str, namespace: ElementNamespace) -> String {
+        let lower = raw_name.to_ascii_lowercase();
+        let (ns, local) = split_ns_name(&lower);
+        if let Some(ns) = ns
+            && !ns.is_empty()
+        {
+            return format!(":{ns}:{local}");
+        }
+        match namespace {
+            ElementNamespace::Svg => format!(":svg:{local}"),
+            ElementNamespace::Math => format!(":math:{local}"),
+            ElementNamespace::Html => lower,
         }
     }
 
@@ -2940,6 +2974,7 @@ impl<'a> HtmlToR3Transform<'a> {
         &mut self,
         attrs: &[HtmlAttribute<'a>],
         element_name: &str,
+        i18n_element_name: &str,
         is_template: bool,
     ) -> (
         Vec<'a, R3TextAttribute<'a>>,  // Static attributes
@@ -2963,8 +2998,9 @@ impl<'a> HtmlToR3Transform<'a> {
         for attr in attrs {
             let name = attr.name.as_str();
             if let Some(target_attr) = name.strip_prefix("i18n-") {
-                // `isTrustedTypesSink` lowercases and does not strip `:svg:` / `:math:`.
-                if is_trusted_types_sink_at(element_name, target_attr, self.angular_version) {
+                // `isTrustedTypesSink` lowercases the parser's full name and does
+                // not strip a namespace prefix.
+                if is_trusted_types_sink_at(i18n_element_name, target_attr, self.angular_version) {
                     self.report_error(
                         &format!(
                             "Translating attribute '{target_attr}' is disallowed for security reasons."
@@ -4987,6 +5023,15 @@ mod security_tests {
     }
 
     #[test]
+    #[test]
+    fn xml_script_is_kept_and_xml_iframe_src_stays_translatable() {
+        let (names, _, _) = compile(r#"<xml:script>alert(1)</xml:script>"#);
+        assert!(names.iter().any(|name| name.contains("script")), "{names:?}");
+        let (_, _, errors) =
+            compile(r#"<xml:iframe i18n-src src="https://example.com"></xml:iframe>"#);
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
     fn v21_2_3_allows_iframe_src_translation() {
         let (_, _, errors) = compile_at(
             r#"<iframe i18n-src src="https://example.com"></iframe>"#,

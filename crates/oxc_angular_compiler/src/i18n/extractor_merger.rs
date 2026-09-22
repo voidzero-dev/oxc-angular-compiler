@@ -1119,8 +1119,27 @@ impl<'a> I18nVisitor<'a> {
 
                 // Check if this attribute needs translation
                 let i18n_meta = explicit_attr_meta.get(attr.name);
-                let needs_translation =
-                    i18n_meta.is_some() || implicit_attr_names.iter().any(|n| n == attr.name);
+                let implicit = implicit_attr_names.iter().any(|n| n == attr.name);
+                let needs_translation = i18n_meta.is_some() || implicit;
+
+                // Implicit config can name a sink (`iframe` → `src`) without an
+                // `i18n-*` marker. The marker loop above never sees that case.
+                if needs_translation && is_trusted_types_sink(element_name, attr.name) {
+                    if implicit && i18n_meta.is_none() {
+                        self.report_error(
+                            attr.span,
+                            &format!(
+                                "Translating attribute '{}' is disallowed for security reasons.",
+                                attr.name
+                            ),
+                        );
+                    }
+                    return Some(TranslatedAttribute {
+                        name: attr.name.to_string(),
+                        value: attr.value.to_string(),
+                        span: attr.span,
+                    });
+                }
 
                 if needs_translation && !attr.is_interpolation_only && !attr.value.trim().is_empty()
                 {
@@ -1274,13 +1293,23 @@ impl<'a> I18nVisitor<'a> {
                     attr.is_interpolation_only,
                 );
             } else if implicit_attr_names.iter().any(|n| n == attr.name) {
-                self.add_message_from_attr(
-                    attr.name,
-                    attr.value,
-                    "",
-                    attr.span,
-                    attr.is_interpolation_only,
-                );
+                if is_trusted_types_sink(element_name, attr.name) {
+                    self.report_error(
+                        attr.span,
+                        &format!(
+                            "Translating attribute '{}' is disallowed for security reasons.",
+                            attr.name
+                        ),
+                    );
+                } else {
+                    self.add_message_from_attr(
+                        attr.name,
+                        attr.value,
+                        "",
+                        attr.span,
+                        attr.is_interpolation_only,
+                    );
+                }
             }
         }
     }
@@ -1867,6 +1896,65 @@ mod tests {
         let result = extract_messages(&nodes, &[], &FxHashMap::default(), true, source_file);
         assert!(result.errors.is_empty());
         assert!(!result.messages.is_empty());
+    }
+
+    #[test]
+    fn test_implicit_iframe_src_is_rejected() {
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let span = Span::default();
+        let mut implicit_attrs = FxHashMap::default();
+        implicit_attrs.insert("iframe".to_string(), vec!["src".to_string()]);
+        let nodes = vec![HtmlNodeRef::Element {
+            name: "iframe",
+            attrs: vec![HtmlAttrRef {
+                name: "src",
+                value: "https://example.com",
+                span,
+                is_interpolation_only: false,
+            }],
+            children: vec![],
+            span,
+            start_span: span,
+            end_span: None,
+        }];
+        let result = extract_messages(&nodes, &[], &implicit_attrs, true, source_file);
+        assert!(result.messages.is_empty());
+        assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
+    }
+
+    #[test]
+    fn test_implicit_iframe_src_is_not_rewritten_on_merge() {
+        let source_file = Arc::new(ParseSourceFile::new("", "<test>"));
+        let span = Span::default();
+        let mut implicit_attrs = FxHashMap::default();
+        implicit_attrs.insert("iframe".to_string(), vec!["src".to_string()]);
+        let nodes = vec![HtmlNodeRef::Element {
+            name: "iframe",
+            attrs: vec![HtmlAttrRef {
+                name: "src",
+                value: "https://example.com",
+                span,
+                is_interpolation_only: false,
+            }],
+            children: vec![],
+            span,
+            start_span: span,
+            end_span: None,
+        }];
+        let bundle = crate::i18n::translation_bundle::TranslationBundle::new_empty(
+            crate::i18n::digest::compute_digest,
+            crate::i18n::i18n_html_parser::MissingTranslationStrategy::Ignore,
+            None,
+        );
+        let result = merge_translations(&nodes, &bundle, &[], &implicit_attrs, source_file);
+        assert!(result.errors.iter().any(|err| err.message.contains("disallowed")));
+        match &result.nodes[0] {
+            TranslatedNode::Element { attrs, .. } => {
+                assert_eq!(attrs[0].name, "src");
+                assert_eq!(attrs[0].value, "https://example.com");
+            }
+            _ => panic!("expected an element"),
+        }
     }
 
     #[test]
