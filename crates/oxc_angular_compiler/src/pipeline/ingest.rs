@@ -4126,9 +4126,10 @@ fn ingest_host_dom_property<'a>(
         // `style` / `class` / animation ops are specialized before sanitizers run.
         security_context: match binding_kind {
             BindingKind::Attribute | BindingKind::Property | BindingKind::TwoWayProperty => {
-                crate::schema::host_binding_security_context(
+                crate::schema::host_binding_security_context_for(
                     job.component_selector.as_str(),
                     name.as_str(),
+                    job.angular_version,
                 )
             }
             _ => SecurityContext::None,
@@ -4143,8 +4144,12 @@ fn ingest_host_dom_property<'a>(
 /// Security context for a static host attribute.
 ///
 /// Same selector rules as host property bindings (`calcPossibleSecurityContexts`).
-fn compute_security_context(selector: &str, attr_name: &str) -> SecurityContext {
-    crate::schema::host_binding_security_context(selector, attr_name)
+fn compute_security_context(
+    selector: &str,
+    attr_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> SecurityContext {
+    crate::schema::host_binding_security_context_for(selector, attr_name, version)
 }
 
 /// Ingests a static host attribute.
@@ -4165,7 +4170,11 @@ fn ingest_host_attribute<'a>(
     let allocator = job.allocator;
 
     // Compute security context based on selector and attribute name
-    let security_context = compute_security_context(job.component_selector.as_str(), name.as_str());
+    let security_context = compute_security_context(
+        job.component_selector.as_str(),
+        name.as_str(),
+        job.angular_version,
+    );
 
     // Wrap the OutputExpression in IrExpression::OutputExpr
     // This matches TypeScript which passes o.Expression directly to the IR
@@ -4405,7 +4414,11 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
             continue;
         }
 
-        let security_context = crate::schema::get_security_context(NG_TEMPLATE_TAG_NAME, attr_name);
+        let security_context = crate::schema::get_security_context_for(
+            NG_TEMPLATE_TAG_NAME,
+            attr_name,
+            job.angular_version,
+        );
         let value_expr = create_string_literal_atom(allocator, attr.value.clone());
 
         // Handle i18n message if present (for i18n-* attribute markers)
@@ -4494,8 +4507,11 @@ fn ingest_control_flow_insertion_point<'a, 'b>(
             continue;
         }
 
-        let security_context =
-            crate::schema::get_security_context(NG_TEMPLATE_TAG_NAME, &input.name);
+        let security_context = crate::schema::get_security_context_for(
+            NG_TEMPLATE_TAG_NAME,
+            &input.name,
+            job.angular_version,
+        );
 
         let extracted_attr_op = CreateOp::ExtractedAttribute(ExtractedAttributeOp {
             base: CreateOpBase { source_span: Some(input.source_span), ..Default::default() },

@@ -13,12 +13,75 @@ use crate::ast::r3::SecurityContext;
 use crate::parser::html::split_ns_name;
 use crate::pipeline::selector::CssSelector;
 
-/// Security schema mapping `"element|property"` to `SecurityContext`.
+/// Which Angular security schema a compilation is targeting.
 ///
-/// Keys follow `registerContext` in `dom_security_schema.ts`: an `svg` or `math`
-/// namespace is stored as `:svg:tag|attr` / `:math:tag|attr`. `*` and `unknown`
-/// stay un-namespaced. Lookup lowercases both sides.
-static SECURITY_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> = LazyLock::new(|| {
+/// `None` means the latest schema (v22). The v22 schema namespaces SVG and
+/// MathML keys. Earlier versions store bare `tag|attr` keys and gained the
+/// SVG animation and Trusted Types entries on the v21 line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SchemaKind {
+    /// Before 21.1. `script|src` is a resource URL. No SVG animation sinks.
+    Legacy,
+    /// 21.1.0 through 21.2.6. Adds `script|href`, MathML hrefs, and
+    /// `attributeName` no-binding keys. No animation value attributes yet.
+    V21_1,
+    /// 21.2.7 through 21.x. Animation `to` / `from` / `values` are bare keys.
+    V21_2_7,
+    /// 22+. Namespaced keys. `script|src` and `script|href` are gone.
+    V22,
+}
+
+struct SecurityProfile {
+    kind: SchemaKind,
+    /// v22 `normalizeTagName` keeps `:svg:` and `:math:`.
+    namespaced: bool,
+    /// v22 preparser strips `:svg:script` as well as `script`.
+    strip_svg_script: bool,
+    /// `iframe|src` joined Trusted Types sinks in 21.2.4.
+    iframe_src_i18n: bool,
+}
+
+fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
+    let Some(version) = version else {
+        return v22_profile();
+    };
+    if version.major >= 22 {
+        return v22_profile();
+    }
+    let on_21 = version.major == 21;
+    let v21_1 = on_21 && version.minor >= 1;
+    let v21_2_4 = on_21 && (version.minor > 2 || (version.minor == 2 && version.patch >= 4));
+    let v21_2_7 = on_21 && (version.minor > 2 || (version.minor == 2 && version.patch >= 7));
+    let kind = if v21_2_7 {
+        SchemaKind::V21_2_7
+    } else if v21_1 {
+        SchemaKind::V21_1
+    } else {
+        SchemaKind::Legacy
+    };
+    SecurityProfile { kind, namespaced: false, strip_svg_script: false, iframe_src_i18n: v21_2_4 }
+}
+
+fn v22_profile() -> SecurityProfile {
+    SecurityProfile {
+        kind: SchemaKind::V22,
+        namespaced: true,
+        strip_svg_script: true,
+        iframe_src_i18n: true,
+    }
+}
+
+/// Whether this Angular version strips `:svg:script` during template lowering.
+pub fn strips_namespaced_svg_script(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).strip_svg_script
+}
+
+/// Whether i18n must reject `iframe` `src` as a Trusted Types sink.
+pub fn rejects_iframe_src_i18n(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).iframe_src_i18n
+}
+
+fn build_v22_schema() -> FxHashMap<String, SecurityContext> {
     let mut schema = FxHashMap::default();
 
     register(
@@ -111,7 +174,134 @@ static SECURITY_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> = LazyLock:
     );
 
     schema
-});
+}
+
+static V22_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> = LazyLock::new(build_v22_schema);
+static V21_27_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::V21_2_7));
+static V21_1_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::V21_1));
+static LEGACY_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::Legacy));
+
+fn schema_for(kind: SchemaKind) -> &'static FxHashMap<String, SecurityContext> {
+    match kind {
+        SchemaKind::Legacy => &LEGACY_SCHEMA,
+        SchemaKind::V21_1 => &V21_1_SCHEMA,
+        SchemaKind::V21_2_7 => &V21_27_SCHEMA,
+        SchemaKind::V22 => &V22_SCHEMA,
+    }
+}
+
+/// Bare-key schema used before Angular 22.
+///
+/// 21.1 adds MathML hrefs, `script|href`, iframe sandbox keys, and
+/// `attributeName` no-binding. 21.2.7 adds the animation value attributes.
+fn build_pren22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
+    let mut schema = FxHashMap::default();
+    register_base_html_style_and_url(&mut schema);
+    register(
+        &mut schema,
+        SecurityContext::ResourceUrl,
+        None,
+        &[
+            ("base", &["href"]),
+            ("embed", &["src"]),
+            ("frame", &["src"]),
+            ("iframe", &["src"]),
+            ("link", &["href"]),
+            ("object", &["codebase", "data"]),
+            ("script", &["src"]),
+        ],
+    );
+
+    let extended = matches!(kind, SchemaKind::V21_1 | SchemaKind::V21_2_7);
+    if extended {
+        register_uniform(
+            &mut schema,
+            SecurityContext::Url,
+            None,
+            MATHML_URL_ELEMENTS,
+            &["href", "xlink:href"],
+        );
+        register(
+            &mut schema,
+            SecurityContext::ResourceUrl,
+            None,
+            &[("script", &["href", "xlink:href"])],
+        );
+        register(
+            &mut schema,
+            SecurityContext::AttributeNoBinding,
+            None,
+            &[
+                ("animate", &["attributeName"]),
+                ("set", &["attributeName"]),
+                ("animateMotion", &["attributeName"]),
+                ("animateTransform", &["attributeName"]),
+                ("unknown", &["attributeName"]),
+                (
+                    "iframe",
+                    &[
+                        "sandbox",
+                        "allow",
+                        "allowFullscreen",
+                        "referrerPolicy",
+                        "csp",
+                        "fetchPriority",
+                    ],
+                ),
+                (
+                    "unknown",
+                    &[
+                        "sandbox",
+                        "allow",
+                        "allowFullscreen",
+                        "referrerPolicy",
+                        "csp",
+                        "fetchPriority",
+                    ],
+                ),
+            ],
+        );
+    }
+    if matches!(kind, SchemaKind::V21_2_7) {
+        register(
+            &mut schema,
+            SecurityContext::AttributeNoBinding,
+            None,
+            &[
+                ("animate", &["values", "to", "from"]),
+                ("set", &["to"]),
+                ("unknown", &["values", "to", "from"]),
+            ],
+        );
+    }
+    schema
+}
+
+fn register_base_html_style_and_url(schema: &mut FxHashMap<String, SecurityContext>) {
+    register(
+        schema,
+        SecurityContext::Html,
+        None,
+        &[("iframe", &["srcdoc"]), ("*", &["innerHTML", "outerHTML"])],
+    );
+    register(schema, SecurityContext::Style, None, &[("*", &["style"])]);
+    register(
+        schema,
+        SecurityContext::Url,
+        None,
+        &[
+            ("*", &["formAction"]),
+            ("area", &["href"]),
+            ("a", &["href", "xlink:href"]),
+            ("form", &["action"]),
+            ("img", &["src"]),
+            ("video", &["src"]),
+        ],
+    );
+}
 
 /// MathML elements whose `href` / `xlink:href` are URL sinks in the security schema.
 /// `annotation`, `malignmark`, `mglyph`, `mprescripts`, and `none` are not in the
@@ -439,20 +629,36 @@ fn normalize_tag_name(tag_name: &str) -> String {
     }
 }
 
-/// Security context for one element and property.
+/// Security context for one element and property on the latest schema (v22).
 ///
 /// Case-insensitive. Returns `SecurityContext::None` when the pair is not a sink.
 pub fn get_security_context(element: &str, property: &str) -> SecurityContext {
-    let tag = normalize_tag_name(element);
+    get_security_context_for(element, property, None)
+}
+
+/// Security context for the Angular version being compiled.
+///
+/// v22 keeps `:svg:` and `:math:` in the lookup key. Earlier versions lowercase
+/// the tag as written and look up a bare `tag|attr` key, so `:svg:animate|to`
+/// misses and `animate|to` hits on 21.2.7.
+pub fn get_security_context_for(
+    element: &str,
+    property: &str,
+    version: Option<crate::AngularVersion>,
+) -> SecurityContext {
+    let profile = security_profile(version);
+    let tag =
+        if profile.namespaced { normalize_tag_name(element) } else { element.to_ascii_lowercase() };
     let property_lower = property.to_ascii_lowercase();
+    let schema = schema_for(profile.kind);
 
     let key = format!("{tag}|{property_lower}");
-    if let Some(&ctx) = SECURITY_SCHEMA.get(&key) {
+    if let Some(&ctx) = schema.get(&key) {
         return ctx;
     }
 
     let wildcard_key = format!("*|{property_lower}");
-    if let Some(&ctx) = SECURITY_SCHEMA.get(&wildcard_key) {
+    if let Some(&ctx) = schema.get(&wildcard_key) {
         return ctx;
     }
 
@@ -466,20 +672,39 @@ pub fn calc_security_context_for_unknown_element(property: &str) -> SecurityCont
     host_binding_security_context("", property)
 }
 
-/// Security context of a host binding.
+/// Security context of a host binding on the latest schema (v22).
 ///
 /// Mirrors `calcPossibleSecurityContexts` plus the host ingest filter that drops
 /// `NONE` and the `{URL, RESOURCE_URL}` pair in `resolve_sanitizers.ts`.
-/// `style` / `class` / animation bindings are classified by the caller; this
-/// function is the element-selector lookup for attribute and property bindings.
 pub fn host_binding_security_context(selector: &str, prop_name: &str) -> SecurityContext {
-    reduce_security_contexts(&collect_security_contexts(selector, prop_name))
+    host_binding_security_context_for(selector, prop_name, None)
 }
 
-fn collect_security_contexts(selector: &str, prop_name: &str) -> Vec<SecurityContext> {
+/// Host-binding security context for a specific Angular version.
+pub fn host_binding_security_context_for(
+    selector: &str,
+    prop_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> SecurityContext {
+    let contexts = if security_profile(version).namespaced {
+        collect_namespaced_contexts(selector, prop_name, version)
+    } else {
+        collect_bare_contexts(selector, prop_name, version)
+    };
+    reduce_security_contexts(&contexts)
+}
+
+fn collect_namespaced_contexts(
+    selector: &str,
+    prop_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> Vec<SecurityContext> {
     let selector = selector.trim();
     if selector.is_empty() {
-        return KNOWN_ELEMENT_NAMES.iter().map(|el| get_security_context(el, prop_name)).collect();
+        return KNOWN_ELEMENT_NAMES
+            .iter()
+            .map(|el| get_security_context_for(el, prop_name, version))
+            .collect();
     }
 
     let (namespace_key, base_selector) = split_ns_name(selector);
@@ -495,8 +720,51 @@ fn collect_security_contexts(selector: &str, prop_name: &str) -> Vec<SecurityCon
         for element_name in element_names {
             if is_not_excluded(&element_name, &excluded) {
                 let full_name = qualify_with_selector_namespace(&element_name, namespace_key);
-                contexts.push(get_security_context(&full_name, prop_name));
+                contexts.push(get_security_context_for(&full_name, prop_name, version));
             }
+        }
+    }
+    contexts
+}
+
+/// v21 `calcPossibleSecurityContexts`: no namespace rewrite, and `:not(element)`
+/// matches the element string exactly, including case.
+fn collect_bare_contexts(
+    selector: &str,
+    prop_name: &str,
+    version: Option<crate::AngularVersion>,
+) -> Vec<SecurityContext> {
+    let selector = selector.trim();
+    if selector.is_empty() {
+        return KNOWN_ELEMENT_NAMES
+            .iter()
+            .map(|el| get_security_context_for(el, prop_name, version))
+            .collect();
+    }
+
+    let mut contexts = Vec::new();
+    for css in CssSelector::parse(selector) {
+        let excluded: FxHashSet<String> = css
+            .not_selectors
+            .iter()
+            .filter(|sel| {
+                sel.element.is_some()
+                    && sel.class_names.is_empty()
+                    && sel.attrs.is_empty()
+                    && sel.not_selectors.is_empty()
+            })
+            .filter_map(|sel| sel.element.clone())
+            .collect();
+        let element_names: Vec<String> = if let Some(element) = &css.element {
+            vec![element.clone()]
+        } else {
+            KNOWN_ELEMENT_NAMES.iter().map(|name| (*name).to_string()).collect()
+        };
+        for element_name in element_names {
+            if excluded.contains(&element_name) {
+                continue;
+            }
+            contexts.push(get_security_context_for(&element_name, prop_name, version));
         }
     }
     contexts
@@ -732,5 +1000,71 @@ mod tests {
             host_binding_security_context("a, base", "href"),
             SecurityContext::UrlOrResourceUrl
         );
+    }
+
+    fn v21_2_7() -> Option<crate::AngularVersion> {
+        Some(crate::AngularVersion::new(21, 2, 7))
+    }
+
+    #[test]
+    fn v21_2_7_uses_bare_keys() {
+        let version = v21_2_7();
+        assert_eq!(
+            get_security_context_for("animate", "to", version),
+            SecurityContext::AttributeNoBinding
+        );
+        assert_eq!(get_security_context_for(":svg:animate", "to", version), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for("script", "src", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(
+            get_security_context_for("script", "href", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("mi", "href", version), SecurityContext::Url);
+        assert_eq!(get_security_context_for(":math:mi", "href", version), SecurityContext::None);
+        assert_eq!(
+            host_binding_security_context_for("animate", "to", version),
+            SecurityContext::AttributeNoBinding
+        );
+        assert_eq!(
+            host_binding_security_context_for("[x]", "to", version),
+            SecurityContext::AttributeNoBinding
+        );
+    }
+
+    #[test]
+    fn v21_2_6_has_no_animation_value_sinks() {
+        let version = Some(crate::AngularVersion::new(21, 2, 6));
+        assert_eq!(get_security_context_for("animate", "to", version), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for("animate", "attributeName", version),
+            SecurityContext::AttributeNoBinding
+        );
+        assert!(rejects_iframe_src_i18n(version));
+        assert_eq!(host_binding_security_context_for("[x]", "to", version), SecurityContext::None);
+    }
+
+    #[test]
+    fn v21_0_has_script_src_only() {
+        let version = Some(crate::AngularVersion::new(21, 0, 0));
+        assert_eq!(
+            get_security_context_for("script", "src", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("script", "href", version), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for("animate", "attributeName", version),
+            SecurityContext::None
+        );
+        assert!(!rejects_iframe_src_i18n(version));
+        assert!(!strips_namespaced_svg_script(version));
+    }
+
+    #[test]
+    fn v21_2_3_still_allows_iframe_src_i18n() {
+        assert!(!rejects_iframe_src_i18n(Some(crate::AngularVersion::new(21, 2, 3))));
+        assert!(rejects_iframe_src_i18n(Some(crate::AngularVersion::new(21, 2, 4))));
     }
 }

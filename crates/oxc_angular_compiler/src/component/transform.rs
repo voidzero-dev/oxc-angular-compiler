@@ -3701,8 +3701,10 @@ fn compile_component_full<'a>(
     };
 
     // Stage 2: Transform HTML to R3 AST
-    let r3_transform_options =
-        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: options.angular_version,
+    };
     let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
     let r3_result = transformer.transform(nodes);
 
@@ -4161,8 +4163,10 @@ pub fn compile_component_template<'a>(
     };
 
     // Stage 2: Transform HTML to R3 AST
-    let r3_transform_options =
-        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: None,
+    };
     let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
     let r3_result = transformer.transform(nodes);
 
@@ -4258,8 +4262,10 @@ pub fn compile_template_to_js_with_options<'a>(
     };
 
     // Stage 2: Transform HTML to R3 AST
-    let r3_transform_options =
-        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: options.angular_version,
+    };
     let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
     let r3_result = transformer.transform(nodes);
 
@@ -4433,8 +4439,10 @@ pub fn compile_template_for_hmr<'a>(
     };
 
     // Stage 2: Transform HTML to R3 AST
-    let r3_transform_options =
-        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: options.angular_version,
+    };
     let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
     let r3_result = transformer.transform(nodes);
 
@@ -5132,8 +5140,10 @@ pub fn compile_template_for_linker<'a>(
     };
 
     // Stage 2: Transform HTML to R3 AST
-    let r3_transform_options =
-        R3TransformOptions { collect_comment_nodes: parse_options.collect_comment_nodes };
+    let r3_transform_options = R3TransformOptions {
+        collect_comment_nodes: parse_options.collect_comment_nodes,
+        angular_version: None,
+    };
     let transformer = HtmlToR3Transform::new(allocator, template, r3_transform_options);
     let r3_result = transformer.transform(nodes);
 

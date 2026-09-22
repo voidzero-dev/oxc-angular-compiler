@@ -394,7 +394,8 @@ fn parse_internal(
         html_result.errors.iter().map(|e| &e.msg).collect::<Vec<_>>()
     );
 
-    let options = TransformOptions { collect_comment_nodes: collect_comments };
+    let options =
+        TransformOptions { collect_comment_nodes: collect_comments, ..Default::default() };
     let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
     let r3_result = transformer.transform(&html_result.nodes);
 
@@ -758,7 +759,7 @@ fn get_transform_errors(html: &str) -> Vec<String> {
     let parser = HtmlParser::new(allocator_ref, html, "test.html");
     let html_result = parser.parse();
 
-    let options = TransformOptions { collect_comment_nodes: false };
+    let options = TransformOptions { collect_comment_nodes: false, ..Default::default() };
     let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
     let r3_result = transformer.transform(&html_result.nodes);
 
@@ -2340,7 +2341,7 @@ mod switch_invalid_case_unknown_blocks {
         let parser = HtmlParser::new(allocator_ref, html, "test.html");
         let html_result = parser.parse();
 
-        let options = TransformOptions { collect_comment_nodes: false };
+        let options = TransformOptions { collect_comment_nodes: false, ..Default::default() };
         let transformer = HtmlToR3Transform::new(allocator_ref, html, options);
         let r3_result = transformer.transform(&html_result.nodes);
 

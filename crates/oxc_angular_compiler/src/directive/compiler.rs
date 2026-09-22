@@ -30,7 +30,7 @@ use crate::output::ast::{
 };
 use crate::parser::expression::BindingParser;
 use crate::pipeline::emit::{HostBindingCompilationResult, compile_host_bindings};
-use crate::pipeline::ingest::{HostBindingInput, ingest_host_binding};
+use crate::pipeline::ingest::{HostBindingInput, ingest_host_binding_with_version};
 use crate::pipeline::selector::{
     parse_selector_to_r3_selector as parse_css_to_r3, r3_selector_to_output_expr,
 };
@@ -163,9 +163,12 @@ fn build_base_directive_fields<'a>(
     // - hostVars: number of host variables (only if > 0)
     // - hostBindings: the host binding function
     if metadata.host.has_bindings() {
-        if let Some((result, new_pool_index)) =
-            compile_directive_host_bindings(allocator, metadata, pool_starting_index)
-        {
+        if let Some((result, new_pool_index)) = compile_directive_host_bindings(
+            allocator,
+            metadata,
+            pool_starting_index,
+            angular_version,
+        ) {
             next_pool_index = new_pool_index;
 
             // hostAttrs: [...] - static host attributes
@@ -562,6 +565,7 @@ fn compile_directive_host_bindings<'a>(
     allocator: &'a Allocator,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
+    angular_version: Option<crate::AngularVersion>,
 ) -> Option<(HostBindingCompilationResult<'a>, u32)> {
     let host = &metadata.host;
 
@@ -580,7 +584,13 @@ fn compile_directive_host_bindings<'a>(
 
     // Ingest and compile the host bindings using the IR pipeline
     // Use the provided pool_starting_index to continue from where previous compilations left off
-    let mut job = ingest_host_binding(allocator, input, pool_starting_index);
+    let mut job = ingest_host_binding_with_version(
+        allocator,
+        input,
+        pool_starting_index,
+        angular_version,
+        None,
+    );
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation

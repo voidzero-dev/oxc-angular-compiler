@@ -10,6 +10,7 @@ use oxc_span::Span;
 use oxc_str::Ident;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::AngularVersion;
 use crate::ast::expression::{
     AbsoluteSourceSpan, AngularExpression, BindingType, ParseSpan, ParsedEventType,
 };
@@ -29,7 +30,9 @@ use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, split_ns_name};
-use crate::schema::{get_security_context, is_trusted_types_sink};
+use crate::schema::{
+    get_security_context_for, is_trusted_types_sink_at, strips_namespaced_svg_script,
+};
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
 
@@ -98,6 +101,8 @@ struct TemplateAttrInfo<'a> {
 pub struct TransformOptions {
     /// Whether to collect comment nodes.
     pub collect_comment_nodes: bool,
+    /// Angular version being compiled. `None` uses the latest (v22) security schema.
+    pub angular_version: Option<AngularVersion>,
 }
 
 /// Inserts or updates a var entry in an ordered Vec, preserving first-insertion order.
@@ -156,6 +161,8 @@ pub struct HtmlToR3Transform<'a> {
     /// Placeholder registry for generating unique tag placeholder names within i18n blocks.
     /// Reset when entering a new i18n block.
     i18n_placeholder_registry: PlaceholderRegistry,
+    /// Angular version for security-schema and script-stripping compatibility.
+    angular_version: Option<AngularVersion>,
     /// Counter for generating unique i18n message instance IDs.
     ///
     /// Each i18n message gets a unique instance ID that's used to track message identity
@@ -195,7 +202,12 @@ impl<'a> HtmlToR3Transform<'a> {
             icu_placeholder_counts: FxHashMap::default(),
             i18n_placeholder_registry: PlaceholderRegistry::new(),
             i18n_message_instance_counter: 0,
+            angular_version: options.angular_version,
         }
+    }
+
+    fn security_context(&self, element: &str, property: &str) -> SecurityContext {
+        get_security_context_for(element, property, self.angular_version)
     }
 
     /// Allocates a new unique instance ID for an i18n message.
@@ -323,12 +335,13 @@ impl<'a> HtmlToR3Transform<'a> {
             child_namespace
         };
         let local_name = split_ns_name(raw_name).1.to_ascii_lowercase();
+        let security_name = Self::security_element_name(raw_name, element_namespace);
 
-        // `<script>` and `:svg:script` are stripped (`SCRIPT_ELEMENTS` in
-        // `template_preparser.ts`). `<style>` is extracted only in HTML;
-        // `:svg:style` stays a normal element.
-        if local_name == "script"
-            && matches!(element_namespace, ElementNamespace::Html | ElementNamespace::Svg)
+        // HTML `<script>` is always stripped. `:svg:script` is stripped from
+        // v22 (`SCRIPT_ELEMENTS`). v21 only matches the bare name `script`.
+        if security_name == "script"
+            || (strips_namespaced_svg_script(self.angular_version)
+                && security_name == ":svg:script")
         {
             return None;
         }
@@ -350,7 +363,6 @@ impl<'a> HtmlToR3Transform<'a> {
         }
 
         // Parse attributes
-        let security_name = Self::security_element_name(raw_name, element_namespace);
         let (attributes, inputs, outputs, references, variables, template_attr) =
             self.parse_attributes(&element.attrs, &security_name, raw_name == "ng-template");
 
@@ -974,7 +986,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 key_span: attr.name_span,
                                 value_span: Some(value_span),
                                 i18n: None,
-                                security_context: get_security_context(element_name, prop_name),
+                                security_context: self.security_context(element_name, prop_name),
                             });
                         }
                         BindingPrefix::On => {
@@ -1009,7 +1021,7 @@ impl<'a> HtmlToR3Transform<'a> {
                                 key_span: attr.name_span,
                                 value_span: Some(value_span),
                                 i18n: None,
-                                security_context: get_security_context(element_name, rest),
+                                security_context: self.security_context(element_name, rest),
                             });
 
                             // Two-way binding also creates an output event
@@ -1075,7 +1087,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         key_span: attr.name_span,
                         value_span: Some(value_span),
                         i18n: None,
-                        security_context: get_security_context(element_name, prop_name),
+                        security_context: self.security_context(element_name, prop_name),
                     });
 
                     // Two-way binding also creates an output event
@@ -1146,7 +1158,7 @@ impl<'a> HtmlToR3Transform<'a> {
                         key_span: attr.name_span,
                         value_span: Some(value_span),
                         i18n: None,
-                        security_context: get_security_context(element_name, prop_name),
+                        security_context: self.security_context(element_name, prop_name),
                     });
                 } else if attr_name.starts_with('(') && attr_name.ends_with(')') {
                     // Event binding: (event)="handler"
@@ -2952,7 +2964,7 @@ impl<'a> HtmlToR3Transform<'a> {
             let name = attr.name.as_str();
             if let Some(target_attr) = name.strip_prefix("i18n-") {
                 // `isTrustedTypesSink` lowercases and does not strip `:svg:` / `:math:`.
-                if is_trusted_types_sink(element_name, target_attr) {
+                if is_trusted_types_sink_at(element_name, target_attr, self.angular_version) {
                     self.report_error(
                         &format!(
                             "Translating attribute '{target_attr}' is disallowed for security reasons."
@@ -3253,7 +3265,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let name_atom = Ident::from(self.allocator.alloc_str(property_name));
 
         // Look up security context based on element and property
-        let security_context = get_security_context(element_name, property_name);
+        let security_context = self.security_context(element_name, property_name);
 
         R3BoundAttribute {
             name: name_atom,
@@ -4599,7 +4611,7 @@ impl<'a> HtmlToR3Transform<'a> {
         let (binding_type, final_name, unit, security_context) =
             if let Some(stripped) = name.strip_prefix("attr.") {
                 // Attribute bindings use the attribute security context
-                let security_context = get_security_context(element_name, stripped);
+                let security_context = self.security_context(element_name, stripped);
                 (BindingType::Attribute, stripped, None, security_context)
             } else if let Some(stripped) = name.strip_prefix("class.") {
                 (BindingType::Class, stripped, None, SecurityContext::None)
@@ -4614,7 +4626,7 @@ impl<'a> HtmlToR3Transform<'a> {
                 }
             } else {
                 // Property bindings use the property security context
-                let security_context = get_security_context(element_name, name);
+                let security_context = self.security_context(element_name, name);
                 (BindingType::Property, name, None, security_context)
             };
 
@@ -4880,10 +4892,22 @@ mod security_tests {
         source: &str,
     ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
     {
+        compile_at(source, None)
+    }
+
+    fn compile_at(
+        source: &str,
+        angular_version: Option<AngularVersion>,
+    ) -> (std::vec::Vec<String>, std::vec::Vec<(String, SecurityContext)>, std::vec::Vec<String>)
+    {
         let allocator = Allocator::default();
         let parsed = HtmlParser::new(&allocator, source, "test.html").parse();
-        let result =
-            html_ast_to_r3_ast(&allocator, source, &parsed.nodes, TransformOptions::default());
+        let result = html_ast_to_r3_ast(
+            &allocator,
+            source,
+            &parsed.nodes,
+            TransformOptions { angular_version, ..TransformOptions::default() },
+        );
         let mut names = std::vec::Vec::new();
         let mut contexts = std::vec::Vec::new();
         fn walk<'a>(
@@ -4945,6 +4969,29 @@ mod security_tests {
     fn namespaced_iframe_i18n_src_stays_allowed() {
         let (_, _, errors) =
             compile(r#"<svg><iframe i18n-src src="https://example.com"></iframe></svg>"#);
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+    }
+
+    #[test]
+    fn v21_keeps_svg_script_and_does_not_validate_namespaced_animate() {
+        let version = Some(AngularVersion::new(21, 2, 7));
+        let (names, contexts, _) = compile_at(
+            r#"<svg><script>alert(1)</script><animate [attr.to]="url"></animate></svg>"#,
+            version,
+        );
+        assert!(names.iter().any(|name| name.contains("script")), "{names:?}");
+        assert!(
+            contexts.iter().any(|(name, ctx)| name == "to" && *ctx == SecurityContext::None),
+            "{contexts:?}"
+        );
+    }
+
+    #[test]
+    fn v21_2_3_allows_iframe_src_translation() {
+        let (_, _, errors) = compile_at(
+            r#"<iframe i18n-src src="https://example.com"></iframe>"#,
+            Some(AngularVersion::new(21, 2, 3)),
+        );
         assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
     }
 }
