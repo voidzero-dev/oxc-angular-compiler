@@ -327,14 +327,6 @@ impl<'a> HtmlToR3Transform<'a> {
         // local name and tracks the namespace on a stack, so the lookup name is
         // qualified explicitly.
         let parent_namespace = self.current_namespace();
-        let child_namespace = self.resolve_namespace(raw_name, parent_namespace);
-        let element_namespace = if parent_namespace == ElementNamespace::Svg
-            && raw_name.eq_ignore_ascii_case("foreignObject")
-        {
-            ElementNamespace::Svg
-        } else {
-            child_namespace
-        };
         // `<MyComp:iframe>` keeps the class in `name`. The host tag is what
         // `isTrustedTypesSink` and the binding security lookup see, including an
         // explicit prefix and a namespace inherited from `<svg>` / `<math>`
@@ -344,6 +336,25 @@ impl<'a> HtmlToR3Transform<'a> {
             Self::selectorless_host_tag(element, parent_namespace)
         } else {
             None
+        };
+        // For a component the host tag drives both namespaces: the element's own
+        // namespace is the host's, and children inherit it unless the host tag
+        // prevents namespace inheritance (`foreignObject`). `tagName === null`
+        // resets to HTML (`_getPrefix` skips a null parent tagName).
+        let (element_namespace, child_namespace) = if element.is_component {
+            let host_namespace = Self::component_host_namespace(host_tag.as_deref());
+            let child = Self::component_children_namespace(host_tag.as_deref(), host_namespace);
+            (host_namespace, child)
+        } else {
+            let child = self.resolve_namespace(raw_name, parent_namespace);
+            let own = if parent_namespace == ElementNamespace::Svg
+                && raw_name.eq_ignore_ascii_case("foreignObject")
+            {
+                ElementNamespace::Svg
+            } else {
+                child
+            };
+            (own, child)
         };
         let security_name = if element.is_component {
             Self::component_security_name(host_tag.as_deref())
@@ -734,10 +745,13 @@ impl<'a> HtmlToR3Transform<'a> {
         let (attributes, inputs, outputs, references, _variables, template_attr) =
             self.parse_attributes(&component.attrs, &security_name, i18n_element_name, false);
 
-        // Resolve namespace for this component and its children.
-        let element_namespace =
-            self.resolve_namespace(component.full_name.as_str(), parent_namespace);
-        self.namespace_stack.push(element_namespace);
+        // Children inherit the host tag's namespace (`_getPrefix` uses
+        // `component.tagName` as the parent name), honoring
+        // `preventNamespaceInheritance` on hosts like `foreignObject`.
+        let element_namespace = Self::component_host_namespace(host_tag.as_deref());
+        let child_namespace =
+            Self::component_children_namespace(host_tag.as_deref(), element_namespace);
+        self.namespace_stack.push(child_namespace);
 
         // Check if component has ngNonBindable attribute
         let has_non_bindable =
@@ -967,6 +981,35 @@ impl<'a> HtmlToR3Transform<'a> {
                 Some(format!(":{prefix}:{local}"))
             }
         }
+    }
+
+    /// The namespace a selectorless host tag itself belongs to, from its
+    /// resolved `:ns:` prefix. Bare local tags and `tagName === null` are HTML.
+    fn component_host_namespace(host_tag: Option<&str>) -> ElementNamespace {
+        host_tag
+            .and_then(|tag| {
+                let (ns, _) = split_ns_name(tag);
+                ns.and_then(Self::namespace_from_prefix)
+            })
+            .unwrap_or(ElementNamespace::Html)
+    }
+
+    /// Namespace pushed for children of a selectorless component.
+    ///
+    /// `_getPrefix` inherits the parent namespace unless the parent's tag
+    /// definition sets `preventNamespaceInheritance` (`foreignObject`). The
+    /// local part of the resolved host tag is what upstream looks up.
+    fn component_children_namespace(
+        host_tag: Option<&str>,
+        host_namespace: ElementNamespace,
+    ) -> ElementNamespace {
+        let prevents_inheritance = host_tag
+            .map(|tag| {
+                let (_, local) = split_ns_name(tag);
+                get_html_tag_definition(local).prevent_namespace_inheritance
+            })
+            .unwrap_or(false);
+        if prevents_inheritance { ElementNamespace::Html } else { host_namespace }
     }
 
     /// Security-schema name for a selectorless component, matching
@@ -5379,6 +5422,49 @@ mod security_tests {
         // `normalizeTagName` drops a non-svg/math prefix, so `<xml:iframe>`
         // inside `<svg>` still requires the resource-URL sanitizer.
         let (_, contexts, _) = compile(r#"<svg><xml:iframe [src]="url"></xml:iframe></svg>"#);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_children_inherit_the_host_tag_namespace() {
+        // Children of `<MyComp:math>` are MathML: `mi` is only an href sink in
+        // the `:math:` namespace.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp:math><mi [href]="url"></mi></MyComp:math>"#);
+        assert!(
+            contexts.iter().any(|(name, ctx)| name == "href" && *ctx == SecurityContext::Url),
+            "{contexts:?}"
+        );
+
+        // `foreignObject` prevents namespace inheritance, so children of
+        // `<MyComp:foreignObject>` inside `<svg>` are HTML again.
+        let (_, contexts, _) = compile_selectorless(
+            r#"<svg><MyComp:foreignObject><iframe [src]="url"></iframe></MyComp:foreignObject></svg>"#,
+        );
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
+
+        // `<MyComp>` inside `<svg>` resolves to `:svg:ng-component`, so its
+        // children stay namespaced.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<svg><MyComp><iframe [src]="url"></iframe></MyComp></svg>"#);
+        assert!(
+            contexts.iter().all(|(name, ctx)| name != "src" || *ctx == SecurityContext::None),
+            "{contexts:?}"
+        );
+
+        // At the HTML root `tagName === null`: children are plain HTML.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp><iframe [src]="url"></iframe></MyComp>"#);
         assert!(
             contexts
                 .iter()
