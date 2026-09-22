@@ -128,6 +128,13 @@ pub fn strips_namespaced_svg_style(version: Option<crate::AngularVersion>) -> bo
     security_profile(version).strip_svg_style
 }
 
+/// Whether this Angular version's schema keys keep `:svg:` / `:math:` prefixes.
+/// `calcPossibleSecurityContexts` only promotes bare selector elements to
+/// their `:svg:` / `:math:` forms on the namespaced schema.
+pub fn uses_namespaced_schema(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).namespaced
+}
+
 /// Whether i18n must reject `iframe` `src` as a Trusted Types sink.
 pub fn rejects_iframe_src_i18n(version: Option<crate::AngularVersion>) -> bool {
     security_profile(version).iframe_src_i18n

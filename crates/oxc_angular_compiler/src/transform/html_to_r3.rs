@@ -32,7 +32,7 @@ use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
     get_security_context_for, is_known_element, is_trusted_types_sink_at,
-    strips_namespaced_svg_script, strips_namespaced_svg_style,
+    strips_namespaced_svg_script, strips_namespaced_svg_style, uses_namespaced_schema,
 };
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
@@ -341,7 +341,7 @@ impl<'a> HtmlToR3Transform<'a> {
             Self::resolve_element_name(raw_name, parent_prefix)
         };
         let security_name = if element.is_component {
-            Self::component_security_name(host_tag.as_deref())
+            Self::component_security_name(host_tag.as_deref(), self.angular_version)
         } else {
             Self::security_lookup_name(&resolved_name)
         };
@@ -728,7 +728,8 @@ impl<'a> HtmlToR3Transform<'a> {
 
         // `tagName === null` is not a Trusted Types sink. `full_name` is the class.
         let i18n_element_name = host_tag.as_deref();
-        let security_name = Self::component_security_name(host_tag.as_deref());
+        let security_name =
+            Self::component_security_name(host_tag.as_deref(), self.angular_version);
         let (attributes, inputs, outputs, references, _variables, template_attr) =
             self.parse_attributes(&component.attrs, &security_name, i18n_element_name, false);
 
@@ -916,15 +917,19 @@ impl<'a> HtmlToR3Transform<'a> {
     /// Security-schema name for a selectorless component, matching
     /// `calcPossibleSecurityContexts(component.tagName, ...)`.
     ///
-    /// A bare host tag that is not an HTML element is rewritten to its known
-    /// `:svg:`/`:math:` form (`animate` → `:svg:animate`). `tagName === null`
-    /// resolves over every known element upstream; the empty name reproduces
-    /// that through the `*|attr` fallback (`src` → `NONE`, `innerHTML` →
-    /// `HTML`).
-    fn component_security_name(host_tag: Option<&str>) -> String {
+    /// On the namespaced schema a bare host tag that is not an HTML element is
+    /// rewritten to its known `:svg:`/`:math:` form (`animate` →
+    /// `:svg:animate`); pre-v22 versions look up the bare tag (`animate|to`).
+    /// `tagName === null` resolves over every known element upstream; the empty
+    /// name reproduces that through the `*|attr` fallback (`src` → `NONE`,
+    /// `innerHTML` → `HTML`).
+    fn component_security_name(host_tag: Option<&str>, version: Option<AngularVersion>) -> String {
         let Some(tag) = host_tag else {
             return String::new();
         };
+        if !uses_namespaced_schema(version) {
+            return tag.to_string();
+        }
         let lower = tag.to_ascii_lowercase();
         let (ns, local) = split_ns_name(&lower);
         if ns.is_none() && !is_known_element(local) {
@@ -5370,6 +5375,43 @@ mod security_tests {
             contexts
                 .iter()
                 .any(|(name, ctx)| name == "src" && *ctx == SecurityContext::ResourceUrl),
+            "{contexts:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_bare_host_stays_bare_before_the_namespaced_schema() {
+        // Pre-v22 `calcPossibleSecurityContexts` looks the bare tag up:
+        // `animate|to` is `AttributeNoBinding` on 21.2.7 while `:svg:animate|to`
+        // is not a key.
+        let (_, contexts, _) = compile_selectorless_at(
+            r#"<MyComp:animate [attr.to]="value"></MyComp:animate>"#,
+            Some(AngularVersion::new(21, 2, 7)),
+        );
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
+            "{contexts:?}"
+        );
+
+        // Same for bare MathML hosts: `mi|href` is a bare URL key pre-v22.
+        let (_, contexts, _) = compile_selectorless_at(
+            r#"<MyComp:mi [attr.href]="value"></MyComp:mi>"#,
+            Some(AngularVersion::new(21, 2, 7)),
+        );
+        assert!(
+            contexts.iter().any(|(name, ctx)| name == "href" && *ctx == SecurityContext::Url),
+            "{contexts:?}"
+        );
+
+        // v22 promotes the bare host to `:svg:animate` like upstream.
+        let (_, contexts, _) =
+            compile_selectorless(r#"<MyComp:animate [attr.to]="value"></MyComp:animate>"#);
+        assert!(
+            contexts
+                .iter()
+                .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
             "{contexts:?}"
         );
     }
