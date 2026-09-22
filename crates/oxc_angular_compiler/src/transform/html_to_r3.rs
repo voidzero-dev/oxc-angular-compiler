@@ -29,7 +29,7 @@ use crate::ast::r3::{
 use crate::i18n::parser::I18nMessageFactory;
 use crate::i18n::placeholder::PlaceholderRegistry;
 use crate::parser::expression::{BindingParser, find_comment_start};
-use crate::parser::html::{decode_entities_in_string, split_ns_name};
+use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
     get_security_context_for, is_trusted_types_sink_at, strips_namespaced_svg_script,
 };
@@ -339,11 +339,15 @@ impl<'a> HtmlToR3Transform<'a> {
         // `security_element_name` drops non-svg/math prefixes (`:xml:iframe` →
         // `iframe`), which is correct for the security schema and wrong here.
         let qualified_name = Self::qualified_element_name(raw_name, element_namespace);
-        // `<MyComp:iframe>` keeps the class in `name`. The host tag, including an
-        // explicit namespace (`:svg:iframe`, `:svg:ng-component`), is what
-        // `isTrustedTypesSink` sees. No host tag means `tagName === null`.
-        let host_tag =
-            if element.is_component { Self::selectorless_host_tag(element) } else { None };
+        // `<MyComp:iframe>` keeps the class in `name`. The host tag is what
+        // `isTrustedTypesSink` sees, including an explicit prefix and a namespace
+        // inherited from `<svg>` / `<math>` (`:svg:ng-component`, `:svg:iframe`).
+        // No prefix and no local tag is `tagName === null`.
+        let host_tag = if element.is_component {
+            Self::selectorless_host_tag(element, parent_namespace)
+        } else {
+            None
+        };
 
         if element.is_component {
             // `visitComponent` does not run the element preparser. A class named
@@ -706,18 +710,20 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Visits an HTML component (selectorless component AST node).
     fn visit_html_component(&mut self, component: &HtmlComponent<'a>) -> Option<R3Node<'a>> {
-        if let Some(tag) = component.tag_name.as_ref()
-            && UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag.as_str())
+        let parent_namespace = self.current_namespace();
+        let host_tag = Self::component_node_host_tag(component, parent_namespace);
+        if let Some(tag) = host_tag.as_deref()
+            && UNSUPPORTED_SELECTORLESS_TAGS.contains(&tag)
         {
             self.report_error(
-                &format!("Tag name \"{}\" cannot be used as a component tag", tag.as_str()),
+                &format!("Tag name \"{tag}\" cannot be used as a component tag"),
                 component.start_span,
             );
             return None;
         }
 
         // `tagName === null` is not a Trusted Types sink. `full_name` is the class.
-        let i18n_element_name = component.tag_name.as_ref().map(|tag| tag.as_str());
+        let i18n_element_name = host_tag.as_deref();
         let (attributes, inputs, outputs, references, _variables, template_attr) = self
             .parse_attributes(
                 &component.attrs,
@@ -727,7 +733,6 @@ impl<'a> HtmlToR3Transform<'a> {
             );
 
         // Resolve namespace for this component and its children.
-        let parent_namespace = self.current_namespace();
         let element_namespace =
             self.resolve_namespace(component.full_name.as_str(), parent_namespace);
         self.namespace_stack.push(element_namespace);
@@ -903,14 +908,59 @@ impl<'a> HtmlToR3Transform<'a> {
 
     /// Host tag of a selectorless component, matching Angular's `tagName`.
     ///
-    /// `None` is `<MyComp>` (`tagName === null`). An explicit prefix is kept
-    /// (`:svg:iframe`, or `:svg:ng-component` when the prefix has no local name).
-    fn selectorless_host_tag(element: &HtmlElement<'a>) -> Option<String> {
-        match (&element.component_prefix, &element.component_tag_name) {
-            (None, None) => None,
-            (None, Some(tag)) => Some(tag.as_str().to_string()),
-            (Some(prefix), None) => Some(format!(":{}:ng-component", prefix.as_str())),
-            (Some(prefix), Some(tag)) => Some(format!(":{}:{}", prefix.as_str(), tag.as_str())),
+    /// Prefix order matches `_getPrefix`: explicit prefix, then the host tag's
+    /// implicit namespace (`svg`, `math`, `foreignObject`), then the parent
+    /// namespace. `foreignObject` already resets that parent to HTML. A prefix
+    /// with no local tag becomes `ng-component`. No prefix and no local tag is
+    /// `tagName === null`.
+    fn selectorless_host_tag(
+        element: &HtmlElement<'a>,
+        parent_namespace: ElementNamespace,
+    ) -> Option<String> {
+        Self::canonical_host_tag(
+            element.component_prefix.as_ref().map(|prefix| prefix.as_str()),
+            element.component_tag_name.as_ref().map(|tag| tag.as_str()),
+            parent_namespace,
+        )
+    }
+
+    /// `HtmlComponent.tag_name` is either already `:ns:local` or a local name.
+    fn component_node_host_tag(
+        component: &HtmlComponent<'a>,
+        parent_namespace: ElementNamespace,
+    ) -> Option<String> {
+        match component.tag_name.as_ref().map(|tag| tag.as_str()) {
+            Some(tag) if tag.starts_with(':') => Some(tag.to_string()),
+            other => Self::canonical_host_tag(None, other, parent_namespace),
+        }
+    }
+
+    fn canonical_host_tag(
+        explicit_prefix: Option<&str>,
+        local_tag: Option<&str>,
+        parent_namespace: ElementNamespace,
+    ) -> Option<String> {
+        let mut prefix = explicit_prefix.unwrap_or("").to_string();
+        if prefix.is_empty()
+            && let Some(tag) = local_tag
+            && let Some(implicit) = get_html_tag_definition(tag).implicit_namespace_prefix
+        {
+            prefix = implicit.to_string();
+        }
+        if prefix.is_empty() {
+            prefix = match parent_namespace {
+                ElementNamespace::Svg => "svg".to_string(),
+                ElementNamespace::Math => "math".to_string(),
+                ElementNamespace::Html => String::new(),
+            };
+        }
+        match (prefix.is_empty(), local_tag) {
+            (true, None) => None,
+            (true, Some(tag)) => Some(tag.to_string()),
+            (false, local) => {
+                let local = local.unwrap_or("ng-component");
+                Some(format!(":{prefix}:{local}"))
+            }
         }
     }
 
@@ -5190,6 +5240,54 @@ mod security_tests {
         assert!(
             !names.iter().any(|name| name.to_ascii_lowercase().contains("script")),
             "{names:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_inside_svg_inherits_the_namespace() {
+        let (_, _, errors) = compile_selectorless(
+            r#"<svg><MyComp i18n-innerHTML innerHTML="<b>x</b>"></MyComp></svg>"#,
+        );
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?}"
+        );
+
+        let (_, _, errors) = compile_selectorless(
+            r#"<svg><MyComp:iframe i18n-src src="https://example.com"></MyComp:iframe></svg>"#,
+        );
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+
+        let (names, _, errors) =
+            compile_selectorless(r#"<svg><MyComp:script></MyComp:script></svg>"#);
+        assert!(
+            !errors.iter().any(|msg| msg.contains("cannot be used as a component tag")),
+            "{errors:?}"
+        );
+        assert!(names.iter().any(|name| name == "component:MyComp"), "{names:?}");
+
+        let (_, _, errors) = compile_selectorless(
+            r#"<math><MyComp i18n-innerHTML innerHTML="<b>x</b>"></MyComp></math>"#,
+        );
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn selectorless_inside_foreign_object_does_not_inherit_svg() {
+        let (_, _, errors) = compile_selectorless(
+            r#"<svg><foreignObject><MyComp i18n-innerHTML innerHTML="<b>x</b>"></MyComp></foreignObject></svg>"#,
+        );
+        assert!(!errors.iter().any(|msg| msg.contains("disallowed")), "{errors:?}");
+
+        let (_, _, errors) = compile_selectorless(
+            r#"<svg><foreignObject><MyComp:iframe i18n-src src="https://example.com"></MyComp:iframe></foreignObject></svg>"#,
+        );
+        assert!(
+            errors.iter().any(|msg| msg.contains("disallowed for security reasons")),
+            "{errors:?}"
         );
     }
 
