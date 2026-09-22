@@ -32,7 +32,7 @@ use crate::parser::expression::{BindingParser, find_comment_start};
 use crate::parser::html::{decode_entities_in_string, get_html_tag_definition, split_ns_name};
 use crate::schema::{
     get_security_context_for, is_known_element, is_trusted_types_sink_at,
-    strips_namespaced_svg_script,
+    strips_namespaced_svg_script, strips_namespaced_svg_style,
 };
 use crate::transform::control_flow::{parse_conditional_params, parse_defer_triggers};
 use crate::util::ParseError;
@@ -388,7 +388,13 @@ impl<'a> HtmlToR3Transform<'a> {
             {
                 return None;
             }
-            if qualified_name == "style" {
+            // The preparser classified `:svg:style` as a style element only on
+            // 20.3.22 and 21.2.14 (`STYLE_ELEMENTS`); elsewhere it stays an
+            // ordinary element.
+            if qualified_name == "style"
+                || (strips_namespaced_svg_style(self.angular_version)
+                    && qualified_name == ":svg:style")
+            {
                 if let Some(content) = self.get_text_content(element) {
                     self.styles.push(content);
                 }

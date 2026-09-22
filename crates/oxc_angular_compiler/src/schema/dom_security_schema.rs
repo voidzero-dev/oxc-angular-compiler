@@ -15,29 +15,48 @@ use crate::pipeline::selector::CssSelector;
 
 /// Which Angular security schema a compilation is targeting.
 ///
-/// `None` means the latest schema (v22). The v22 schema namespaces SVG and
-/// MathML keys. Earlier versions store bare `tag|attr` keys and gained the
-/// SVG animation and Trusted Types entries on the v21 line.
+/// `None` means the latest schema (v22). Security fixes were backported per
+/// release line, so the cutovers are not monotonic: e.g. `attributeName`
+/// no-binding reached 20.3.15 and 21.0.2 but `script|href` only reached
+/// 20.3.16 and 21.0.7, and the namespaced schema landed on 20.3.22 and
+/// 21.2.14 while 21.0.x / 21.1.x never received it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SchemaKind {
-    /// Before 21.1. `script|src` is a resource URL. No SVG animation sinks.
+    /// 21.0.0 / 21.0.1 and everything below 20.3.15. Old URL set with
+    /// `*|ping`, `*|cite`, `applet|code`, `media|src`, etc.
     Legacy,
-    /// 21.1.0 through 21.2.6. Adds `script|href`, MathML hrefs, and
-    /// `attributeName` no-binding keys. No animation value attributes yet.
+    /// 20.3.15, 21.0.2–21.0.5. Adds MathML hrefs, `attributeName` no-binding,
+    /// and iframe sandbox keys on top of the old URL set.
+    V20_3_15,
+    /// 21.0.6 only. The hardening without the legacy URL keys, and before
+    /// `script|href` landed in 21.0.7.
+    V21_0_6,
+    /// 20.3.16–20.3.21 and 21.0.7 through 21.2.6. Adds `script|href`; the
+    /// `ping`/`cite`/`applet`/`media` keys are gone from 21.0.6 on.
     V21_1,
-    /// 21.2.7 through 21.x. Animation `to` / `from` / `values` are bare keys.
+    /// Same as `V21_1` but still carrying the legacy URL keys: only
+    /// 20.3.16–20.3.21 (the key removal was never backported to 20.3).
+    V20_3_16,
+    /// 21.2.7 through 21.2.13. Animation `to` / `from` / `values` are bare keys.
     V21_2_7,
-    /// 22+. Namespaced keys. `script|src` and `script|href` are gone.
+    /// 21.2.14 only. Namespaced keys but no `:svg:a|href` yet.
+    V21_2_14,
+    /// 20.3.22+, 21.2.15+, 22+. Namespaced keys with `:svg:a|href`.
+    /// `script|src` and `script|href` are gone.
     V22,
 }
 
 struct SecurityProfile {
     kind: SchemaKind,
-    /// v22 `normalizeTagName` keeps `:svg:` and `:math:`.
+    /// `normalizeTagName` keeps `:svg:` and `:math:` (namespaced schema).
     namespaced: bool,
-    /// v22 preparser strips `:svg:script` as well as `script`.
+    /// The preparser strips `:svg:script` as well as `script`.
     strip_svg_script: bool,
-    /// `iframe|src` joined Trusted Types sinks in 21.2.4.
+    /// The preparser also strips `:svg:style`. Only 20.3.22 and 21.2.14 did
+    /// this; it was reverted everywhere else.
+    strip_svg_style: bool,
+    /// `iframe|src` joined Trusted Types sinks (20.3.18–21, 21.2.4+; never on
+    /// the 21.0.x / 21.1.x lines).
     iframe_src_i18n: bool,
 }
 
@@ -48,18 +67,43 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     if version.major >= 22 {
         return v22_profile();
     }
-    let on_21 = version.major == 21;
-    let v21_1 = on_21 && version.minor >= 1;
-    let v21_2_4 = on_21 && (version.minor > 2 || (version.minor == 2 && version.patch >= 4));
-    let v21_2_7 = on_21 && (version.minor > 2 || (version.minor == 2 && version.patch >= 7));
-    let kind = if v21_2_7 {
-        SchemaKind::V21_2_7
-    } else if v21_1 {
-        SchemaKind::V21_1
-    } else {
-        SchemaKind::Legacy
+
+    let (kind, iframe_src_i18n) = match version.major {
+        20 if version.minor >= 3 => match version.patch {
+            0..=14 => (SchemaKind::Legacy, false),
+            15 => (SchemaKind::V20_3_15, false),
+            16..=17 => (SchemaKind::V20_3_16, false),
+            18..=21 => (SchemaKind::V20_3_16, true),
+            // 20.3.22+ has the namespaced schema with `:svg:a|href`.
+            _ => (SchemaKind::V22, true),
+        },
+        21 => match (version.minor, version.patch) {
+            (0, 0..=1) => (SchemaKind::Legacy, false),
+            (0, 2..=5) => (SchemaKind::V20_3_15, false),
+            (0, 6) => (SchemaKind::V21_0_6, false),
+            (0, _) => (SchemaKind::V21_1, false),
+            (1, _) => (SchemaKind::V21_1, false),
+            (2, 0..=3) => (SchemaKind::V21_1, false),
+            (2, 4..=6) => (SchemaKind::V21_1, true),
+            (2, 7..=13) => (SchemaKind::V21_2_7, true),
+            (2, 14) => (SchemaKind::V21_2_14, true),
+            // 21.2.15+ and any later 21.x minor use the namespaced schema.
+            _ => (SchemaKind::V22, true),
+        },
+        _ => (SchemaKind::Legacy, false),
     };
-    SecurityProfile { kind, namespaced: false, strip_svg_script: false, iframe_src_i18n: v21_2_4 }
+
+    let namespaced = matches!(kind, SchemaKind::V21_2_14 | SchemaKind::V22);
+    // `:svg:style` stripping existed only in 20.3.22 and 21.2.14.
+    let strip_svg_style = matches!(kind, SchemaKind::V21_2_14)
+        || (version.major == 20 && version.minor == 3 && version.patch == 22);
+    SecurityProfile {
+        kind,
+        namespaced,
+        strip_svg_script: namespaced,
+        strip_svg_style,
+        iframe_src_i18n,
+    }
 }
 
 fn v22_profile() -> SecurityProfile {
@@ -67,6 +111,7 @@ fn v22_profile() -> SecurityProfile {
         kind: SchemaKind::V22,
         namespaced: true,
         strip_svg_script: true,
+        strip_svg_style: false,
         iframe_src_i18n: true,
     }
 }
@@ -76,12 +121,19 @@ pub fn strips_namespaced_svg_script(version: Option<crate::AngularVersion>) -> b
     security_profile(version).strip_svg_script
 }
 
+/// Whether this Angular version's preparser classifies `:svg:style` as a style
+/// element (its text is collected into component styles and the element is
+/// dropped). Only 20.3.22 and 21.2.14 did this.
+pub fn strips_namespaced_svg_style(version: Option<crate::AngularVersion>) -> bool {
+    security_profile(version).strip_svg_style
+}
+
 /// Whether i18n must reject `iframe` `src` as a Trusted Types sink.
 pub fn rejects_iframe_src_i18n(version: Option<crate::AngularVersion>) -> bool {
     security_profile(version).iframe_src_i18n
 }
 
-fn build_v22_schema() -> FxHashMap<String, SecurityContext> {
+fn build_v22_schema(with_svg_a: bool) -> FxHashMap<String, SecurityContext> {
     let mut schema = FxHashMap::default();
 
     register(
@@ -130,7 +182,10 @@ fn build_v22_schema() -> FxHashMap<String, SecurityContext> {
         ],
     );
 
-    register(&mut schema, SecurityContext::Url, Some("svg"), &[("a", &["href", "xlink:href"])]);
+    // `:svg:a|href` landed in 20.3.22 / 21.2.15; 21.2.14 did not have it.
+    if with_svg_a {
+        register(&mut schema, SecurityContext::Url, Some("svg"), &[("a", &["href", "xlink:href"])]);
+    }
 
     // SVG animation value attributes can retarget `href` / `xlink:href`.
     // Upstream registers them under the SVG namespace as ATTRIBUTE_NO_BINDING.
@@ -176,30 +231,94 @@ fn build_v22_schema() -> FxHashMap<String, SecurityContext> {
     schema
 }
 
-static V22_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> = LazyLock::new(build_v22_schema);
+static V22_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_v22_schema(true));
+static V21_2_14_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_v22_schema(false));
 static V21_27_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_pren22_schema(SchemaKind::V21_2_7));
 static V21_1_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_pren22_schema(SchemaKind::V21_1));
+static V20_3_16_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::V20_3_16));
+static V20_3_15_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::V20_3_15));
+static V21_0_6_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
+    LazyLock::new(|| build_pren22_schema(SchemaKind::V21_0_6));
 static LEGACY_SCHEMA: LazyLock<FxHashMap<String, SecurityContext>> =
     LazyLock::new(|| build_pren22_schema(SchemaKind::Legacy));
 
 fn schema_for(kind: SchemaKind) -> &'static FxHashMap<String, SecurityContext> {
     match kind {
         SchemaKind::Legacy => &LEGACY_SCHEMA,
+        SchemaKind::V20_3_15 => &V20_3_15_SCHEMA,
+        SchemaKind::V21_0_6 => &V21_0_6_SCHEMA,
+        SchemaKind::V20_3_16 => &V20_3_16_SCHEMA,
         SchemaKind::V21_1 => &V21_1_SCHEMA,
         SchemaKind::V21_2_7 => &V21_27_SCHEMA,
+        SchemaKind::V21_2_14 => &V21_2_14_SCHEMA,
         SchemaKind::V22 => &V22_SCHEMA,
     }
 }
-
-/// Bare-key schema used before Angular 22.
-///
-/// 21.1 adds MathML hrefs, `script|href`, iframe sandbox keys, and
-/// `attributeName` no-binding. 21.2.7 adds the animation value attributes.
+/// Pre-v22 schemas look up bare `tag|attr` keys (`normalizeTagName` did not keep
+/// namespaces yet), so nothing here registers `:svg:` or `:math:` keys.
 fn build_pren22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
     let mut schema = FxHashMap::default();
     register_base_html_style_and_url(&mut schema);
+
+    let hardened = kind != SchemaKind::Legacy;
+    let legacy_url_keys =
+        matches!(kind, SchemaKind::Legacy | SchemaKind::V20_3_15 | SchemaKind::V20_3_16);
+    // `script|href` / `script|xlink:href` landed in 20.3.16 and 21.0.7.
+    let script_href =
+        matches!(kind, SchemaKind::V20_3_16 | SchemaKind::V21_1 | SchemaKind::V21_2_7);
+
+    if hardened {
+        // `a|xlink:href` was added with the MathML hardening; the Legacy URL
+        // set has only `a|href` / `a|ping`.
+        register(&mut schema, SecurityContext::Url, None, &[("a", &["xlink:href"])]);
+        register_uniform(
+            &mut schema,
+            SecurityContext::Url,
+            None,
+            MATHML_URL_ELEMENTS,
+            &["href", "xlink:href"],
+        );
+    }
+
+    if legacy_url_keys {
+        register(
+            &mut schema,
+            SecurityContext::Url,
+            None,
+            &[
+                ("area", &["ping"]),
+                ("audio", &["src"]),
+                ("a", &["ping"]),
+                ("blockquote", &["cite"]),
+                ("body", &["background"]),
+                ("del", &["cite"]),
+                ("input", &["src"]),
+                ("ins", &["cite"]),
+                ("q", &["cite"]),
+                ("source", &["src"]),
+                ("track", &["src"]),
+                ("video", &["poster"]),
+            ],
+        );
+        register(
+            &mut schema,
+            SecurityContext::ResourceUrl,
+            None,
+            &[
+                ("applet", &["code", "codebase"]),
+                ("head", &["profile"]),
+                ("html", &["manifest"]),
+                ("media", &["src"]),
+            ],
+        );
+    }
+
     register(
         &mut schema,
         SecurityContext::ResourceUrl,
@@ -214,22 +333,16 @@ fn build_pren22_schema(kind: SchemaKind) -> FxHashMap<String, SecurityContext> {
             ("script", &["src"]),
         ],
     );
-
-    let extended = matches!(kind, SchemaKind::V21_1 | SchemaKind::V21_2_7);
-    if extended {
-        register_uniform(
-            &mut schema,
-            SecurityContext::Url,
-            None,
-            MATHML_URL_ELEMENTS,
-            &["href", "xlink:href"],
-        );
+    if script_href {
         register(
             &mut schema,
             SecurityContext::ResourceUrl,
             None,
             &[("script", &["href", "xlink:href"])],
         );
+    }
+
+    if hardened {
         register(
             &mut schema,
             SecurityContext::AttributeNoBinding,
@@ -295,7 +408,9 @@ fn register_base_html_style_and_url(schema: &mut FxHashMap<String, SecurityConte
         &[
             ("*", &["formAction"]),
             ("area", &["href"]),
-            ("a", &["href", "xlink:href"]),
+            // `a|xlink:href` is not in the Legacy URL set; callers add it for
+            // hardened kinds.
+            ("a", &["href"]),
             ("form", &["action"]),
             ("img", &["src"]),
             ("video", &["src"]),
@@ -1102,5 +1217,111 @@ mod tests {
     fn v21_2_3_still_allows_iframe_src_i18n() {
         assert!(!rejects_iframe_src_i18n(Some(crate::AngularVersion::new(21, 2, 3))));
         assert!(rejects_iframe_src_i18n(Some(crate::AngularVersion::new(21, 2, 4))));
+    }
+
+    #[test]
+    fn v21_0_1_is_the_legacy_schema() {
+        let version = Some(crate::AngularVersion::new(21, 0, 1));
+        // Legacy URL keys exist, but the hardening had not landed yet.
+        assert_eq!(get_security_context_for("a", "ping", version), SecurityContext::Url);
+        assert_eq!(get_security_context_for("media", "src", version), SecurityContext::ResourceUrl);
+        assert_eq!(
+            get_security_context_for("applet", "code", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(
+            get_security_context_for("script", "src", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("a", "xlink:href", version), SecurityContext::None);
+        assert_eq!(get_security_context_for("mi", "href", version), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for("animate", "attributeName", version),
+            SecurityContext::None
+        );
+        assert_eq!(get_security_context_for("iframe", "sandbox", version), SecurityContext::None);
+        assert_eq!(get_security_context_for("script", "href", version), SecurityContext::None);
+    }
+
+    #[test]
+    fn v21_0_2_hardens_but_keeps_legacy_keys() {
+        let version = Some(crate::AngularVersion::new(21, 0, 2));
+        assert_eq!(get_security_context_for("a", "xlink:href", version), SecurityContext::Url);
+        assert_eq!(get_security_context_for("mi", "href", version), SecurityContext::Url);
+        assert_eq!(
+            get_security_context_for("animate", "attributeName", version),
+            SecurityContext::AttributeNoBinding
+        );
+        assert_eq!(get_security_context_for("media", "src", version), SecurityContext::ResourceUrl);
+        // `script|href` only landed in 21.0.7.
+        assert_eq!(get_security_context_for("script", "href", version), SecurityContext::None);
+    }
+
+    #[test]
+    fn v21_0_6_drops_legacy_keys_without_script_href() {
+        let version = Some(crate::AngularVersion::new(21, 0, 6));
+        assert_eq!(get_security_context_for("a", "ping", version), SecurityContext::None);
+        assert_eq!(get_security_context_for("media", "src", version), SecurityContext::None);
+        assert_eq!(get_security_context_for("script", "href", version), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for("script", "src", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(get_security_context_for("mi", "href", version), SecurityContext::Url);
+        assert_eq!(
+            get_security_context_for("animate", "attributeName", version),
+            SecurityContext::AttributeNoBinding
+        );
+    }
+
+    #[test]
+    fn v20_3_16_has_script_href_and_legacy_keys() {
+        let version = Some(crate::AngularVersion::new(20, 3, 16));
+        // The legacy-key removal was never backported to 20.3.
+        assert_eq!(get_security_context_for("media", "src", version), SecurityContext::ResourceUrl);
+        assert_eq!(
+            get_security_context_for("script", "href", version),
+            SecurityContext::ResourceUrl
+        );
+        assert_eq!(
+            get_security_context_for("script", "xlink:href", version),
+            SecurityContext::ResourceUrl
+        );
+        assert!(!rejects_iframe_src_i18n(version));
+        assert!(rejects_iframe_src_i18n(Some(crate::AngularVersion::new(20, 3, 18))));
+    }
+
+    #[test]
+    fn v21_2_14_is_namespaced_without_svg_a() {
+        let version = Some(crate::AngularVersion::new(21, 2, 14));
+        assert_eq!(
+            get_security_context_for(":svg:animate", "to", version),
+            SecurityContext::AttributeNoBinding
+        );
+        // Bare `animate|to` is not a key in the namespaced schema.
+        assert_eq!(get_security_context_for("animate", "to", version), SecurityContext::None);
+        // `:svg:a|href` arrived in 21.2.15.
+        assert_eq!(get_security_context_for(":svg:a", "href", version), SecurityContext::None);
+        assert_eq!(get_security_context_for("script", "src", version), SecurityContext::None);
+        assert!(strips_namespaced_svg_script(version));
+        assert!(strips_namespaced_svg_style(version));
+    }
+
+    #[test]
+    fn v21_2_15_and_v20_3_22_add_svg_a() {
+        for version in [
+            crate::AngularVersion::new(21, 2, 15),
+            crate::AngularVersion::new(20, 3, 22),
+            crate::AngularVersion::new(20, 3, 23),
+        ] {
+            let version = Some(version);
+            assert_eq!(get_security_context_for(":svg:a", "href", version), SecurityContext::Url);
+            assert!(strips_namespaced_svg_script(version));
+        }
+        // `:svg:style` classification was reverted after 21.2.14 / 20.3.22.
+        assert!(!strips_namespaced_svg_style(Some(crate::AngularVersion::new(21, 2, 15))));
+        assert!(strips_namespaced_svg_style(Some(crate::AngularVersion::new(20, 3, 22))));
+        assert!(!strips_namespaced_svg_style(Some(crate::AngularVersion::new(20, 3, 23))));
+        assert!(!strips_namespaced_svg_style(None));
     }
 }
