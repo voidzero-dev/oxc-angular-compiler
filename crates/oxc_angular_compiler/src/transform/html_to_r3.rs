@@ -343,11 +343,12 @@ impl<'a> HtmlToR3Transform<'a> {
         let security_name = if element.is_component {
             Self::component_security_name(host_tag.as_deref(), self.angular_version)
         } else {
-            Self::security_lookup_name(&resolved_name)
+            // The security lookup gets the verbatim resolved name;
+            // `get_security_context_for` decides per target version whether
+            // `normalizeTagName` strips non-svg/math prefixes.
+            resolved_name.clone()
         };
         // Trusted Types and the script/style sets use the parser's full name.
-        // `security_lookup_name` drops non-svg/math prefixes (`:xml:iframe` →
-        // `iframe`), which is correct for the security schema and wrong here.
         let qualified_name = resolved_name.to_ascii_lowercase();
         // Children inherit this element's own resolved prefix, or nothing when
         // its tag definition prevents namespace inheritance (`foreignObject`) or
@@ -836,19 +837,6 @@ impl<'a> HtmlToR3Transform<'a> {
             return String::new();
         }
         ns.unwrap_or("").to_string()
-    }
-
-    /// Element name passed to the security schema (`normalizeTagName`).
-    ///
-    /// `:svg:` and `:math:` are kept; any other prefix is dropped
-    /// (`:xml:iframe` → `iframe`).
-    fn security_lookup_name(resolved_name: &str) -> String {
-        let lower = resolved_name.to_ascii_lowercase();
-        let (ns, local) = split_ns_name(&lower);
-        match ns {
-            Some(ns @ ("svg" | "math")) => format!(":{ns}:{local}"),
-            _ => local.to_string(),
-        }
     }
 
     /// Host tag of a selectorless component, matching Angular's `tagName`.
@@ -5414,5 +5402,30 @@ mod security_tests {
                 .any(|(name, ctx)| name == "to" && *ctx == SecurityContext::AttributeNoBinding),
             "{contexts:?}"
         );
+    }
+
+    #[test]
+    fn prefixed_element_lookup_matches_the_versions_normalize_tag_name() {
+        // `normalizeTagName` in `securityContext` only exists at 19.2.23 /
+        // 20.3.22 / 21.2.15 and later. Before that the tag is lowercased
+        // verbatim, so `:xml:iframe|src` is not the `iframe|src` sink.
+        for (major, minor, patch, expected) in [
+            (21, 2, 13, SecurityContext::None),
+            (21, 2, 14, SecurityContext::None),
+            (21, 2, 15, SecurityContext::ResourceUrl),
+            (19, 2, 22, SecurityContext::None),
+            (19, 2, 23, SecurityContext::ResourceUrl),
+            (20, 3, 21, SecurityContext::None),
+            (20, 3, 22, SecurityContext::ResourceUrl),
+        ] {
+            let (_, contexts, _) = compile_at(
+                r#"<xml:iframe [src]="url"></xml:iframe>"#,
+                Some(AngularVersion::new(major, minor, patch)),
+            );
+            assert!(
+                contexts.iter().any(|(name, ctx)| name == "src" && *ctx == expected),
+                "v{major}.{minor}.{patch}: {contexts:?}"
+            );
+        }
     }
 }

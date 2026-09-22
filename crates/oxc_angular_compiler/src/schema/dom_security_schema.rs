@@ -49,8 +49,16 @@ enum SchemaKind {
 
 struct SecurityProfile {
     kind: SchemaKind,
-    /// `normalizeTagName` keeps `:svg:` and `:math:` (namespaced schema).
+    /// The schema keys keep `:svg:` / `:math:` prefixes (21.2.14+, 19.2.23+,
+    /// 20.3.22+). `calcPossibleSecurityContexts` rewrites selectors for these
+    /// versions.
     namespaced: bool,
+    /// `securityContext` runs `normalizeTagName`, stripping non-svg/math
+    /// prefixes from the element before the lookup. Upstream added the
+    /// normalizer one release after the namespaced schema: 21.2.14 looks the
+    /// verbatim tag up, so `:xml:iframe|src` misses there but hits `iframe|src`
+    /// at 21.2.15+.
+    normalizes_tag_names: bool,
     /// The preparser strips `:svg:script` as well as `script`.
     strip_svg_script: bool,
     /// The preparser also strips `:svg:style`. Only 19.2.23, 20.3.22 and
@@ -115,6 +123,10 @@ fn security_profile(version: Option<crate::AngularVersion>) -> SecurityProfile {
     SecurityProfile {
         kind,
         namespaced,
+        // `normalizeTagName` in `securityContext` landed with the schema
+        // backports that carried `:svg:a|href` (19.2.23 / 20.3.22 / 21.2.15);
+        // 21.2.14 has namespaced keys but no normalizer.
+        normalizes_tag_names: matches!(kind, SchemaKind::V22),
         strip_svg_script: namespaced,
         strip_svg_style,
         iframe_src_i18n,
@@ -126,6 +138,7 @@ fn v22_profile() -> SecurityProfile {
     SecurityProfile {
         kind: SchemaKind::V22,
         namespaced: true,
+        normalizes_tag_names: true,
         strip_svg_script: true,
         strip_svg_style: false,
         iframe_src_i18n: true,
@@ -797,17 +810,22 @@ pub fn get_security_context(element: &str, property: &str) -> SecurityContext {
 
 /// Security context for the Angular version being compiled.
 ///
-/// v22 keeps `:svg:` and `:math:` in the lookup key. Earlier versions lowercase
-/// the tag as written and look up a bare `tag|attr` key, so `:svg:animate|to`
-/// misses and `animate|to` hits on 21.2.7.
+/// Callers pass the resolved (possibly `:ns:`-prefixed) element name. Versions
+/// with `normalizeTagName` (19.2.23+, 20.3.22+, 21.2.15+) strip non-svg/math
+/// prefixes; every earlier version lowercases the tag as written, so
+/// `:xml:iframe|src` misses the schema while `:svg:animate|to` hits its
+/// namespaced key at 21.2.14.
 pub fn get_security_context_for(
     element: &str,
     property: &str,
     version: Option<crate::AngularVersion>,
 ) -> SecurityContext {
     let profile = security_profile(version);
-    let tag =
-        if profile.namespaced { normalize_tag_name(element) } else { element.to_ascii_lowercase() };
+    let tag = if profile.normalizes_tag_names {
+        normalize_tag_name(element)
+    } else {
+        element.to_ascii_lowercase()
+    };
     let property_lower = property.to_ascii_lowercase();
     let schema = schema_for(profile.kind);
 
@@ -1438,6 +1456,28 @@ mod tests {
         assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(21, 0, 2))));
         assert!(!uses_iframe_attr_validation(None));
         assert!(!uses_iframe_attr_validation(Some(crate::AngularVersion::new(22, 0, 0))));
+    }
+
+    #[test]
+    fn v21_2_14_looks_up_the_tag_verbatim() {
+        // 21.2.14 has the namespaced schema keys but `securityContext` had no
+        // `normalizeTagName` yet: the tag is lowercased verbatim.
+        let v21_2_14 = Some(crate::AngularVersion::new(21, 2, 14));
+        assert_eq!(get_security_context_for(":xml:iframe", "src", v21_2_14), SecurityContext::None);
+        assert_eq!(
+            get_security_context_for(":svg:animate", "to", v21_2_14),
+            SecurityContext::AttributeNoBinding
+        );
+        // 21.2.15+ normalizes `:xml:iframe` down to `iframe`.
+        let v21_2_15 = Some(crate::AngularVersion::new(21, 2, 15));
+        assert_eq!(
+            get_security_context_for(":xml:iframe", "src", v21_2_15),
+            SecurityContext::ResourceUrl
+        );
+        // Pre-namespaced versions never normalized either.
+        let v21_2_13 = Some(crate::AngularVersion::new(21, 2, 13));
+        assert_eq!(get_security_context_for(":xml:iframe", "src", v21_2_13), SecurityContext::None);
+        assert_eq!(get_security_context_for(":svg:animate", "to", v21_2_13), SecurityContext::None);
     }
 
     #[test]
