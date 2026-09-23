@@ -602,7 +602,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             }
 
             const decodedComponentId = decodeURIComponent(componentId)
-            const atIndex = decodedComponentId.indexOf('@')
+            const atIndex = decodedComponentId.lastIndexOf('@')
 
             // Validate component ID format: should be "filePath@ClassName"
             if (atIndex === -1) {
@@ -614,6 +614,9 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
             const fileId = decodedComponentId.slice(0, atIndex)
             const className = decodedComponentId.slice(atIndex + 1)
+            // `fileId` is the transform id verbatim, which is what the per-file
+            // maps are keyed by. `resolvedId` is for the filesystem only: on
+            // Windows it swaps Vite's forward slashes for backslashes.
             const resolvedId = resolve(process.cwd(), fileId)
 
             // Only return an HMR update module if `handleHotUpdate` queued
@@ -634,7 +637,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             // around indefinitely because the transient-empty preservation
             // logic below assumes a future save will resolve it. Consume
             // and return empty.
-            if (!componentsByFile.get(resolvedId)?.has(className)) {
+            if (!componentsByFile.get(fileId)?.has(className)) {
               pendingHmrUpdates.delete(decodedComponentId)
               res.setHeader('Content-Type', 'text/javascript')
               res.setHeader('Cache-Control', 'no-cache')
@@ -791,7 +794,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                 // read is still served on a mismatch — no worse than main,
                 // which scanned the same disk source.
                 const compiledFromThisSource = () => {
-                  const cachedStripped = componentMetadataCache.get(resolvedId)
+                  const cachedStripped = componentMetadataCache.get(fileId)
                   return (
                     cachedStripped !== undefined &&
                     cachedStripped === stripComponentMetadata(source)
@@ -1023,7 +1026,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             )
             const classNamesInFile = new Set<string>()
             for (const componentId of templateUpdateKeys) {
-              const atIdx = componentId.indexOf('@')
+              const atIdx = componentId.lastIndexOf('@')
               if (atIdx === -1) continue
               classNamesInFile.add(componentId.slice(atIdx + 1))
             }

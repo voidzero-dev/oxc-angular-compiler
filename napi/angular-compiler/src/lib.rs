@@ -20,14 +20,14 @@ use napi_derive::napi;
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{
     AngularVersion as RustAngularVersion, ChangeDetectionStrategy as RustChangeDetectionStrategy,
-    HostMetadataInput as RustHostMetadataInput, TransformOptions as RustTransformOptions,
-    ViewEncapsulation as RustViewEncapsulation,
+    HmrUpdateModuleOptions, HostMetadataInput as RustHostMetadataInput,
+    TransformOptions as RustTransformOptions, ViewEncapsulation as RustViewEncapsulation,
     build_ctor_params_metadata as core_build_ctor_params_metadata,
     build_decorator_metadata_array as core_build_decorator_metadata_array,
     build_prop_decorators_metadata as core_build_prop_decorators_metadata,
     compile_template_for_hmr, compile_template_to_js_with_options,
-    encapsulate_style as rust_encapsulate_style, generate_hmr_update_module_from_js,
-    generate_style_update_module,
+    encapsulate_style as rust_encapsulate_style, generate_hmr_update_module,
+    generate_hmr_update_module_from_js, generate_style_update_module,
 };
 use oxc_napi::OxcError;
 
@@ -595,13 +595,15 @@ pub fn compile_for_hmr_sync(
                 };
 
             // Generate HMR module with declarations, encapsulated styles, and consts
-            let hmr_module = generate_hmr_update_module_from_js(
-                &component_id,
-                &template_js,
-                encapsulated_styles.as_deref(),
+            let hmr_module = generate_hmr_update_module(&HmrUpdateModuleOptions {
+                component_id: &component_id,
+                class_name: &component_name,
+                template_js: Some(&template_js),
+                styles: encapsulated_styles.as_deref(),
                 declarations_js,
-                output.consts_js.as_deref(),
-            );
+                consts_js: output.consts_js.as_deref(),
+                include_full_metadata: false,
+            });
 
             HmrCompileResult { hmr_module, component_id, template_js, errors: vec![] }
         }

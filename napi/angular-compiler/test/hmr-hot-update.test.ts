@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Plugin, ModuleNode, HmrContext } from 'vite'
-import { normalizePath, resolveConfig } from 'vite'
+import { normalizePath, parseSync, resolveConfig } from 'vite'
 import { afterAll, beforeAll, describe, it, expect, vi } from 'vitest'
 
 import { angular } from '../vite-plugin/index.js'
@@ -383,6 +383,40 @@ describe('pendingHmrUpdates race condition', () => {
     expect(bBody).toContain('BComponent')
   })
 
+  it('serves the HMR module for a component whose path contains @', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const scopedDir = join(tempDir, 'packages', '@company', 'app')
+    mkdirSync(scopedDir, { recursive: true })
+    const scopedPath = join(scopedDir, 'scoped.component.ts')
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-scoped', template: '<p>S</p>' })
+      export class ScopedComponent {}
+    `
+    writeFileSync(scopedPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      scopedPath,
+    )
+
+    writeFileSync(scopedPath, source.replace('<p>S</p>', '<p>S!</p>'))
+    const ctx = createMockHmrContext(scopedPath, [{ id: scopedPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+    const body = await invokeAngularMiddleware(middleware, `${scopedPath}@ScopedComponent`)
+
+    expect(body).toContain('function ScopedComponent_UpdateMetadata(ScopedComponent')
+    expect(parseSync('hmr.js', body).errors).toEqual([])
+  })
+
   it("dispatches HMR for both components when only one component's inline styles change", async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)
@@ -525,6 +559,55 @@ describe('pendingHmrUpdates race condition', () => {
     // A second request must also return '' (pending slot consumed first time).
     const dropBody2 = await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)
     expect(dropBody2).toBe('')
+  })
+
+  it('prunes only the removed class when the file path contains @', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    const scopedDir = join(tempDir, 'packages', '@company', 'prune')
+    mkdirSync(scopedDir, { recursive: true })
+    const stalePath = join(scopedDir, 'stale.component.ts')
+    const originalSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-keep', template: '<keep/>' })
+      export class KeepComponent {}
+      @Component({ selector: 'app-drop', template: '<drop/>' })
+      export class DropComponent {}
+    `
+    writeFileSync(stalePath, originalSource)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      originalSource,
+      stalePath,
+    )
+
+    writeFileSync(stalePath, originalSource.replace('<keep/>', '<keep-edited/>'))
+    const ctx = createMockHmrContext(stalePath, [{ id: stalePath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const reducedSource = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-keep', template: '<keep-edited/>' })
+      export class KeepComponent {}
+    `
+    writeFileSync(stalePath, reducedSource)
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      reducedSource,
+      stalePath,
+    )
+
+    const middleware = (mockServer.middlewares.use as ReturnType<typeof vi.fn>).mock.calls[0]?.[0]
+
+    expect(await invokeAngularMiddleware(middleware, `${stalePath}@DropComponent`)).toBe('')
+    const keepBody = await invokeAngularMiddleware(middleware, `${stalePath}@KeepComponent`)
+    expect(keepBody).toContain('function KeepComponent_UpdateMetadata(KeepComponent')
+    expect(keepBody).toContain('keep-edited')
   })
 
   it('triggers full reload when a multi-component .ts changes outside template/styles', async () => {
@@ -2040,6 +2123,44 @@ describe('@ng/component endpoint resolves the styles per class', () => {
     expect(body).not.toBe('')
     expect(body).not.toContain('PS_EMPTYINLINE_SIB_MARKER')
     // Definitive and empty: the module clears the class's styles outright.
+    expect(body).toContain('styles: []')
+  })
+
+  // Vite hands `transform` forward-slash ids on every platform. The endpoint
+  // must look the file up by that same spelling, not a re-resolved one, or on
+  // Windows it serves nothing and never treats an empty style list as final.
+  it('serves the module for a forward-slash (Vite-normalized) component id', async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithRealConfig(plugin)
+
+    const sibCssPath = normalizePath(join(appDir, 'ps-posix-sib.component.css'))
+    const posixPath = normalizePath(join(appDir, 'ps-posix.component.ts'))
+    writeFileSync(sibCssPath, '.PS_POSIX_SIB_MARKER { color: red; }')
+
+    const source = `
+      import { Component } from '@angular/core';
+      @Component({ selector: 'app-ps-posix', template: '<p>posix</p>', styles: [] })
+      export class PosixComponent {}
+      @Component({
+        selector: 'app-ps-posix-sib',
+        template: '<p>sib</p>',
+        styleUrls: ['./ps-posix-sib.component.css'],
+      })
+      export class PosixSiblingComponent {}
+    `
+    writeFileSync(posixPath, source)
+    await transformSource(plugin, source, posixPath)
+
+    writeFileSync(sibCssPath, '.PS_POSIX_SIB_MARKER { color: green; }')
+    const ctx = createMockHmrContext(sibCssPath, [{ id: sibCssPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+    expectDispatched(mockServer, `${posixPath}@PosixComponent`)
+
+    const body = await invokeAngularMiddleware(
+      getMiddleware(mockServer),
+      `${posixPath}@PosixComponent`,
+    )
+    expect(body).toContain('function PosixComponent_UpdateMetadata(PosixComponent')
     expect(body).toContain('styles: []')
   })
 

@@ -11,9 +11,15 @@
  * 2. `resolveId`/`load` hooks handle `@ng/component` as a safety net, returning
  *    an empty module so the module runner never crashes.
  */
+import { parseSync } from 'vite'
 import { describe, it, expect } from 'vitest'
 
-import { compileForHmrSync, transformAngularFile } from '../index.js'
+import {
+  compileForHmrSync,
+  generateHmrModule,
+  parseComponentId,
+  transformAngularFile,
+} from '../index.js'
 
 const COMPONENT_SOURCE = `
   import { Component } from '@angular/core';
@@ -103,5 +109,44 @@ describe('Component style minification', () => {
 
     expect(result.errors).toHaveLength(0)
     expect(result.hmrModule).toContain('.container[_ngcontent-%COMP%]{color:red;background:0 0}')
+  })
+})
+
+describe('compileForHmrSync with @ in the file path', () => {
+  it.each(['node_modules/@scope/pkg/src/a.ts', 'packages/@a/@b/x.ts'])(
+    'names the update function after the class for %s',
+    (filePath) => {
+      const result = compileForHmrSync('<div></div>', 'Foo', filePath, null, {})
+
+      expect(result.componentId).toBe(`${filePath}@Foo`)
+      expect(result.hmrModule).toContain(
+        'export default function Foo_UpdateMetadata(Foo, ɵɵnamespaces) {',
+      )
+      expect(parseSync('hmr.js', result.hmrModule).errors).toEqual([])
+    },
+  )
+
+  it.each([
+    ['node_modules/@scope/pkg/src/a.ts@Foo', 'node_modules/@scope/pkg/src/a.ts', 'Foo'],
+    ['packages/@a/@b/x.ts@Foo', 'packages/@a/@b/x.ts', 'Foo'],
+    ['Foo', 'Foo', ''],
+  ])('parseComponentId splits %s on the last @', (id, filePath, className) => {
+    expect(parseComponentId(id)).toEqual({ filePath, className })
+  })
+
+  it('generateHmrModule names the update function after the class', () => {
+    const hmrModule = generateHmrModule('node_modules/@scope/pkg/src/a.ts@Foo', 'null')
+
+    expect(hmrModule).toContain('export default function Foo_UpdateMetadata(Foo, ɵɵnamespaces) {')
+    expect(parseSync('hmr.js', hmrModule).errors).toEqual([])
+  })
+
+  it('transformAngularFile emits a parseable HMR initializer with the full id', async () => {
+    const filePath = 'node_modules/@scope/pkg/src/app.component.ts'
+    const result = await transformAngularFile(COMPONENT_SOURCE, filePath, { hmr: true })
+
+    expect(result.errors).toHaveLength(0)
+    expect(result.code).toContain(encodeURIComponent(`${filePath}@AppComponent`))
+    expect(parseSync('app.component.js', result.code).errors).toEqual([])
   })
 })
