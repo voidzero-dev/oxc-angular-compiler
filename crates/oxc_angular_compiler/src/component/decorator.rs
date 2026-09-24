@@ -19,7 +19,7 @@ use super::metadata::{
 use super::transform::ImportMap;
 use crate::directive::{
     StringConsts, extract_host_bindings, extract_host_listeners, extract_input_metadata,
-    extract_output_metadata,
+    extract_output_metadata, merge_by_class_property, parse_decorator_io,
 };
 use crate::output::oxc_converter::convert_oxc_expression;
 
@@ -261,11 +261,18 @@ pub fn extract_component_metadata<'a>(
     metadata.constructor_deps =
         extract_constructor_deps(allocator, class, import_map, has_superclass);
 
-    // Extract inputs from @Input decorators on class members
-    metadata.inputs = extract_input_metadata(allocator, class, source_text);
-
-    // Extract outputs from @Output decorators on class members
-    metadata.outputs = extract_output_metadata(allocator, class);
+    // Inputs/outputs from the `inputs:`/`outputs:` metadata, overridden by
+    // @Input/@Output/signal members ({...fromMeta, ...fromFields} in ngtsc).
+    let io = parse_decorator_io(allocator, config_obj, source_text, consts);
+    metadata.inputs = merge_by_class_property(
+        io.inputs,
+        extract_input_metadata(allocator, class, source_text),
+        |i| i.class_property_name.as_str(),
+    );
+    metadata.outputs =
+        merge_by_class_property(io.outputs, extract_output_metadata(allocator, class), |o| {
+            o.0.as_str()
+        });
 
     // Detect if ngOnChanges lifecycle hook is implemented
     // Similar to Angular's: const usesOnChanges = members.some(member => ...)

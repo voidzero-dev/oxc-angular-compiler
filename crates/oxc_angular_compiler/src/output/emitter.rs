@@ -1322,7 +1322,7 @@ fn escape_identifier(input: &Ident<'_>, escape_dollar: bool, always_quote: bool)
 /// This function matches the ECMAScript specification for `Number::toString()`
 /// (ECMA-262, 7.1.12.1) to ensure the emitted code matches Angular's TypeScript compiler
 /// which uses JavaScript's template literal coercion (`${value}`).
-fn format_number_like_js(value: f64) -> String {
+pub(crate) fn format_number_like_js(value: f64) -> String {
     // 1. NaN
     if value.is_nan() {
         return "NaN".to_string();
