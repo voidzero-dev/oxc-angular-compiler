@@ -230,5 +230,27 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 45, "fixtures compared");
+    assert_eq!(compared, 98, "fixtures compared");
+}
+
+/// ngtsc emits the method's bare name for `transform: Utils.coerce` (a static
+/// method), which here would silently bind the unrelated top-level `coerce`.
+/// oxc keeps the expression as written.
+#[test]
+fn static_method_transform_is_not_confused_with_a_same_named_function() {
+    let source = "import {Directive, Input} from '@angular/core';
+export function coerce(v: string) { return 1; }
+class Utils { static coerce(v: boolean) { return 2; } }
+@Directive({selector: '[d]'})
+export class Dir { @Input({transform: Utils.coerce}) x: any; }";
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "test.ts",
+        source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    let code = strip(&result.code);
+    assert!(code.contains(r#"inputs:{x:[2,"x","x",Utils.coerce]}"#), "{code}");
 }

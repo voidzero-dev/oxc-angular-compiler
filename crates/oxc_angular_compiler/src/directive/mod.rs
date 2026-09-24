@@ -31,7 +31,9 @@ pub use decorator::{
     find_directive_decorator_span,
 };
 pub(crate) use decorator::{extract_string_value, resolve_template_literal};
-pub(crate) use decorator::{merge_by_class_property, parse_decorator_io};
+pub(crate) use decorator::{
+    merge_by_class_property, parse_decorator_io, resolve_member_transforms,
+};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,

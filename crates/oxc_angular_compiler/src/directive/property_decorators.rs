@@ -37,14 +37,26 @@ fn find_decorator_by_name<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
     name: &str,
 ) -> Option<&'a Decorator<'a>> {
-    decorators.iter().find(|d| match &d.expression {
-        Expression::CallExpression(call) => match &call.callee {
-            Expression::Identifier(id) => id.name == name,
-            _ => false,
-        },
+    // `@Input` or, through a namespace import, `@core.Input`.
+    let is_name = |expr: &Expression<'_>| match expr {
         Expression::Identifier(id) => id.name == name,
+        Expression::StaticMemberExpression(m) => m.property.name == name,
         _ => false,
+    };
+    decorators.iter().find(|d| match &d.expression {
+        Expression::CallExpression(call) => is_name(&call.callee),
+        expr => is_name(expr),
     })
+}
+
+/// The options argument of an `@Input(...)` decorator, if any.
+pub(crate) fn input_decorator_options<'a>(
+    decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
+) -> Option<&'a Expression<'a>> {
+    match &find_decorator_by_name(decorators, "Input")?.expression {
+        Expression::CallExpression(call) => call.arguments.first()?.as_expression(),
+        _ => None,
+    }
 }
 
 /// Get the property key name as an Atom.
