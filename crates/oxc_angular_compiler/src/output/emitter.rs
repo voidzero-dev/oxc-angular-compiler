@@ -776,7 +776,12 @@ impl JsEmitter {
                             OutputExpression::Parenthesized(p) => p.expr.as_ref(),
                             other => other,
                         };
-                        let is_object_literal = matches!(inner, OutputExpression::LiteralMap(_));
+                        // Objects the converter keeps as written arrive as raw source.
+                        let is_object_literal = match inner {
+                            OutputExpression::LiteralMap(_) => true,
+                            OutputExpression::RawSource(raw) => raw.source.starts_with('{'),
+                            _ => false,
+                        };
                         if is_object_literal {
                             ctx.print("(");
                         }

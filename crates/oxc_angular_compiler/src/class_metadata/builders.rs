@@ -19,7 +19,9 @@ use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
     LiteralMapExpr, LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
 };
-use crate::output::oxc_converter::convert_oxc_expression;
+use crate::output::oxc_converter::{
+    convert_oxc_expression, convert_plain_properties, is_plain_property,
+};
 
 /// Build the decorators metadata array expression.
 ///
@@ -101,7 +103,20 @@ pub fn build_decorator_metadata_array<'a>(
             let mut args = AllocVec::new_in(&allocator);
             for (arg_idx, arg) in call.arguments.iter().enumerate() {
                 let expr = arg.to_expression();
-                if let Some(mut converted) = convert_oxc_expression(allocator, expr, source_text) {
+                let converted = match expr {
+                    // ngtsc rebuilds the metadata from its plain properties when it
+                    // inlines resources, so methods and accessors are dropped.
+                    Expression::ObjectExpression(obj)
+                        if is_component_decorator
+                            && decorator_idx == 0
+                            && arg_idx == 0
+                            && has_resource_property(obj) =>
+                    {
+                        convert_plain_properties(allocator, obj, source_text)
+                    }
+                    _ => convert_oxc_expression(allocator, expr, source_text),
+                };
+                if let Some(mut converted) = converted {
                     // Inline resolved templates/styles into the first arg of the
                     // first @Component decorator. Other decorators / other args
                     // are left alone.
@@ -152,6 +167,18 @@ pub fn build_decorator_metadata_array<'a>(
         LiteralArrayExpr { entries: decorator_entries, source_span: None },
         &allocator,
     ))
+}
+
+/// Whether a `@Component` metadata object has a resource field that ngtsc
+/// inlines: `templateUrl`, `styleUrl`, `styleUrls` or `styles`.
+fn has_resource_property(obj: &oxc_ast::ast::ObjectExpression<'_>) -> bool {
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else { return false };
+        is_plain_property(prop)
+            && get_property_key_name(&prop.key).is_some_and(|name| {
+                matches!(name.as_str(), "templateUrl" | "styleUrl" | "styleUrls" | "styles")
+            })
+    })
 }
 
 /// Rewrite the `@Component` config map so external resource references are

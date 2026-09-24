@@ -25,6 +25,8 @@ const INCREMENTAL_HYDRATION =
   'ɵɵenableIncrementalHydrationRuntime is not emitted for a `hydrate` trigger'
 const SELECTOR_WHITESPACE =
   'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
+const INJECTABLE_FACTORY_WRAPPER =
+  'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'animations/animation-metadata-with-change-detection': {
@@ -191,6 +193,26 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   },
   'pipe-compilation/pure-pipe': {
     fields: ['MyPurePipe.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/object-members-injectable-use-factory': {
+    fields: ['ObjectMembersService.ɵfac', 'ObjectMembersService.ɵprov'],
+    reasons: [FACTORY, INJECTABLE_FACTORY_WRAPPER],
+  },
+  'providers/object-members-injectable-use-value': {
+    fields: ['ObjectMembersValueService.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/object-members-ng-module': {
+    fields: ['ObjectMembersModule.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/object-members-options-directive-pipe-module': {
+    fields: ['OptionsPipe.ɵfac', 'OptionsModule.ɵfac'],
+    reasons: [FACTORY],
+  },
+  'providers/object-members-options-injectable': {
+    fields: ['OptionsMethodService.ɵfac', 'OptionsGetterService.ɵfac'],
     reasons: [FACTORY],
   },
   'providers/providers-with-change-detection': {

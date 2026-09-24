@@ -15,6 +15,7 @@ use super::metadata::R3PipeMetadata;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
+use crate::util::is_metadata_property;
 
 /// Extracted pipe metadata from a `@Pipe` decorator.
 ///
@@ -141,7 +142,9 @@ pub fn extract_pipe_metadata<'a>(
 
     // Parse each property in the config object
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             let Some(key_name) = get_property_key_name(&prop.key) else {
                 continue;
             };

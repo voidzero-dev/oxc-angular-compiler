@@ -14,7 +14,7 @@
 use oxc_allocator::{Allocator, Box, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Expression, ObjectPropertyKind, PropertyKey,
-    UnaryOperator as OxcUnaryOperator,
+    PropertyKind, UnaryOperator as OxcUnaryOperator,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
@@ -301,24 +301,56 @@ fn convert_object_expression<'a>(
     obj: &oxc_ast::ast::ObjectExpression<'a>,
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
+    // A `LiteralMap` entry is a plain `key: value` pair, so methods (`a() {}`),
+    // accessors (`get a() {}`), computed keys (`[a]: 1`) and other key kinds
+    // cannot be represented. Keep such objects as written rather than emitting
+    // an altered object.
+    if obj
+        .properties
+        .iter()
+        .any(|prop| matches!(prop, ObjectPropertyKind::ObjectProperty(p) if !is_plain_property(p)))
+    {
+        return make_raw_source(allocator, source_text, obj.span);
+    }
+    convert_plain_properties(allocator, obj, source_text)
+}
+
+/// Whether a property is a `key: value` pair with an identifier, string or number key.
+pub fn is_plain_property(p: &oxc_ast::ast::ObjectProperty<'_>) -> bool {
+    !p.method
+        && !p.computed
+        && p.kind == PropertyKind::Init
+        && matches!(
+            p.key,
+            PropertyKey::StaticIdentifier(_)
+                | PropertyKey::StringLiteral(_)
+                | PropertyKey::NumericLiteral(_)
+        )
+}
+
+/// Convert an object expression, keeping only its plain `key: value` pairs and
+/// spreads. ngtsc rebuilds a component's metadata the same way when it inlines
+/// resources (`transformDecoratorResources`).
+pub fn convert_plain_properties<'a>(
+    allocator: &'a Allocator,
+    obj: &oxc_ast::ast::ObjectExpression<'a>,
+    source_text: Option<&'a str>,
+) -> Option<OutputExpression<'a>> {
     let mut entries = OxcVec::with_capacity_in(obj.properties.len(), &allocator);
 
     for prop in &obj.properties {
         match prop {
             ObjectPropertyKind::ObjectProperty(p) => {
-                // Get the property key
+                if !is_plain_property(p) {
+                    continue;
+                }
                 let (key, quoted) = match &p.key {
                     PropertyKey::StaticIdentifier(id) => (id.name.clone().into(), false),
                     PropertyKey::StringLiteral(lit) => (lit.value.clone().into(), true),
                     PropertyKey::NumericLiteral(lit) => {
                         (Ident::from(allocator.alloc_str(&lit.value.to_string())), true)
                     }
-                    PropertyKey::PrivateIdentifier(_) => return None, // Private fields not supported
-                    _ => {
-                        // Computed property key - try to convert it
-                        // For now, skip computed properties
-                        continue;
-                    }
+                    _ => continue,
                 };
 
                 // Convert the value
@@ -760,6 +792,10 @@ fn strip_expression_types(expr_source: &str) -> String {
             return inner.to_string();
         }
     }
+    // Codegen drops parentheses it doesn't need, e.g. "0, { a() {} };"
+    if let Some(inner) = code.strip_prefix("0, ").and_then(|rest| rest.strip_suffix(';')) {
+        return inner.to_string();
+    }
 
     // Fallback: return original
     expr_source.to_string()
@@ -1150,5 +1186,21 @@ mod tests {
         let result = strip_expression_types("(x: number) => x + 1");
         assert!(!result.contains(": number"), "Should strip type annotation. Got: {result}");
         assert!(result.contains("=> x + 1"), "Should preserve expression. Got: {result}");
+    }
+
+    #[test]
+    fn test_object_with_method_falls_back_to_raw_source_without_types() {
+        let allocator = Allocator::default();
+        let source = "{ attach(x: string): string { return x; }, [key]: 1 }";
+        let expr = Parser::new(&allocator, source, SourceType::ts())
+            .parse_expression()
+            .expect("Failed to parse expression");
+        let result = convert_oxc_expression(&allocator, &expr, Some(source));
+        let Some(OutputExpression::RawSource(raw)) = result else {
+            panic!("Expected RawSource expression, got {result:?}");
+        };
+        let raw = raw.source.as_str();
+        assert!(!raw.contains(": string"), "Should strip type annotations. Got: {raw}");
+        assert!(raw.contains("attach(x)") && raw.contains("[key]: 1"), "Got: {raw}");
     }
 }

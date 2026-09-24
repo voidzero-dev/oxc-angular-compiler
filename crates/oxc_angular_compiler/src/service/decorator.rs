@@ -19,6 +19,7 @@ use oxc_str::Ident;
 
 use super::metadata::R3ServiceMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
+use crate::util::is_metadata_property;
 
 /// Extracted metadata from a `@Service` decorator.
 #[derive(Debug)]
@@ -84,6 +85,9 @@ pub fn extract_service_metadata<'a>(
 
     for prop in &config_obj.properties {
         let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
+        if !is_metadata_property(prop) {
+            continue;
+        }
         let Some(key) = get_property_key_name(&prop.key) else { continue };
 
         match key.as_str() {

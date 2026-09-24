@@ -11234,6 +11234,185 @@ export class MyComponent {}
     );
 }
 
+/// Object literals in decorator metadata must keep methods, accessors and
+/// computed keys. The converter used to re-emit `attach() {}` as the invalid
+/// `attach:() {}`, drop `get`/`set`/`async`/`*`, and silently drop computed keys.
+#[test]
+fn test_object_methods_and_computed_keys_in_decorator_metadata_preserved() {
+    let members = [
+        ("attach() {}", "attach() {}"),
+        ("get ready() { return 1; }", "get ready() {"),
+        ("set ready(v) {}", "set ready(v) {"),
+        ("async load() {}", "async load() {"),
+        ("*items() {}", "*items() {"),
+        ("[key]() {}", "[key]() {"),
+        ("[key]: 1", "[key]: 1"),
+    ];
+    let fields = [
+        ("Component", "providers"),
+        ("Component", "viewProviders"),
+        ("Directive", "providers"),
+        ("NgModule", "providers"),
+    ];
+    for (member, expected) in members {
+        for (decorator, field) in fields {
+            let extra = if decorator == "Component" { "template: '<div></div>'," } else { "" };
+            let source = format!(
+                "import {{ {decorator} }} from '@angular/core';
+class Token {{}}
+const key = 'k';
+@{decorator}({{ selector: 'app-repro', {extra} {field}: [{{ provide: Token, useValue: {{ {member} }} }}] }})
+export class Repro {{}}
+"
+            );
+            let code = compile_to_valid_js(&source);
+            // Once in the definition, once in setClassMetadata.
+            assert_eq!(
+                code.matches(expected).count(),
+                2,
+                "`{member}` lost in @{decorator} {field}. Got:\n{code}"
+            );
+        }
+    }
+}
+
+/// Compiles `source`, asserting there are no errors and the output parses as JS.
+fn compile_to_valid_js(source: &str) -> String {
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(!result.has_errors(), "Unexpected errors {:?} for:\n{source}", result.diagnostics);
+    let parsed =
+        oxc_parser::Parser::new(&allocator, &result.code, oxc_span::SourceType::mjs()).parse();
+    assert!(
+        parsed.diagnostics.is_empty(),
+        "Output is not valid JS ({:?}). Got:\n{}",
+        parsed.diagnostics,
+        result.code
+    );
+    result.code
+}
+
+/// Keys that aren't identifiers, strings or numbers (here a BigInt, which only a
+/// `@ts-ignore` lets through) keep the object as written, as ngc does, rather
+/// than failing the conversion and losing the whole field.
+#[test]
+fn test_object_with_bigint_key_kept_as_written() {
+    let code = compile_to_valid_js(
+        "import { Component } from '@angular/core';
+class Token {}
+@Component({ selector: 'a', template: '', providers: [{ provide: Token, useValue: { 1n: 5, b: 2 } }] })
+export class C {}
+",
+    );
+    assert_eq!(code.matches("{ 1n: 5, b: 2 }").count(), 2, "Got:\n{code}");
+    assert!(code.contains("selector:\"a\""), "setClassMetadata keeps its args. Got:\n{code}");
+}
+
+/// When a component's resources are inlined, ngc rebuilds its metadata object
+/// for `setClassMetadata` from the plain properties, dropping methods, accessors
+/// and computed keys. Without resources it keeps the object as written.
+#[test]
+fn test_component_metadata_with_accessor_and_resources_matches_ngc() {
+    let source = "import { Component } from '@angular/core';
+const key = 'k';
+@Component({ selector: 'b', templateUrl: './x.html', get foo() { return 1; }, [key]: 2 })
+export class B {}
+@Component({ selector: 'c', template: '', get foo() { return 1; } })
+export class C {}
+";
+    let allocator = Allocator::default();
+    let mut templates = std::collections::HashMap::new();
+    templates.insert("./x.html".to_string(), "<div>hi</div>".to_string());
+    let resources = ResolvedResources { templates, styles: std::collections::HashMap::new() };
+    let result = transform_angular_file(&allocator, "test.ts", source, None, Some(&resources));
+    assert!(!result.has_errors(), "Unexpected errors: {:?}", result.diagnostics);
+    let code = &result.code;
+
+    assert!(
+        code.contains("args:[{selector:\"b\",template:\"<div>hi</div>\"}]"),
+        "Resources are inlined into a rebuilt object. Got:\n{code}"
+    );
+    assert!(!code.contains("templateUrl"), "Got:\n{code}");
+    assert_eq!(code.matches("get foo()").count(), 1, "Only C keeps its accessor. Got:\n{code}");
+}
+
+/// An arrow whose body is an object literal must keep its parentheses, even when
+/// the object is kept as written because it has methods or computed keys.
+#[test]
+fn test_arrow_returning_object_with_methods_keeps_parentheses() {
+    for body in ["({ attach() { return 1; } })", "({ [key]: 1 })"] {
+        let component = compile_to_valid_js(&format!(
+            "import {{ Component }} from '@angular/core';
+class Token {{}}
+const key = 'k';
+@Component({{ selector: 'a', template: '', providers: [{{ provide: Token, useFactory: () => {body} }}] }})
+export class C {{}}
+"
+        ));
+        assert_eq!(component.matches(body).count(), 2, "Got:\n{component}");
+
+        let injectable = compile_to_valid_js(&format!(
+            "import {{ Injectable }} from '@angular/core';
+const key = 'k';
+@Injectable({{ providedIn: 'root', useFactory: () => {body} }})
+export class S {{}}
+"
+        ));
+        assert_eq!(injectable.matches(body).count(), 2, "Got:\n{injectable}");
+    }
+}
+
+/// Like ngtsc's `reflectObjectLiteral`, methods and accessors on a decorator's
+/// own options object are not metadata. `setClassMetadata` keeps them as written.
+/// Expected output checked against ngc 22.
+#[test]
+fn test_methods_and_accessors_on_decorator_options_are_ignored() {
+    let code = compile_to_valid_js(
+        "import { Component, ContentChild, Directive, Injectable, Input, NgModule, Pipe, ViewChild, input, model, output, viewChild } from '@angular/core';
+class Token {}
+@Injectable({ providedIn: 'root', useFactory() { return 1; } })
+export class S1 {}
+@Injectable({ providedIn: 'root', get useValue() { return 1; } })
+export class S2 {}
+@Directive({ selector: '[d]', get providers() { return []; } })
+export class D {}
+@NgModule({ get providers() { return []; } })
+export class M {}
+@Pipe({ name: 'p', get pure() { return false; } })
+export class P {}
+@Component({ selector: 'c', template: '', get viewProviders() { return []; } })
+export class C {
+  @Input({ alias: 'value', transform(v: string) { return v; } }) value = '';
+  @ViewChild('x', { static: true, get read() { return Token; } }) x;
+  @ContentChild('y', { get descendants() { return false; } }) y;
+}
+@Component({ selector: 's', template: '<div #z></div>' })
+export class Signals {
+  a = input(0, { get alias() { return 'aliasA'; } });
+  m = model(0, { get alias() { return 'aliasM'; } });
+  o = output({ get alias() { return 'aliasO'; } });
+  q = viewChild('z', { get read() { return Token; } });
+}
+",
+    );
+    let definitions = code.split("ɵsetClassMetadata").next().unwrap();
+    for ignored in ["useFactory", "useValue", "ɵɵProvidersFeature", "providers:", "transform"] {
+        assert!(!definitions.contains(ignored), "`{ignored}` should be ignored. Got:\n{code}");
+    }
+    for expected in [
+        "factory:S1.ɵfac",
+        "factory:S2.ɵfac",
+        "pure:true",
+        "i0.ɵɵviewQuery(_c1,7);",
+        "i0.ɵɵcontentQuery(dirIndex,_c0,5);",
+        "inputs:{a:[1,\"a\"],m:[1,\"m\"]}",
+        "outputs:{m:\"mChange\",o:\"o\"}",
+    ] {
+        assert!(code.contains(expected), "Expected `{expected}`. Got:\n{code}");
+    }
+    assert!(code.contains("get providers() {"), "setClassMetadata keeps members. Got:\n{code}");
+}
+
 // =============================================================================
 // Regression: @Inject(TOKEN) on pipe constructor parameters
 // =============================================================================

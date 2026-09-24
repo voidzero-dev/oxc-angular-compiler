@@ -20,6 +20,7 @@ use super::metadata::{
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
+use crate::util::is_metadata_property;
 
 /// Find the @Directive decorator in a list of decorators.
 pub(crate) fn find_directive_decorator<'a>(
@@ -121,7 +122,9 @@ pub fn extract_directive_metadata<'a>(
     // Parse each property in the config object (if present)
     if let Some(config_obj) = config_obj {
         for prop in &config_obj.properties {
-            if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+            if let ObjectPropertyKind::ObjectProperty(prop) = prop
+                && is_metadata_property(prop)
+            {
                 let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                     continue;
                 };
@@ -624,7 +627,9 @@ fn extract_host_metadata<'a>(
     let mut host = R3HostMetadata::new(allocator);
 
     for prop in &obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                 continue;
             };
@@ -714,7 +719,9 @@ fn extract_single_host_directive<'a>(
             let mut is_forward_reference = false;
 
             for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+                if let ObjectPropertyKind::ObjectProperty(prop) = prop
+                    && is_metadata_property(prop)
+                {
                     let Some(key_name) = get_property_key_name(&prop.key, consts) else {
                         continue;
                     };

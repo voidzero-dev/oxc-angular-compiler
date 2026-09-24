@@ -14,6 +14,7 @@ use oxc_str::Ident;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
+use crate::util::is_metadata_property;
 
 /// Extracted injectable metadata from a `@Injectable` decorator.
 #[derive(Debug)]
@@ -316,7 +317,9 @@ fn extract_provided_in<'a>(
     source_text: Option<&'a str>,
 ) -> Option<ProvidedInValue<'a>> {
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "providedIn" {
                     return parse_provided_in_value(allocator, &prop.value, source_text);
@@ -355,7 +358,9 @@ fn extract_use_class<'a>(
     source_text: Option<&'a str>,
 ) -> Option<UseClassMetadata<'a>> {
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "useClass" {
                     let (class_expr, is_forward_ref) =
@@ -375,7 +380,9 @@ fn extract_use_factory<'a>(
     source_text: Option<&'a str>,
 ) -> Option<UseFactoryMetadata<'a>> {
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "useFactory" {
                     let factory = convert_oxc_expression(allocator, &prop.value, source_text)?;
@@ -394,7 +401,9 @@ fn extract_use_value<'a>(
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "useValue" {
                     return convert_oxc_expression(allocator, &prop.value, source_text);
@@ -411,7 +420,9 @@ fn extract_use_existing<'a>(
     source_text: Option<&'a str>,
 ) -> Option<UseExistingMetadata<'a>> {
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "useExisting" {
                     let (existing, is_forward_ref) =
@@ -459,7 +470,9 @@ fn extract_deps_from_config<'a>(
     let mut deps = Vec::new_in(&allocator);
 
     for prop in &config_obj.properties {
-        if let ObjectPropertyKind::ObjectProperty(prop) = prop {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && is_metadata_property(prop)
+        {
             if let Some(key_name) = get_property_key_name(&prop.key) {
                 if key_name.as_str() == "deps" {
                     if let Expression::ArrayExpression(arr) = &prop.value {
