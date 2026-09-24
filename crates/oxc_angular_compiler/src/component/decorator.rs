@@ -20,6 +20,7 @@ use super::transform::ImportMap;
 use crate::directive::{
     StringConsts, extract_host_bindings, extract_host_listeners, extract_input_metadata,
     extract_output_metadata, merge_by_class_property, parse_decorator_io,
+    resolve_member_transforms,
 };
 use crate::output::oxc_converter::convert_oxc_expression;
 
@@ -263,12 +264,13 @@ pub fn extract_component_metadata<'a>(
 
     // Inputs/outputs from the `inputs:`/`outputs:` metadata, overridden by
     // @Input/@Output/signal members ({...fromMeta, ...fromFields} in ngtsc).
-    let io = parse_decorator_io(allocator, config_obj, source_text, consts);
+    let io = parse_decorator_io(allocator, config_obj, class, source_text, consts);
     metadata.inputs = merge_by_class_property(
         io.inputs,
         extract_input_metadata(allocator, class, source_text),
         |i| i.class_property_name.as_str(),
     );
+    resolve_member_transforms(allocator, class, source_text, consts, &mut metadata.inputs);
     metadata.outputs =
         merge_by_class_property(io.outputs, extract_output_metadata(allocator, class), |o| {
             o.0.as_str()

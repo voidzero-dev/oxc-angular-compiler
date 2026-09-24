@@ -11,10 +11,12 @@
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration,
-    ExportDefaultDeclarationKind, Expression, Function, ImportDeclarationSpecifier,
-    MethodDefinitionKind, ModuleExportName, ObjectPropertyKind, Program, PropertyKey, Statement,
+    ArrayExpressionElement, ArrowFunctionExpression, BindingPattern, Class, ClassElement,
+    Declaration, ExportDefaultDeclarationKind, Expression, FormalParameters, Function,
+    ImportDeclarationSpecifier, MethodDefinitionKind, ModuleExportName, ObjectPropertyKind,
+    Program, PropertyKey, Statement, TSType, TSTypeName,
 };
+use oxc_ast_visit::Visit;
 
 use crate::output::emitter::format_number_like_js;
 
@@ -23,9 +25,10 @@ use crate::output::emitter::format_number_like_js;
 pub(crate) struct FileScope<'a> {
     /// `const`/`let`/`var` bindings with an initializer.
     variables: HashMap<&'a str, &'a Expression<'a>>,
-    /// Bindings with no initializer (`declare const X: T`, `let x;`), functions
-    /// and enums: references to a declaration that isn't evaluated.
+    /// Bindings with no initializer (`declare const X: T`, `let x;`) and enums.
     declared: HashSet<&'a str>,
+    /// Function declarations, with their overload signature count.
+    functions: HashMap<&'a str, (&'a Function<'a>, usize)>,
     classes: HashMap<&'a str, &'a Class<'a>>,
     imports: HashMap<&'a str, Import<'a>>,
     /// Names exported from the file (`export ...` and `export { ... }`).
@@ -141,9 +144,17 @@ impl<'a> FileScope<'a> {
     fn function(&mut self, function: &'a Function<'a>, exported: bool) {
         let Some(id) = &function.id else { return };
         let id = id.name.as_str();
-        self.declared.insert(id);
         if exported {
             self.exported.insert(id);
+        }
+        // Overloads are body-less declarations followed by the implementation;
+        // only the overloads count as call signatures, as in TypeScript.
+        let entry = self.functions.entry(id).or_insert((function, 0));
+        if function.body.is_none() {
+            entry.1 += 1;
+        }
+        if function.body.is_some() || entry.0.body.is_none() {
+            entry.0 = function;
         }
     }
 
@@ -158,12 +169,54 @@ impl<'a> FileScope<'a> {
     }
 }
 
+/// A function definition ngtsc's `getDefinitionOfFunction` accepts.
+#[derive(Clone, Copy)]
+pub(crate) enum FnDef<'a> {
+    Function(&'a Function<'a>),
+    Arrow(&'a ArrowFunctionExpression<'a>),
+}
+
+impl<'a> FnDef<'a> {
+    fn is_generic(self) -> bool {
+        match self {
+            FnDef::Function(f) => f.type_parameters.is_some(),
+            FnDef::Arrow(f) => f.type_parameters.is_some(),
+        }
+    }
+
+    pub(crate) fn params(self) -> &'a FormalParameters<'a> {
+        match self {
+            FnDef::Function(f) => &f.params,
+            FnDef::Arrow(f) => &f.params,
+        }
+    }
+
+    /// The type annotation of the first parameter (after any `this` parameter,
+    /// which oxc keeps separately): `Ok(None)` when there are no parameters,
+    /// `Err(())` when the first one has no type.
+    pub(crate) fn first_param_type(self) -> Result<Option<&'a TSType<'a>>, ()> {
+        let params = self.params();
+        let annotation = match (params.items.first(), &params.rest) {
+            (Some(param), _) => &param.type_annotation,
+            (None, Some(rest)) => &rest.type_annotation,
+            (None, None) => return Ok(None),
+        };
+        annotation.as_ref().map(|t| Some(&t.type_annotation)).ok_or(())
+    }
+}
+
 /// What a declaration reference resolves to.
 #[derive(Clone)]
 pub(crate) enum RefKind<'a> {
+    /// A function declaration or static method in this file, with its call
+    /// signature count and whether it's a top-level function declaration
+    /// (whose own name is in scope where the metadata is compiled).
+    Function(FnDef<'a>, usize, bool),
     Class(&'a Class<'a>),
-    /// An imported binding, or `ns.x` through `import * as ns`.
-    Import,
+    /// An imported binding; `namespace_member` for `ns.x` through `import * as ns`.
+    Import {
+        namespace_member: bool,
+    },
     /// An identifier with no declaration in this file (a global, most likely).
     Global,
     /// Any other declaration (a variable without an initializer, ...).
@@ -187,6 +240,9 @@ pub(crate) enum Value<'a> {
         kind: RefKind<'a>,
     },
     Dynamic,
+    /// An arrow or function expression written directly as a property value;
+    /// the only place ngtsc keeps a function expression analyzable.
+    Function(FnDef<'a>),
 }
 
 /// An object literal property: its key, value, and the source expression it came from.
@@ -250,14 +306,16 @@ impl<'a> Value<'a> {
             ),
             Value::Module => "(module)".into(),
             Value::Reference { name, .. } => name.clone(),
-            Value::Dynamic => "(not statically analyzable)".into(),
+            Value::Dynamic | Value::Function(_) => "(not statically analyzable)".into(),
         }
     }
 
     /// The chained line ngtsc's `createValueHasWrongTypeError` adds after a message.
     pub(crate) fn wrong_type_suffix(&self) -> String {
         match self {
-            Value::Dynamic => " Value could not be determined statically.".into(),
+            Value::Dynamic | Value::Function(_) => {
+                " Value could not be determined statically.".into()
+            }
             Value::Reference { name, .. } => format!(" Value is a reference to '{name}'."),
             _ => format!(" Value is of type '{}'.", self.describe()),
         }
@@ -354,7 +412,15 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                             let Some(key) = self.property_key(&p.key, depth) else {
                                 return Value::Dynamic;
                             };
-                            let value = self.eval(&p.value, depth);
+                            let value = match &p.value {
+                                Expression::ArrowFunctionExpression(f) => {
+                                    Value::Function(FnDef::Arrow(f))
+                                }
+                                Expression::FunctionExpression(f) => {
+                                    Value::Function(FnDef::Function(f))
+                                }
+                                value => self.eval(value, depth),
+                            };
                             props.push(Prop { key, value, expr: Some(&p.value) });
                         }
                         ObjectPropertyKind::SpreadProperty(spread) => {
@@ -367,17 +433,19 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 }
                 Value::Object(props)
             }
+            // A function expression reached through a property access isn't
+            // analyzable (`({ f: (v: string) => 1 }).f`).
             Expression::StaticMemberExpression(m) => {
                 let object = self.eval(&m.object, depth);
-                self.member(object, m.property.name.as_str(), depth)
+                opaque_function(self.member(object, m.property.name.as_str(), depth))
             }
             Expression::ComputedMemberExpression(m) => {
                 let object = self.eval(&m.object, depth);
-                match self.eval(&m.expression, depth) {
+                opaque_function(match self.eval(&m.expression, depth) {
                     Value::String(key) => self.member(object, &key, depth),
                     Value::Number(n) => self.member(object, &format_number_like_js(n), depth),
                     _ => Value::Dynamic,
-                }
+                })
             }
             _ => Value::Dynamic,
         }
@@ -402,9 +470,17 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 return cached.clone().unwrap_or(Value::Dynamic);
             }
             self.variables.borrow_mut().insert(name, None);
-            let value = self.eval(init, depth);
+            // A dynamic value reached through a declaration loses its node, so a
+            // function expression assigned to a variable isn't analyzable.
+            let value = opaque_function(self.eval(init, depth));
             self.variables.borrow_mut().insert(name, Some(value.clone()));
             return value;
+        }
+        if let Some((f, overloads)) = scope.functions.get(name) {
+            return Value::Reference {
+                name: name.into(),
+                kind: RefKind::Function(FnDef::Function(f), (*overloads).max(1), true),
+            };
         }
         if let Some(class) = scope.classes.get(name) {
             return Value::Reference { name: name.into(), kind: RefKind::Class(class) };
@@ -413,7 +489,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             return match import.imported {
                 Some(imported) => {
                     let name = if imported == "default" { name } else { imported };
-                    Value::Reference { name: name.into(), kind: RefKind::Import }
+                    Value::Reference {
+                        name: name.into(),
+                        kind: RefKind::Import { namespace_member: false },
+                    }
                 }
                 None => Value::Module,
             };
@@ -441,11 +520,14 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     .unwrap_or(Value::Undefined),
             },
             Value::String(s) if key == "length" => Value::Number(s.chars().count() as f64),
-            Value::Module => Value::Reference { name: key.into(), kind: RefKind::Import },
+            Value::Module => Value::Reference {
+                name: key.into(),
+                kind: RefKind::Import { namespace_member: true },
+            },
             Value::Reference { kind: RefKind::Class(class), .. } => {
                 self.static_member(class, key, depth)
             }
-            Value::Reference { kind: RefKind::Import | RefKind::Global, .. } => {
+            Value::Reference { kind: RefKind::Import { .. } | RefKind::Global, .. } => {
                 Value::Reference { name: key.into(), kind: RefKind::Global }
             }
             _ => Value::Dynamic,
@@ -453,6 +535,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     }
 
     fn static_member(&self, class: &'a Class<'a>, key: &str, depth: u16) -> Value<'a> {
+        let mut overloads = 0;
+        let mut found = None;
         for element in &class.body.body {
             match element {
                 ClassElement::MethodDefinition(m)
@@ -460,16 +544,138 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         && m.kind == MethodDefinitionKind::Method
                         && m.key.static_name().is_some_and(|n| n == key) =>
                 {
-                    return Value::Reference { name: key.into(), kind: RefKind::Other };
+                    if m.value.body.is_none() {
+                        overloads += 1;
+                    } else {
+                        found = Some(FnDef::Function(&m.value));
+                    }
                 }
                 ClassElement::PropertyDefinition(p)
                     if p.r#static && p.key.static_name().is_some_and(|n| n == key) =>
                 {
-                    return p.value.as_ref().map_or(Value::Undefined, |v| self.eval(v, depth));
+                    return p.value.as_ref().map_or(Value::Undefined, |v| {
+                        match self.eval(v, depth) {
+                            Value::Function(_) => Value::Dynamic,
+                            value => value,
+                        }
+                    });
                 }
                 _ => {}
             }
         }
-        if key == "prototype" { Value::Dynamic } else { Value::Undefined }
+        match found {
+            Some(def) => Value::Reference {
+                name: key.into(),
+                kind: RefKind::Function(def, overloads.max(1), false),
+            },
+            _ if key == "prototype" => Value::Dynamic,
+            _ => Value::Undefined,
+        }
+    }
+}
+
+fn opaque_function(value: Value<'_>) -> Value<'_> {
+    match value {
+        Value::Function(_) => Value::Dynamic,
+        value => value,
+    }
+}
+
+// =============================================================================
+// Input transforms
+// =============================================================================
+
+/// ngtsc's checks on an input `transform`
+/// (`parseDecoratorInputTransformFunction` in
+/// packages/compiler-cli/src/ngtsc/annotations/directive/src/input_transforms.ts).
+///
+/// `position` is the index in the `inputs:` array, `None` for `@Input({ transform })`.
+pub(crate) fn transform_error(
+    value: &Value<'_>,
+    position: Option<usize>,
+    input_name: &str,
+    class: &Class<'_>,
+    scope: &FileScope<'_>,
+) -> Option<String> {
+    let suffix = value.wrong_type_suffix();
+    let def = match value {
+        Value::Function(def) | Value::Reference { kind: RefKind::Function(def, ..), .. } => *def,
+        // Imports and globals can't be inspected from this file; assume a function.
+        Value::Reference {
+            kind: RefKind::Import { namespace_member: false } | RefKind::Global,
+            ..
+        } => {
+            return None;
+        }
+        Value::Reference { kind: RefKind::Import { namespace_member: true }, .. } => {
+            return Some(format!("Input transform function could not be referenced{suffix}"));
+        }
+        Value::Reference { .. } | Value::Dynamic => {
+            return Some(format!("Input transform must be a function{suffix}"));
+        }
+        _ => {
+            return Some(match position {
+                Some(i) => format!(
+                    "Transform of value at position {i} of @Directive.inputs array must be a function{suffix}"
+                ),
+                None => format!("Input transform must be a function{suffix}"),
+            });
+        }
+    };
+    if def.is_generic() {
+        return Some(format!("Input transform function cannot be generic{suffix}"));
+    }
+    if let Value::Reference { kind: RefKind::Function(_, signatures, _), .. } = value
+        && *signatures > 1
+    {
+        return Some(format!("Input transform function cannot have multiple signatures{suffix}"));
+    }
+    let conflicting = format!("ngAcceptInputType_{input_name}");
+    if class.body.body.iter().any(|el| {
+        el.r#static()
+            && el
+                .property_key()
+                .and_then(PropertyKey::static_name)
+                .is_some_and(|n| n == conflicting)
+    }) {
+        return Some(format!(
+            "Class cannot have both a transform function on Input {input_name} and a static member called {conflicting}"
+        ));
+    }
+    match def.first_param_type() {
+        Ok(None) => None,
+        Err(()) => {
+            Some(format!("Input transform function first parameter must have a type{suffix}"))
+        }
+        Ok(Some(_)) if def.params().items.is_empty() => Some(format!(
+            "Input transform function first parameter cannot be a spread parameter{suffix}"
+        )),
+        Ok(Some(ty)) => {
+            let mut check = UnexportedType { scope, found: false };
+            check.visit_ts_type(ty);
+            check.found.then(|| {
+                "Symbol must be exported in order to be used as the type of an Input transform function"
+                    .to_string()
+            })
+        }
+    }
+}
+
+/// Finds a type reference to a same-file type that isn't exported, which ngtsc
+/// can't emit into the `.d.ts` (`assertEmittableInputType`).
+struct UnexportedType<'s, 'a> {
+    scope: &'s FileScope<'a>,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for UnexportedType<'_, 'a> {
+    fn visit_ts_type_name(&mut self, name: &TSTypeName<'a>) {
+        if let TSTypeName::IdentifierReference(id) = name {
+            let id = id.name.as_str();
+            if self.scope.types.contains(id) && !self.scope.exported.contains(id) {
+                self.found = true;
+            }
+        }
+        oxc_ast_visit::walk::walk_ts_type_name(self, name);
     }
 }
