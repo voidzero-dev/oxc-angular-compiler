@@ -230,7 +230,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 98, "fixtures compared");
+    assert_eq!(compared, 134, "fixtures compared");
 }
 
 /// ngtsc emits the method's bare name for `transform: Utils.coerce` (a static

@@ -26,6 +26,36 @@
       "dtsImports": []
     },
     {
+      "name": "ngtsc_spec: should throw error if @Directive.queries field has wrong type",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Directive} from '@angular/core';\n\n          @Directive({\n            selector: 'test-dir',\n            // @ts-ignore\n            queries: 'invalid-queries-type'\n          })\n          export class TestDir {}\n        "
+      },
+      "diagnostics": ["Decorator queries metadata must be an object literal"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should throw error if @Directive.queries object has incorrect values",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Directive} from '@angular/core';\n\n          @Directive({\n            selector: 'test-dir',\n            queries: {\n              myViewQuery: 'invalid-query-type'\n            }\n          })\n          export class TestDir {}\n        "
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should throw error if @Directive.queries object has incorrect values (refs to other decorators)",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n              import {Directive, Input} from '@angular/core';\n\n              @Directive({\n                selector: 'test-dir',\n                queries: {\n                  myViewQuery: new Input()\n                }\n              })\n              export class TestDir {}\n            "
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "ngtsc_spec: should produce a diagnostic if the transform value is not a function",
       "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
       "files": {
@@ -182,6 +212,50 @@
       "dtsImports": []
     },
     {
+      "name": "ngtsc_spec: should generate queries for components",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n        import {Component, ContentChild, ContentChildren, TemplateRef, ViewChild} from '@angular/core';\n\n        @Component({\n          selector: 'test',\n          template: '<div #foo></div>',\n          queries: {\n            'mview': new ViewChild('test1'),\n            'mcontent': new ContentChild('test2'),\n          }\n        })\n        class FooCmp {\n          @ContentChild('bar', {read: TemplateRef}) child: any;\n          @ContentChildren(TemplateRef) children: any;\n          get aview(): any { return null; }\n          @ViewChild('accessor') set aview(value: any) {}\n        }\n    "
+      },
+      "diagnostics": [],
+      "classes": {
+        "FooCmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"bar\"],5,TemplateRef)(dirIndex,TemplateRef,4)(dirIndex,[\"test2\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.child=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.children=_t);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mcontent=_t.first);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"accessor\"],5)([\"test1\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.aview=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mview=_t.first);}}"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should generate queries for directives",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n        import {Directive, ContentChild, ContentChildren, TemplateRef, ViewChild} from '@angular/core';\n        import * as core from '@angular/core';\n\n        @Directive({\n          selector: '[test]',\n          queries: {\n            'mview': new ViewChild('test1'),\n            'mcontent': new core.ContentChild('test2'),\n          }\n        })\n        class FooCmp {\n          @ContentChild('bar', {read: TemplateRef}) child: any;\n          @ContentChildren(TemplateRef) children: any;\n          get aview(): any { return null; }\n          @ViewChild('accessor') set aview(value: any) {}\n        }\n    "
+      },
+      "diagnostics": [],
+      "classes": {
+        "FooCmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"bar\"],5,TemplateRef)(dirIndex,TemplateRef,4)(dirIndex,[\"test2\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.child=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.children=_t);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mcontent=_t.first);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"accessor\"],5)([\"test1\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.aview=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mview=_t.first);}}"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should handle queries that use forwardRef",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n        import {Component, ContentChild, TemplateRef, ViewContainerRef, forwardRef} from '@angular/core';\n\n        @Component({\n          selector: 'test',\n          template: '<div #foo></div>',\n        })\n        class FooCmp {\n          @ContentChild(forwardRef(() => TemplateRef)) child: any;\n\n          @ContentChild(forwardRef(function() { return ViewContainerRef; })) child2: any;\n\n          @ContentChild((forwardRef((function() { return 'parens'; }) as any))) childInParens: any;\n        }\n    "
+      },
+      "diagnostics": [],
+      "classes": {
+        "FooCmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,TemplateRef,5)(dirIndex,ViewContainerRef,5)(dirIndex,[\"parens\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.child=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.child2=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.childInParens=_t.first);}}"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "ngtsc_spec: should handle queries that use an InjectionToken",
       "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
       "files": {
@@ -328,6 +402,40 @@
         "test.ts": "\n        import {Directive, model} from '@angular/core';\n\n        @Directive({\n          inputs: ['value'],\n        })\n        export class TestDir {\n          value = model('test');\n        }\n      "
       },
       "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "authoring_queries_spec: should report an error when declared in @Directive metadata",
+      "origin": "packages/compiler-cli/test/ngtsc/authoring_queries_spec.ts",
+      "files": {
+        "test.ts": "\n        import {Directive, ViewChild, viewChild} from '@angular/core';\n\n        @Directive({\n          selector: 'test',\n          queries: {\n            el: new ViewChild('myLocator'),\n          },\n        })\n        export class TestDir {\n          el = viewChild('myLocator');\n        }\n      "
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "authoring_queries_spec: should report an error when declared in @Component metadata",
+      "origin": "packages/compiler-cli/test/ngtsc/authoring_queries_spec.ts",
+      "files": {
+        "test.ts": "\n        import {Component, ViewChild, viewChild} from '@angular/core';\n\n        @Component({\n          selector: 'test',\n          template: '',\n          queries: {\n            el: new ViewChild('myLocator'),\n          },\n        })\n        export class TestComp {\n          el = viewChild('myLocator');\n        }\n      "
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Component\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "authoring_queries_spec: should report an error when a signal-based query function is used in metadata",
+      "origin": "packages/compiler-cli/test/ngtsc/authoring_queries_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Component, viewChild} from '@angular/core';\n\n          @Component({\n            selector: 'test',\n            template: '',\n            queries: {\n              // @ts-ignore\n              el: new viewChild('myLocator'),\n            },\n          })\n          export class TestComp {}\n        "
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
       "classes": {},
       "dtsImports": []
     },
@@ -977,6 +1085,354 @@
       },
       "diagnostics": ["Input transform must be a function Value is of type 'null'."],
       "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qBasic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\"), b: new ViewChildren(TemplateRef, {read: ElementRef}), c: new ContentChild(\"y\", {descendants: false, static: true}), d: new ContentChildren(TemplateRef, {descendants: true, emitDistinctChangesOnly: false})}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"y\"],6)(dirIndex,TemplateRef,1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.c=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.d=_t);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5)(TemplateRef,5,ElementRef);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.b=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"c\",\"d\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qOrderWithFields",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {mc: new ContentChild(\"m\"), mv: new ViewChild(\"mv\")}})\nexport class Dir { @ContentChild(\"f\") fc: any; @ViewChild(\"fv\") fv: any; @ContentChildren(\"g\") gc: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"f\"],5)(dirIndex,[\"g\"],4)(dirIndex,[\"m\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.fc=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.gc=_t);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mc=_t.first);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"fv\"],5)([\"mv\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.fv=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.mv=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"fc\",\"gc\",\"mc\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qNs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new core.ViewChild(\"x\")}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qStrArr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChildren([\"x\", \"y\"])}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\",\"y\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qCommaStr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChildren(\"x, y\")}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\",\"y\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qConstStr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nconst S = \"sel\";\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(S)}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"sel\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qForwardRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nexport class T {}\n@Directive({selector: \"[d]\", queries: {a: new ContentChild(forwardRef(() => T))}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,T,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"a\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qViewDescFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", {descendants: false})}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-memberViewDescFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\"})\nexport class Dir { @ViewChild(\"x\", {descendants: false}) a: any; @ViewChildren(\"y\", {emitDistinctChangesOnly: false}) b: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],4)([\"y\"],1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.b=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-memberConstSel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nconst S = \"sel\";\n@Directive({selector: \"[d]\"})\nexport class Dir { @ViewChild(S) a: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"sel\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qNotObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: \"bad\"})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator queries metadata must be an object literal"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qStringValue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: \"bad\"}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qInput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new Input()}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qSignalFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new (viewChild as any)(\"x\")}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qSignalFnBare",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new viewChild(\"x\")}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qCallNotNew",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: viewChild(\"x\")}})\nexport class Dir {  }\n"
+      },
+      "skip": "ngtsc also reports its separate check for signal query functions called outside a member initializer, which oxc doesn't implement"
+    },
+    {
+      "name": "probe: queries-qNoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild()}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["@ViewChild must have arguments"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qTooMany",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", {}, 1)}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["@ViewChild has too many arguments"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qOptsNotObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", 1)}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qDescNotBool",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", {descendants: 1})}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [
+        "@ViewChild options.descendants must be a boolean Value is of type 'number'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qStaticNotBool",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", {static: \"y\"})}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qEdcoNotBool",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(\"x\", {emitDistinctChangesOnly: 1})}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [
+        "@ViewChild options.emitDistinctChangesOnly must be a boolean Value is of type 'number'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qPredNum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChild(1)}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["@ViewChild predicate cannot be interpreted Value is of type 'number'."],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qPredArrMixed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {a: new ViewChildren([\"x\", 1])}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @ViewChildren predicate at position 1 to a string Value is of type 'number'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qSignalCollision",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {el: new ViewChild(\"x\")}})\nexport class Dir { el = viewChild(\"x\"); }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qSignalCollisionContent",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Directive({selector: \"[d]\", queries: {el: new ContentChild(\"x\"), v: new ViewChild(\"y\")}})\nexport class Dir { el = core.contentChild(\"x\"); v = viewChild(\"y\"); }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qLocalClass",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nclass ViewChild2 {}\n@Directive({selector: \"[d]\", queries: {a: new ViewChild2(\"x\")}})\nexport class Dir {  }\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-qComponent",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\n\n@Component({selector: \"c\", template: \"<div #x></div>\", queries: {v: new ViewChild(\"x\"), c: new ContentChild(\"y\")}})\nexport class Cmp {}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"y\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.c=_t.first);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.v=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"c\"],never,true,never>;"
+        }
+      },
       "dtsImports": []
     },
     {

@@ -30,7 +30,9 @@ pub use decorator::{
     StringConsts, collect_string_consts, decorator_io_errors, extract_directive_metadata,
     find_directive_decorator_span,
 };
-pub(crate) use decorator::{extract_string_value, resolve_template_literal};
+pub(crate) use decorator::{
+    angular_decorator_config, extract_string_value, resolve_template_literal,
+};
 pub(crate) use decorator::{
     merge_by_class_property, parse_decorator_io, resolve_member_transforms,
 };
@@ -40,11 +42,11 @@ pub use metadata::{
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,
 };
 pub use property_decorators::{
-    extract_content_queries, extract_host_bindings, extract_host_listeners, extract_input_metadata,
-    extract_output_metadata, extract_view_queries,
+    extract_class_queries, extract_content_queries, extract_host_bindings, extract_host_listeners,
+    extract_input_metadata, extract_output_metadata, extract_view_queries,
 };
 pub(crate) use property_decorators::{
-    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
-    unwrap_initializer_api_expr,
+    parse_decorator_queries, try_parse_signal_input, try_parse_signal_model,
+    try_parse_signal_output, unwrap_initializer_api_expr,
 };
 pub use query::{create_content_queries_function, create_view_queries_function};
