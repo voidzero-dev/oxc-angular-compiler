@@ -41,7 +41,7 @@ use crate::class_metadata::{
 use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
-    extract_content_queries, extract_directive_metadata, extract_view_queries,
+    decorator_io_errors, extract_content_queries, extract_directive_metadata, extract_view_queries,
     find_directive_decorator, find_directive_decorator_span, generate_directive_definitions,
 };
 use crate::dts;
@@ -2577,6 +2577,11 @@ pub fn transform_angular_file(
 
             // Compute implicit_standalone based on Angular version
             let implicit_standalone = options.implicit_standalone();
+
+            // `inputs:`/`outputs:` forms ngtsc rejects, rather than dropping them silently.
+            for error in decorator_io_errors(allocator, class, &string_consts) {
+                result.diagnostics.push(OxcDiagnostic::error(error));
+            }
 
             if let Some(mut metadata) = extract_component_metadata(
                 &allocator,

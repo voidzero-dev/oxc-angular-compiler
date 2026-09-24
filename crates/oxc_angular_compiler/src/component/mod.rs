@@ -21,6 +21,7 @@ mod transform;
 #[cfg(feature = "cross_file_elision")]
 pub use cross_file_elision::CrossFileAnalyzer;
 pub use decorator::extract_component_metadata;
+pub(crate) use decorator::find_component_decorator;
 pub use definition::{
     ComponentDefinitions, const_value_to_expression, generate_component_definitions,
 };

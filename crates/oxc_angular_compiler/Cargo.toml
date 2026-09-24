@@ -42,6 +42,7 @@ cross_file_elision = ["oxc_resolver", "pathdiff"]
 
 [dev-dependencies]
 insta = { workspace = true, features = ["glob"] }
+serde_json = { workspace = true }
 tempfile = "3"
 
 [lints]

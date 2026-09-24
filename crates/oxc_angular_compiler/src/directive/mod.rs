@@ -15,6 +15,7 @@
 mod compiler;
 mod decorator;
 mod definition;
+mod evaluator;
 mod metadata;
 mod property_decorators;
 mod query;
@@ -26,9 +27,11 @@ pub use compiler::{
 };
 pub(crate) use decorator::find_directive_decorator;
 pub use decorator::{
-    StringConsts, collect_string_consts, extract_directive_metadata, find_directive_decorator_span,
+    StringConsts, collect_string_consts, decorator_io_errors, extract_directive_metadata,
+    find_directive_decorator_span,
 };
 pub(crate) use decorator::{extract_string_value, resolve_template_literal};
+pub(crate) use decorator::{merge_by_class_property, parse_decorator_io};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,

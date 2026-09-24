@@ -8,14 +8,16 @@ use std::collections::HashMap;
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration, Decorator,
-    Expression, MethodDefinitionKind, ObjectPropertyKind, Program, PropertyKey, Statement,
-    TemplateLiteral, VariableDeclarationKind,
+    Expression, MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, Program, PropertyKey,
+    Statement, TemplateLiteral, VariableDeclarationKind,
 };
 use oxc_span::Span;
 use oxc_str::Ident;
 
+use super::evaluator::{Evaluator, FileScope, Value};
 use super::metadata::{
     R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata, R3HostMetadata,
+    R3InputMetadata,
 };
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
@@ -117,6 +119,7 @@ pub fn extract_directive_metadata<'a>(
 
     // Track host metadata from the decorator
     let mut host_from_decorator: Option<R3HostMetadata<'a>> = None;
+    let io = config_obj.map(|obj| parse_decorator_io(allocator, obj, source_text, consts));
 
     // Parse each property in the config object (if present)
     if let Some(config_obj) = config_obj {
@@ -202,6 +205,14 @@ pub fn extract_directive_metadata<'a>(
     // Now we need to merge host metadata from decorator with host metadata from class members
     // The builder already has host data from extract_from_class, we need to merge the decorator host
     let mut metadata = builder.build()?;
+
+    if let Some(io) = io {
+        let fields = std::mem::replace(&mut metadata.inputs, Vec::new_in(&allocator));
+        metadata.inputs =
+            merge_by_class_property(io.inputs, fields, |i| i.class_property_name.as_str());
+        let fields = std::mem::replace(&mut metadata.outputs, Vec::new_in(&allocator));
+        metadata.outputs = merge_by_class_property(io.outputs, fields, |o| o.0.as_str());
+    }
 
     // Merge host metadata from decorator into the existing host metadata
     if let Some(decorator_host) = host_from_decorator {
@@ -466,8 +477,28 @@ fn has_ng_on_changes_method(class: &Class<'_>) -> bool {
 /// the official Angular compiler's compile-time constant folding.
 ///
 /// Only literal string values (string literals and single-quasi template literals)
-/// are captured; computed initializers and cross-file imports are out of scope.
-pub type StringConsts<'a> = HashMap<&'a str, Ident<'a>>;
+/// are folded; computed initializers and cross-file imports are out of scope.
+/// It also carries the file's top-level declarations, for evaluating
+/// `inputs:`, `outputs:` and `queries:` the way ngtsc's partial evaluator does.
+#[derive(Default)]
+pub struct StringConsts<'a> {
+    strings: HashMap<&'a str, Ident<'a>>,
+    program: Option<&'a Program<'a>>,
+    /// Built on first use: most files have no decorator metadata to evaluate.
+    scope: std::cell::OnceCell<FileScope<'a>>,
+}
+
+impl<'a> StringConsts<'a> {
+    /// The folded string value of a same-file `const`.
+    pub fn get(&self, name: &str) -> Option<&Ident<'a>> {
+        self.strings.get(name)
+    }
+
+    /// The file's top-level declarations, for the partial evaluator.
+    pub(crate) fn scope(&self) -> &FileScope<'a> {
+        self.scope.get_or_init(|| self.program.map(FileScope::collect).unwrap_or_default())
+    }
+}
 
 /// Walk the top-level statements of a program and collect string-valued `const`
 /// declarations.
@@ -480,12 +511,12 @@ pub type StringConsts<'a> = HashMap<&'a str, Ident<'a>>;
 /// matching the official Angular compiler's partial evaluator.
 pub fn collect_string_consts<'a>(
     allocator: &'a Allocator,
-    program: &Program<'a>,
+    program: &'a Program<'a>,
 ) -> StringConsts<'a> {
     // Collect every top-level `const` binding's name + initializer up front so
     // we can iterate to a fixed point. Each pending entry is dropped from the
     // worklist as soon as its initializer folds successfully.
-    let mut pending: std::vec::Vec<(&'a str, &Expression<'a>)> = std::vec::Vec::new();
+    let mut pending: std::vec::Vec<(&'a str, &'a Expression<'a>)> = std::vec::Vec::new();
     for stmt in &program.body {
         let decl = match stmt {
             Statement::VariableDeclaration(d) => d.as_ref(),
@@ -507,21 +538,25 @@ pub fn collect_string_consts<'a>(
         }
     }
 
-    let mut map = StringConsts::default();
+    let mut map = StringConsts {
+        strings: HashMap::default(),
+        program: Some(program),
+        scope: std::cell::OnceCell::new(),
+    };
     loop {
-        let before = map.len();
+        let before = map.strings.len();
         pending.retain(|(name, init)| {
-            if map.contains_key(name) {
+            if map.strings.contains_key(name) {
                 return false;
             }
             if let Some(value) = extract_string_value(allocator, init, &map) {
-                map.insert(name, value);
+                map.strings.insert(name, value);
                 false
             } else {
                 true
             }
         });
-        if map.len() == before {
+        if map.strings.len() == before {
             break;
         }
     }
@@ -607,6 +642,271 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
         Expression::BooleanLiteral(lit) => Some(lit.value.into()),
         _ => None,
     }
+}
+
+/// `inputs:` / `outputs:` declared in a `@Directive` / `@Component` metadata object.
+pub(crate) struct DecoratorIo<'a> {
+    pub inputs: Vec<'a, R3InputMetadata<'a>>,
+    /// (class property name, binding property name)
+    pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
+    /// The first error ngtsc reports for `inputs:`, then for `outputs:`.
+    pub input_error: Option<String>,
+    pub output_error: Option<String>,
+}
+
+/// The last property called `name` in a decorator metadata object.
+pub(super) fn config_property<'a>(
+    config: &'a ObjectExpression<'a>,
+    name: &str,
+    consts: &StringConsts<'a>,
+) -> Option<&'a Expression<'a>> {
+    config.properties.iter().rev().find_map(|prop| match prop {
+        ObjectPropertyKind::ObjectProperty(prop)
+            if get_property_key_name(&prop.key, consts).is_some_and(|k| k == name) =>
+        {
+            Some(&prop.value)
+        }
+        _ => None,
+    })
+}
+
+/// Parse `inputs:` / `outputs:` from a decorator metadata object.
+///
+/// Reference: `parseInputsArray` / `parseOutputsArray` in
+/// packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts
+pub(crate) fn parse_decorator_io<'a>(
+    allocator: &'a Allocator,
+    config: &'a ObjectExpression<'a>,
+    source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
+) -> DecoratorIo<'a> {
+    let evaluator = Evaluator::new(consts);
+    let alloc = |s: &str| Ident::from(allocator.alloc_str(s));
+    let mut io = DecoratorIo {
+        inputs: Vec::new_in(&allocator),
+        outputs: Vec::new_in(&allocator),
+        input_error: None,
+        output_error: None,
+    };
+
+    if let Some(expr) = config_property(config, "inputs", consts) {
+        match evaluator.evaluate(expr) {
+            Value::Array(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    let error = match item {
+                        Value::String(s) => {
+                            let (class_name, binding_name) = parse_mapping_string(s);
+                            upsert_input(
+                                &mut io.inputs,
+                                R3InputMetadata {
+                                    binding_property_name: alloc(binding_name),
+                                    ..R3InputMetadata::simple(alloc(class_name))
+                                },
+                            );
+                            None
+                        }
+                        Value::Object(_) => {
+                            parse_input_object(allocator, &mut io, item, i, source_text)
+                        }
+                        other => Some(format!(
+                            "@Directive.inputs array can only contain strings or object literals{}",
+                            other.wrong_type_suffix()
+                        )),
+                    };
+                    io.input_error = io.input_error.take().or(error);
+                }
+            }
+            other => {
+                io.input_error = Some(format!(
+                    "Failed to resolve @Directive.inputs to an array{}",
+                    other.wrong_type_suffix()
+                ));
+            }
+        }
+    }
+
+    if let Some(expr) = config_property(config, "outputs", consts) {
+        match evaluator.evaluate(expr) {
+            Value::Array(items) => {
+                for (i, item) in items.iter().enumerate() {
+                    match item {
+                        Value::String(s) => {
+                            let (class_name, binding_name) = parse_mapping_string(s);
+                            upsert(
+                                &mut io.outputs,
+                                (alloc(class_name), alloc(binding_name)),
+                                |o| o.0.as_str(),
+                            );
+                        }
+                        other => {
+                            io.output_error = io.output_error.take().or_else(|| {
+                                Some(format!(
+                                    "Failed to resolve outputs at position {i} to a string{}",
+                                    other.wrong_type_suffix()
+                                ))
+                            });
+                        }
+                    }
+                }
+            }
+            other => {
+                io.output_error = Some(format!(
+                    "Failed to resolve @Directive.outputs to a string array{}",
+                    other.wrong_type_suffix()
+                ));
+            }
+        }
+    }
+    io
+}
+
+/// `'field'` or `'field: binding'` -> (class property name, binding property name).
+/// Like ngtsc's `value.split(':', 2)`, anything after a second colon is ignored.
+fn parse_mapping_string(value: &str) -> (&str, &str) {
+    let mut parts = value.split(':').map(str::trim);
+    let field = parts.next().unwrap_or_default();
+    (field, parts.next().unwrap_or(field))
+}
+
+/// `{ name, alias?, required?, transform? }` at `position` in the `inputs:` array.
+/// Returns ngtsc's error, if any.
+fn parse_input_object<'a>(
+    allocator: &'a Allocator,
+    io: &mut DecoratorIo<'a>,
+    item: &Value<'a>,
+    position: usize,
+    source_text: Option<&'a str>,
+) -> Option<String> {
+    let name = match item.prop("name").map(|p| &p.value) {
+        Some(Value::String(name)) => name.as_str(),
+        other => {
+            return Some(format!(
+                "Value at position {position} of @Directive.inputs array must have a \"name\" property{}",
+                other.unwrap_or(&Value::Undefined).wrong_type_suffix()
+            ));
+        }
+    };
+    let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
+    let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
+    let transform_function = item
+        .prop("transform")
+        .and_then(|t| convert_oxc_expression(allocator, t.expr?, source_text));
+    upsert_input(
+        &mut io.inputs,
+        R3InputMetadata {
+            class_property_name: Ident::from(allocator.alloc_str(name)),
+            binding_property_name: Ident::from(allocator.alloc_str(alias)),
+            required,
+            is_signal: false,
+            transform_function,
+        },
+    );
+    None
+}
+
+/// ngtsc's `{...fromMeta, ...fromFields}` keyed by class property name: a member
+/// declaration replaces the metadata entry in place, new members are appended.
+pub(crate) fn merge_by_class_property<T>(
+    mut from_meta: Vec<'_, T>,
+    from_fields: impl IntoIterator<Item = T>,
+    key: impl Fn(&T) -> &str,
+) -> Vec<'_, T> {
+    for field in from_fields {
+        upsert(&mut from_meta, field, &key);
+    }
+    from_meta
+}
+
+/// Insert keyed by class property name, like assigning to a JS object: a
+/// repeated key keeps its first position and takes the later value.
+fn upsert<T>(list: &mut Vec<'_, T>, item: T, key: impl Fn(&T) -> &str) {
+    match list.iter().position(|existing| key(existing) == key(&item)) {
+        Some(i) => list[i] = item,
+        None => list.push(item),
+    }
+}
+
+fn upsert_input<'a>(inputs: &mut Vec<'a, R3InputMetadata<'a>>, input: R3InputMetadata<'a>) {
+    upsert(inputs, input, |i| i.class_property_name.as_str());
+}
+
+/// The `@Component` / `@Directive` decorator on `class`, its metadata object
+/// (if any) and its name.
+pub(crate) fn angular_decorator_config<'a>(
+    class: &'a Class<'a>,
+) -> Option<(Option<&'a ObjectExpression<'a>>, &'static str)> {
+    let (decorator, name) = crate::component::find_component_decorator(&class.decorators)
+        .map(|d| (d, "Component"))
+        .or_else(|| find_directive_decorator(&class.decorators).map(|d| (d, "Directive")))?;
+    let config = match &decorator.expression {
+        Expression::CallExpression(call) => match call.arguments.first() {
+            Some(Argument::ObjectExpression(config)) => Some(&**config),
+            _ => None,
+        },
+        _ => None,
+    };
+    Some((config, name))
+}
+
+/// The first error ngtsc raises for the inputs and outputs of a `@Component` /
+/// `@Directive` on `class`, in the order it checks them
+/// (`extractDirectiveMetadata`): `inputs:`, input members, `outputs:`, then
+/// output members. ngtsc stops at the first one.
+pub fn decorator_io_errors<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: &StringConsts<'a>,
+) -> std::vec::Vec<String> {
+    let Some((config, decorator_name)) = angular_decorator_config(class) else {
+        return std::vec::Vec::new();
+    };
+    let io = config.map(|config| parse_decorator_io(allocator, config, None, consts));
+    let (meta_inputs, meta_outputs): (std::vec::Vec<&str>, std::vec::Vec<&str>) = match &io {
+        Some(io) => (
+            io.inputs.iter().map(|i| i.class_property_name.as_str()).collect(),
+            io.outputs.iter().map(|o| o.0.as_str()).collect(),
+        ),
+        None => Default::default(),
+    };
+    let input_members = || {
+        class.body.body.iter().find_map(|element| {
+            let ClassElement::PropertyDefinition(prop) = element else { return None };
+            let name = prop.key.static_name()?;
+            // A signal input only collides with a metadata entry of the same name.
+            let value = prop.value.as_ref().filter(|_| meta_inputs.contains(&name.as_ref()))?;
+            let signal = Ident::from(allocator.alloc_str(&name));
+            let is_input = super::try_parse_signal_model(allocator, value, signal.clone())
+                .is_some()
+                || super::try_parse_signal_input(allocator, value, signal).is_some();
+            is_input.then(|| {
+                format!("Input \"{name}\" is also declared as non-signal in @{decorator_name}.")
+            })
+        })
+    };
+    let output_members = || {
+        class.body.body.iter().find_map(|element| {
+            let ClassElement::PropertyDefinition(prop) = element else { return None };
+            let (value, name) = (prop.value.as_ref()?, prop.key.static_name()?);
+            if !meta_outputs.contains(&name.as_ref()) {
+                return None;
+            }
+            let signal = Ident::from(allocator.alloc_str(&name));
+            let is_output = super::try_parse_signal_model(allocator, value, signal.clone())
+                .is_some()
+                || super::try_parse_signal_output(value, signal).is_some();
+            is_output.then(|| {
+                format!("Output \"{name}\" is unexpectedly declared in @{decorator_name} as well.")
+            })
+        })
+    };
+
+    io.as_ref()
+        .and_then(|io| io.input_error.clone())
+        .or_else(input_members)
+        .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()))
+        .or_else(output_members)
+        .into_iter()
+        .collect()
 }
 
 /// Extract host metadata from a host object expression.
