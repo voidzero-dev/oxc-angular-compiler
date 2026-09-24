@@ -18,6 +18,7 @@ use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
     MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
 };
+use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
 use super::metadata::{QueryPredicate, R3InputMetadata, R3QueryMetadata};
@@ -127,42 +128,33 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 
 /// Try to unwrap a forwardRef call and extract the inner expression.
 ///
-/// For `forwardRef(() => MyClass)`, returns `Some(MyClass expression)`.
-/// For non-forwardRef expressions, returns None.
+/// Mirrors ngtsc's `tryUnwrapForwardRef`: `forwardRef(() => X)`,
+/// `forwardRef(function () { return X; })`, looking through parentheses and
+/// `as` casts. Returns `None` for anything else.
 fn try_unwrap_forward_ref<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
-    let call = match expr {
-        Expression::CallExpression(call) => call,
+    let Expression::CallExpression(call) = unwrap_expression(expr) else { return None };
+    let callee = match &call.callee {
+        Expression::Identifier(id) => id.name.as_str(),
+        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
         _ => return None,
     };
-
-    // Check if callee is forwardRef
-    let is_forward_ref =
-        matches!(&call.callee, Expression::Identifier(id) if id.name == "forwardRef");
-    if !is_forward_ref {
+    if callee != "forwardRef" || call.arguments.len() != 1 {
         return None;
     }
-
-    // Get the first argument (should be an arrow function)
-    let first_arg = call.arguments.first()?;
-    let arrow = match first_arg {
-        Argument::ArrowFunctionExpression(arrow) => arrow,
+    let body = match unwrap_expression(call.arguments[0].as_expression()?) {
+        Expression::ArrowFunctionExpression(arrow) => {
+            if let Some(expr) = arrow.get_expression() {
+                return Some(expr);
+            }
+            arrow.get_function_body()?
+        }
+        Expression::FunctionExpression(f) => &**f.body.as_ref()?,
         _ => return None,
     };
-
-    // Expression body: () => MyClass
-    if let Some(expr) = arrow.get_expression() {
-        return Some(expr);
+    match body.statements.as_slice() {
+        [oxc_ast::ast::Statement::ReturnStatement(ret)] => ret.argument.as_ref(),
+        _ => None,
     }
-    // Block body: () => { return MyClass; }
-    if let Some(body) = arrow.get_function_body() {
-        if body.statements.len() == 1 {
-            if let oxc_ast::ast::Statement::ReturnStatement(ret) = &body.statements[0] {
-                return ret.argument.as_ref();
-            }
-        }
-    }
-
-    None
 }
 
 // ============================================================================
@@ -784,13 +776,15 @@ struct QueryConfig<'a> {
     is_static: bool,
     /// Expression to read from matched elements.
     read: Option<OutputExpression<'a>>,
-    /// Whether to include descendants (for content queries).
+    /// Whether to include descendants.
     descendants: bool,
+    /// Whether a `QueryList` only notifies when its contents change.
+    emit_distinct_changes_only: bool,
 }
 
 impl<'a> Default for QueryConfig<'a> {
     fn default() -> Self {
-        Self { predicate: None, is_static: false, read: None, descendants: true }
+        Self::default_for("")
     }
 }
 
@@ -806,6 +800,7 @@ impl<'a> QueryConfig<'a> {
             read: None,
             // For @ContentChildren, default is false; for all others, default is true
             descendants: decorator_name != "ContentChildren",
+            emit_distinct_changes_only: true,
         }
     }
 }
@@ -825,38 +820,40 @@ fn parse_query_config<'a>(
     decorator: &'a Decorator<'a>,
     decorator_name: &str,
     source_text: Option<&'a str>,
+    consts: Option<&super::StringConsts<'a>>,
 ) -> QueryConfig<'a> {
     let Expression::CallExpression(call) = &decorator.expression else {
         return QueryConfig::default_for(decorator_name);
     };
 
-    let Some(first_arg) = call.arguments.first() else {
+    let Some(first_arg) = call.arguments.first().and_then(Argument::as_expression) else {
         return QueryConfig::default_for(decorator_name);
     };
 
     let mut config = QueryConfig::default_for(decorator_name);
 
-    // Parse predicate from first argument
-    match first_arg {
-        // @ViewChild('refName') - string selector
-        Argument::StringLiteral(lit) => {
-            let mut selectors = Vec::new_in(&allocator);
-            selectors.push(lit.value.clone().into());
-            config.predicate = Some(QueryPredicate::Selectors(selectors));
-        }
-
-        // Other expressions (identifiers, member expressions, forwardRef calls, etc.)
-        _ => {
-            let expr = first_arg.to_expression();
-            // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
-            let unwrapped_expr = try_unwrap_forward_ref(expr).unwrap_or(expr);
-            if let Some(output_expr) =
-                convert_oxc_expression(allocator, unwrapped_expr, source_text)
-            {
-                config.predicate = Some(QueryPredicate::Type(output_expr));
+    // The predicate: a string selector, a string array, or a type/token.
+    // forwardRef isn't included in compiled output.
+    let node = try_unwrap_forward_ref(first_arg).unwrap_or(first_arg);
+    let selectors = match (consts, node) {
+        (Some(consts), _) => match super::evaluator::Evaluator::new(consts).evaluate(node) {
+            super::evaluator::Value::String(s) => Some(std::vec![s]),
+            super::evaluator::Value::Array(items) => {
+                items.iter().map(|i| i.as_str().map(str::to_string)).collect()
             }
+            _ => None,
+        },
+        (None, Expression::StringLiteral(lit)) => Some(std::vec![lit.value.to_string()]),
+        _ => None,
+    };
+    config.predicate = match selectors {
+        Some(selectors) => {
+            let mut list = Vec::new_in(&allocator);
+            list.extend(selectors.iter().map(|s| Ident::from(allocator.alloc_str(s))));
+            Some(QueryPredicate::Selectors(list))
         }
-    }
+        None => convert_oxc_expression(allocator, node, source_text).map(QueryPredicate::Type),
+    };
 
     // Parse options from second argument if present
     if let Some(second_arg) = call.arguments.get(1) {
@@ -880,6 +877,10 @@ fn parse_query_config<'a>(
                             let default = decorator_name != "ContentChildren";
                             config.descendants =
                                 extract_boolean_value(&prop.value).unwrap_or(default);
+                        }
+                        "emitDistinctChangesOnly" => {
+                            config.emit_distinct_changes_only =
+                                extract_boolean_value(&prop.value).unwrap_or(true);
                         }
                         _ => {}
                     }
@@ -1084,6 +1085,17 @@ pub fn extract_view_queries<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
 ) -> Vec<'a, R3QueryMetadata<'a>> {
+    extract_view_queries_in(allocator, class, source_text, None)
+}
+
+/// [`extract_view_queries`], resolving predicates that reference same-file
+/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does.
+pub(crate) fn extract_view_queries_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, R3QueryMetadata<'a>> {
     // Use separate vectors to match Angular's ordering approach.
     // Angular groups queries by type, maintaining declaration order within each group:
     // 1. Signal queries first (viewChild(), viewChildren())
@@ -1115,15 +1127,20 @@ pub fn extract_view_queries<'a>(
                 // Check for decorator-based queries (@ViewChild, @ViewChildren)
                 if let Some(decorator) = find_decorator_by_name(&prop.decorators, "ViewChild") {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ViewChild", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ViewChild",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             view_child_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: true,
                                 predicate,
-                                descendants: true,
-                                emit_distinct_changes_only: true,
+                                descendants: config.descendants,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1134,15 +1151,20 @@ pub fn extract_view_queries<'a>(
                     find_decorator_by_name(&prop.decorators, "ViewChildren")
                 {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ViewChildren", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ViewChildren",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             view_children_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: false,
                                 predicate,
-                                descendants: true,
-                                emit_distinct_changes_only: true,
+                                descendants: config.descendants,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1157,15 +1179,20 @@ pub fn extract_view_queries<'a>(
                 // Check for decorator-based queries on setters/getters
                 if let Some(decorator) = find_decorator_by_name(&method.decorators, "ViewChild") {
                     if let Some(property_name) = get_property_key_name(&method.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ViewChild", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ViewChild",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             view_child_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: true,
                                 predicate,
-                                descendants: true,
-                                emit_distinct_changes_only: true,
+                                descendants: config.descendants,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1176,15 +1203,20 @@ pub fn extract_view_queries<'a>(
                     find_decorator_by_name(&method.decorators, "ViewChildren")
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ViewChildren", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ViewChildren",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             view_children_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: false,
                                 predicate,
-                                descendants: true,
-                                emit_distinct_changes_only: true,
+                                descendants: config.descendants,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1227,6 +1259,17 @@ pub fn extract_content_queries<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
 ) -> Vec<'a, R3QueryMetadata<'a>> {
+    extract_content_queries_in(allocator, class, source_text, None)
+}
+
+/// [`extract_content_queries`], resolving predicates that reference same-file
+/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does.
+pub(crate) fn extract_content_queries_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, R3QueryMetadata<'a>> {
     // Use separate vectors to match Angular's ordering approach.
     // Angular groups queries by type, maintaining declaration order within each group:
     // 1. Signal queries first (contentChild(), contentChildren())
@@ -1258,15 +1301,20 @@ pub fn extract_content_queries<'a>(
                 // Check for decorator-based queries (@ContentChild, @ContentChildren)
                 if let Some(decorator) = find_decorator_by_name(&prop.decorators, "ContentChild") {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ContentChild", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ContentChild",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             content_child_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: true,
                                 predicate,
                                 descendants: config.descendants,
-                                emit_distinct_changes_only: true,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1282,6 +1330,7 @@ pub fn extract_content_queries<'a>(
                             decorator,
                             "ContentChildren",
                             source_text,
+                            consts,
                         );
                         if let Some(predicate) = config.predicate {
                             content_children_queries.push(R3QueryMetadata {
@@ -1289,7 +1338,7 @@ pub fn extract_content_queries<'a>(
                                 first: false,
                                 predicate,
                                 descendants: config.descendants,
-                                emit_distinct_changes_only: true,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1305,15 +1354,20 @@ pub fn extract_content_queries<'a>(
                 if let Some(decorator) = find_decorator_by_name(&method.decorators, "ContentChild")
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
-                        let config =
-                            parse_query_config(allocator, decorator, "ContentChild", source_text);
+                        let config = parse_query_config(
+                            allocator,
+                            decorator,
+                            "ContentChild",
+                            source_text,
+                            consts,
+                        );
                         if let Some(predicate) = config.predicate {
                             content_child_queries.push(R3QueryMetadata {
                                 property_name,
                                 first: true,
                                 predicate,
                                 descendants: config.descendants,
-                                emit_distinct_changes_only: true,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1329,6 +1383,7 @@ pub fn extract_content_queries<'a>(
                             decorator,
                             "ContentChildren",
                             source_text,
+                            consts,
                         );
                         if let Some(predicate) = config.predicate {
                             content_children_queries.push(R3QueryMetadata {
@@ -1336,7 +1391,7 @@ pub fn extract_content_queries<'a>(
                                 first: false,
                                 predicate,
                                 descendants: config.descendants,
-                                emit_distinct_changes_only: true,
+                                emit_distinct_changes_only: config.emit_distinct_changes_only,
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
@@ -1533,6 +1588,287 @@ fn parse_host_listener_config<'a>(
 // ============================================================================
 // Tests
 // ============================================================================
+
+/// A class's view and content queries as they're compiled: member decorators
+/// and signal queries (predicates referencing same-file consts resolved), then
+/// `queries:` from its `@Component` / `@Directive` metadata, in ngtsc's order.
+pub fn extract_class_queries<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: &super::StringConsts<'a>,
+) -> (Vec<'a, R3QueryMetadata<'a>>, Vec<'a, R3QueryMetadata<'a>>) {
+    let mut view = extract_view_queries_in(allocator, class, source_text, Some(consts));
+    let mut content = extract_content_queries_in(allocator, class, source_text, Some(consts));
+    if let Some((Some(config), name)) = super::angular_decorator_config(class) {
+        let queries = parse_decorator_queries(allocator, config, class, source_text, consts, name);
+        view.extend(queries.view);
+        content.extend(queries.content);
+    }
+    (view, content)
+}
+
+// ============================================================================
+// `queries:` in @Directive / @Component metadata
+// ============================================================================
+
+/// Queries declared in decorator metadata, e.g.
+/// `@Directive({ queries: { el: new ViewChild('el') } })`.
+pub(crate) struct DecoratorQueries<'a> {
+    pub view: Vec<'a, R3QueryMetadata<'a>>,
+    pub content: Vec<'a, R3QueryMetadata<'a>>,
+    /// The first error ngtsc reports for them, and the node it reports it on.
+    pub error: Option<(String, Span)>,
+}
+
+const QUERY_TYPES: &[&str] = &["ViewChild", "ViewChildren", "ContentChild", "ContentChildren"];
+
+/// ngtsc's `unwrapExpression`: parentheses and `as` casts.
+fn unwrap_expression<'a>(mut expr: &'a Expression<'a>) -> &'a Expression<'a> {
+    loop {
+        expr = match expr {
+            Expression::ParenthesizedExpression(e) => &e.expression,
+            Expression::TSAsExpression(e) => &e.expression,
+            _ => return expr,
+        };
+    }
+}
+
+/// ngtsc's `reflectObjectLiteral`: property assignments with a static name and
+/// shorthand properties; anything else is skipped.
+fn reflect_object_literal<'a>(
+    obj: &'a oxc_ast::ast::ObjectExpression<'a>,
+) -> std::vec::Vec<(String, &'a Expression<'a>)> {
+    let mut entries: std::vec::Vec<(String, &'a Expression<'a>)> = std::vec::Vec::new();
+    for prop in &obj.properties {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
+        if prop.method || prop.computed || !matches!(prop.kind, oxc_ast::ast::PropertyKind::Init) {
+            continue;
+        }
+        let name = match &prop.key {
+            PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+            PropertyKey::StringLiteral(s) => s.value.to_string(),
+            PropertyKey::NumericLiteral(n) => n.value.to_string(),
+            _ => continue,
+        };
+        // A Map keeps the first key's position and the last value.
+        match entries.iter_mut().find(|(k, _)| *k == name) {
+            Some(entry) => entry.1 = &prop.value,
+            None => entries.push((name, &prop.value)),
+        }
+    }
+    entries
+}
+
+/// Parse `queries:` from a decorator metadata object.
+///
+/// Reference: `extractQueriesFromDecorator` / `extractDecoratorQueryMetadata` in
+/// packages/compiler-cli/src/ngtsc/annotations/directive/src/shared.ts
+pub(crate) fn parse_decorator_queries<'a>(
+    allocator: &'a Allocator,
+    config: &'a oxc_ast::ast::ObjectExpression<'a>,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: &super::StringConsts<'a>,
+    decorator_name: &str,
+) -> DecoratorQueries<'a> {
+    let mut queries = DecoratorQueries {
+        view: Vec::new_in(&allocator),
+        content: Vec::new_in(&allocator),
+        error: None,
+    };
+    let Some(query_data) = super::decorator::config_property(config, "queries", consts) else {
+        return queries;
+    };
+    let Expression::ObjectExpression(query_data) = query_data else {
+        queries.error = Some((
+            "Decorator queries metadata must be an object literal".into(),
+            query_data.span(),
+        ));
+        return queries;
+    };
+    let evaluator = super::evaluator::Evaluator::new(consts);
+    // Where each query is written, for the collision error below.
+    let (mut content_exprs, mut view_exprs) = (std::vec::Vec::new(), std::vec::Vec::new());
+    for (property_name, expr) in reflect_object_literal(query_data) {
+        let not_a_query = || {
+            Some((
+                "Decorator query metadata must be an instance of a query type".into(),
+                query_data.span,
+            ))
+        };
+        let Expression::NewExpression(new_expr) = unwrap_expression(expr) else {
+            queries.error = not_a_query();
+            return queries;
+        };
+        // `new ViewChild(...)` / `new core.ViewChild(...)`, imported from @angular/core.
+        let type_name = match &new_expr.callee {
+            Expression::Identifier(id) => consts
+                .scope()
+                .import(id.name.as_str())
+                .filter(|i| i.module == "@angular/core")
+                .and_then(|i| i.imported),
+            Expression::StaticMemberExpression(m) => match &m.object {
+                Expression::Identifier(ns) => consts
+                    .scope()
+                    .import(ns.name.as_str())
+                    .filter(|i| i.module == "@angular/core" && i.imported.is_none())
+                    .map(|_| m.property.name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        };
+        let Some(type_name) = type_name.filter(|t| QUERY_TYPES.contains(t)) else {
+            queries.error = not_a_query();
+            return queries;
+        };
+        match decorator_query(
+            allocator,
+            &evaluator,
+            type_name,
+            new_expr,
+            property_name,
+            source_text,
+        ) {
+            Ok(query) if type_name.starts_with("Content") => {
+                queries.content.push(query);
+                content_exprs.push(new_expr.span);
+            }
+            Ok(query) => {
+                queries.view.push(query);
+                view_exprs.push(new_expr.span);
+            }
+            Err(error) => {
+                queries.error = Some(error);
+                return queries;
+            }
+        }
+    }
+
+    // A signal query member for the same property is an error.
+    let signal_queries: std::vec::Vec<Ident<'a>> = class
+        .body
+        .body
+        .iter()
+        .filter_map(|element| {
+            let ClassElement::PropertyDefinition(prop) = element else { return None };
+            let name = get_property_key_name(&prop.key)?;
+            try_parse_signal_query(allocator, prop.value.as_ref()?, name.clone(), source_text)
+                .map(|_| name)
+        })
+        .collect();
+    // ngtsc checks the content queries first, and reports the `new` expression.
+    let collision = queries
+        .content
+        .iter()
+        .zip(content_exprs)
+        .chain(queries.view.iter().zip(view_exprs))
+        .find(|(q, _)| signal_queries.contains(&q.property_name));
+    if let Some((_, span)) = collision {
+        queries.error = Some((
+            format!(
+                "Query is declared multiple times. \"@{decorator_name}\" declares a query for the same property."
+            ),
+            span,
+        ));
+    }
+    queries
+}
+
+/// One `new ViewChild(predicate, options?)` and friends. An error comes with
+/// the node ngtsc reports it on.
+fn decorator_query<'a>(
+    allocator: &'a Allocator,
+    evaluator: &super::evaluator::Evaluator<'_, 'a>,
+    name: &str,
+    new_expr: &'a oxc_ast::ast::NewExpression<'a>,
+    property_name: String,
+    source_text: Option<&'a str>,
+) -> Result<R3QueryMetadata<'a>, (String, Span)> {
+    use super::evaluator::Value;
+    let args = &new_expr.arguments;
+    let Some(first) = args.first().and_then(Argument::as_expression) else {
+        return Err((format!("@{name} must have arguments"), new_expr.span));
+    };
+    let node = try_unwrap_forward_ref(first).unwrap_or(first);
+    let at_node = |message: String| (message, node.span());
+    let predicate = match evaluator.evaluate(node) {
+        Value::Reference { .. } | Value::Dynamic | Value::Function(_) => {
+            let expr = convert_oxc_expression(allocator, node, source_text)
+                .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
+            QueryPredicate::Type(expr)
+        }
+        Value::String(s) => {
+            let mut selectors = Vec::new_in(&allocator);
+            selectors.push(Ident::from(allocator.alloc_str(&s)));
+            QueryPredicate::Selectors(selectors)
+        }
+        Value::Array(items) => {
+            let mut selectors = Vec::new_in(&allocator);
+            for (i, item) in items.iter().enumerate() {
+                let Value::String(s) = item else {
+                    return Err(at_node(format!(
+                        "Failed to resolve @{name} predicate at position {i} to a string{}",
+                        item.wrong_type_suffix()
+                    )));
+                };
+                selectors.push(Ident::from(allocator.alloc_str(s)));
+            }
+            QueryPredicate::Selectors(selectors)
+        }
+        other => {
+            return Err(at_node(format!(
+                "@{name} predicate cannot be interpreted{}",
+                other.wrong_type_suffix()
+            )));
+        }
+    };
+
+    let mut config = QueryConfig::default_for(name);
+    if args.len() == 2 {
+        let options = args[1].as_expression().map(unwrap_expression);
+        let Some(Expression::ObjectExpression(options)) = options else {
+            let span = options.map_or(args[1].span(), GetSpan::span);
+            return Err((format!("@{name} options must be an object literal"), span));
+        };
+        for (key, value) in reflect_object_literal(options) {
+            // ngtsc reports a bad `static` on the predicate, the others on their value.
+            let flag = |option: &str, span: Span| match evaluator.evaluate(value) {
+                Value::Bool(b) => Ok(b),
+                other => Err((
+                    format!(
+                        "@{name} options.{option} must be a boolean{}",
+                        other.wrong_type_suffix()
+                    ),
+                    span,
+                )),
+            };
+            match key.as_str() {
+                "read" => config.read = convert_oxc_expression(allocator, value, source_text),
+                "descendants" => config.descendants = flag("descendants", value.span())?,
+                "emitDistinctChangesOnly" => {
+                    config.emit_distinct_changes_only =
+                        flag("emitDistinctChangesOnly", value.span())?;
+                }
+                "static" => config.is_static = flag("static", node.span())?,
+                _ => {}
+            }
+        }
+    } else if args.len() > 2 {
+        return Err(at_node(format!("@{name} has too many arguments")));
+    }
+
+    Ok(R3QueryMetadata {
+        property_name: Ident::from(allocator.alloc_str(&property_name)),
+        first: name == "ViewChild" || name == "ContentChild",
+        predicate,
+        descendants: config.descendants,
+        emit_distinct_changes_only: config.emit_distinct_changes_only,
+        read: config.read,
+        is_static: config.is_static,
+        is_signal: false,
+    })
+}
 
 #[cfg(test)]
 mod tests {

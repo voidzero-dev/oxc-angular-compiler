@@ -141,8 +141,8 @@ enum PathKey<'a> {
     Unknown,
 }
 
-/// An import binding: the module it's imported from and, unless it's a
-/// namespace import, the name it's exported under.
+/// An import binding: the module it comes from and, unless it's a namespace
+/// import, the name it's exported under.
 #[derive(Clone, Copy)]
 pub(crate) struct Import<'a> {
     pub module: &'a str,

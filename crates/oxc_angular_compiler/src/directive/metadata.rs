@@ -411,10 +411,22 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
     /// # Returns
     /// The builder with all extracted metadata added.
     pub fn extract_from_class(
+        self,
+        allocator: &'a Allocator,
+        class: &'a Class<'a>,
+        source_text: Option<&'a str>,
+    ) -> Self {
+        self.extract_from_class_in(allocator, class, source_text, None)
+    }
+
+    /// [`Self::extract_from_class`], resolving query predicates that reference
+    /// same-file consts (`@ViewChild(SELECTOR)`) the way ngtsc does.
+    pub(crate) fn extract_from_class_in(
         mut self,
         allocator: &'a Allocator,
         class: &'a Class<'a>,
         source_text: Option<&'a str>,
+        consts: Option<&super::StringConsts<'a>>,
     ) -> Self {
         // Extract inputs from @Input decorators
         let inputs =
@@ -430,15 +442,23 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         }
 
         // Extract view queries from @ViewChild/@ViewChildren
-        let view_queries =
-            super::property_decorators::extract_view_queries(allocator, class, source_text);
+        let view_queries = super::property_decorators::extract_view_queries_in(
+            allocator,
+            class,
+            source_text,
+            consts,
+        );
         for query in view_queries {
             self = self.add_view_query(query);
         }
 
         // Extract content queries from @ContentChild/@ContentChildren
-        let content_queries =
-            super::property_decorators::extract_content_queries(allocator, class, source_text);
+        let content_queries = super::property_decorators::extract_content_queries_in(
+            allocator,
+            class,
+            source_text,
+            consts,
+        );
         for query in content_queries {
             self = self.add_query(query);
         }
