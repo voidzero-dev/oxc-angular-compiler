@@ -20,6 +20,7 @@ use crate::ng_module::NgModuleMetadata;
 use crate::pipe::PipeMetadata;
 use crate::service::ServiceMetadata;
 use oxc_str::Ident;
+use std::collections::HashMap;
 
 /// A `.d.ts` type declaration for an Angular class.
 ///
@@ -55,6 +56,7 @@ pub fn generate_component_dts(
     content_query_names: &[String],
     has_injectable: bool,
     ng_content_selectors: &[String],
+    accept_types: &HashMap<String, String>,
 ) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
     let type_with_params = type_with_parameters(class_name, type_argument_count);
@@ -73,7 +75,7 @@ pub fn generate_component_dts(
             let cleaned = s.as_str().replace('\n', "");
             format!("\"{}\"", escape_dts_string(&cleaned))
         }
-        None => "never".to_string(),
+        None => "\"ng-component\"".to_string(),
     };
 
     let export_as = if metadata.export_as.is_empty() {
@@ -155,7 +157,7 @@ pub fn generate_component_dts(
     }
 
     // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
-    generate_input_transform_fields(&metadata.inputs, &mut members);
+    generate_input_transform_fields(&metadata.inputs, accept_types, &mut members);
 
     DtsDeclaration { class_name: class_name.to_string(), members }
 }
@@ -172,6 +174,7 @@ pub fn generate_component_dts(
 pub fn generate_directive_dts(
     metadata: &R3DirectiveMetadata,
     has_injectable: bool,
+    accept_types: &HashMap<String, String>,
 ) -> DtsDeclaration {
     let class_name = metadata.name.as_str();
     let type_with_params = type_with_parameters(class_name, metadata.type_argument_count);
@@ -259,7 +262,7 @@ pub fn generate_directive_dts(
     }
 
     // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
-    generate_input_transform_fields(&metadata.inputs, &mut members);
+    generate_input_transform_fields(&metadata.inputs, accept_types, &mut members);
 
     DtsDeclaration { class_name: class_name.to_string(), members }
 }
@@ -551,25 +554,37 @@ fn generate_ctor_deps_type_from_factory_deps(
 /// Generate `ngAcceptInputType_*` static fields for non-signal inputs with transform functions.
 ///
 /// When an input has a `transform` function (e.g., `@Input({transform: booleanAttribute})`),
-/// Angular generates a static field like:
+/// Angular generates a static field typed with the transform's first parameter:
 /// ```text
-/// static ngAcceptInputType_disabled: unknown;
+/// static ngAcceptInputType_disabled: boolean | string;
 /// ```
 /// This enables template type-checking to know that transformed inputs accept wider types.
 ///
 /// Signal inputs do NOT generate these fields (they capture WriteT within the InputSignal type).
 ///
-/// Note: We use `unknown` as the type because we don't have access to the TypeScript type checker
-/// to determine the actual write type of the transform function.
-fn generate_input_transform_fields(inputs: &[R3InputMetadata], members: &mut String) {
+/// `accept_types` maps input names to that type for transforms defined in the
+/// same file; the rest (imported transforms) fall back to `unknown`, since their
+/// signature isn't visible here.
+fn generate_input_transform_fields(
+    inputs: &[R3InputMetadata],
+    accept_types: &HashMap<String, String>,
+    members: &mut String,
+) {
     for input in inputs {
         if !input.is_signal && input.transform_function.is_some() {
-            members.push_str(&format!(
-                "\nstatic ngAcceptInputType_{}: unknown;",
-                input.class_property_name.as_str()
-            ));
+            let name = input.class_property_name.as_str();
+            let field = format!("ngAcceptInputType_{name}");
+            let field = if is_identifier_name(&field) { field } else { format!("\"{field}\"") };
+            let ty = accept_types.get(name).map_or("unknown", String::as_str);
+            members.push_str(&format!("\nstatic {field}: {ty};"));
         }
     }
+}
+
+fn is_identifier_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
+        && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
 /// Generate the input map type for `ɵɵComponentDeclaration` / `ɵɵDirectiveDeclaration`.

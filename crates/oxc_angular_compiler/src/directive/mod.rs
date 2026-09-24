@@ -15,6 +15,7 @@
 mod compiler;
 mod decorator;
 mod definition;
+mod dts_type;
 mod evaluator;
 mod metadata;
 mod property_decorators;
@@ -37,6 +38,7 @@ pub(crate) use decorator::{
     merge_by_class_property, parse_decorator_io, resolve_member_transforms,
 };
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
+pub use evaluator::input_transform_types;
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,

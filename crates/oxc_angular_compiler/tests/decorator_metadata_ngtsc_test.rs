@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 754, "fixtures compared");
+    assert_eq!(compared, 775, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -801,8 +801,11 @@ export function coerce(v: string) { return 1; }
 class Utils { static coerce(v: boolean) { return 2; } }
 @Directive({selector: '[d]'})
 export class Dir { @Input({transform: Utils.coerce}) x: any; }";
-    let code = strip(&transform(source).code);
+    let result = transform(source);
+    let code = strip(&result.code);
     assert!(code.contains(r#"inputs:{x:[2,"x","x",Utils.coerce]}"#), "{code}");
+    let dts = &result.dts_declarations[0].members;
+    assert!(dts.contains("static ngAcceptInputType_x: boolean;"), "{dts}");
 }
 
 /// A transform read through a namespace import (`core.booleanAttribute`):
