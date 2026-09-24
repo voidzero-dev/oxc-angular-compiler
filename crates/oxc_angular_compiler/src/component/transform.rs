@@ -2878,12 +2878,18 @@ pub fn transform_angular_file(
                                 .type_parameters
                                 .as_ref()
                                 .map_or(0, |tp| tp.params.len() as u32);
+                            let accept_types = crate::directive::input_transform_types(
+                                class,
+                                &string_consts,
+                                source,
+                            );
                             result.dts_declarations.push(dts::generate_component_dts(
                                 &metadata,
                                 type_argument_count,
                                 &content_query_names,
                                 has_injectable,
                                 &compilation_result.ng_content_selectors,
+                                &accept_types,
                             ));
 
                             result.component_count += 1;
@@ -3000,9 +3006,13 @@ pub fn transform_angular_file(
                     let type_argument_count =
                         class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                     directive_metadata.type_argument_count = type_argument_count;
-                    result
-                        .dts_declarations
-                        .push(dts::generate_directive_dts(&directive_metadata, has_injectable));
+                    let accept_types =
+                        crate::directive::input_transform_types(class, &string_consts, source);
+                    result.dts_declarations.push(dts::generate_directive_dts(
+                        &directive_metadata,
+                        has_injectable,
+                        &accept_types,
+                    ));
 
                     // Emit setClassMetadata for TestBed support (overrideDirective +
                     // signal members), mirroring the @Component path.

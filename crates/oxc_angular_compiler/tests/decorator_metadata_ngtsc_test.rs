@@ -230,7 +230,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 134, "fixtures compared");
+    assert_eq!(compared, 155, "fixtures compared");
 }
 
 /// ngtsc emits the method's bare name for `transform: Utils.coerce` (a static
@@ -253,4 +253,6 @@ export class Dir { @Input({transform: Utils.coerce}) x: any; }";
     );
     let code = strip(&result.code);
     assert!(code.contains(r#"inputs:{x:[2,"x","x",Utils.coerce]}"#), "{code}");
+    let dts = &result.dts_declarations[0].members;
+    assert!(dts.contains("static ngAcceptInputType_x: boolean;"), "{dts}");
 }

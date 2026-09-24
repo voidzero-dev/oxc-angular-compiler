@@ -686,3 +686,83 @@ impl<'a> Visit<'a> for UnexportedType<'_, 'a> {
         oxc_ast_visit::walk::walk_ts_type_name(self, name);
     }
 }
+
+// =============================================================================
+// `.d.ts` input transform types
+// =============================================================================
+
+/// The `.d.ts` type of each input transform's first parameter, for
+/// `static ngAcceptInputType_<name>: T;`.
+///
+/// Only transforms defined in this file are covered; imported ones can't be
+/// inspected and are left out.
+pub fn input_transform_types<'a>(
+    class: &'a Class<'a>,
+    consts: &super::StringConsts<'a>,
+    source: &'a str,
+) -> HashMap<String, String> {
+    let evaluator = Evaluator::new(consts);
+    // The transform that ends up compiled for each input: a member `@Input`
+    // overrides an `inputs:` entry, like the compiled inputs map.
+    let mut transforms: std::vec::Vec<(String, Option<FnDef<'a>>)> = std::vec::Vec::new();
+    let mut record = |name: String, value: &Value<'a>| {
+        let def = match value {
+            Value::Function(def) | Value::Reference { kind: RefKind::Function(def, ..), .. } => {
+                Some(*def)
+            }
+            _ => None,
+        };
+        match transforms.iter_mut().find(|(n, _)| *n == name) {
+            Some(entry) => entry.1 = def,
+            None => transforms.push((name, def)),
+        }
+    };
+    if let Some((Some(config), _)) = super::angular_decorator_config(class)
+        && let Some(inputs) = super::decorator::config_property(config, "inputs", consts)
+        && let Value::Array(items) = evaluator.evaluate(inputs)
+    {
+        for item in &items {
+            if let (Some(Value::String(name)), Some(transform)) =
+                (item.prop("name").map(|p| &p.value), item.prop("transform"))
+            {
+                record(name.clone(), &transform.value);
+            }
+        }
+    }
+    for element in &class.body.body {
+        let (key, decorators) = match element {
+            ClassElement::PropertyDefinition(p) => (&p.key, &p.decorators),
+            ClassElement::AccessorProperty(p) => (&p.key, &p.decorators),
+            ClassElement::MethodDefinition(m) => (&m.key, &m.decorators),
+            _ => continue,
+        };
+        let Some(name) = key.static_name() else { continue };
+        if let Some(options) = super::property_decorators::input_decorator_options(decorators)
+            && let Some(transform) = evaluator.evaluate(options).prop("transform")
+        {
+            record(name.to_string(), &transform.value);
+        }
+    }
+
+    transforms
+        .into_iter()
+        .filter_map(|(name, def)| {
+            let ty = match def?.first_param_type().ok()? {
+                Some(ty) => {
+                    let mut printer = super::dts_type::TypePrinter {
+                        scope: consts.scope(),
+                        source,
+                        other_module: false,
+                    };
+                    let ty = printer.print(ty);
+                    if printer.other_module {
+                        return None;
+                    }
+                    ty
+                }
+                None => "unknown".to_string(),
+            };
+            Some((name, ty))
+        })
+        .collect()
+}

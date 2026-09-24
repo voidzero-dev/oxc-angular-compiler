@@ -271,6 +271,55 @@
       "dtsImports": []
     },
     {
+      "name": "ngtsc_spec: should *not* generate a validator fn for attribute and property bindings when *not* on <iframe>",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n                import {Component, Directive} from '@angular/core';\n\n                @Directive({\n                  selector: '[sandbox]',\n                  inputs: ['sandbox']\n                })\n                class Dir {}\n\n                @Component({\n                  imports: [Dir],\n                  template: `\n                    <div [sandbox]=\"''\" [title]=\"'Hi!'\"></div>\n                  `\n                })\n                export class SomeComponent {}\n              "
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{sandbox:\"sandbox\"}"
+        },
+        "SomeComponent": {
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<SomeComponent,\"ng-component\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should compile a directive input with a transform function",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Directive, Input} from '@angular/core';\n\n          function toNumber(value: boolean | string) { return 1; }\n\n          @Directive({standalone: true})\n          export class Dir {\n            @Input({transform: toNumber}) value!: number;\n          }\n        "
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[2,\"value\",\"value\",toNumber]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,never,never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:boolean|string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should compile a component input with a transform function",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Component, Input} from '@angular/core';\n\n          function toNumber(value: boolean | string) { return 1; }\n\n          @Component({standalone: true, template: 'hello'})\n          export class Dir {\n            @Input({transform: toNumber}) value!: number;\n          }\n        "
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[2,\"value\",\"value\",toNumber]}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"ng-component\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:boolean|string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "ngtsc_spec: should compile an input with a transform function that contains a generic parameter",
       "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
       "files": {
@@ -323,6 +372,22 @@
       "dtsImports": ["import * as i1 from \"external\";"]
     },
     {
+      "name": "ngtsc_spec: should compile a directive input with a transform function with a `this` typing",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Directive, Input} from '@angular/core';\n\n          function toNumber(this: Dir, value: boolean | string) { return 1; }\n\n          @Directive({standalone: true})\n          export class Dir {\n            @Input({transform: toNumber}) value!: number;\n          }\n        "
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[2,\"value\",\"value\",toNumber]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,never,never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:boolean|string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "ngtsc_spec: should treat an input transform function only with a `this` parameter as unknown",
       "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
       "files": {
@@ -334,6 +399,22 @@
           "inputs": "{value:[2,\"value\",\"value\",toNumber]}",
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,never,never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;",
           "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "ngtsc_spec: should compile an input with a transform function and whose name needs to be quoted",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "test.ts": "\n          import {Directive, Input} from '@angular/core';\n\n          @Directive({selector: '[dir]'})\n          export class Dir {\n            @Input({transform: (value: string) => value}) 'aria-label': string = '';\n          }\n        "
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"aria-label\":[2,\"aria-label\",\"aria-label\",(value)=>value]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[dir]\",never,{\"aria-label\":{\"alias\":\"aria-label\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_aria-label": "static\"ngAcceptInputType_aria-label\":string;"
         }
       },
       "dtsImports": []
@@ -362,6 +443,33 @@
       "files": {
         "util.ts": "\n              export interface GenericWrapper<T> {\n                value: T;\n              }\n\n              interface InternalType {\n                foo: boolean;\n              }\n\n              export function toNumber(val: GenericWrapper<InternalType>) { return 1; }\n            ",
         "test.ts": "\n              import {Directive, Input} from '@angular/core';\n              import {toNumber} from './util';\n\n              @Directive({selector: '[dir]'})\n              export class Dir {\n                @Input({transform: toNumber}) value!: number;\n              }\n            "
+      },
+      "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
+    },
+    {
+      "name": "ngtsc_spec: should compile an input with an external transform function",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "node_modules/external/index.d.ts": "\n          export interface ExternalObj {\n            foo: boolean;\n          }\n\n          export type ExternalToNumberType = string | boolean | ExternalObj;\n\n          export declare function externalToNumber(val: ExternalToNumberType): number;\n        ",
+        "test.ts": "\n          import {Directive, Input} from '@angular/core';\n          import {externalToNumber} from 'external';\n\n          @Directive({standalone: true})\n          export class Dir {\n            @Input({transform: externalToNumber}) value!: number;\n          }\n        "
+      },
+      "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
+    },
+    {
+      "name": "ngtsc_spec: should compile an input referencing an imported function with literal types",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "transforms.ts": "\n          export function toBoolean(value: boolean | '' | 'true' | 'false'): boolean {\n            return !!value;\n          }\n        ",
+        "test.ts": "\n          import {Directive, Input} from '@angular/core';\n          import {toBoolean} from './transforms';\n\n          @Directive({standalone: true})\n          export class Dir {\n            @Input({transform: toBoolean}) value!: number;\n          }\n        "
+      },
+      "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
+    },
+    {
+      "name": "ngtsc_spec: should compile an input with using an ambient type in the transform function",
+      "origin": "packages/compiler-cli/test/ngtsc/ngtsc_spec.ts",
+      "files": {
+        "node_modules/external/index.d.ts": "\n          import {ElementRef} from '@angular/core';\n\n          export declare function coerceElement(value: HTMLElement | ElementRef<HTMLElement>): HTMLElement;\n        ",
+        "test.ts": "\n          import {Directive, Input, Component} from '@angular/core';\n          import {coerceElement} from 'external';\n\n          @Directive({standalone: true})\n          export class Dir {\n            @Input({transform: coerceElement}) element!: HTMLElement;\n          }\n        "
       },
       "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
     },
@@ -458,6 +566,45 @@
       "dtsImports": []
     },
     {
+      "name": "acceptance/directive_spec: object literal syntax in the `inputs` array",
+      "origin": "packages/core/test/acceptance/directive_spec.ts",
+      "files": {
+        "test.ts": "import {Component, Directive, ViewChild} from '@angular/core';\n\n@Directive({\n  selector: '[dir]',\n  inputs: [{name: 'plainInput'}, {name: 'aliasedInput', alias: 'alias'}],\n})\nexport class Dir {\n  plainInput: number | undefined;\n  aliasedInput: number | undefined;\n}\n\n@Component({\n  imports: [Dir],\n  template: '<div dir [plainInput]=\"plainValue\" [alias]=\"aliasedValue\"></div>',\n})\nexport class App {\n  @ViewChild(Dir) dirInstance!: Dir;\n  plainValue = 123;\n  aliasedValue = 321;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{plainInput:\"plainInput\",aliasedInput:[0,\"alias\",\"aliasedInput\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[dir]\",never,{\"plainInput\":{\"alias\":\"plainInput\";\"required\":false;};\"aliasedInput\":{\"alias\":\"alias\";\"required\":false;};},{},never,never,true,never>;"
+        },
+        "App": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Dir,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.dirInstance=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<App,\"ng-component\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "acceptance/directive_spec: transform declared through the `inputs` array",
+      "origin": "packages/core/test/acceptance/directive_spec.ts",
+      "files": {
+        "test.ts": "import {Component, Directive, ViewChild} from '@angular/core';\n\n@Directive({\n  selector: '[dir]',\n  inputs: [{name: 'value', transform: (value: string) => (value ? 1 : 0)}],\n})\nexport class Dir {\n  value = -1;\n}\n\n@Component({\n  imports: [Dir],\n  template: '<div dir [value]=\"assignedValue\"></div>',\n})\nexport class TestComp {\n  @ViewChild(Dir) dir!: Dir;\n  assignedValue = '';\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[2,\"value\",\"value\",(value)=>(value?1:0)]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[dir]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:string;"
+        },
+        "TestComp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Dir,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.dir=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<TestComp,\"ng-component\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "acceptance/inherit_definition_feature_spec: inputs re-declared in the `inputs` array",
       "origin": "packages/core/test/acceptance/inherit_definition_feature_spec.ts",
       "files": {
@@ -472,6 +619,27 @@
         },
         "TestCmp": {
           "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<TestCmp,\"ng-component\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-inlineArrowTyped",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\n\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: (v: string) => 1}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: (v: string) => 1}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
         }
       },
       "dtsImports": []
@@ -506,6 +674,69 @@
           "inputs": "{w:[2,\"w\",\"w\",()=>1]}",
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
           "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-inlineFnExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\n\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: function (v: string) { return 1; }}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: function (v: string) { return 1; }}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",function(v){return1;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",function(v){return1;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-fnDecl",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\nexport function f(v: string) { return 1; }\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: f}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: f}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-fnDeclNotExported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\nfunction f(v: string) { return 1; }\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: f}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: f}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
         }
       },
       "dtsImports": []
@@ -594,6 +825,27 @@
         "Input transform function first parameter cannot be a spread parameter Value is a reference to 'f'."
       ],
       "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-thisParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\nexport function f(this: any, v: string) { return 1; }\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: f}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: f}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
       "dtsImports": []
     },
     {
@@ -730,6 +982,27 @@
       "dtsImports": []
     },
     {
+      "name": "probe: transform-declaredFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\nexport declare function f(v: string): number;\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: f}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: f}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: transform-nonExportedParamType",
       "origin": "probe",
       "files": {
@@ -740,6 +1013,27 @@
         "Symbol must be exported in order to be used as the type of an Input transform function"
       ],
       "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-exportedParamType",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from \"@angular/core\";\nexport interface Shown { a: 1 }\nexport function f(v: Shown) { return 1; }\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: f}) v: any; }\n@Directive({selector: \"[e]\", inputs: [{name: \"w\", transform: f}]})\nexport class Dir2 { w: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:Shown;"
+        },
+        "Dir2": {
+          "inputs": "{w:[2,\"w\",\"w\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir2,\"[e]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:Shown;"
+        }
+      },
       "dtsImports": []
     },
     {
@@ -833,6 +1127,22 @@
         "Input transform must be a function Value could not be determined statically."
       ],
       "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objMemberFnDecl",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nexport function g(v: string) { return 1; }\nconst T = { f: g };\n@Directive({selector: \"[d]\"})\nexport class Dir { @Input({transform: T.f}) v: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",g]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        }
+      },
       "dtsImports": []
     },
     {
@@ -1436,6 +1746,57 @@
       "dtsImports": []
     },
     {
+      "name": "probe: queries-dtsAccept",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, ViewChild, ViewChildren, ContentChild, ContentChildren, TemplateRef, ElementRef, forwardRef, viewChild} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nexport interface Shown { a: 1 }\nexport function f(v: string | Shown) { return 1; }\nexport function g(this: any) { return 1; }\n@Directive({selector: \"[d]\", inputs: [{name: \"w\", transform: (v: ElementRef<HTMLElement> | \"x\") => 1}]})\nexport class Dir { @Input({transform: f}) v: any; @Input({transform: g}) u: any; @Input({transform: (x: boolean) => x}) \"aria-label\": any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{w:[2,\"w\",\"w\",(v)=>1],v:[2,\"v\",\"v\",f],u:[2,\"u\",\"u\",g],\"aria-label\":[2,\"aria-label\",\"aria-label\",(x)=>x]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};\"v\":{\"alias\":\"v\";\"required\":false;};\"u\":{\"alias\":\"u\";\"required\":false;};\"aria-label\":{\"alias\":\"aria-label\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:i0.ElementRef<HTMLElement>|\"x\";",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string|Shown;",
+          "dts:ngAcceptInputType_u": "staticngAcceptInputType_u:unknown;",
+          "dts:ngAcceptInputType_aria-label": "static\"ngAcceptInputType_aria-label\":boolean;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: resolve-constObjInArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from \"@angular/core\";\nconst OBJ = {name: \"w\", transform: (v: string) => 1};\n@Directive({selector: \"[d]\", inputs: [OBJ]})\nexport class Dir { w: any; a: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{w:[2,\"w\",\"w\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: resolve-constArrOfObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from \"@angular/core\";\nconst INPUTS = [{name: \"w\", transform: (v: string) => 1}];\n@Directive({selector: \"[d]\", inputs: INPUTS})\nexport class Dir { w: any; a: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{w:[2,\"w\",\"w\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: resolve-fnMultiStmt",
       "origin": "probe",
       "files": {
@@ -1607,6 +1968,61 @@
       "dtsImports": []
     },
     {
+      "name": "probe: dts-dtsTypes",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ElementRef, TemplateRef} from \"@angular/core\";\nimport * as core from \"@angular/core\";\nimport {Observable} from \"rxjs\";\nimport * as rx from \"rxjs\";\nexport interface Shown<T = any> { a: T }\nexport type Alias = string;\n@Directive({selector: \"[d]\"})\nexport class Dir {\n  @Input({transform: (v: boolean | '' | 'true') => 1}) m0: any;\n  @Input({transform: (v: string|number) => 1}) m1: any;\n  @Input({transform: (v: Shown<string>) => 1}) m2: any;\n  @Input({transform: (v: Shown<Observable<number>>) => 1}) m3: any;\n  @Input({transform: (v: ElementRef<HTMLElement>) => 1}) m4: any;\n  @Input({transform: (v: core.ElementRef) => 1}) m5: any;\n  @Input({transform: (v: rx.Observable<string>) => 1}) m6: any;\n  @Input({transform: (v: string[]) => 1}) m7: any;\n  @Input({transform: (v: Array<string>) => 1}) m8: any;\n  @Input({transform: (v: readonly string[]) => 1}) m9: any;\n  @Input({transform: (v: [string, number]) => 1}) m10: any;\n  @Input({transform: (v: (string | number)[]) => 1}) m11: any;\n  @Input({transform: (v: {a: number; b?: string}) => 1}) m12: any;\n  @Input({transform: (v: { a: number, b: Shown }) => 1}) m13: any;\n  @Input({transform: (v: {}) => 1}) m14: any;\n  @Input({transform: (v: () => void) => 1}) m15: any;\n  @Input({transform: (v: (x: string) => number) => 1}) m16: any;\n  @Input({transform: (v: typeof core.booleanAttribute) => 1}) m17: any;\n  @Input({transform: (v: keyof Shown) => 1}) m18: any;\n  @Input({transform: (v: Shown[\"a\"]) => 1}) m19: any;\n  @Input({transform: (v: Alias) => 1}) m20: any;\n  @Input({transform: (v: null | undefined) => 1}) m21: any;\n  @Input({transform: (v: unknown) => 1}) m22: any;\n  @Input({transform: (v: any) => 1}) m23: any;\n  @Input({transform: (v: never) => 1}) m24: any;\n  @Input({transform: (v: object) => 1}) m25: any;\n  @Input({transform: (v: 1 | 2) => 1}) m26: any;\n  @Input({transform: (v: -1) => 1}) m27: any;\n  @Input({transform: (v: true) => 1}) m28: any;\n  @Input({transform: (v: `a${string}`) => 1}) m29: any;\n  @Input({transform: (v: Record<string, Observable<void>>) => 1}) m30: any;\n  @Input({transform: (v: Promise<TemplateRef<any>>) => 1}) m31: any;\n  @Input({transform: (v: Observable<{a: Shown}>) => 1}) m32: any;\n  @Input({transform: (v: bigint) => 1}) m33: any;\n  @Input({transform: (v: symbol) => 1}) m34: any;\n  @Input({transform: (v: string & {}) => 1}) m35: any;\n  @Input({transform: (v: 'it\\'s') => 1}) m36: any;\n  @Input({transform: (v: \"dq\") => 1}) m37: any;\n  @Input({transform: (v: Observable<string>) => 1}) m38: any;\n  @Input({transform: (v: Observable < string >) => 1}) m39: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{m0:[2,\"m0\",\"m0\",(v)=>1],m1:[2,\"m1\",\"m1\",(v)=>1],m2:[2,\"m2\",\"m2\",(v)=>1],m3:[2,\"m3\",\"m3\",(v)=>1],m4:[2,\"m4\",\"m4\",(v)=>1],m5:[2,\"m5\",\"m5\",(v)=>1],m6:[2,\"m6\",\"m6\",(v)=>1],m7:[2,\"m7\",\"m7\",(v)=>1],m8:[2,\"m8\",\"m8\",(v)=>1],m9:[2,\"m9\",\"m9\",(v)=>1],m10:[2,\"m10\",\"m10\",(v)=>1],m11:[2,\"m11\",\"m11\",(v)=>1],m12:[2,\"m12\",\"m12\",(v)=>1],m13:[2,\"m13\",\"m13\",(v)=>1],m14:[2,\"m14\",\"m14\",(v)=>1],m15:[2,\"m15\",\"m15\",(v)=>1],m16:[2,\"m16\",\"m16\",(v)=>1],m17:[2,\"m17\",\"m17\",(v)=>1],m18:[2,\"m18\",\"m18\",(v)=>1],m19:[2,\"m19\",\"m19\",(v)=>1],m20:[2,\"m20\",\"m20\",(v)=>1],m21:[2,\"m21\",\"m21\",(v)=>1],m22:[2,\"m22\",\"m22\",(v)=>1],m23:[2,\"m23\",\"m23\",(v)=>1],m24:[2,\"m24\",\"m24\",(v)=>1],m25:[2,\"m25\",\"m25\",(v)=>1],m26:[2,\"m26\",\"m26\",(v)=>1],m27:[2,\"m27\",\"m27\",(v)=>1],m28:[2,\"m28\",\"m28\",(v)=>1],m29:[2,\"m29\",\"m29\",(v)=>1],m30:[2,\"m30\",\"m30\",(v)=>1],m31:[2,\"m31\",\"m31\",(v)=>1],m32:[2,\"m32\",\"m32\",(v)=>1],m33:[2,\"m33\",\"m33\",(v)=>1],m34:[2,\"m34\",\"m34\",(v)=>1],m35:[2,\"m35\",\"m35\",(v)=>1],m36:[2,\"m36\",\"m36\",(v)=>1],m37:[2,\"m37\",\"m37\",(v)=>1],m38:[2,\"m38\",\"m38\",(v)=>1],m39:[2,\"m39\",\"m39\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"m0\":{\"alias\":\"m0\";\"required\":false;};\"m1\":{\"alias\":\"m1\";\"required\":false;};\"m2\":{\"alias\":\"m2\";\"required\":false;};\"m3\":{\"alias\":\"m3\";\"required\":false;};\"m4\":{\"alias\":\"m4\";\"required\":false;};\"m5\":{\"alias\":\"m5\";\"required\":false;};\"m6\":{\"alias\":\"m6\";\"required\":false;};\"m7\":{\"alias\":\"m7\";\"required\":false;};\"m8\":{\"alias\":\"m8\";\"required\":false;};\"m9\":{\"alias\":\"m9\";\"required\":false;};\"m10\":{\"alias\":\"m10\";\"required\":false;};\"m11\":{\"alias\":\"m11\";\"required\":false;};\"m12\":{\"alias\":\"m12\";\"required\":false;};\"m13\":{\"alias\":\"m13\";\"required\":false;};\"m14\":{\"alias\":\"m14\";\"required\":false;};\"m15\":{\"alias\":\"m15\";\"required\":false;};\"m16\":{\"alias\":\"m16\";\"required\":false;};\"m17\":{\"alias\":\"m17\";\"required\":false;};\"m18\":{\"alias\":\"m18\";\"required\":false;};\"m19\":{\"alias\":\"m19\";\"required\":false;};\"m20\":{\"alias\":\"m20\";\"required\":false;};\"m21\":{\"alias\":\"m21\";\"required\":false;};\"m22\":{\"alias\":\"m22\";\"required\":false;};\"m23\":{\"alias\":\"m23\";\"required\":false;};\"m24\":{\"alias\":\"m24\";\"required\":false;};\"m25\":{\"alias\":\"m25\";\"required\":false;};\"m26\":{\"alias\":\"m26\";\"required\":false;};\"m27\":{\"alias\":\"m27\";\"required\":false;};\"m28\":{\"alias\":\"m28\";\"required\":false;};\"m29\":{\"alias\":\"m29\";\"required\":false;};\"m30\":{\"alias\":\"m30\";\"required\":false;};\"m31\":{\"alias\":\"m31\";\"required\":false;};\"m32\":{\"alias\":\"m32\";\"required\":false;};\"m33\":{\"alias\":\"m33\";\"required\":false;};\"m34\":{\"alias\":\"m34\";\"required\":false;};\"m35\":{\"alias\":\"m35\";\"required\":false;};\"m36\":{\"alias\":\"m36\";\"required\":false;};\"m37\":{\"alias\":\"m37\";\"required\":false;};\"m38\":{\"alias\":\"m38\";\"required\":false;};\"m39\":{\"alias\":\"m39\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_m0": "staticngAcceptInputType_m0:boolean|\"\"|\"true\";",
+          "dts:ngAcceptInputType_m1": "staticngAcceptInputType_m1:string|number;",
+          "dts:ngAcceptInputType_m2": "staticngAcceptInputType_m2:Shown<string>;",
+          "dts:ngAcceptInputType_m3": "staticngAcceptInputType_m3:Shown<i1.Observable<number>>;",
+          "dts:ngAcceptInputType_m4": "staticngAcceptInputType_m4:i0.ElementRef<HTMLElement>;",
+          "dts:ngAcceptInputType_m5": "staticngAcceptInputType_m5:i0.ElementRef;",
+          "dts:ngAcceptInputType_m6": "staticngAcceptInputType_m6:i1.Observable<string>;",
+          "dts:ngAcceptInputType_m7": "staticngAcceptInputType_m7:string[];",
+          "dts:ngAcceptInputType_m8": "staticngAcceptInputType_m8:Array<string>;",
+          "dts:ngAcceptInputType_m9": "staticngAcceptInputType_m9:readonlystring[];",
+          "dts:ngAcceptInputType_m10": "staticngAcceptInputType_m10:[string,number];",
+          "dts:ngAcceptInputType_m11": "staticngAcceptInputType_m11:(string|number)[];",
+          "dts:ngAcceptInputType_m12": "staticngAcceptInputType_m12:{a:number;b?:string;};",
+          "dts:ngAcceptInputType_m13": "staticngAcceptInputType_m13:{a:number;b:Shown;};",
+          "dts:ngAcceptInputType_m14": "staticngAcceptInputType_m14:{};",
+          "dts:ngAcceptInputType_m15": "staticngAcceptInputType_m15:()=>void;",
+          "dts:ngAcceptInputType_m16": "staticngAcceptInputType_m16:(x:string)=>number;",
+          "dts:ngAcceptInputType_m17": "staticngAcceptInputType_m17:typeofcore.booleanAttribute;",
+          "dts:ngAcceptInputType_m18": "staticngAcceptInputType_m18:keyofShown;",
+          "dts:ngAcceptInputType_m19": "staticngAcceptInputType_m19:Shown[\"a\"];",
+          "dts:ngAcceptInputType_m20": "staticngAcceptInputType_m20:Alias;",
+          "dts:ngAcceptInputType_m21": "staticngAcceptInputType_m21:null|undefined;",
+          "dts:ngAcceptInputType_m22": "staticngAcceptInputType_m22:unknown;",
+          "dts:ngAcceptInputType_m23": "staticngAcceptInputType_m23:any;",
+          "dts:ngAcceptInputType_m24": "staticngAcceptInputType_m24:never;",
+          "dts:ngAcceptInputType_m25": "staticngAcceptInputType_m25:object;",
+          "dts:ngAcceptInputType_m26": "staticngAcceptInputType_m26:1|2;",
+          "dts:ngAcceptInputType_m27": "staticngAcceptInputType_m27:-1;",
+          "dts:ngAcceptInputType_m28": "staticngAcceptInputType_m28:true;",
+          "dts:ngAcceptInputType_m29": "staticngAcceptInputType_m29:`a${string}`;",
+          "dts:ngAcceptInputType_m30": "staticngAcceptInputType_m30:Record<string,i1.Observable<void>>;",
+          "dts:ngAcceptInputType_m31": "staticngAcceptInputType_m31:Promise<i0.TemplateRef<any>>;",
+          "dts:ngAcceptInputType_m32": "staticngAcceptInputType_m32:i1.Observable<{a:Shown;}>;",
+          "dts:ngAcceptInputType_m33": "staticngAcceptInputType_m33:bigint;",
+          "dts:ngAcceptInputType_m34": "staticngAcceptInputType_m34:symbol;",
+          "dts:ngAcceptInputType_m35": "staticngAcceptInputType_m35:string&{};",
+          "dts:ngAcceptInputType_m36": "staticngAcceptInputType_m36:\"it's\";",
+          "dts:ngAcceptInputType_m37": "staticngAcceptInputType_m37:\"dq\";",
+          "dts:ngAcceptInputType_m38": "staticngAcceptInputType_m38:i1.Observable<string>;",
+          "dts:ngAcceptInputType_m39": "staticngAcceptInputType_m39:i1.Observable<string>;"
+        }
+      },
+      "dtsImports": ["import * as i1 from \"rxjs\";"]
+    },
+    {
       "name": "probe: basic-all-forms",
       "origin": "probe",
       "files": {
@@ -1688,6 +2104,22 @@
       "dtsImports": []
     },
     {
+      "name": "probe: review-dtsMemberOverridesLocalTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from '@angular/core';\nexport function localFn(v: string) { return 1; }\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: booleanAttribute}]})\nexport class Dir { @Input({transform: localFn}) x: any; }"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",localFn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: review-namespacedInput",
       "origin": "probe",
       "files": {
@@ -1707,6 +2139,22 @@
       "classes": {},
       "dtsImports": [],
       "skip": "member decorators imported under another name (`import {Input as In}`) are matched by name throughout oxc, so `@In` isn't recognised as `@Input`"
+    },
+    {
+      "name": "probe: review-namespacedInputTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute} from '@angular/core';\nimport * as core from '@angular/core';\nexport function localFn(v: string) { return 1; }\n@Directive({selector: '[d]'})\nexport class Dir { @core.Input({transform: localFn}) v: any; }"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{v:[2,\"v\",\"v\",localFn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"v\":{\"alias\":\"v\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_v": "staticngAcceptInputType_v:string;"
+        }
+      },
+      "dtsImports": []
     },
     {
       "name": "probe: review-numberSmall",
