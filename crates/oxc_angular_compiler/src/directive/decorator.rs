@@ -15,7 +15,7 @@ use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
-use super::evaluator::{Evaluator, FileScope, Prop, Value};
+use super::evaluator::{Evaluator, FileScope, Prop, RefKind, Value, transform_error};
 use super::metadata::{
     R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata, R3HostMetadata,
     R3InputMetadata,
@@ -120,7 +120,7 @@ pub fn extract_directive_metadata<'a>(
 
     // Track host metadata from the decorator
     let mut host_from_decorator: Option<R3HostMetadata<'a>> = None;
-    let io = config_obj.map(|obj| parse_decorator_io(allocator, obj, source_text, consts));
+    let io = config_obj.map(|obj| parse_decorator_io(allocator, obj, class, source_text, consts));
 
     // Parse each property in the config object (if present)
     if let Some(config_obj) = config_obj {
@@ -214,6 +214,7 @@ pub fn extract_directive_metadata<'a>(
         let fields = std::mem::replace(&mut metadata.outputs, Vec::new_in(&allocator));
         metadata.outputs = merge_by_class_property(io.outputs, fields, |o| o.0.as_str());
     }
+    resolve_member_transforms(allocator, class, source_text, consts, &mut metadata.inputs);
 
     // Merge host metadata from decorator into the existing host metadata
     if let Some(decorator_host) = host_from_decorator {
@@ -714,6 +715,7 @@ fn scoped_transform_error(input: &str, expr: &Expression<'_>, consts: &StringCon
 pub(crate) fn parse_decorator_io<'a>(
     allocator: &'a Allocator,
     config: &'a ObjectExpression<'a>,
+    class: &'a Class<'a>,
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
 ) -> DecoratorIo<'a> {
@@ -743,19 +745,29 @@ pub(crate) fn parse_decorator_io<'a>(
                             );
                             None
                         }
-                        Value::Object(_) => {
-                            parse_input_object(allocator, &mut io, item, i, source_text, consts)
-                        }
-                        other => Some(io_error(
-                            "inputs",
-                            || {
-                                "@Directive.inputs array can only contain strings or object literals"
-                                    .into()
-                            },
-                            other,
+                        Value::Object(_) => parse_input_object(
+                            allocator,
+                            &mut io,
+                            item,
+                            i,
+                            class,
+                            span,
+                            source_text,
+                            consts,
+                        ),
+                        other => Some((
+                            io_error(
+                                "inputs",
+                                || {
+                                    "@Directive.inputs array can only contain strings or object literals"
+                                        .into()
+                                },
+                                other,
+                            ),
+                            span,
                         )),
                     };
-                    io.input_error = io.input_error.take().or(error.map(|e| (e, span)));
+                    io.input_error = io.input_error.take().or(error);
                 }
             }
             other => {
@@ -815,16 +827,20 @@ fn parse_mapping_string(value: &str) -> (&str, &str) {
     (field, parts.next().unwrap_or(field))
 }
 
-/// `{ name, alias?, required?, transform? }` at `position` in the `inputs:` array.
-/// Returns ngtsc's error, if any.
+/// `{ name, alias?, required?, transform? }` at `position` in the `inputs:`
+/// array, whose value is at `span`. Returns ngtsc's error, if any, and the
+/// node it reports it on.
+#[expect(clippy::too_many_arguments)]
 fn parse_input_object<'a>(
     allocator: &'a Allocator,
     io: &mut DecoratorIo<'a>,
     item: &Value<'a>,
     position: usize,
+    class: &'a Class<'a>,
+    span: Span,
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
-) -> Option<String> {
+) -> Option<(String, Span)> {
     let name = match item.prop("name").map(|p| &p.value) {
         Some(Value::String(name)) => name.as_str(),
         other => {
@@ -833,26 +849,32 @@ fn parse_input_object<'a>(
                     "Value at position {position} of @Directive.inputs array must have a \"name\" property"
                 )
             };
-            return Some(io_error("inputs", message, other.unwrap_or(&Value::Undefined)));
+            return Some((io_error("inputs", message, other.unwrap_or(&Value::Undefined)), span));
         }
     };
     // ngtsc would read an imported alias or `required` flag from its file; oxc
     // can't, and guessing would compile the wrong binding.
     for key in ["alias", "required"] {
         if let Some(value) = item.prop(key).map(|p| &p.value).filter(|v| v.is_import()) {
-            return Some(io_error("inputs", String::new, value));
+            return Some((io_error("inputs", String::new, value), span));
         }
     }
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
-    let transform_function = match item.prop("transform") {
-        Some(Prop { expr: Some(expr), origin: None, .. }) => {
-            return Some(scoped_transform_error(name, expr, consts));
-        }
+    let (transform_function, error) = match item.prop("transform") {
         Some(transform) => {
-            transform.origin.and_then(|e| convert_oxc_expression(allocator, e, source_text))
+            let expr = transform_expression(allocator, transform, source_text, consts);
+            let error =
+                transform_error(transform, Some(position), name, class, consts.scope(), span)
+                    .or_else(|| match transform {
+                        Prop { expr: Some(written), origin: None, .. } if expr.is_none() => {
+                            Some((scoped_transform_error(name, written, consts), span))
+                        }
+                        _ => None,
+                    });
+            (expr, error)
         }
-        None => None,
+        None => (None, None),
     };
     upsert_input(
         &mut io.inputs,
@@ -864,7 +886,59 @@ fn parse_input_object<'a>(
             transform_function,
         },
     );
-    None
+    error
+}
+
+/// The expression ngtsc emits for a transform: a function written in place, or
+/// the identifier of the declaration it resolved to (`T.f` where
+/// `const T = { f }` becomes `f`). For a static method that identifier isn't in
+/// scope, so the written expression is kept there, as it can be written where
+/// the metadata is compiled (see [`Prop::origin`]): `None` when it can't.
+pub(crate) fn transform_expression<'a>(
+    allocator: &'a Allocator,
+    transform: &Prop<'a>,
+    source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
+) -> Option<OutputExpression<'a>> {
+    match &transform.value {
+        Value::Reference { name, kind: RefKind::Function(function, _) }
+            if consts.scope().is_top_level_function(name, function) =>
+        {
+            Some(OutputAstBuilder::variable(allocator, Ident::from(allocator.alloc_str(name))))
+        }
+        _ => convert_oxc_expression(allocator, transform.origin?, source_text),
+    }
+}
+
+/// Give `@Input({ transform })` members the transform expression ngtsc emits
+/// (see [`transform_expression`]), in place of the one written.
+pub(crate) fn resolve_member_transforms<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
+    inputs: &mut [R3InputMetadata<'a>],
+) {
+    let evaluator = Evaluator::new(consts);
+    for element in &class.body.body {
+        let (key, decorators) = match element {
+            ClassElement::PropertyDefinition(p) => (&p.key, &p.decorators),
+            ClassElement::AccessorProperty(p) => (&p.key, &p.decorators),
+            ClassElement::MethodDefinition(m) => (&m.key, &m.decorators),
+            _ => continue,
+        };
+        let Some(name) = key.static_name() else { continue };
+        let options = super::property_decorators::input_decorator_options(decorators);
+        let Some(options) = options else { continue };
+        let options = evaluator.evaluate(options);
+        let Some(transform) = options.prop("transform") else { continue };
+        let Some(input) = inputs.iter_mut().find(|i| i.class_property_name == name.as_ref()) else {
+            continue;
+        };
+        if let Some(expr) = transform_expression(allocator, transform, source_text, consts) {
+            input.transform_function = Some(expr);
+        }
+    }
 }
 
 /// ngtsc's `{...fromMeta, ...fromFields}` keyed by class property name: a member
@@ -932,7 +1006,7 @@ pub(crate) fn angular_decorator_config<'a>(
 
 /// The first error ngtsc raises for the inputs and outputs of a `@Component` /
 /// `@Directive` on `class`, in the order it checks them
-/// (`extractDirectiveMetadata`): `inputs:`, input members, `outputs:`, then
+/// (`extractDirectiveMetadata`): `inputs:`, `@Input` members, `outputs:`, then
 /// output members. ngtsc stops at the first one.
 ///
 /// Each error points where ngtsc's does: the `inputs:` / `outputs:` value, or
@@ -945,7 +1019,7 @@ pub fn decorator_io_errors<'a>(
     let Some((config, decorator_name)) = angular_decorator_config(class) else {
         return std::vec::Vec::new();
     };
-    let io = config.map(|config| parse_decorator_io(allocator, config, None, consts));
+    let io = config.map(|config| parse_decorator_io(allocator, config, class, None, consts));
     let (meta_inputs, meta_outputs): (std::vec::Vec<&str>, std::vec::Vec<&str>) = match &io {
         Some(io) => (
             io.inputs.iter().map(|i| i.class_property_name.as_str()).collect(),
@@ -953,18 +1027,38 @@ pub fn decorator_io_errors<'a>(
         ),
         None => Default::default(),
     };
+    let evaluator = Evaluator::new(consts);
+
     let input_members = || {
         class.body.body.iter().find_map(|element| {
-            let ClassElement::PropertyDefinition(prop) = element else { return None };
-            let name = prop.key.static_name()?;
+            let (key, decorators, value) = match element {
+                ClassElement::PropertyDefinition(p) => (&p.key, &p.decorators, p.value.as_ref()),
+                ClassElement::AccessorProperty(p) => (&p.key, &p.decorators, p.value.as_ref()),
+                ClassElement::MethodDefinition(m) => (&m.key, &m.decorators, None),
+                _ => return None,
+            };
+            let name = key.static_name()?;
+            // `@Input({ transform })`
+            let options = super::property_decorators::input_decorator_options(decorators);
+            if let Some(options) = options {
+                let span = options.span();
+                let options = evaluator.evaluate(options);
+                if let Some(transform) = options.prop("transform") {
+                    let error =
+                        transform_error(transform, None, &name, class, consts.scope(), span);
+                    if error.is_some() {
+                        return error;
+                    }
+                }
+            }
             // A signal input only collides with a metadata entry of the same name.
-            let value = prop.value.as_ref().filter(|_| meta_inputs.contains(&name.as_ref()))?;
+            let value = value.filter(|_| meta_inputs.contains(&name.as_ref()))?;
             let is_input = is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API]);
             is_input.then(|| {
                 let message = format!(
                     "Input \"{name}\" is also declared as non-signal in @{decorator_name}."
                 );
-                (message, prop.span)
+                (message, element.span())
             })
         })
     };

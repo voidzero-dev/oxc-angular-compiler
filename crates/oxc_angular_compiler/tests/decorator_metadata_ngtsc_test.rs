@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 380, "fixtures compared");
+    assert_eq!(compared, 432, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -677,4 +677,37 @@ fn evaluation_is_bounded() {
             None => assert!(messages.len() <= 1, "{messages:?}"),
         }
     }
+}
+
+/// ngtsc emits the method's bare name for `transform: Utils.coerce` (a static
+/// method), which here would silently bind the unrelated top-level `coerce`.
+/// oxc keeps the expression as written.
+#[test]
+fn static_method_transform_is_not_confused_with_a_same_named_function() {
+    let source = "import {Directive, Input} from '@angular/core';
+export function coerce(v: string) { return 1; }
+class Utils { static coerce(v: boolean) { return 2; } }
+@Directive({selector: '[d]'})
+export class Dir { @Input({transform: Utils.coerce}) x: any; }";
+    let code = strip(&transform(source).code);
+    assert!(code.contains(r#"inputs:{x:[2,"x","x",Utils.coerce]}"#), "{code}");
+}
+
+/// A transform read through a namespace import (`core.booleanAttribute`):
+/// ngtsc 22.1.7 reports that it can't reference it, at the declaration in
+/// @angular/core's `.d.ts`, which the snapshot can't record (see
+/// `probe: eval-nsImportMember`). oxc reports it on the expression.
+#[test]
+fn namespace_imported_transform_cannot_be_referenced() {
+    let source = "import {Directive, Input} from '@angular/core';
+import * as core from '@angular/core';
+@Directive({selector: '[d]'})
+export class Dir { @Input({transform: core.booleanAttribute}) v: any; }
+";
+    let message = "Input transform function could not be referenced \
+                   Value is a reference to 'booleanAttribute'.";
+    assert_eq!(
+        errors(&transform(source), source),
+        vec![(message.to_string(), "core.booleanAttribute".to_string())]
+    );
 }
