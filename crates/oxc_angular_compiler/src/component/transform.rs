@@ -41,7 +41,7 @@ use crate::class_metadata::{
 use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
-    decorator_io_errors, extract_content_queries, extract_directive_metadata, extract_view_queries,
+    decorator_io_errors, extract_class_queries, extract_directive_metadata,
     find_directive_decorator, find_directive_decorator_span, generate_directive_definitions,
 };
 use crate::dts;
@@ -2634,11 +2634,11 @@ pub fn transform_angular_file(
                     let template = allocator.alloc_str(&template_string);
                     // 4.5 Extract view queries from the class (for @ViewChild/@ViewChildren)
                     // These need to be passed to compile_component_full so predicates can be pooled
-                    let view_queries = extract_view_queries(allocator, class, Some(source));
-
-                    // 4.6 Extract content queries from the class (for @ContentChild/@ContentChildren)
-                    // Signal-based queries (contentChild(), contentChildren()) are also detected here
-                    let content_queries = extract_content_queries(allocator, class, Some(source));
+                    // 4.5/4.6 View and content queries: member decorators and signal
+                    // queries, then `queries:` in the decorator, as ngtsc orders them.
+                    // Predicates are pooled by compile_component_full.
+                    let (view_queries, content_queries) =
+                        extract_class_queries(allocator, class, Some(source), &string_consts);
 
                     // Collect content query property names for .d.ts generation
                     // (before content_queries is moved into compile_component_full)

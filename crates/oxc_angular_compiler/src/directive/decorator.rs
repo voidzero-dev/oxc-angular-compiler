@@ -181,7 +181,7 @@ pub fn extract_directive_metadata<'a>(
     }
 
     // Extract @Input/@Output/@HostBinding/@HostListener from class members
-    builder = builder.extract_from_class(allocator, class, source_text);
+    builder = builder.extract_from_class_in(allocator, class, source_text, Some(consts));
 
     // Detect if ngOnChanges lifecycle hook is implemented
     // Similar to Angular's: const usesOnChanges = members.some(member => ...)
@@ -205,6 +205,20 @@ pub fn extract_directive_metadata<'a>(
     // Now we need to merge host metadata from decorator with host metadata from class members
     // The builder already has host data from extract_from_class, we need to merge the decorator host
     let mut metadata = builder.build()?;
+
+    // `queries:` from the decorator come after the member queries, as in ngtsc.
+    if let Some(config) = config_obj {
+        let queries = super::parse_decorator_queries(
+            allocator,
+            config,
+            class,
+            source_text,
+            consts,
+            "Directive",
+        );
+        metadata.view_queries.extend(queries.view);
+        metadata.queries.extend(queries.content);
+    }
 
     if let Some(io) = io {
         let fields = std::mem::replace(&mut metadata.inputs, Vec::new_in(&allocator));
@@ -910,10 +924,10 @@ pub(crate) fn angular_decorator_config<'a>(
     Some((config, name))
 }
 
-/// The first error ngtsc raises for the inputs and outputs of a `@Component` /
-/// `@Directive` on `class`, in the order it checks them
-/// (`extractDirectiveMetadata`): `inputs:`, `@Input` members, `outputs:`, then
-/// output members. ngtsc stops at the first one.
+/// The first error ngtsc raises for the inputs, outputs and queries of a
+/// `@Component` / `@Directive` on `class`, in the order it checks them
+/// (`extractDirectiveMetadata`): `inputs:`, `@Input` members, `outputs:`,
+/// output members, then `queries:`. ngtsc stops at the first one.
 pub fn decorator_io_errors<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -980,12 +994,17 @@ pub fn decorator_io_errors<'a>(
             })
         })
     };
+    let queries = || {
+        let config = config?;
+        super::parse_decorator_queries(allocator, config, class, None, consts, decorator_name).error
+    };
 
     io.as_ref()
         .and_then(|io| io.input_error.clone())
         .or_else(input_members)
         .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()))
         .or_else(output_members)
+        .or_else(queries)
         .into_iter()
         .collect()
 }

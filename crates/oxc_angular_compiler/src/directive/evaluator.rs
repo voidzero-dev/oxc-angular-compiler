@@ -37,9 +37,11 @@ pub(crate) struct FileScope<'a> {
     types: HashSet<&'a str>,
 }
 
-/// An import binding: unless it's a namespace import, the name it's exported under.
+/// An import binding: the module it comes from and, unless it's a namespace
+/// import, the name it's exported under.
 #[derive(Clone, Copy)]
 pub(crate) struct Import<'a> {
+    pub module: &'a str,
     pub imported: Option<&'a str>,
 }
 
@@ -49,6 +51,7 @@ impl<'a> FileScope<'a> {
         for stmt in &program.body {
             match stmt {
                 Statement::ImportDeclaration(import) => {
+                    let module = import.source.value.as_str();
                     for spec in import.specifiers.iter().flatten() {
                         let (local, imported) = match spec {
                             ImportDeclarationSpecifier::ImportSpecifier(s) => {
@@ -66,7 +69,7 @@ impl<'a> FileScope<'a> {
                                 (s.local.name.as_str(), None)
                             }
                         };
-                        scope.imports.insert(local, Import { imported });
+                        scope.imports.insert(local, Import { module, imported });
                     }
                 }
                 Statement::ExportDeclaration(export) => {
@@ -166,6 +169,10 @@ impl<'a> FileScope<'a> {
         if exported {
             self.exported.insert(id);
         }
+    }
+
+    pub(crate) fn import(&self, name: &str) -> Option<Import<'a>> {
+        self.imports.get(name).copied()
     }
 }
 
