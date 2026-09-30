@@ -110,23 +110,38 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     }
 }
 
+/// Angular's signal query functions (ngtsc's `QUERY_INITIALIZER_FNS`).
+const QUERY_APIS: [super::decorator::InitializerApi; 4] = [
+    ("viewChild", "@angular/core"),
+    ("viewChildren", "@angular/core"),
+    ("contentChild", "@angular/core"),
+    ("contentChildren", "@angular/core"),
+];
+
 /// Try to unwrap a forwardRef call and extract the inner expression.
 ///
 /// Mirrors ngtsc's `tryUnwrapForwardRef`: `forwardRef(() => X)`,
 /// `forwardRef(function () { return X; })`, looking through parentheses and
 /// `as` casts. Returns `None` for anything else.
 ///
-/// Like ngtsc, `ns.forwardRef(...)` is only unwrapped when `ns` is a namespace
-/// import of `@angular/core` (see [`is_core_namespace`]); `util.forwardRef`
-/// on any other object is kept as written. A bare `forwardRef` is matched by
-/// name.
+/// Like ngtsc, it's only unwrapped when it's `@angular/core`'s `forwardRef`:
+/// imported by name (under any alias), or `ns.forwardRef(...)` with `ns` a
+/// namespace import of `@angular/core` (see [`is_core_namespace`]). Any other
+/// `forwardRef` (a local function, one from another module, `util.forwardRef`)
+/// is kept as written. Without the file's imports (`consts` is `None`), a bare
+/// `forwardRef` is matched by name.
 fn try_unwrap_forward_ref<'a>(
     expr: &'a Expression<'a>,
     consts: Option<&super::StringConsts<'_>>,
 ) -> Option<&'a Expression<'a>> {
     let Expression::CallExpression(call) = unwrap_expression(expr) else { return None };
     let is_forward_ref = match &call.callee {
-        Expression::Identifier(id) => id.name == "forwardRef",
+        Expression::Identifier(id) => match consts {
+            Some(consts) => consts.scope().import(&id.name).is_some_and(|import| {
+                import.module == "@angular/core" && import.imported == Some("forwardRef")
+            }),
+            None => id.name == "forwardRef",
+        },
         Expression::StaticMemberExpression(m) => {
             m.property.name == "forwardRef"
                 && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(consts, &ns.name))
@@ -1802,7 +1817,9 @@ pub(crate) fn parse_decorator_queries<'a>(
         }
     }
 
-    // A signal query member for the same property is an error.
+    // A signal query member for the same property is an error: one calling
+    // Angular's `viewChild()`, `contentChildren()`, ... (not just any function
+    // named like them).
     let signal_queries: std::vec::Vec<Ident<'a>> = class
         .body
         .body
@@ -1810,14 +1827,8 @@ pub(crate) fn parse_decorator_queries<'a>(
         .filter_map(|element| {
             let ClassElement::PropertyDefinition(prop) = element else { return None };
             let name = get_property_key_name(&prop.key)?;
-            try_parse_signal_query(
-                allocator,
-                prop.value.as_ref()?,
-                name.clone(),
-                source_text,
-                Some(consts),
-            )
-            .map(|_| name)
+            super::decorator::is_initializer_api_call(prop.value.as_ref()?, consts, &QUERY_APIS)
+                .then_some(name)
         })
         .collect();
     // ngtsc checks the content queries first, and reports the `new` expression.

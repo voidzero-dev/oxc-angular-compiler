@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 620, "fixtures compared");
+    assert_eq!(compared, 637, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -657,6 +657,36 @@ export class Dir {{ value = {initializer}; }}
         );
         let result = transform(&source);
         assert_eq!(errors(&result, &source), vec![], "{import} {initializer}");
+    }
+}
+
+/// The same for a signal query also declared in `queries:`: ngtsc 22.1.7
+/// reports it only for Angular's `viewChild()`, `contentChild()`, ... (the
+/// snapshot's `initializerApi-viewChild*` probes), and compiles these, whose
+/// functions aren't Angular's. oxc still compiles such a member as a signal
+/// query too (it recognises them by name), so these compare only the
+/// diagnostics.
+#[test]
+fn only_angular_signal_queries_collide_with_decorator_queries() {
+    let cases = [
+        ("import {viewChild} from './other';", "viewChild('x')", "ViewChild"),
+        ("import * as other from './other';", "other.viewChild('x')", "ViewChild"),
+        (
+            "function contentChild(x: string): any { return null; }",
+            "contentChild('x')",
+            "ContentChild",
+        ),
+    ];
+    for (declaration, initializer, query) in cases {
+        let source = format!(
+            "import {{Directive, {query}}} from '@angular/core';
+{declaration}
+@Directive({{selector: '[d]', queries: {{foo: new {query}('x')}}}})
+export class Dir {{ foo = {initializer}; }}
+"
+        );
+        let result = transform(&source);
+        assert_eq!(errors(&result, &source), vec![], "{declaration} {initializer}");
     }
 }
 

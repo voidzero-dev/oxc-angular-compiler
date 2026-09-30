@@ -7103,6 +7103,274 @@
       "dtsImports": []
     },
     {
+      "name": "probe: forwardRef-readCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, forwardRef } from '@angular/core';\nexport class Foo {}\nexport class Bar {}\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(Foo, { read: forwardRef(() => Bar) }) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5,forwardRef(()=>Bar));}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-aliasFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, forwardRef as fr } from '@angular/core';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(fr(() => Foo)) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-otherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nimport { forwardRef } from './other';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(forwardRef(() => Foo)) el: any; }\n",
+        "other.ts": "export function forwardRef(fn: () => any): any { return fn; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-localFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nexport class Foo {}\nfunction forwardRef(fn: () => any): any { return fn; }\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(forwardRef(() => Foo)) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-declaredGlobal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nexport class Foo {}\ndeclare function forwardRef(fn: () => any): any;\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(forwardRef(() => Foo)) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-core",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, forwardRef } from '@angular/core';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(forwardRef(() => Foo)) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-queriesAliasFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, forwardRef as fr } from '@angular/core';\nexport class Foo {}\n@Directive({ selector: '[d]', queries: { el: new ViewChild(fr(() => Foo)) } })\nexport class D { el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-queriesOtherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nimport { forwardRef } from './other';\nexport class Foo {}\n@Directive({ selector: '[d]', queries: { el: new ViewChild(forwardRef(() => Foo)) } })\nexport class D { el: any; }\n",
+        "other.ts": "export function forwardRef(fn: () => any): any { return fn; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-contentChildrenAliasFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ContentChildren, forwardRef as fr } from '@angular/core';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { @ContentChildren(fr(() => Foo)) els: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,Foo,4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.els=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},[\"els\"],never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-signalQueryAliasFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, viewChild, forwardRef as fr } from '@angular/core';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { el = viewChild(fr(() => Foo)); }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.el,Foo,5);}if(rf&2){i0.ɵɵqueryAdvance();}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-signalQueryOtherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, viewChild } from '@angular/core';\nimport { forwardRef } from './other';\nexport class Foo {}\n@Directive({ selector: '[d]' })\nexport class D { el = viewChild(forwardRef(() => Foo)); }\n",
+        "other.ts": "export function forwardRef(fn: () => any): any { return fn; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.el,forwardRef(()=>Foo),5);}if(rf&2){i0.ɵɵqueryAdvance();}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: forwardRef-readAliasFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, forwardRef as fr } from '@angular/core';\nexport class Foo {}\nexport class Bar {}\n@Directive({ selector: '[d]' })\nexport class D { @ViewChild(Foo, { read: fr(() => Bar) }) el: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5,fr(()=>Bar));}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.el=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-viewChildCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, viewChild } from '@angular/core';\n@Directive({ selector: '[d]', queries: { foo: new ViewChild('x') } })\nexport class D { foo = viewChild('x'); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[111, 129]]
+    },
+    {
+      "name": "probe: initializerApi-viewChildCoreAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild, viewChild as vc } from '@angular/core';\n@Directive({ selector: '[d]', queries: { foo: new ViewChild('x') } })\nexport class D { foo = vc('x'); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[117, 135]]
+    },
+    {
+      "name": "probe: initializerApi-viewChildCoreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({ selector: '[d]', queries: { foo: new ViewChild('x') } })\nexport class D { foo = core.viewChild('x'); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[139, 157]]
+    },
+    {
+      "name": "probe: initializerApi-viewChildRequiredOtherModuleCast",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ViewChild } from '@angular/core';\nimport { viewChild } from './other';\n@Directive({ selector: '[d]', queries: { foo: new ViewChild('x') } })\nexport class D { foo = (viewChild as any).required('x'); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-contentChildRequiredCoreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, ContentChild } from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({ selector: '[d]', queries: { foo: new ContentChild('x') } })\nexport class D { foo = core.contentChild.required('x'); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [
+        "Query is declared multiple times. \"@Directive\" declares a query for the same property."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[142, 163]]
+    },
+    {
       "name": "probe: transform-global-atob",
       "origin": "probe",
       "files": {
