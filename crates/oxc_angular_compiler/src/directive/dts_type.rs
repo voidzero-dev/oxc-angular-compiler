@@ -32,7 +32,7 @@ pub(crate) struct TypePrinter<'s, 'a> {
     pub other_module: bool,
 }
 
-impl TypePrinter<'_, '_> {
+impl<'a> TypePrinter<'_, 'a> {
     /// `unknown` when the type has a form ngtsc can't emit either (an
     /// `import('...')` type) or that isn't valid in a type annotation.
     pub(crate) fn print(&mut self, ty: &TSType<'_>) -> String {
@@ -211,26 +211,42 @@ impl TypePrinter<'_, '_> {
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
         let mut parts = std::vec::Vec::new();
         entity_parts(name, &mut parts)?;
+        Some(match self.resolve_aliases(parts)? {
+            Resolved::Core(rest) => format!("i0{rest}"),
+            Resolved::OtherModule(parts) => {
+                self.other_module = true;
+                parts.join(".")
+            }
+            Resolved::Name(parts, _) => self.resolved_name(&parts),
+        })
+    }
+
+    /// `parts` (a name, head first) with the import-equals aliases it starts
+    /// with replaced by their targets, until its head isn't one.
+    fn resolve_aliases<'p>(&self, mut parts: std::vec::Vec<&'p str>) -> Option<Resolved<'p>>
+    where
+        'a: 'p,
+    {
+        let mut aliased = false;
         // Aliases can name aliases; a cycle is a TypeScript error.
         for _ in 0..16 {
             let (len, target) = match self.scope.alias(parts[0]) {
                 Some(target) => (1, target),
                 None => match self.scope.namespace_alias(&parts) {
                     Some(found) => found,
-                    None => return Some(self.resolved_name(&parts)),
+                    None => return Some(Resolved::Name(parts, aliased)),
                 },
             };
+            aliased = true;
             match target {
                 // `import Core = require('@angular/core')`: `Core.X` is
                 // `i0.X`, like a namespace import's member.
                 AliasTarget::Module("@angular/core") => {
-                    let rest: String = parts[len..].iter().map(|m| format!(".{m}")).collect();
-                    return Some(format!("i0{rest}"));
+                    return Some(Resolved::Core(
+                        parts[len..].iter().map(|m| format!(".{m}")).collect(),
+                    ));
                 }
-                AliasTarget::Module(_) => {
-                    self.other_module = true;
-                    return Some(parts.join("."));
-                }
+                AliasTarget::Module(_) => return Some(Resolved::OtherModule(parts)),
                 AliasTarget::Entity(target) => {
                     parts.splice(0..len, target);
                 }
@@ -413,22 +429,51 @@ impl TypePrinter<'_, '_> {
     /// `@angular/core` value becomes `i0.token`, another module's makes the
     /// type `unknown`, and a local or global one stays as written (ngtsc copies
     /// the expression, which doesn't resolve for an import).
+    ///
+    /// Through an import-equals alias too, although ngtsc copies those as
+    /// written: an alias of `@angular/core` gives `i0.token` and one of another
+    /// module `unknown`, where ngtsc's name doesn't resolve in the `.d.ts`. An
+    /// alias of a global is written as its target (`[Symbol.iterator]` for
+    /// `import S = Symbol`), and one of a name the file declares stays as
+    /// written, like ngtsc.
     fn key(&mut self, key: &PropertyKey<'_>, computed: bool) -> Option<String> {
         let text = match key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
             PropertyKey::StringLiteral(s) => quote_literal(s),
             PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
             PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
-            PropertyKey::Identifier(id) => self.value_name(&id.name, ""),
+            PropertyKey::Identifier(id) => self.computed_name(std::vec![id.name.as_str()])?,
             PropertyKey::StaticMemberExpression(m) => {
-                let chain = member_chain(&m.object, &m.property.name)?;
-                let (head, rest) = chain.split_once('.').unwrap_or((&chain, ""));
-                let rest = if rest.is_empty() { String::new() } else { format!(".{rest}") };
-                self.value_name(head, &rest)
+                let mut parts = std::vec::Vec::new();
+                member_parts(&m.object, &mut parts)?;
+                parts.push(m.property.name.as_str());
+                self.computed_name(parts)?
             }
             _ => return None,
         };
         Some(if computed { format!("[{text}]") } else { text })
+    }
+
+    /// A computed property name `a.b.c` (`parts`, head first), as [`Self::key`]
+    /// writes it.
+    fn computed_name(&mut self, parts: std::vec::Vec<&str>) -> Option<String> {
+        let written = parts.join(".");
+        Some(match self.resolve_aliases(parts)? {
+            Resolved::Core(rest) => format!("i0{rest}"),
+            Resolved::OtherModule(_) => {
+                self.other_module = true;
+                written
+            }
+            Resolved::Name(parts, aliased) => {
+                let (head, members) = (parts[0], &parts[1..]);
+                if aliased && self.scope.import(head).is_none() && self.scope.declares(head) {
+                    written
+                } else {
+                    let rest: String = members.iter().map(|m| format!(".{m}")).collect();
+                    self.value_name(head, &rest)
+                }
+            }
+        })
     }
 
     fn params(
@@ -592,15 +637,27 @@ fn entity_parts<'n>(name: &'n TSTypeName<'_>, out: &mut Vec<&'n str>) -> Option<
     Some(())
 }
 
-fn member_chain(object: &Expression<'_>, property: &str) -> Option<String> {
-    let object = match object {
-        Expression::Identifier(id) => id.name.to_string(),
+/// The parts of a computed name's object, `a.b` in `[a.b.c]`, head first.
+fn member_parts<'n>(object: &'n Expression<'_>, out: &mut Vec<&'n str>) -> Option<()> {
+    match object {
+        Expression::Identifier(id) => out.push(id.name.as_str()),
         Expression::StaticMemberExpression(m) if !m.optional => {
-            member_chain(&m.object, &m.property.name)?
+            member_parts(&m.object, out)?;
+            out.push(m.property.name.as_str());
         }
         _ => return None,
-    };
-    Some(format!("{object}.{property}"))
+    }
+    Some(())
+}
+
+/// A name with its import-equals aliases replaced by their targets.
+enum Resolved<'p> {
+    /// An alias of `@angular/core`: the `.member`s after it.
+    Core(String),
+    /// An alias of another module: the name as written.
+    OtherModule(std::vec::Vec<&'p str>),
+    /// Any other name, head first, and whether an alias was replaced.
+    Name(std::vec::Vec<&'p str>, bool),
 }
 
 fn is_line_break(c: char) -> bool {

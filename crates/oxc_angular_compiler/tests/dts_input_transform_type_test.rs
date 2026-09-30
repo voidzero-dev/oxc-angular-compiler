@@ -503,6 +503,89 @@ fn computed_names_from_imports_follow_type_name_rules() {
     ]);
 }
 
+/// A computed property name through an import-equals alias (top level, in a
+/// namespace, or of an alias) resolves it the way a type name does. ngtsc
+/// 22.1.7 copies every one of these as written. An alias of a name the file
+/// declares stays as written, as ngtsc wrote it (the last group). The rest
+/// follow oxc's rules for imports and globals, since type-checking ngtsc's
+/// `.d.ts` reports "Cannot find name" for each (except `Ex`, which is
+/// exported): an alias of `@angular/core` gives `i0.X`, one of another module
+/// makes the type `unknown`, and one of a global (`G`, declared in a separate
+/// `.d.ts` for ngtsc) is written as its target.
+#[test]
+fn computed_names_through_import_equals_aliases() {
+    let cases: [(&str, &[&str], &[&str]); 4] = [
+        (
+            "import Core = require('@angular/core');\nimport S = Core.ɵSIGNAL;\nimport C2 = Core;\nexport import Ex = require('@angular/core');\nimport * as ng from '@angular/core';\nimport C = ng;\nimport S2 = ng.ɵSIGNAL;\nnamespace W { export import C3 = Core; export import S3 = Core.ɵSIGNAL; }\n",
+            &[
+                "{ [Core.ɵSIGNAL]: string }",
+                "{ [Core.ɵSIGNAL](): void }",
+                "{ [S]: string }",
+                "{ [C2.ɵSIGNAL]: string }",
+                "{ [Ex.ɵSIGNAL]: string }",
+                "{ [C.ɵSIGNAL]: string }",
+                "{ [S2]: string }",
+                "{ [W.C3.ɵSIGNAL]: string }",
+                "{ [W.S3]: string }",
+            ],
+            &[
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL](): void; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+                "{ [i0.ɵSIGNAL]: string; }",
+            ],
+        ),
+        (
+            "import R = require('./other');\nimport * as o from './other';\nimport O = o;\nimport T = o.token;\nimport {Inner} from './other';\nimport I = Inner;\nnamespace W { export import O2 = o; }\n",
+            &[
+                "{ [R.token]: string }",
+                "{ [R.Inner.k]: string }",
+                "{ [O.token]: string }",
+                "{ [T]: string }",
+                "{ [I.k]: string }",
+                "{ [W.O2.token]: string }",
+            ],
+            &["unknown", "unknown", "unknown", "unknown", "unknown", "unknown"],
+        ),
+        (
+            "import GA = G;\nimport GK = G.k;\nimport GI = G.In;\nnamespace W { export import GA2 = G; }\n",
+            &[
+                "{ [GA.k]: string }",
+                "{ [GK]: string }",
+                "{ [GI.j]: string }",
+                "{ [W.GA2.k]: string }",
+            ],
+            &[
+                "{ [G.k]: string; }",
+                "{ [G.k]: string; }",
+                "{ [G.In.j]: string; }",
+                "{ [G.k]: string; }",
+            ],
+        ),
+        (
+            "namespace NS { export const k = 'nk'; }\nimport A = NS;\nimport K = NS.k;\nnamespace W { export import A2 = NS; }\n",
+            &["{ [A.k]: string }", "{ [K]: string }", "{ [W.A2.k]: string }"],
+            &["{ [A.k]: string; }", "{ [K]: string; }", "{ [W.A2.k]: string; }"],
+        ),
+    ];
+    for (imports, types, expected) in cases {
+        let source = format!(
+            "import {{Directive, Input}} from '@angular/core';
+{imports}@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+            members_typed(types)
+        );
+        assert_eq!(accept_members(&source), expect_members(expected), "{imports}");
+    }
+}
+
 /// An overloaded static method is typed from its first declaration, as an
 /// overloaded function is (ngtsc 22.1.7 writes `string` here). The snapshot
 /// can't hold this case: ngtsc compiles the transform to the bare method name
