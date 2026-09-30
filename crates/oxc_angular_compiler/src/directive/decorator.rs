@@ -750,7 +750,8 @@ fn is_out_of_scope(transform: &Prop<'_>, consts: &StringConsts<'_>) -> bool {
 /// The identifier ngtsc emits for a transform that resolves to a reference
 /// (the reference's identity in this file, `getIdentityIn`), see
 /// [`transform_expression`]: a same-file function's name, or the name an
-/// imported function or a global was first reached by, through any variables
+/// imported function or a global (including one declared outside the file,
+/// like `atob`) was first reached by, through any variables
 /// (`booleanAttribute` for `const t = booleanAttribute` and `transform: t`).
 fn reference_identity<'p>(transform: &'p Prop<'_>, consts: &StringConsts<'_>) -> Option<&'p str> {
     match &transform.value {
@@ -760,7 +761,7 @@ fn reference_identity<'p>(transform: &'p Prop<'_>, consts: &StringConsts<'_>) ->
             Some(name)
         }
         Value::Reference { kind: RefKind::Import { namespace_member: false, local }, .. } => *local,
-        Value::Reference { name, kind: RefKind::Global } => Some(name),
+        Value::Reference { name, kind: RefKind::Global | RefKind::Ambient } => Some(name),
         _ => None,
     }
 }

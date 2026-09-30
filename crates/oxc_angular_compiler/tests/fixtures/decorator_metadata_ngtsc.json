@@ -12736,6 +12736,118 @@
       "dtsImports": []
     },
     {
+      "name": "probe: shorthandRef-globalConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst t = atob;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: t}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalTernary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = 1;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: A ? atob : btoa}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalHelper",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction pick(f: (v: string) => string) { return f; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: pick(atob)}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst T = {f: atob};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: T.f}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalCondition",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: window ? atob : btoa}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "a global declared outside the file is dynamic in oxc wherever its value is used (here in a condition or `||`), since oxc can't tell it from a name declared nowhere, so the transform isn't a function; ngtsc reads its declaration and picks `atob`"
+    },
+    {
+      "name": "probe: shorthandRef-globalOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: atob || btoa}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "a global declared outside the file is dynamic in oxc wherever its value is used (here in a condition or `||`), since oxc can't tell it from a name declared nowhere, so the transform isn't a function; ngtsc reads its declaration and picks `atob`"
+    },
+    {
+      "name": "probe: shorthandRef-globalNot",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (!atob ? btoa : atob)}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "a global declared outside the file is dynamic in oxc wherever its value is used (here in a condition or `||`), since oxc can't tell it from a name declared nowhere, so the transform isn't a function; ngtsc reads its declaration and picks `atob`"
+    },
+    {
       "name": "probe: shortCircuit-metaOr",
       "origin": "probe",
       "files": {
