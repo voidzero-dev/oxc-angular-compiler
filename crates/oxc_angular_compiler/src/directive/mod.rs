@@ -39,6 +39,7 @@ pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,
 };
+pub(crate) use property_decorators::CoreNamespaces;
 pub use property_decorators::{
     extract_content_queries, extract_host_bindings, extract_host_listeners, extract_input_metadata,
     extract_output_metadata, extract_view_queries,

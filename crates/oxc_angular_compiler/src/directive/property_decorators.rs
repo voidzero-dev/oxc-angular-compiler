@@ -11,6 +11,8 @@
 //! These decorators are found on class properties and methods, and define
 //! how the directive/component interacts with its parent context.
 
+use std::cell::RefCell;
+
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
@@ -26,21 +28,53 @@ use crate::output::oxc_converter::convert_oxc_expression;
 // Helper Functions
 // ============================================================================
 
+thread_local! {
+    /// The local names of `import * as ns from '@angular/core'` in the file
+    /// being compiled (see [`CoreNamespaces`]).
+    static CORE_NAMESPACES: RefCell<std::vec::Vec<String>> =
+        const { RefCell::new(std::vec::Vec::new()) };
+}
+
+/// While alive, member decorators written through these namespace imports of
+/// `@angular/core` (`@core.Input()`) are recognised. ngtsc only reads a
+/// namespaced member decorator whose namespace imports `@angular/core`, and the
+/// functions here that extract member decorators don't see the file's imports.
+pub(crate) struct CoreNamespaces(std::vec::Vec<String>);
+
+impl CoreNamespaces {
+    pub(crate) fn enter(names: std::vec::Vec<String>) -> Self {
+        Self(CORE_NAMESPACES.with(|current| current.replace(names)))
+    }
+}
+
+impl Drop for CoreNamespaces {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.0);
+        CORE_NAMESPACES.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
 /// Find a decorator by name from a list of decorators.
 ///
 /// Searches for decorators that are either:
 /// - Simple identifiers: `@Input`
 /// - Call expressions: `@Input()` or `@Input('alias')`
+/// - Either of those through a namespace import of `@angular/core` (see
+///   [`CoreNamespaces`]): `@core.Input()`
 ///
 /// Returns the first matching decorator.
 fn find_decorator_by_name<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
     name: &str,
 ) -> Option<&'a Decorator<'a>> {
-    // `@Input` or, through a namespace import, `@core.Input`.
+    let is_core_namespace =
+        |ns: &str| CORE_NAMESPACES.with(|names| names.borrow().iter().any(|n| n == ns));
     let is_name = |expr: &Expression<'_>| match expr {
         Expression::Identifier(id) => id.name == name,
-        Expression::StaticMemberExpression(m) => m.property.name == name,
+        Expression::StaticMemberExpression(m) => {
+            m.property.name == name
+                && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(&ns.name))
+        }
         _ => false,
     };
     decorators.iter().find(|d| match &d.expression {

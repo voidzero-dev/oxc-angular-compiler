@@ -18,14 +18,17 @@ use oxc_ast::ast::{
     Class, ClassElement, ComputedMemberExpression, ConditionalExpression, Declaration,
     ExportDefaultDeclarationKind, Expression, ForInStatement, ForOfStatement, ForStatement,
     ForStatementInit, ForStatementLeft, FormalParameters, Function, FunctionBody,
-    IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
-    ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
-    Statement, StaticBlock, StaticMemberExpression, Super, SwitchStatement, TSEnumDeclaration,
-    TSEnumMemberName, TSInterfaceDeclaration, TSLiteral, TSModuleReference, TSNamespaceDeclaration,
-    TSNamespaceDeclarationBody, TSQualifiedName, TSTupleElement, TSType, TSTypeAliasDeclaration,
-    TSTypeName, TSTypeOperatorOperator, TSTypeParameterDeclaration, TSTypeParameterInstantiation,
-    TSTypeQueryExprName, TemplateLiteral, ThisExpression, UnaryExpression, VariableDeclaration,
-    VariableDeclarationKind,
+    IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinition,
+    MethodDefinitionKind, ModuleExportName, ObjectExpression, ObjectPropertyKind, Program,
+    PropertyKey, PropertyKind, Statement, StaticBlock, StaticMemberExpression, Super,
+    SwitchStatement, TSCallSignatureDeclaration, TSConditionalType,
+    TSConstructSignatureDeclaration, TSConstructorType, TSEnumDeclaration, TSEnumMemberName,
+    TSFunctionType, TSInferType, TSInterfaceDeclaration, TSLiteral, TSMappedType,
+    TSMethodSignature, TSModuleReference, TSNamespaceDeclaration, TSNamespaceDeclarationBody,
+    TSQualifiedName, TSTupleElement, TSType, TSTypeAliasDeclaration, TSTypeName,
+    TSTypeOperatorOperator, TSTypeParameterDeclaration, TSTypeParameterInstantiation,
+    TSTypeQueryExprName, TSTypeReference, TemplateLiteral, ThisExpression, UnaryExpression,
+    VariableDeclaration, VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
@@ -44,13 +47,18 @@ pub(crate) struct FileScope<'a> {
     /// there's none) and how many body-less declarations (overloads,
     /// `declare function`) come with it.
     functions: HashMap<&'a str, (&'a Function<'a>, usize)>,
+    /// The first declaration of each function (its first overload, if any),
+    /// which is the one ngtsc checks as an input transform.
+    first_functions: HashMap<&'a str, &'a Function<'a>>,
     enums: HashMap<&'a str, &'a TSEnumDeclaration<'a>>,
     classes: HashMap<&'a str, &'a Class<'a>>,
     imports: HashMap<&'a str, Import<'a>>,
-    /// Names exported from the file (`export ...` and `export { ... }`).
+    /// Names exported from the file (`export ...`, `export { ... }` and
+    /// `export default name`).
     exported: HashSet<&'a str>,
-    /// Interfaces, type aliases, classes and enums declared in the file.
-    types: HashSet<&'a str>,
+    /// Interfaces, type aliases, classes and enums declared in the file, and
+    /// whether the first declaration of each is itself marked `export`.
+    types: HashMap<&'a str, bool>,
     /// Where each top-level function, class and variable is first declared, as
     /// ngtsc's diagnostics point at it: the whole statement (with `export`) for
     /// a function or class, the declarator (`x: T`) for a variable.
@@ -178,6 +186,12 @@ impl<'a> FileScope<'a> {
                     }
                     ExportDefaultDeclarationKind::FunctionDeclaration(function) => {
                         scope.function(function, true, export.span);
+                    }
+                    ExportDefaultDeclarationKind::TSInterfaceDeclaration(i) => {
+                        scope.types.entry(i.id.name.as_str()).or_insert(true);
+                    }
+                    ExportDefaultDeclarationKind::Identifier(id) => {
+                        scope.exported.insert(id.name.as_str());
                     }
                     _ => {}
                 },
@@ -487,15 +501,15 @@ impl<'a> FileScope<'a> {
             Declaration::TSEnumDeclaration(e) => {
                 let id = e.id.name.as_str();
                 self.enums.entry(id).or_insert(e);
-                self.types.insert(id);
+                self.types.entry(id).or_insert(exported);
                 name(self, id);
             }
             Declaration::TSInterfaceDeclaration(i) => {
-                self.types.insert(i.id.name.as_str());
+                self.types.entry(i.id.name.as_str()).or_insert(exported);
                 name(self, i.id.name.as_str());
             }
             Declaration::TSTypeAliasDeclaration(t) => {
-                self.types.insert(t.id.name.as_str());
+                self.types.entry(t.id.name.as_str()).or_insert(exported);
                 name(self, t.id.name.as_str());
             }
             Declaration::TSImportEqualsDeclaration(alias) => {
@@ -513,6 +527,32 @@ impl<'a> FileScope<'a> {
         self.functions.get(name).is_some_and(|(f, _)| std::ptr::eq(*f, function))
     }
 
+    /// The first declaration of the function or static method `name` whose
+    /// implementation is `function`: its first overload, if any. That's
+    /// TypeScript's value declaration, the one ngtsc checks as a transform.
+    fn first_declaration(&self, name: &str, function: &'a Function<'a>) -> &'a Function<'a> {
+        if self.is_top_level_function(name, function) {
+            return self.first_functions.get(name).copied().unwrap_or(function);
+        }
+        self.first_static_method(function).map_or(function, |m| &m.value)
+    }
+
+    /// The first declaration of the static method whose implementation is
+    /// `function`.
+    fn first_static_method(&self, function: &Function<'_>) -> Option<&'a MethodDefinition<'a>> {
+        self.classes.values().find_map(|class| {
+            let methods = || {
+                class.body.body.iter().filter_map(|el| match el {
+                    ClassElement::MethodDefinition(m) if m.r#static => Some(&**m),
+                    _ => None,
+                })
+            };
+            let method = methods().find(|m| std::ptr::eq(&*m.value, function))?;
+            let name = method.key.static_name()?;
+            methods().find(|m| m.key.static_name().is_some_and(|n| n == name))
+        })
+    }
+
     fn function(&mut self, function: &'a Function<'a>, exported: bool, span: Span) {
         let Some(id) = &function.id else { return };
         let id = id.name.as_str();
@@ -520,6 +560,7 @@ impl<'a> FileScope<'a> {
             self.exported.insert(id);
         }
         self.declaration_spans.entry(id).or_insert(span);
+        self.first_functions.entry(id).or_insert(function);
         // Overloads are body-less declarations followed by the implementation.
         let entry = self.functions.entry(id).or_insert((function, 0));
         if function.body.is_none() {
@@ -535,10 +576,27 @@ impl<'a> FileScope<'a> {
         let id = id.name.as_str();
         self.classes.insert(id, class);
         self.declaration_spans.entry(id).or_insert(span);
-        self.types.insert(id);
+        self.types.entry(id).or_insert(exported);
         if exported {
             self.exported.insert(id);
         }
+    }
+
+    /// For a type declared in the file, whether ngtsc's `isStaticallyExported`
+    /// holds for the declaration the name resolves to: `None` for a name the
+    /// file doesn't declare as a type.
+    ///
+    /// A name with a value declaration (a class or enum, or a variable or
+    /// function merged with the type) resolves to it, and a value is also
+    /// exported by `export { X }` or `export default X`. An interface or type
+    /// alias has no value declaration: only its own `export` counts.
+    fn type_is_exported(&self, name: &str) -> Option<bool> {
+        let exported_itself = *self.types.get(name)?;
+        let has_value = self.classes.contains_key(name)
+            || self.enums.contains_key(name)
+            || self.variables.contains_key(name)
+            || self.functions.contains_key(name);
+        Some(if has_value { self.exported.contains(name) } else { exported_itself })
     }
 
     pub(crate) fn import(&self, name: &str) -> Option<Import<'a>> {
@@ -679,6 +737,9 @@ pub(crate) enum RefKind<'a> {
     /// An identifier with no declaration in this file that names a standard
     /// ECMAScript global (see [`ES_GLOBALS`]).
     Global,
+    /// A static getter or setter, or a static property without an
+    /// initializer, declared at the span.
+    StaticMember(Span),
     /// Any other declaration (a `declare`d variable, an enum member, ...).
     Other,
 }
@@ -907,6 +968,22 @@ const ES_GLOBALS: &[&str] = &[
     "WeakMap",
     "WeakRef",
     "WeakSet",
+];
+
+/// The globals in [`ES_GLOBALS`] declared as functions (`declare function`),
+/// each with a single signature; the others are `declare var`s.
+const ES_GLOBAL_FUNCTIONS: &[&str] = &[
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "eval",
+    "isFinite",
+    "isNaN",
+    "parseFloat",
+    "parseInt",
+    "unescape",
 ];
 
 /// Bounds a chain of import-equals aliases (`import A = B; import B = A;`).
@@ -1890,9 +1967,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             }
             // The object is in another file, and so is its member.
             object @ Value::Reference { kind: RefKind::Import { .. }, .. } => object,
-            Value::Reference { kind: RefKind::Global, .. } => {
-                Value::Reference { name: key_str(), kind: RefKind::Global }
-            }
+            // Including a member of a global (`Math.round`): ngtsc only
+            // resolves the global's own declaration.
             _ => Value::Dynamic,
         }
     }
@@ -1906,7 +1982,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     if m.r#static && m.key.static_name().is_some_and(|n| n == key) =>
                 {
                     if m.kind != MethodDefinitionKind::Method {
-                        return Value::Reference { name: key.into(), kind: RefKind::Other };
+                        return Value::Reference {
+                            name: key.into(),
+                            kind: RefKind::StaticMember(m.span),
+                        };
                     }
                     if m.value.body.is_none() {
                         overloads += 1;
@@ -1925,7 +2004,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                             let block = self.consts.scope().block_of(class);
                             self.eval(value, depth, &Frame::at(block))
                         }
-                        None => Value::Reference { name: key.into(), kind: RefKind::Other },
+                        None => Value::Reference {
+                            name: key.into(),
+                            kind: RefKind::StaticMember(p.span),
+                        },
                     };
                 }
                 _ => {}
@@ -1952,37 +2034,66 @@ impl<'s, 'a> Evaluator<'s, 'a> {
 /// `position` is the index in the `inputs:` array, `None` for
 /// `@Input({ transform })`; `container` is the `inputs:` value or the `@Input`
 /// argument, where ngtsc reports a transform that isn't even a reference.
-pub(crate) fn transform_error(
-    transform: &Prop<'_>,
+pub(crate) fn transform_error<'a>(
+    transform: &Prop<'a>,
     position: Option<usize>,
     input_name: &str,
-    class: &Class<'_>,
-    scope: &FileScope<'_>,
+    class: &Class<'a>,
+    scope: &FileScope<'a>,
     container: Span,
 ) -> Option<(String, Span)> {
     let value = &transform.value;
     let suffix = value.wrong_type_suffix();
     let expr_span = transform.expr.map_or(container, GetSpan::span);
     // ngtsc's `value.node`: where the reference is declared, or the expression
-    // that isn't analyzable.
+    // that isn't analyzable. For a declaration in another file, the nearest
+    // thing in this one is the expression.
     let node = || value_node_span(value, expr_span, scope);
+    let conflicting = format!("ngAcceptInputType_{input_name}");
+    let clash = || {
+        class
+            .body
+            .body
+            .iter()
+            .any(|el| {
+                el.r#static()
+                    && el
+                        .property_key()
+                        .and_then(PropertyKey::static_name)
+                        .is_some_and(|n| n == conflicting)
+            })
+            .then(|| {
+                (
+                    format!(
+                        "Class cannot have both a transform function on Input {input_name} and a static member called {conflicting}"
+                    ),
+                    node(),
+                )
+            })
+    };
     let def = match value {
         Value::Function(def) => *def,
-        Value::Reference { kind: RefKind::Function(function, _), .. } => FnDef::Function(function),
-        // Imports and globals can't be inspected from this file; assume a function.
-        Value::Reference {
-            kind: RefKind::Import { namespace_member: false } | RefKind::Global,
-            ..
-        } => {
-            return None;
+        Value::Reference { name, kind: RefKind::Function(function, _) } => {
+            FnDef::Function(scope.first_declaration(name, function))
         }
-        // ngtsc points at the declaration in the other file; the nearest
-        // thing in this one is the expression.
+        // An imported function can't be inspected from this file, so whether
+        // it's generic or overloaded is unknown; the name clash is checked
+        // after those.
+        Value::Reference { kind: RefKind::Import { namespace_member: false }, .. } => {
+            return clash();
+        }
+        // ngtsc can't name `ns.f` in the compiled file.
         Value::Reference { kind: RefKind::Import { namespace_member: true }, .. } => {
-            return Some((
-                format!("Input transform function could not be referenced{suffix}"),
-                expr_span,
-            ));
+            return clash().or_else(|| {
+                Some((format!("Input transform function could not be referenced{suffix}"), node()))
+            });
+        }
+        // A `declare function` of TypeScript's library: neither generic nor
+        // overloaded.
+        Value::Reference { name, kind: RefKind::Global }
+            if ES_GLOBAL_FUNCTIONS.contains(&name.as_str()) =>
+        {
+            return clash();
         }
         Value::Reference { .. } | Value::Dynamic => {
             return Some((format!("Input transform must be a function{suffix}"), node()));
@@ -2008,20 +2119,8 @@ pub(crate) fn transform_error(
             node(),
         ));
     }
-    let conflicting = format!("ngAcceptInputType_{input_name}");
-    if class.body.body.iter().any(|el| {
-        el.r#static()
-            && el
-                .property_key()
-                .and_then(PropertyKey::static_name)
-                .is_some_and(|n| n == conflicting)
-    }) {
-        return Some((
-            format!(
-                "Class cannot have both a transform function on Input {input_name} and a static member called {conflicting}"
-            ),
-            node(),
-        ));
+    if let Some(error) = clash() {
+        return Some(error);
     }
     match def.first_param_type() {
         Ok(None) => None,
@@ -2036,8 +2135,14 @@ pub(crate) fn transform_error(
             node(),
         )),
         Ok(Some(ty)) => {
-            let mut check = UnexportedType { scope, found: false };
-            check.visit_ts_type(ty);
+            // An arrow written in a member's `@Input` sees the class's type
+            // parameters.
+            let in_class = matches!(value, Value::Function(_))
+                && class.body.span.contains_inclusive(def.span());
+            let class_params = class.type_parameters.as_deref().filter(|_| in_class);
+            let mut check =
+                UnexportedType { scope, type_params: std::vec::Vec::new(), found: false };
+            check.with_params(class_params, |check| check.visit_ts_type(ty));
             check.found.then(|| {
                 (
                     "Symbol must be exported in order to be used as the type of an Input transform function"
@@ -2059,12 +2164,13 @@ fn value_node_span(value: &Value<'_>, expr_span: Span, scope: &FileScope<'_>) ->
             if scope.is_top_level_function(name, function) {
                 declared(name)
             } else {
-                static_method_span(function, scope)
+                scope.first_static_method(function).map(|m| m.span)
             }
         }
         Value::Reference { kind: RefKind::Class(class), .. } => {
             class.id.as_ref().and_then(|id| declared(id.name.as_str()))
         }
+        Value::Reference { kind: RefKind::StaticMember(span), .. } => Some(*span),
         Value::Reference { name, kind: RefKind::Other }
             if matches!(scope.variables.get(name.as_str()), Some(Variable::Declared(_))) =>
         {
@@ -2075,39 +2181,110 @@ fn value_node_span(value: &Value<'_>, expr_span: Span, scope: &FileScope<'_>) ->
     span.unwrap_or(expr_span)
 }
 
-/// The first declaration of the static method whose implementation is
-/// `function` (TypeScript's value declaration, the first overload if any).
-fn static_method_span(function: &Function<'_>, scope: &FileScope<'_>) -> Option<Span> {
-    scope.classes.values().find_map(|class| {
-        let methods = || {
-            class.body.body.iter().filter_map(|el| match el {
-                ClassElement::MethodDefinition(m) if m.r#static => Some(m),
-                _ => None,
-            })
-        };
-        let method = methods().find(|m| std::ptr::eq(&*m.value, function))?;
-        let name = method.key.static_name()?;
-        methods().find(|m| m.key.static_name().is_some_and(|n| n == name)).map(|m| m.span)
-    })
-}
-
-/// Finds a type reference to a same-file type that isn't exported, which ngtsc
-/// can't emit into the `.d.ts` (`assertEmittableInputType`).
+/// Finds what ngtsc's `assertEmittableInputType` rejects in a transform's
+/// parameter type: a type reference whose name is a plain identifier that
+/// resolves to a declaration in this file that isn't exported, which can't be
+/// written into the `.d.ts`. A type parameter never is. `typeof X` and the
+/// left side of `X.Y` aren't type references, so they're never checked.
 struct UnexportedType<'s, 'a> {
     scope: &'s FileScope<'a>,
+    /// The type parameters in scope, innermost last.
+    type_params: std::vec::Vec<&'a str>,
     found: bool,
 }
 
-impl<'a> Visit<'a> for UnexportedType<'_, 'a> {
-    fn visit_ts_type_name(&mut self, name: &TSTypeName<'a>) {
-        if let TSTypeName::IdentifierReference(id) = name {
-            let id = id.name.as_str();
-            if self.scope.types.contains(id) && !self.scope.exported.contains(id) {
-                self.found = true;
-            }
-        }
-        oxc_ast_visit::walk::walk_ts_type_name(self, name);
+impl<'a> UnexportedType<'_, 'a> {
+    /// Visits `walk` with `params` in scope.
+    fn with_params(
+        &mut self,
+        params: Option<&TSTypeParameterDeclaration<'a>>,
+        walk: impl FnOnce(&mut Self),
+    ) {
+        let len = self.type_params.len();
+        self.type_params
+            .extend(params.into_iter().flat_map(|d| &d.params).map(|p| p.name.name.as_str()));
+        walk(self);
+        self.type_params.truncate(len);
     }
+}
+
+impl<'a> Visit<'a> for UnexportedType<'_, 'a> {
+    fn visit_ts_type_reference(&mut self, reference: &TSTypeReference<'a>) {
+        if let TSTypeName::IdentifierReference(id) = &reference.type_name {
+            let name = id.name.as_str();
+            // Innermost first: a type parameter shadows a declaration.
+            let exported = if self.type_params.contains(&name) {
+                Some(false)
+            } else {
+                self.scope.type_is_exported(name)
+            };
+            self.found |= exported == Some(false);
+        }
+        if let Some(args) = &reference.type_arguments {
+            self.visit_ts_type_parameter_instantiation(args);
+        }
+    }
+
+    fn visit_ts_mapped_type(&mut self, ty: &TSMappedType<'a>) {
+        let len = self.type_params.len();
+        self.type_params.push(ty.key.name.as_str());
+        walk::walk_ts_mapped_type(self, ty);
+        self.type_params.truncate(len);
+    }
+
+    fn visit_ts_function_type(&mut self, ty: &TSFunctionType<'a>) {
+        self.with_params(ty.type_parameters.as_deref(), |v| walk::walk_ts_function_type(v, ty));
+    }
+
+    fn visit_ts_constructor_type(&mut self, ty: &TSConstructorType<'a>) {
+        self.with_params(ty.type_parameters.as_deref(), |v| walk::walk_ts_constructor_type(v, ty));
+    }
+
+    fn visit_ts_method_signature(&mut self, sig: &TSMethodSignature<'a>) {
+        self.with_params(sig.type_parameters.as_deref(), |v| {
+            walk::walk_ts_method_signature(v, sig)
+        });
+    }
+
+    fn visit_ts_call_signature_declaration(&mut self, sig: &TSCallSignatureDeclaration<'a>) {
+        self.with_params(sig.type_parameters.as_deref(), |v| {
+            walk::walk_ts_call_signature_declaration(v, sig);
+        });
+    }
+
+    fn visit_ts_construct_signature_declaration(
+        &mut self,
+        sig: &TSConstructSignatureDeclaration<'a>,
+    ) {
+        self.with_params(sig.type_parameters.as_deref(), |v| {
+            walk::walk_ts_construct_signature_declaration(v, sig);
+        });
+    }
+
+    /// `infer U` declares `U` for the `extends` clause and the true branch.
+    fn visit_ts_conditional_type(&mut self, ty: &TSConditionalType<'a>) {
+        self.visit_ts_type(&ty.check_type);
+        let mut infers = InferNames(std::vec::Vec::new());
+        infers.visit_ts_type(&ty.extends_type);
+        let len = self.type_params.len();
+        self.type_params.extend(infers.0);
+        self.visit_ts_type(&ty.extends_type);
+        self.visit_ts_type(&ty.true_type);
+        self.type_params.truncate(len);
+        self.visit_ts_type(&ty.false_type);
+    }
+}
+
+/// The type parameters `infer` declares in a conditional type's `extends`
+/// clause (not those of a conditional type nested in it).
+struct InferNames<'a>(std::vec::Vec<&'a str>);
+
+impl<'a> Visit<'a> for InferNames<'a> {
+    fn visit_ts_infer_type(&mut self, ty: &TSInferType<'a>) {
+        self.0.push(ty.type_parameter.name.name.as_str());
+    }
+
+    fn visit_ts_conditional_type(&mut self, _: &TSConditionalType<'a>) {}
 }
 
 /// The identifiers an expression mentions.

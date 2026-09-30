@@ -2536,6 +2536,16 @@ pub fn transform_angular_file(
         }
     }
 
+    // `@core.Input()` and the other member decorators through a namespace
+    // import of `@angular/core`.
+    let _core_namespaces = crate::directive::CoreNamespaces::enter(
+        import_map
+            .keys()
+            .filter(|name| is_angular_core_namespace(&import_map, name))
+            .map(ToString::to_string)
+            .collect(),
+    );
+
     // 2. Walk AST to find @Component decorated classes and extract metadata
     for stmt in &parser_ret.program.body {
         let (class, stmt_start) = match stmt {

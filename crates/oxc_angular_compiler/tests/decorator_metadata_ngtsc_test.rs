@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 432, "fixtures compared");
+    assert_eq!(compared, 496, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -710,4 +710,85 @@ export class Dir { @Input({transform: core.booleanAttribute}) v: any; }
         errors(&transform(source), source),
         vec![(message.to_string(), "core.booleanAttribute".to_string())]
     );
+}
+
+/// A transform declared in another file (an import, a namespace member or a
+/// global from TypeScript's lib): ngtsc 22.1.7 reports these at that
+/// declaration, which the snapshot can't record (the fixtures below are
+/// skipped for that reason, with the diagnostics ngtsc reported). oxc reports
+/// the same message on the expression.
+#[test]
+fn transform_declared_in_another_file_is_reported_on_the_expression() {
+    let fixtures: Value = serde_json::from_str(FIXTURES).unwrap();
+    let cases = [
+        ("probe: transform-clashImported", "booleanAttribute"),
+        ("probe: transform-clashImportedMeta", "booleanAttribute"),
+        ("probe: transform-clashGlobal", "parseInt"),
+        ("probe: transform-globalNumber", "Number"),
+        ("probe: transform-globalNumberClash", "Number"),
+        ("probe: transform-globalString", "String"),
+        ("probe: transform-nsClash", "u.toNum"),
+    ];
+    for (name, expression) in cases {
+        let fixture = fixtures["fixtures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["name"] == name)
+            .unwrap_or_else(|| panic!("{name}"));
+        let source = fixture["files"]["test.ts"].as_str().unwrap();
+        let expected: Vec<(String, String)> = fixture["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| (d.as_str().unwrap().to_string(), expression.to_string()))
+            .collect();
+        assert_eq!(errors(&transform(source), source), expected, "{name}");
+    }
+}
+
+/// ngtsc checks an overloaded static method's first declaration, not its
+/// implementation (checked with @angular/compiler-cli 22.1.7, which compiles
+/// this; the snapshot can't hold it because ngtsc emits the method's bare name,
+/// see `static_method_transform_is_not_confused_with_a_same_named_function`).
+#[test]
+fn overloaded_static_method_transform_is_checked_at_its_first_declaration() {
+    let source = "import {Directive, Input} from '@angular/core';
+interface Foo {}
+class U { static c(v: string): number; static c(v: string | Foo) { return 1; } }
+@Directive({selector: '[d]'})
+export class Dir { @Input({transform: U.c}) x!: number; }
+";
+    let result = transform(source);
+    assert_eq!(errors(&result, source), vec![]);
+    let code = strip(&result.code);
+    assert!(code.contains(r#"inputs:{x:[2,"x","x",U.c]}"#), "{code}");
+}
+
+/// Member decorators through a namespace import are Angular's only when the
+/// namespace imports `@angular/core` (ngtsc 22.1.7 compiles the query, host
+/// binding and listener below for `core`, and none of them for `foreign`).
+/// The snapshot compares the inputs and outputs of both
+/// (`probe: transform-coreNamespaceMembers` and
+/// `probe: transform-foreignNamespaceMembers`).
+#[test]
+fn namespaced_member_decorators_need_an_angular_core_namespace() {
+    let members = "
+export class Cmp {
+  @NS.ViewChild('ref') ref: any;
+  @NS.HostBinding('class.a') a = true;
+  @NS.HostListener('click') onClick() {}
+}
+";
+    let core = "import * as NS from '@angular/core';
+@NS.Component({selector: 'c', template: '<div #ref></div>'})";
+    let foreign = "import {Component} from '@angular/core';
+import * as NS from 'foreign-decorators';
+@Component({selector: 'c', template: '<div #ref></div>'})";
+    for (header, compiled) in [(core, true), (foreign, false)] {
+        let code = transform(&format!("{header}{members}")).code;
+        for part in ["viewQuery", "ɵɵclassProp(\"a\"", "ɵɵlistener(\"click\""] {
+            assert_eq!(code.contains(part), compiled, "{part} in\n{code}");
+        }
+    }
 }
