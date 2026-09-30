@@ -11,7 +11,8 @@ use oxc_ast::ast::{
     Expression, MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, Program, PropertyKey,
     Statement, TemplateLiteral, VariableDeclarationKind,
 };
-use oxc_span::Span;
+use oxc_diagnostics::OxcDiagnostic;
+use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
 use super::evaluator::{Evaluator, FileScope, Value};
@@ -649,12 +650,14 @@ pub(crate) struct DecoratorIo<'a> {
     pub inputs: Vec<'a, R3InputMetadata<'a>>,
     /// (class property name, binding property name)
     pub outputs: Vec<'a, (Ident<'a>, Ident<'a>)>,
-    /// The first error ngtsc reports for `inputs:`, then for `outputs:`.
-    pub input_error: Option<String>,
-    pub output_error: Option<String>,
+    /// The first error ngtsc reports for `inputs:`, then for `outputs:`, and
+    /// the node it reports it on (the `inputs:` / `outputs:` value).
+    pub input_error: Option<(String, Span)>,
+    pub output_error: Option<(String, Span)>,
 }
 
-/// The last property called `name` in a decorator metadata object.
+/// The last property called `name` in a decorator metadata object. Like
+/// ngtsc's `reflectObjectLiteral`, computed keys (`[K]: ...`) are skipped.
 pub(super) fn config_property<'a>(
     config: &'a ObjectExpression<'a>,
     name: &str,
@@ -662,12 +665,25 @@ pub(super) fn config_property<'a>(
 ) -> Option<&'a Expression<'a>> {
     config.properties.iter().rev().find_map(|prop| match prop {
         ObjectPropertyKind::ObjectProperty(prop)
-            if get_property_key_name(&prop.key, consts).is_some_and(|k| k == name) =>
+            if !prop.computed
+                && get_property_key_name(&prop.key, consts).is_some_and(|k| k == name) =>
         {
             Some(&prop.value)
         }
         _ => None,
     })
+}
+
+/// ngtsc's error for `value` in `@Directive.{field}`, or, when the value comes
+/// from another module, why oxc can't tell (ngtsc would read that file).
+fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) -> String {
+    match value {
+        Value::Reference { name, .. } if value.is_import() => format!(
+            "@Directive.{field} depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        ),
+        _ => format!("{}{}", message(), value.wrong_type_suffix()),
+    }
 }
 
 /// Parse `inputs:` / `outputs:` from a decorator metadata object.
@@ -690,6 +706,7 @@ pub(crate) fn parse_decorator_io<'a>(
     };
 
     if let Some(expr) = config_property(config, "inputs", consts) {
+        let span = expr.span();
         match evaluator.evaluate(expr) {
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
@@ -708,31 +725,38 @@ pub(crate) fn parse_decorator_io<'a>(
                         Value::Object(_) => {
                             parse_input_object(allocator, &mut io, item, i, source_text)
                         }
-                        other => Some(format!(
-                            "@Directive.inputs array can only contain strings or object literals{}",
-                            other.wrong_type_suffix()
+                        other => Some(io_error(
+                            "inputs",
+                            || {
+                                "@Directive.inputs array can only contain strings or object literals"
+                                    .into()
+                            },
+                            other,
                         )),
                     };
-                    io.input_error = io.input_error.take().or(error);
+                    io.input_error = io.input_error.take().or(error.map(|e| (e, span)));
                 }
             }
             other => {
-                io.input_error = Some(format!(
-                    "Failed to resolve @Directive.inputs to an array{}",
-                    other.wrong_type_suffix()
-                ));
+                let error = io_error(
+                    "inputs",
+                    || "Failed to resolve @Directive.inputs to an array".into(),
+                    &other,
+                );
+                io.input_error = Some((error, span));
             }
         }
     }
 
     if let Some(expr) = config_property(config, "outputs", consts) {
+        let span = expr.span();
         match evaluator.evaluate(expr) {
             Value::Array(items) => {
                 for (i, item) in items.iter().enumerate() {
                     match item {
                         Value::String(s) => {
                             let (class_name, binding_name) = parse_mapping_string(s);
-                            upsert(
+                            upsert_meta(
                                 &mut io.outputs,
                                 (alloc(class_name), alloc(binding_name)),
                                 |o| o.0.as_str(),
@@ -740,20 +764,22 @@ pub(crate) fn parse_decorator_io<'a>(
                         }
                         other => {
                             io.output_error = io.output_error.take().or_else(|| {
-                                Some(format!(
-                                    "Failed to resolve outputs at position {i} to a string{}",
-                                    other.wrong_type_suffix()
-                                ))
+                                let message = || {
+                                    format!("Failed to resolve outputs at position {i} to a string")
+                                };
+                                Some((io_error("outputs", message, other), span))
                             });
                         }
                     }
                 }
             }
             other => {
-                io.output_error = Some(format!(
-                    "Failed to resolve @Directive.outputs to a string array{}",
-                    other.wrong_type_suffix()
-                ));
+                let error = io_error(
+                    "outputs",
+                    || "Failed to resolve @Directive.outputs to a string array".into(),
+                    &other,
+                );
+                io.output_error = Some((error, span));
             }
         }
     }
@@ -780,12 +806,21 @@ fn parse_input_object<'a>(
     let name = match item.prop("name").map(|p| &p.value) {
         Some(Value::String(name)) => name.as_str(),
         other => {
-            return Some(format!(
-                "Value at position {position} of @Directive.inputs array must have a \"name\" property{}",
-                other.unwrap_or(&Value::Undefined).wrong_type_suffix()
-            ));
+            let message = || {
+                format!(
+                    "Value at position {position} of @Directive.inputs array must have a \"name\" property"
+                )
+            };
+            return Some(io_error("inputs", message, other.unwrap_or(&Value::Undefined)));
         }
     };
+    // ngtsc would read an imported alias or `required` flag from its file; oxc
+    // can't, and guessing would compile the wrong binding.
+    for key in ["alias", "required"] {
+        if let Some(value) = item.prop(key).map(|p| &p.value).filter(|v| v.is_import()) {
+            return Some(io_error("inputs", String::new, value));
+        }
+    }
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
     let transform_function = item
@@ -806,6 +841,8 @@ fn parse_input_object<'a>(
 
 /// ngtsc's `{...fromMeta, ...fromFields}` keyed by class property name: a member
 /// declaration replaces the metadata entry in place, new members are appended.
+/// The result is ordered like the keys of a JavaScript object: integer-like
+/// keys first, in ascending order.
 pub(crate) fn merge_by_class_property<T>(
     mut from_meta: Vec<'_, T>,
     from_fields: impl IntoIterator<Item = T>,
@@ -814,7 +851,16 @@ pub(crate) fn merge_by_class_property<T>(
     for field in from_fields {
         upsert(&mut from_meta, field, &key);
     }
+    // A stable sort: the other keys keep their insertion order.
+    from_meta.sort_by_key(|item| array_index(key(item)).unwrap_or(u32::MAX));
     from_meta
+}
+
+/// The array index a JavaScript object key stands for (`"0"`, `"42"`, but not
+/// `"01"` or `"4294967295"`), which orders it before all other keys.
+fn array_index(key: &str) -> Option<u32> {
+    let index: u32 = key.parse().ok()?;
+    (index != u32::MAX && index.to_string() == key).then_some(index)
 }
 
 /// Insert keyed by class property name, like assigning to a JS object: a
@@ -826,8 +872,16 @@ fn upsert<T>(list: &mut Vec<'_, T>, item: T, key: impl Fn(&T) -> &str) {
     }
 }
 
+/// [`upsert`] for a metadata entry. ngtsc assigns those to a plain object, where
+/// `__proto__` sets the prototype instead, so that entry is dropped.
+fn upsert_meta<T>(list: &mut Vec<'_, T>, item: T, key: impl Fn(&T) -> &str) {
+    if key(&item) != "__proto__" {
+        upsert(list, item, key);
+    }
+}
+
 fn upsert_input<'a>(inputs: &mut Vec<'a, R3InputMetadata<'a>>, input: R3InputMetadata<'a>) {
-    upsert(inputs, input, |i| i.class_property_name.as_str());
+    upsert_meta(inputs, input, |i| i.class_property_name.as_str());
 }
 
 /// The `@Component` / `@Directive` decorator on `class`, its metadata object
@@ -852,11 +906,14 @@ pub(crate) fn angular_decorator_config<'a>(
 /// `@Directive` on `class`, in the order it checks them
 /// (`extractDirectiveMetadata`): `inputs:`, input members, `outputs:`, then
 /// output members. ngtsc stops at the first one.
+///
+/// Each error points where ngtsc's does: the `inputs:` / `outputs:` value, or
+/// the member.
 pub fn decorator_io_errors<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     consts: &StringConsts<'a>,
-) -> std::vec::Vec<String> {
+) -> std::vec::Vec<OxcDiagnostic> {
     let Some((config, decorator_name)) = angular_decorator_config(class) else {
         return std::vec::Vec::new();
     };
@@ -879,7 +936,10 @@ pub fn decorator_io_errors<'a>(
                 .is_some()
                 || super::try_parse_signal_input(allocator, value, signal).is_some();
             is_input.then(|| {
-                format!("Input \"{name}\" is also declared as non-signal in @{decorator_name}.")
+                let message = format!(
+                    "Input \"{name}\" is also declared as non-signal in @{decorator_name}."
+                );
+                (message, prop.span)
             })
         })
     };
@@ -895,7 +955,10 @@ pub fn decorator_io_errors<'a>(
                 .is_some()
                 || super::try_parse_signal_output(value, signal).is_some();
             is_output.then(|| {
-                format!("Output \"{name}\" is unexpectedly declared in @{decorator_name} as well.")
+                let message = format!(
+                    "Output \"{name}\" is unexpectedly declared in @{decorator_name} as well."
+                );
+                (message, prop.span)
             })
         })
     };
@@ -905,6 +968,7 @@ pub fn decorator_io_errors<'a>(
         .or_else(input_members)
         .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()))
         .or_else(output_members)
+        .map(|(message, span)| OxcDiagnostic::error(message).with_label(span))
         .into_iter()
         .collect()
 }

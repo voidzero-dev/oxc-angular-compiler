@@ -6,32 +6,64 @@
 //! describe values the way that evaluator resolves them. This module reproduces
 //! the parts of it that can be answered from the current file, so the compiled
 //! metadata and the diagnostics match ngtsc word for word. Imported bindings
-//! can't be seen into and are treated as opaque references.
+//! can't be seen into and are treated as opaque references; anything computed
+//! from one stays a reference to that import (see [`Value::is_import`]).
 
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration,
-    ExportDefaultDeclarationKind, Expression, Function, ImportDeclarationSpecifier,
-    MethodDefinitionKind, ModuleExportName, ObjectPropertyKind, Program, PropertyKey, Statement,
+    Argument, ArrayExpression, ArrayExpressionElement, BinaryExpression, BindingPattern,
+    CallExpression, ChainElement, Class, ClassElement, ComputedMemberExpression,
+    ConditionalExpression, Declaration, ExportDefaultDeclarationKind, Expression, Function,
+    IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
+    ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
+    Statement, StaticMemberExpression, TSEnumDeclaration, TSEnumMemberName, TSLiteral,
+    TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator, TSTypeQueryExprName,
+    TemplateLiteral, UnaryExpression,
 };
+use oxc_ast_visit::Visit;
+use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 
 use crate::output::emitter::format_number_like_js;
 
 /// Everything declared at the top level of a file that the evaluator can resolve.
 #[derive(Default)]
 pub(crate) struct FileScope<'a> {
-    /// `const`/`let`/`var` bindings with an initializer.
-    variables: HashMap<&'a str, &'a Expression<'a>>,
-    /// Bindings with no initializer (`declare const X: T`, `let x;`), functions
-    /// and enums: references to a declaration that isn't evaluated.
-    declared: HashSet<&'a str>,
+    /// `const`/`let`/`var` bindings. The first declaration of a name wins, as
+    /// it's TypeScript's value declaration (`var X = ['a']; var X = ['b'];`).
+    variables: HashMap<&'a str, Variable<'a>>,
+    /// Function declarations: the implementation (the first declaration when
+    /// there's none) and how many body-less declarations (overloads,
+    /// `declare function`) come with it.
+    functions: HashMap<&'a str, (&'a Function<'a>, usize)>,
+    enums: HashMap<&'a str, &'a TSEnumDeclaration<'a>>,
     classes: HashMap<&'a str, &'a Class<'a>>,
     imports: HashMap<&'a str, Import<'a>>,
     /// Names exported from the file (`export ...` and `export { ... }`).
     exported: HashSet<&'a str>,
     /// Interfaces, type aliases, classes and enums declared in the file.
     types: HashSet<&'a str>,
+}
+
+/// A top-level variable binding.
+enum Variable<'a> {
+    /// A name bound by a declaration with an initializer, and the path to it
+    /// when it's destructured (`const { a: [x] } = init` binds `x` at `a`, `0`).
+    Init(&'a Expression<'a>, std::vec::Vec<PathKey<'a>>),
+    /// `declare const X: T`: evaluated from its type when that's a literal.
+    Declared(Option<&'a TSType<'a>>),
+    /// `let x;`: `undefined`.
+    Uninitialized,
+}
+
+/// A step into a destructured initializer, as ngtsc's `visitBindingElement` reads it.
+#[derive(Clone, Copy)]
+enum PathKey<'a> {
+    Index(usize),
+    Key(&'a str),
+    /// A key ngtsc doesn't follow (a string literal or computed property name).
+    Unknown,
 }
 
 /// An import binding: unless it's a namespace import, the name it's exported under.
@@ -104,25 +136,26 @@ impl<'a> FileScope<'a> {
         match decl {
             Declaration::VariableDeclaration(vars) => {
                 for var in &vars.declarations {
-                    let BindingPattern::BindingIdentifier(id) = &var.id else { continue };
-                    let id = id.name.as_str();
-                    match &var.init {
-                        Some(init) => {
-                            self.variables.insert(id, init);
-                        }
-                        None => {
-                            self.declared.insert(id);
-                        }
+                    let mut bindings = std::vec::Vec::new();
+                    collect_bindings(&var.id, &mut std::vec::Vec::new(), &mut bindings);
+                    for (id, path) in bindings {
+                        let variable = match &var.init {
+                            Some(init) => Variable::Init(init, path),
+                            None if vars.declare => Variable::Declared(
+                                var.type_annotation.as_ref().map(|t| &t.type_annotation),
+                            ),
+                            None => Variable::Uninitialized,
+                        };
+                        self.variables.entry(id).or_insert(variable);
+                        name(self, id);
                     }
-                    name(self, id);
                 }
             }
             Declaration::FunctionDeclaration(function) => self.function(function, exported),
             Declaration::ClassDeclaration(class) => self.class(class, exported),
             Declaration::TSEnumDeclaration(e) => {
                 let id = e.id.name.as_str();
-                // An enum isn't evaluated; it's a non-function reference.
-                self.declared.insert(id);
+                self.enums.entry(id).or_insert(e);
                 self.types.insert(id);
                 name(self, id);
             }
@@ -141,9 +174,16 @@ impl<'a> FileScope<'a> {
     fn function(&mut self, function: &'a Function<'a>, exported: bool) {
         let Some(id) = &function.id else { return };
         let id = id.name.as_str();
-        self.declared.insert(id);
         if exported {
             self.exported.insert(id);
+        }
+        // Overloads are body-less declarations followed by the implementation.
+        let entry = self.functions.entry(id).or_insert((function, 0));
+        if function.body.is_none() {
+            entry.1 += 1;
+        }
+        if function.body.is_some() || entry.0.body.is_none() {
+            entry.0 = function;
         }
     }
 
@@ -158,15 +198,69 @@ impl<'a> FileScope<'a> {
     }
 }
 
+/// The names a binding pattern declares, each with its path into the initializer.
+fn collect_bindings<'a>(
+    pattern: &'a BindingPattern<'a>,
+    path: &mut std::vec::Vec<PathKey<'a>>,
+    out: &mut std::vec::Vec<(&'a str, std::vec::Vec<PathKey<'a>>)>,
+) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => out.push((id.name.as_str(), path.clone())),
+        // A default value isn't evaluated (`const { a = 1 } = {}` is `undefined`).
+        BindingPattern::AssignmentPattern(p) => collect_bindings(&p.left, path, out),
+        BindingPattern::ObjectPattern(p) => {
+            for prop in &p.properties {
+                path.push(match &prop.key {
+                    PropertyKey::StaticIdentifier(id) if !prop.computed => {
+                        PathKey::Key(id.name.as_str())
+                    }
+                    _ => PathKey::Unknown,
+                });
+                collect_bindings(&prop.value, path, out);
+                path.pop();
+            }
+            // ngtsc reads `{ ...rest }` as the property named after the binding.
+            if let Some(rest) = &p.rest {
+                path.push(match &rest.argument {
+                    BindingPattern::BindingIdentifier(id) => PathKey::Key(id.name.as_str()),
+                    _ => PathKey::Unknown,
+                });
+                collect_bindings(&rest.argument, path, out);
+                path.pop();
+            }
+        }
+        BindingPattern::ArrayPattern(p) => {
+            for (i, element) in p.elements.iter().enumerate() {
+                if let Some(element) = element {
+                    path.push(PathKey::Index(i));
+                    collect_bindings(element, path, out);
+                    path.pop();
+                }
+            }
+            // ... and `[a, ...rest]` as the element at the rest element's position.
+            if let Some(rest) = &p.rest {
+                path.push(PathKey::Index(p.elements.len()));
+                collect_bindings(&rest.argument, path, out);
+                path.pop();
+            }
+        }
+    }
+}
+
 /// What a declaration reference resolves to.
 #[derive(Clone)]
 pub(crate) enum RefKind<'a> {
+    /// A function declaration or static method in this file, with the number of
+    /// body-less declarations (overloads) that come with it.
+    Function(&'a Function<'a>, usize),
     Class(&'a Class<'a>),
-    /// An imported binding, or `ns.x` through `import * as ns`.
+    /// An imported binding, `ns.x` through `import * as ns`, or a value
+    /// computed from one: its value is in another file.
     Import,
-    /// An identifier with no declaration in this file (a global, most likely).
+    /// An identifier with no declaration in this file that names a standard
+    /// ECMAScript global (see [`ES_GLOBALS`]).
     Global,
-    /// Any other declaration (a variable without an initializer, ...).
+    /// Any other declaration (a `declare`d variable, an enum member, ...).
     Other,
 }
 
@@ -186,7 +280,23 @@ pub(crate) enum Value<'a> {
         name: String,
         kind: RefKind<'a>,
     },
+    /// A member of an enum declared in this file (ngtsc's `EnumValue`): the
+    /// enum's name and the member's value.
+    Enum {
+        name: String,
+        value: Box<Value<'a>>,
+    },
+    /// `array.slice`, `array.concat` or `string.concat`, which ngtsc can call.
+    Builtin(Builtin<'a>),
     Dynamic,
+}
+
+/// ngtsc's `KnownFn`s (partial_evaluator/src/builtin.ts), bound to their receiver.
+#[derive(Clone)]
+pub(crate) enum Builtin<'a> {
+    ArraySlice(Vec<Value<'a>>),
+    ArrayConcat(Vec<Value<'a>>),
+    StringConcat(String),
 }
 
 /// An object literal property: its key, value, and the source expression it came from.
@@ -210,6 +320,12 @@ impl<'a> Value<'a> {
             Value::String(s) => Some(s),
             _ => None,
         }
+    }
+
+    /// Whether this is an imported binding (or a value computed from one), which
+    /// can't be evaluated without reading another file.
+    pub(crate) fn is_import(&self) -> bool {
+        matches!(self, Value::Reference { kind: RefKind::Import, .. })
     }
 
     /// ngtsc's `describeResolvedType`, one level deep like its diagnostics.
@@ -249,7 +365,8 @@ impl<'a> Value<'a> {
                     .join(", ")
             ),
             Value::Module => "(module)".into(),
-            Value::Reference { name, .. } => name.clone(),
+            Value::Reference { name, .. } | Value::Enum { name, .. } => name.clone(),
+            Value::Builtin(_) => "Function".into(),
             Value::Dynamic => "(not statically analyzable)".into(),
         }
     }
@@ -262,6 +379,34 @@ impl<'a> Value<'a> {
             _ => format!(" Value is of type '{}'.", self.describe()),
         }
     }
+
+    /// JavaScript truthiness. Arrays, objects and references are objects.
+    fn truthy(&self) -> bool {
+        match self {
+            Value::Null | Value::Undefined => false,
+            Value::Bool(b) => *b,
+            Value::Number(n) => *n != 0.0 && !n.is_nan(),
+            Value::String(s) => !s.is_empty(),
+            _ => true,
+        }
+    }
+
+    /// A rough size, to charge for copying the value.
+    fn weight(&self) -> u32 {
+        match self {
+            Value::Array(items) => {
+                items.iter().fold(1u32, |sum, item| sum.saturating_add(item.weight()))
+            }
+            Value::Object(props) => {
+                props.iter().fold(1u32, |sum, p| sum.saturating_add(p.value.weight()))
+            }
+            Value::Enum { value, .. } => value.weight().saturating_add(1),
+            Value::Builtin(Builtin::ArraySlice(items) | Builtin::ArrayConcat(items)) => {
+                items.iter().fold(1u32, |sum, item| sum.saturating_add(item.weight()))
+            }
+            _ => 1,
+        }
+    }
 }
 
 fn quote_key(key: &str) -> String {
@@ -272,29 +417,120 @@ fn quote_key(key: &str) -> String {
     }
 }
 
-/// Bounds expression nesting, to keep deeply nested literals off the end of the stack.
-const MAX_DEPTH: u16 = 256;
+/// The `declare var` / `declare function` globals of TypeScript's ES2022
+/// library (lib.es5.d.ts ... lib.es2022.*.d.ts). ngtsc resolves these to a
+/// reference to their declaration; any other undeclared name is unknown to it.
+/// DOM globals depend on the `lib` option and are treated as unknown.
+const ES_GLOBALS: &[&str] = &[
+    "AggregateError",
+    "Array",
+    "ArrayBuffer",
+    "Atomics",
+    "BigInt",
+    "BigInt64Array",
+    "BigUint64Array",
+    "Boolean",
+    "DataView",
+    "Date",
+    "decodeURI",
+    "decodeURIComponent",
+    "encodeURI",
+    "encodeURIComponent",
+    "Error",
+    "escape",
+    "eval",
+    "EvalError",
+    "FinalizationRegistry",
+    "Float32Array",
+    "Float64Array",
+    "Function",
+    "Infinity",
+    "Int16Array",
+    "Int32Array",
+    "Int8Array",
+    "isFinite",
+    "isNaN",
+    "JSON",
+    "Map",
+    "Math",
+    "NaN",
+    "Number",
+    "Object",
+    "parseFloat",
+    "parseInt",
+    "Promise",
+    "Proxy",
+    "RangeError",
+    "ReferenceError",
+    "RegExp",
+    "Set",
+    "SharedArrayBuffer",
+    "String",
+    "Symbol",
+    "SyntaxError",
+    "TypeError",
+    "Uint16Array",
+    "Uint32Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "unescape",
+    "URIError",
+    "WeakMap",
+    "WeakRef",
+    "WeakSet",
+];
+
+/// Bounds expression nesting (including calls), to keep deeply nested values
+/// off the end of the stack; a debug build uses about 2 KiB per level. Chains of
+/// consts don't nest (see [`Evaluator::evaluate_dependencies`]).
+const MAX_DEPTH: u16 = 500;
+
+/// Bounds the total work of one evaluator: values that grow exponentially
+/// (`const B = [...A, ...A]`, recursive calls) become dynamic instead of hanging.
+const FUEL: u32 = 1 << 22;
+
+/// Parameter bindings of the function being evaluated, or the members of the
+/// enum whose initializers are being evaluated.
+type Frame<'a> = HashMap<&'a str, Value<'a>>;
+
+/// A property key or index, as ngtsc's `accessHelper` receives it.
+#[derive(Clone, Copy)]
+enum Key<'k> {
+    Str(&'k str),
+    Num(f64),
+}
 
 pub(crate) struct Evaluator<'s, 'a> {
     /// The file's declarations are only looked at when an identifier is resolved.
     consts: &'s super::StringConsts<'a>,
-    /// Top-level variables already evaluated, so a chain of consts that each
-    /// reference the previous one several times stays linear. `None` while a
-    /// variable is being evaluated, which makes a circular reference dynamic.
-    variables: std::cell::RefCell<HashMap<&'a str, Option<Value<'a>>>>,
+    /// Top-level variables and enums already evaluated (with their weight), so a
+    /// chain of consts that each reference the previous one several times stays
+    /// linear. `None` while one is being evaluated, which makes a circular
+    /// reference dynamic (ngtsc overflows its stack on those).
+    variables: RefCell<HashMap<&'a str, Option<(Value<'a>, u32)>>>,
+    fuel: Cell<u32>,
 }
 
 impl<'s, 'a> Evaluator<'s, 'a> {
     pub(crate) fn new(consts: &'s super::StringConsts<'a>) -> Self {
-        Self { consts, variables: std::cell::RefCell::default() }
+        Self { consts, variables: RefCell::default(), fuel: Cell::new(FUEL) }
     }
 
     pub(crate) fn evaluate(&self, expr: &'a Expression<'a>) -> Value<'a> {
-        self.eval(expr, 0)
+        self.eval(expr, 0, &Frame::default())
     }
 
-    fn eval(&self, expr: &'a Expression<'a>, depth: u16) -> Value<'a> {
-        if depth > MAX_DEPTH {
+    /// Use up `amount` of the fuel; `false` once it has run out.
+    fn spend(&self, amount: u32) -> bool {
+        let left = self.fuel.get();
+        self.fuel.set(left.saturating_sub(amount));
+        left >= amount
+    }
+
+    /// Evaluates `expr`. Each kind of expression has its own function, so this
+    /// one's stack frame (paid on every level of nesting) stays small.
+    fn eval(&self, expr: &'a Expression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        if depth > MAX_DEPTH || !self.spend(1) {
             return Value::Dynamic;
         }
         let depth = depth + 1;
@@ -303,108 +539,248 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             Expression::BooleanLiteral(b) => Value::Bool(b.value),
             Expression::NumericLiteral(n) => Value::Number(n.value),
             Expression::StringLiteral(s) => Value::String(s.value.to_string()),
-            Expression::TemplateLiteral(tpl) => {
-                let mut out = String::new();
-                for (i, quasi) in tpl.quasis.iter().enumerate() {
-                    let Some(cooked) = &quasi.value.cooked else { return Value::Dynamic };
-                    out.push_str(cooked);
-                    if let Some(e) = tpl.expressions.get(i) {
-                        match self.eval(e, depth) {
-                            Value::String(s) => out.push_str(&s),
-                            Value::Number(n) => out.push_str(&format_number_like_js(n)),
-                            Value::Bool(b) => out.push_str(if b { "true" } else { "false" }),
-                            Value::Null => out.push_str("null"),
-                            Value::Undefined => out.push_str("undefined"),
-                            _ => return Value::Dynamic,
-                        }
-                    }
+            Expression::TemplateLiteral(tpl) => self.template(tpl, depth, frame),
+            Expression::Identifier(id) => self.identifier(id.name.as_str(), depth, frame),
+            Expression::ParenthesizedExpression(e) => self.eval(&e.expression, depth, frame),
+            Expression::TSAsExpression(e) => self.eval(&e.expression, depth, frame),
+            Expression::TSNonNullExpression(e) => self.eval(&e.expression, depth, frame),
+            Expression::ArrayExpression(arr) => self.array(arr, depth, frame),
+            Expression::ObjectExpression(obj) => self.object(obj, depth, frame),
+            Expression::StaticMemberExpression(m) => self.static_member_expr(m, depth, frame),
+            Expression::ComputedMemberExpression(m) => self.computed_member_expr(m, depth, frame),
+            // `a?.b` and `f?.()` evaluate like `a.b` and `f()`.
+            Expression::ChainExpression(chain) => match &chain.expression {
+                ChainElement::CallExpression(call) => self.call(call, depth, frame),
+                ChainElement::TSNonNullExpression(e) => self.eval(&e.expression, depth, frame),
+                ChainElement::StaticMemberExpression(m) => self.static_member_expr(m, depth, frame),
+                ChainElement::ComputedMemberExpression(m) => {
+                    self.computed_member_expr(m, depth, frame)
                 }
-                Value::String(out)
-            }
-            Expression::Identifier(id) => self.identifier(id.name.as_str(), depth),
-            Expression::ParenthesizedExpression(e) => self.eval(&e.expression, depth),
-            Expression::TSAsExpression(e) => self.eval(&e.expression, depth),
-            Expression::TSSatisfiesExpression(e) => self.eval(&e.expression, depth),
-            Expression::TSNonNullExpression(e) => self.eval(&e.expression, depth),
-            Expression::TSTypeAssertion(e) => self.eval(&e.expression, depth),
-            Expression::ArrayExpression(arr) => {
-                let mut items = std::vec::Vec::new();
-                for el in &arr.elements {
-                    match el {
-                        ArrayExpressionElement::SpreadElement(spread) => {
-                            match self.eval(&spread.argument, depth) {
-                                Value::Array(inner) => items.extend(inner),
-                                _ => return Value::Dynamic,
-                            }
-                        }
-                        ArrayExpressionElement::Elision(_) => items.push(Value::Dynamic),
-                        _ => items.push(self.eval(el.to_expression(), depth)),
-                    }
-                }
-                Value::Array(items)
-            }
-            Expression::ObjectExpression(obj) => {
-                let mut props = std::vec::Vec::new();
-                for prop in &obj.properties {
-                    match prop {
-                        ObjectPropertyKind::ObjectProperty(p) => {
-                            if p.method || !matches!(p.kind, oxc_ast::ast::PropertyKind::Init) {
-                                return Value::Dynamic;
-                            }
-                            let Some(key) = self.property_key(&p.key, depth) else {
-                                return Value::Dynamic;
-                            };
-                            let value = self.eval(&p.value, depth);
-                            props.push(Prop { key, value, expr: Some(&p.value) });
-                        }
-                        ObjectPropertyKind::SpreadProperty(spread) => {
-                            match self.eval(&spread.argument, depth) {
-                                Value::Object(inner) => props.extend(inner),
-                                _ => return Value::Dynamic,
-                            }
-                        }
-                    }
-                }
-                Value::Object(props)
-            }
-            Expression::StaticMemberExpression(m) => {
-                let object = self.eval(&m.object, depth);
-                self.member(object, m.property.name.as_str(), depth)
-            }
-            Expression::ComputedMemberExpression(m) => {
-                let object = self.eval(&m.object, depth);
-                match self.eval(&m.expression, depth) {
-                    Value::String(key) => self.member(object, &key, depth),
-                    Value::Number(n) => self.member(object, &format_number_like_js(n), depth),
-                    _ => Value::Dynamic,
-                }
-            }
+                ChainElement::PrivateFieldExpression(_) => Value::Dynamic,
+            },
+            Expression::CallExpression(call) => self.call(call, depth, frame),
+            Expression::ConditionalExpression(c) => self.conditional(c, depth, frame),
+            Expression::UnaryExpression(u) => self.unary_expr(u, depth, frame),
+            Expression::BinaryExpression(b) => self.binary_expr(b, depth, frame),
+            Expression::LogicalExpression(l) => self.logical_expr(l, depth, frame),
+            // Everything else is syntax ngtsc doesn't evaluate: `satisfies`,
+            // `<T>x`, functions, `typeof`, `new`, ...
             _ => Value::Dynamic,
         }
     }
 
-    fn property_key(&self, key: &'a PropertyKey<'a>, depth: u16) -> Option<String> {
-        match key {
-            PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
-            PropertyKey::PrivateIdentifier(_) => None,
-            key => match self.eval(key.to_expression(), depth) {
-                Value::String(s) => Some(s),
-                Value::Number(n) => Some(format_number_like_js(n)),
-                _ => None,
+    #[inline(never)]
+    fn template(&self, tpl: &'a TemplateLiteral<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        let mut out = String::new();
+        for (i, quasi) in tpl.quasis.iter().enumerate() {
+            let Some(cooked) = &quasi.value.cooked else { return Value::Dynamic };
+            out.push_str(cooked);
+            if let Some(e) = tpl.expressions.get(i) {
+                match literal(self.eval(e, depth, frame)) {
+                    Value::Dynamic => return Value::Dynamic,
+                    value if value.is_import() => return value,
+                    value => out.push_str(&to_js_string(&value)),
+                }
+            }
+        }
+        Value::String(out)
+    }
+
+    #[inline(never)]
+    fn array(&self, arr: &'a ArrayExpression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        let mut items = std::vec::Vec::new();
+        for el in &arr.elements {
+            match el {
+                ArrayExpressionElement::SpreadElement(spread) => {
+                    items.extend(self.spread(&spread.argument, depth, frame));
+                }
+                ArrayExpressionElement::Elision(_) => items.push(Value::Dynamic),
+                _ => items.push(self.eval(el.to_expression(), depth, frame)),
+            }
+        }
+        Value::Array(items)
+    }
+
+    #[inline(never)]
+    fn object(&self, obj: &'a ObjectExpression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        let mut props = std::vec::Vec::new();
+        for prop in &obj.properties {
+            match prop {
+                ObjectPropertyKind::ObjectProperty(p) => {
+                    if p.method || !matches!(p.kind, PropertyKind::Init) {
+                        return Value::Dynamic;
+                    }
+                    let Some(key) = self.property_key(&p.key, p.computed, depth, frame) else {
+                        return Value::Dynamic;
+                    };
+                    let value = self.eval(&p.value, depth, frame);
+                    props.push(Prop { key, value, expr: Some(&p.value) });
+                }
+                ObjectPropertyKind::SpreadProperty(spread) => {
+                    match self.eval(&spread.argument, depth, frame) {
+                        Value::Object(inner) if self.spend(inner.len() as u32) => {
+                            props.extend(inner);
+                        }
+                        value if value.is_import() => return value,
+                        _ => return Value::Dynamic,
+                    }
+                }
+            }
+        }
+        Value::Object(props)
+    }
+
+    #[inline(never)]
+    fn static_member_expr(
+        &self,
+        m: &'a StaticMemberExpression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> Value<'a> {
+        let object = self.eval(&m.object, depth, frame);
+        self.member(object, Key::Str(m.property.name.as_str()), depth)
+    }
+
+    #[inline(never)]
+    fn computed_member_expr(
+        &self,
+        m: &'a ComputedMemberExpression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> Value<'a> {
+        let object = self.eval(&m.object, depth, frame);
+        if matches!(object, Value::Dynamic) {
+            return Value::Dynamic;
+        }
+        match self.eval(&m.expression, depth, frame) {
+            Value::String(key) => self.member(object, Key::Str(&key), depth),
+            Value::Number(n) => self.member(object, Key::Num(n), depth),
+            key if key.is_import() => key,
+            _ => Value::Dynamic,
+        }
+    }
+
+    #[inline(never)]
+    fn conditional(
+        &self,
+        c: &'a ConditionalExpression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> Value<'a> {
+        match self.eval(&c.test, depth, frame) {
+            Value::Dynamic => Value::Dynamic,
+            test if test.is_import() => test,
+            test if test.truthy() => self.eval(&c.consequent, depth, frame),
+            _ => self.eval(&c.alternate, depth, frame),
+        }
+    }
+
+    #[inline(never)]
+    fn unary_expr(&self, u: &'a UnaryExpression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        if !matches!(
+            u.operator,
+            UnaryOperator::UnaryNegation
+                | UnaryOperator::UnaryPlus
+                | UnaryOperator::LogicalNot
+                | UnaryOperator::BitwiseNot
+        ) {
+            return Value::Dynamic;
+        }
+        match self.eval(&u.argument, depth, frame) {
+            Value::Dynamic => Value::Dynamic,
+            value if value.is_import() => value,
+            value => unary(u.operator, &value),
+        }
+    }
+
+    #[inline(never)]
+    fn binary_expr(&self, b: &'a BinaryExpression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        if matches!(b.operator, BinaryOperator::In | BinaryOperator::Instanceof) {
+            return Value::Dynamic;
+        }
+        // Operands must be primitives (an enum member counts as its value).
+        let left = literal(self.eval(&b.left, depth, frame));
+        let right = literal(self.eval(&b.right, depth, frame));
+        match (left, right) {
+            (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
+            (value, _) | (_, value) if value.is_import() => value,
+            (left, right) => binary(b.operator, &left, &right),
+        }
+    }
+
+    #[inline(never)]
+    fn logical_expr(
+        &self,
+        l: &'a LogicalExpression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> Value<'a> {
+        // `??` isn't one of ngtsc's operators.
+        if l.operator == LogicalOperator::Coalesce {
+            return Value::Dynamic;
+        }
+        let left = self.eval(&l.left, depth, frame);
+        let right = self.eval(&l.right, depth, frame);
+        match (left, right) {
+            (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
+            (value, _) | (_, value) if value.is_import() => value,
+            (left, right) => match (l.operator, left.truthy()) {
+                (LogicalOperator::And, true) | (LogicalOperator::Or, false) => right,
+                _ => left,
             },
         }
     }
 
-    fn identifier(&self, name: &'a str, depth: u16) -> Value<'a> {
+    /// The elements `...expr` adds to an array or an argument list.
+    fn spread(
+        &self,
+        expr: &'a Expression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> std::vec::Vec<Value<'a>> {
+        match self.eval(expr, depth, frame) {
+            Value::Array(inner) if self.spend(inner.len() as u32) => inner,
+            value if value.is_import() => vec![value],
+            // ngtsc marks only this element as dynamic, not the whole array.
+            _ => vec![Value::Dynamic],
+        }
+    }
+
+    fn property_key(
+        &self,
+        key: &'a PropertyKey<'a>,
+        computed: bool,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> Option<String> {
+        if computed {
+            // A computed key has to evaluate to a string (`{ [1]: x }` doesn't).
+            return match self.eval(key.to_expression(), depth, frame) {
+                Value::String(s) => Some(s),
+                _ => None,
+            };
+        }
+        match key {
+            PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
+            PropertyKey::StringLiteral(s) => Some(s.value.to_string()),
+            PropertyKey::NumericLiteral(n) => Some(format_number_like_js(n.value)),
+            _ => None,
+        }
+    }
+
+    fn identifier(&self, name: &'a str, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        if let Some(value) = frame.get(name) {
+            return value.clone();
+        }
         let scope = self.consts.scope();
-        if let Some(init) = scope.variables.get(name) {
-            if let Some(cached) = self.variables.borrow().get(name) {
-                return cached.clone().unwrap_or(Value::Dynamic);
-            }
-            self.variables.borrow_mut().insert(name, None);
-            let value = self.eval(init, depth);
-            self.variables.borrow_mut().insert(name, Some(value.clone()));
-            return value;
+        if scope.variables.contains_key(name) || scope.enums.contains_key(name) {
+            return self.top_level(name, depth);
+        }
+        if let Some((function, overloads)) = scope.functions.get(name) {
+            return Value::Reference {
+                name: name.into(),
+                kind: RefKind::Function(function, *overloads),
+            };
         }
         if let Some(class) = scope.classes.get(name) {
             return Value::Reference { name: name.into(), kind: RefKind::Class(class) };
@@ -418,58 +794,612 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 None => Value::Module,
             };
         }
-        if scope.declared.contains(name) {
-            return Value::Reference { name: name.into(), kind: RefKind::Other };
-        }
         match name {
             "undefined" => Value::Undefined,
-            _ => Value::Reference { name: name.into(), kind: RefKind::Global },
+            _ if ES_GLOBALS.contains(&name) => {
+                Value::Reference { name: name.into(), kind: RefKind::Global }
+            }
+            // ngtsc can't find a declaration for it.
+            _ => Value::Dynamic,
         }
     }
 
-    fn member(&self, object: Value<'a>, key: &str, depth: u16) -> Value<'a> {
+    /// A top-level variable's or enum's value, evaluated once.
+    fn top_level(&self, name: &'a str, depth: u16) -> Value<'a> {
+        if let Some(cached) = self.variables.borrow().get(name) {
+            return match cached {
+                Some((value, weight)) if self.spend(*weight) => value.clone(),
+                _ => Value::Dynamic,
+            };
+        }
+        self.evaluate_dependencies(name, depth);
+        self.evaluate_top_level(name, depth)
+    }
+
+    /// Evaluates the top-level bindings `root`'s initializer mentions (and theirs)
+    /// before `root`, deepest first, so a long chain of consts
+    /// (`const X2 = [...X1]`) is evaluated one link at a time instead of
+    /// recursively through the whole chain.
+    fn evaluate_dependencies(&self, root: &'a str, depth: u16) {
+        let scope = self.consts.scope();
+        let pending = |name: &str| {
+            (scope.variables.contains_key(name) || scope.enums.contains_key(name))
+                && !self.variables.borrow().contains_key(name)
+        };
+        let mut seen = HashSet::from([root]);
+        let mut stack = vec![(root, false)];
+        while let Some((name, ready)) = stack.pop() {
+            if ready {
+                if name != root && pending(name) {
+                    self.evaluate_top_level(name, depth);
+                }
+                continue;
+            }
+            stack.push((name, true));
+            let mut mentions = Mentions(std::vec::Vec::new());
+            match (scope.variables.get(name), scope.enums.get(name)) {
+                (Some(Variable::Init(init, _)), _) => mentions.visit_expression(init),
+                (_, Some(e)) => mentions.visit_ts_enum_declaration(e),
+                _ => {}
+            }
+            for dep in mentions.0 {
+                if pending(dep) && seen.insert(dep) {
+                    stack.push((dep, false));
+                }
+            }
+        }
+    }
+
+    fn evaluate_top_level(&self, name: &'a str, depth: u16) -> Value<'a> {
+        let scope = self.consts.scope();
+        self.variables.borrow_mut().insert(name, None);
+        let value = match (scope.variables.get(name), scope.enums.get(name)) {
+            (Some(variable), _) => self.variable(name, variable, depth),
+            (_, Some(e)) => self.enumeration(e, depth),
+            _ => Value::Dynamic,
+        };
+        let weight = value.weight();
+        self.variables.borrow_mut().insert(name, Some((value.clone(), weight)));
+        value
+    }
+
+    fn variable(&self, name: &'a str, variable: &Variable<'a>, depth: u16) -> Value<'a> {
+        match variable {
+            // Top-level declarations don't see the caller's parameters.
+            Variable::Init(init, path) => {
+                let mut value = self.eval(init, depth, &Frame::default());
+                for key in path {
+                    value = match key {
+                        PathKey::Index(i) => self.member(value, Key::Num(*i as f64), depth),
+                        PathKey::Key(k) => self.member(value, Key::Str(k), depth),
+                        PathKey::Unknown => Value::Dynamic,
+                    };
+                    if matches!(value, Value::Dynamic) {
+                        break;
+                    }
+                }
+                value
+            }
+            // A literal type is its value; otherwise it's a reference to the variable.
+            Variable::Declared(ty) => match ty.map(|ty| self.eval_type(ty, depth)) {
+                Some(value) if !matches!(value, Value::Dynamic) => value,
+                _ => Value::Reference { name: name.into(), kind: RefKind::Other },
+            },
+            Variable::Uninitialized => Value::Undefined,
+        }
+    }
+
+    /// ngtsc's `visitEnumDeclaration`: a map of members to enum values. A member
+    /// without an initializer is its index (not the previous member plus one).
+    fn enumeration(&self, e: &'a TSEnumDeclaration<'a>, depth: u16) -> Value<'a> {
+        let name_of = |member: &'a TSEnumMemberName<'a>| match member {
+            TSEnumMemberName::Identifier(id) => Some(id.name.as_str()),
+            TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
+                Some(s.value.as_str())
+            }
+            TSEnumMemberName::ComputedTemplateString(t) => {
+                t.quasis.first().and_then(|q| q.value.cooked.as_ref()).map(oxc_str::Str::as_str)
+            }
+        };
+        // Inside the initializers, a member's name refers to the member.
+        let frame: Frame<'a> = e
+            .body
+            .members
+            .iter()
+            .filter_map(|m| name_of(&m.id))
+            .map(|n| (n, Value::Reference { name: n.into(), kind: RefKind::Other }))
+            .collect();
+        let props = e
+            .body
+            .members
+            .iter()
+            .enumerate()
+            .filter_map(|(index, member)| {
+                let key = name_of(&member.id)?;
+                let value = match &member.initializer {
+                    Some(init) => self.eval(init, depth, &frame),
+                    None => Value::Number(index as f64),
+                };
+                let value = Value::Enum { name: e.id.name.to_string(), value: Box::new(value) };
+                Some(Prop { key: key.to_string(), value, expr: None })
+            })
+            .collect();
+        Value::Object(props)
+    }
+
+    /// ngtsc's `visitType`, for `declare const X: T`.
+    fn eval_type(&self, ty: &'a TSType<'a>, depth: u16) -> Value<'a> {
+        if depth > MAX_DEPTH || !self.spend(1) {
+            return Value::Dynamic;
+        }
+        let depth = depth + 1;
+        match ty {
+            TSType::TSNullKeyword(_) => Value::Null,
+            TSType::TSLiteralType(lit) => match &lit.literal {
+                TSLiteral::BooleanLiteral(b) => Value::Bool(b.value),
+                TSLiteral::NumericLiteral(n) => Value::Number(n.value),
+                TSLiteral::StringLiteral(s) => Value::String(s.value.to_string()),
+                TSLiteral::TemplateLiteral(t) if t.expressions.is_empty() => t
+                    .quasis
+                    .first()
+                    .and_then(|q| q.value.cooked.as_ref())
+                    .map_or(Value::Dynamic, |c| Value::String(c.to_string())),
+                TSLiteral::UnaryExpression(u) => {
+                    match self.eval(&u.argument, depth, &Frame::default()) {
+                        Value::Dynamic => Value::Dynamic,
+                        value => unary(u.operator, &value),
+                    }
+                }
+                _ => Value::Dynamic,
+            },
+            TSType::TSTupleType(tuple) => Value::Array(
+                tuple.element_types.iter().map(|el| self.eval_tuple_element(el, depth)).collect(),
+            ),
+            TSType::TSNamedTupleMember(member) => {
+                self.eval_tuple_element(&member.element_type, depth)
+            }
+            TSType::TSTypeOperatorType(op) if op.operator == TSTypeOperatorOperator::Readonly => {
+                self.eval_type(&op.type_annotation, depth)
+            }
+            TSType::TSTypeQuery(query) => match &query.expr_name {
+                TSTypeQueryExprName::IdentifierReference(id) => {
+                    self.identifier(id.name.as_str(), depth, &Frame::default())
+                }
+                // `typeof E.A` is a reference to the declaration of `A`.
+                TSTypeQueryExprName::QualifiedName(name) => {
+                    let mut left = &name.left;
+                    while let TSTypeName::QualifiedName(q) = left {
+                        left = &q.left;
+                    }
+                    let imported = matches!(left, TSTypeName::IdentifierReference(id)
+                        if self.consts.scope().imports.contains_key(id.name.as_str()));
+                    let kind = if imported { RefKind::Import } else { RefKind::Other };
+                    Value::Reference { name: name.right.name.to_string(), kind }
+                }
+                _ => Value::Dynamic,
+            },
+            // A type naming a class is a reference to it.
+            TSType::TSTypeReference(reference) => {
+                let name = match &reference.type_name {
+                    TSTypeName::IdentifierReference(id) => id.name.as_str(),
+                    TSTypeName::QualifiedName(q) => q.right.name.as_str(),
+                    TSTypeName::ThisExpression(_) => return Value::Dynamic,
+                };
+                match self.consts.scope().classes.get(name) {
+                    Some(class) => {
+                        Value::Reference { name: name.into(), kind: RefKind::Class(class) }
+                    }
+                    None => Value::Dynamic,
+                }
+            }
+            _ => Value::Dynamic,
+        }
+    }
+
+    fn eval_tuple_element(&self, element: &'a TSTupleElement<'a>, depth: u16) -> Value<'a> {
+        element.as_ts_type().map_or(Value::Dynamic, |ty| self.eval_type(ty, depth))
+    }
+
+    /// ngtsc's `visitCallExpression`: builtins, and same-file functions whose
+    /// body is a single `return`.
+    fn call(&self, call: &'a CallExpression<'a>, depth: u16, frame: &Frame<'a>) -> Value<'a> {
+        let (function, overloads) = match self.eval(&call.callee, depth, frame) {
+            Value::Builtin(builtin) => {
+                let args = self.arguments(call, depth, frame);
+                return self.call_builtin(builtin, args);
+            }
+            Value::Reference { kind: RefKind::Function(function, overloads), .. } => {
+                (function, overloads)
+            }
+            // An imported function runs in another file.
+            callee if callee.is_import() => return callee,
+            _ => return Value::Dynamic,
+        };
+        // A body-less first declaration (an overload, `declare function`) can't be evaluated.
+        let Some(body) = function.body.as_ref().filter(|_| overloads == 0) else {
+            return Value::Dynamic;
+        };
+        let [Statement::ReturnStatement(ret)] = body.statements.as_slice() else {
+            return Value::Dynamic;
+        };
+        if !body.directives.is_empty() {
+            return Value::Dynamic;
+        }
+        let args = self.arguments(call, depth, frame);
+        // ngtsc counts a `this` parameter as the first one.
+        let offset = usize::from(function.this_param.is_some());
+        let mut scope = Frame::default();
+        for (i, param) in function.params.items.iter().enumerate() {
+            let arg = match args.get(i + offset) {
+                None | Some(Value::Undefined) if param.initializer.is_some() => {
+                    param.initializer.as_ref().map(|init| self.eval(init, depth, &scope))
+                }
+                arg => arg.cloned(),
+            };
+            bind(&mut scope, &param.pattern, arg.unwrap_or(Value::Undefined));
+        }
+        if let Some(rest) = &function.params.rest {
+            let start = function.params.items.len() + offset;
+            let rest_args = args.get(start..).map_or_else(std::vec::Vec::new, <[_]>::to_vec);
+            bind(&mut scope, &rest.rest.argument, Value::Array(rest_args));
+        }
+        ret.argument.as_ref().map_or(Value::Undefined, |e| self.eval(e, depth, &scope))
+    }
+
+    fn arguments(
+        &self,
+        call: &'a CallExpression<'a>,
+        depth: u16,
+        frame: &Frame<'a>,
+    ) -> std::vec::Vec<Value<'a>> {
+        let mut args = std::vec::Vec::new();
+        for arg in &call.arguments {
+            match arg {
+                Argument::SpreadElement(spread) => {
+                    args.extend(self.spread(&spread.argument, depth, frame));
+                }
+                _ => args.push(self.eval(arg.to_expression(), depth, frame)),
+            }
+        }
+        args
+    }
+
+    fn call_builtin(&self, builtin: Builtin<'a>, args: std::vec::Vec<Value<'a>>) -> Value<'a> {
+        match builtin {
+            Builtin::ArraySlice(items) if args.is_empty() => Value::Array(items),
+            Builtin::ArraySlice(_) => Value::Dynamic,
+            Builtin::ArrayConcat(mut items) => {
+                for arg in args {
+                    match arg {
+                        Value::Array(inner) if self.spend(inner.len() as u32) => {
+                            items.extend(inner);
+                        }
+                        Value::Array(_) => return Value::Dynamic,
+                        arg => items.push(arg),
+                    }
+                }
+                Value::Array(items)
+            }
+            Builtin::StringConcat(mut s) => {
+                for arg in args {
+                    let arg = match arg {
+                        Value::Enum { value, .. } => *value,
+                        arg => arg,
+                    };
+                    match arg {
+                        Value::Null
+                        | Value::Undefined
+                        | Value::Bool(_)
+                        | Value::Number(_)
+                        | Value::String(_) => s.push_str(&to_js_string(&arg)),
+                        arg if arg.is_import() => return arg,
+                        _ => return Value::Dynamic,
+                    }
+                }
+                Value::String(s)
+            }
+        }
+    }
+
+    /// ngtsc's `accessHelper`: `object.key` / `object[key]`.
+    fn member(&self, object: Value<'a>, key: Key<'_>, depth: u16) -> Value<'a> {
+        let key_str = || match key {
+            Key::Str(s) => s.to_string(),
+            Key::Num(n) => format_number_like_js(n),
+        };
         match object {
             Value::Object(props) => {
+                let key = key_str();
                 props.into_iter().rev().find(|p| p.key == key).map_or(Value::Undefined, |p| p.value)
             }
             Value::Array(items) => match key {
-                "length" => Value::Number(items.len() as f64),
-                _ => key
-                    .parse::<usize>()
-                    .ok()
-                    .and_then(|i| items.into_iter().nth(i))
-                    .unwrap_or(Value::Undefined),
+                Key::Str("length") => Value::Number(items.len() as f64),
+                Key::Str("slice") => Value::Builtin(Builtin::ArraySlice(items)),
+                Key::Str("concat") => Value::Builtin(Builtin::ArrayConcat(items)),
+                // Only an integer indexes an array; `X['0']` doesn't.
+                Key::Num(n) if n.fract() == 0.0 => {
+                    if n >= 0.0 && n < items.len() as f64 {
+                        items.into_iter().nth(n as usize).unwrap_or(Value::Undefined)
+                    } else {
+                        Value::Undefined
+                    }
+                }
+                _ => Value::Dynamic,
             },
-            Value::String(s) if key == "length" => Value::Number(s.chars().count() as f64),
-            Value::Module => Value::Reference { name: key.into(), kind: RefKind::Import },
-            Value::Reference { kind: RefKind::Class(class), .. } => {
-                self.static_member(class, key, depth)
+            Value::String(s) if matches!(key, Key::Str("concat")) => {
+                Value::Builtin(Builtin::StringConcat(s))
             }
-            Value::Reference { kind: RefKind::Import | RefKind::Global, .. } => {
-                Value::Reference { name: key.into(), kind: RefKind::Global }
+            Value::Module => Value::Reference { name: key_str(), kind: RefKind::Import },
+            Value::Reference { kind: RefKind::Class(class), .. } => {
+                self.static_member(class, &key_str(), depth)
+            }
+            // The object is in another file, and so is its member.
+            object @ Value::Reference { kind: RefKind::Import, .. } => object,
+            Value::Reference { kind: RefKind::Global, .. } => {
+                Value::Reference { name: key_str(), kind: RefKind::Global }
             }
             _ => Value::Dynamic,
         }
     }
 
     fn static_member(&self, class: &'a Class<'a>, key: &str, depth: u16) -> Value<'a> {
+        let mut overloads = 0;
+        let mut method = None;
         for element in &class.body.body {
             match element {
                 ClassElement::MethodDefinition(m)
-                    if m.r#static
-                        && m.kind == MethodDefinitionKind::Method
-                        && m.key.static_name().is_some_and(|n| n == key) =>
+                    if m.r#static && m.key.static_name().is_some_and(|n| n == key) =>
                 {
-                    return Value::Reference { name: key.into(), kind: RefKind::Other };
+                    if m.kind != MethodDefinitionKind::Method {
+                        return Value::Reference { name: key.into(), kind: RefKind::Other };
+                    }
+                    if m.value.body.is_none() {
+                        overloads += 1;
+                    }
+                    if m.value.body.is_some() || method.is_none() {
+                        method = Some(&*m.value);
+                    }
                 }
                 ClassElement::PropertyDefinition(p)
-                    if p.r#static && p.key.static_name().is_some_and(|n| n == key) =>
+                    if method.is_none()
+                        && p.r#static
+                        && p.key.static_name().is_some_and(|n| n == key) =>
                 {
-                    return p.value.as_ref().map_or(Value::Undefined, |v| self.eval(v, depth));
+                    return match &p.value {
+                        Some(value) => self.eval(value, depth, &Frame::default()),
+                        None => Value::Reference { name: key.into(), kind: RefKind::Other },
+                    };
                 }
                 _ => {}
             }
         }
-        if key == "prototype" { Value::Dynamic } else { Value::Undefined }
+        match method {
+            Some(method) => {
+                Value::Reference { name: key.into(), kind: RefKind::Function(method, overloads) }
+            }
+            None => Value::Undefined,
+        }
+    }
+}
+
+/// The identifiers an expression mentions.
+struct Mentions<'a>(std::vec::Vec<&'a str>);
+
+impl<'a> Visit<'a> for Mentions<'a> {
+    fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
+        self.0.push(id.name.as_str());
+    }
+}
+
+/// Bind a parameter: a destructured parameter's names aren't evaluated.
+fn bind<'a>(frame: &mut Frame<'a>, pattern: &'a BindingPattern<'a>, value: Value<'a>) {
+    if let BindingPattern::BindingIdentifier(id) = pattern {
+        frame.insert(id.name.as_str(), value);
+        return;
+    }
+    let mut names = std::vec::Vec::new();
+    collect_bindings(pattern, &mut std::vec::Vec::new(), &mut names);
+    for (name, _) in names {
+        frame.insert(name, Value::Dynamic);
+    }
+}
+
+/// ngtsc's `literal()`: an operand of a binary operator or a template literal
+/// must be a primitive, and an enum member counts as its value.
+fn literal(value: Value<'_>) -> Value<'_> {
+    let value = match value {
+        Value::Enum { value, .. } => *value,
+        value => value,
+    };
+    match value {
+        Value::Dynamic
+        | Value::Null
+        | Value::Undefined
+        | Value::Bool(_)
+        | Value::Number(_)
+        | Value::String(_) => value,
+        value if value.is_import() => value,
+        _ => Value::Dynamic,
+    }
+}
+
+/// `String(value)` for a primitive.
+fn to_js_string(value: &Value<'_>) -> String {
+    match value {
+        Value::Null => "null".into(),
+        Value::Undefined => "undefined".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => format_number_like_js(*n),
+        Value::String(s) => s.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Null | Value::Undefined => String::new(),
+                item => to_js_string(item),
+            })
+            .collect::<std::vec::Vec<_>>()
+            .join(","),
+        _ => "[object Object]".into(),
+    }
+}
+
+/// `Number(value)`. Arrays convert through their string form, like in JavaScript.
+fn to_number(value: &Value<'_>) -> f64 {
+    match value {
+        Value::Null => 0.0,
+        Value::Bool(b) => f64::from(u8::from(*b)),
+        Value::Number(n) => *n,
+        Value::String(s) => string_to_number(s),
+        Value::Array(_) => string_to_number(&to_js_string(value)),
+        _ => f64::NAN,
+    }
+}
+
+/// JavaScript's `StringToNumber`.
+fn string_to_number(s: &str) -> f64 {
+    let is_js_space = |c: char| {
+        matches!(
+            c,
+            '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
+                ..='\u{200a}'
+                    | '\u{2028}'
+                    | '\u{2029}'
+                    | '\u{202f}'
+                    | '\u{205f}'
+                    | '\u{3000}'
+                    | '\u{feff}'
+        )
+    };
+    let s = s.trim_matches(is_js_space);
+    if s.is_empty() {
+        return 0.0;
+    }
+    let radix = |digits: &str, radix: u32| {
+        if digits.is_empty() {
+            return f64::NAN;
+        }
+        digits
+            .chars()
+            .try_fold(0.0, |acc: f64, c| {
+                c.to_digit(radix).map(|d| acc * f64::from(radix) + f64::from(d))
+            })
+            .unwrap_or(f64::NAN)
+    };
+    match s.get(..2) {
+        Some("0x" | "0X") => return radix(&s[2..], 16),
+        Some("0o" | "0O") => return radix(&s[2..], 8),
+        Some("0b" | "0B") => return radix(&s[2..], 2),
+        _ => {}
+    }
+    let unsigned = s.strip_prefix(['+', '-']).unwrap_or(s);
+    if unsigned == "Infinity" {
+        return if s.starts_with('-') { f64::NEG_INFINITY } else { f64::INFINITY };
+    }
+    // Rust also parses `inf`, `nan`, ...: only accept JavaScript's decimal syntax.
+    let (mantissa, exponent) = match unsigned.find(['e', 'E']) {
+        Some(at) => (&unsigned[..at], Some(&unsigned[at + 1..])),
+        None => (unsigned, None),
+    };
+    let (int, frac) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    let valid_mantissa = digits(int) && digits(frac) && !(int.is_empty() && frac.is_empty());
+    let valid_exponent = exponent.is_none_or(|e| {
+        let e = e.strip_prefix(['+', '-']).unwrap_or(e);
+        !e.is_empty() && digits(e)
+    });
+    if valid_mantissa && valid_exponent { s.parse().unwrap_or(f64::NAN) } else { f64::NAN }
+}
+
+/// JavaScript's `ToInt32`.
+fn to_int32(n: f64) -> i32 {
+    if !n.is_finite() {
+        return 0;
+    }
+    (n.trunc().rem_euclid(4_294_967_296.0) as u32) as i32
+}
+
+fn unary<'a>(operator: UnaryOperator, value: &Value<'a>) -> Value<'a> {
+    let value = match value {
+        // An enum member is an object at runtime.
+        Value::Enum { .. } => &Value::Dynamic,
+        value => value,
+    };
+    let number = || if matches!(value, Value::Dynamic) { f64::NAN } else { to_number(value) };
+    match operator {
+        UnaryOperator::UnaryNegation => Value::Number(-number()),
+        UnaryOperator::UnaryPlus => Value::Number(number()),
+        UnaryOperator::LogicalNot => Value::Bool(!value.truthy()),
+        UnaryOperator::BitwiseNot => Value::Number(f64::from(!to_int32(number()))),
+        _ => Value::Dynamic,
+    }
+}
+
+/// A binary operator on two primitives.
+fn binary<'a>(operator: BinaryOperator, left: &Value<'a>, right: &Value<'a>) -> Value<'a> {
+    let (l, r) = (to_number(left), to_number(right));
+    let shift = || to_int32(r) as u32 & 31;
+    match operator {
+        BinaryOperator::Addition => match (left, right) {
+            (Value::String(_), _) | (_, Value::String(_)) => {
+                Value::String(to_js_string(left) + &to_js_string(right))
+            }
+            _ => Value::Number(l + r),
+        },
+        BinaryOperator::Subtraction => Value::Number(l - r),
+        BinaryOperator::Multiplication => Value::Number(l * r),
+        BinaryOperator::Division => Value::Number(l / r),
+        BinaryOperator::Remainder => Value::Number(l % r),
+        BinaryOperator::Exponential => {
+            Value::Number(if r.is_nan() || (l.abs() == 1.0 && r.is_infinite()) {
+                f64::NAN
+            } else {
+                l.powf(r)
+            })
+        }
+        BinaryOperator::BitwiseAnd => Value::Number(f64::from(to_int32(l) & to_int32(r))),
+        BinaryOperator::BitwiseOR => Value::Number(f64::from(to_int32(l) | to_int32(r))),
+        BinaryOperator::BitwiseXOR => Value::Number(f64::from(to_int32(l) ^ to_int32(r))),
+        BinaryOperator::ShiftLeft => Value::Number(f64::from(to_int32(l).wrapping_shl(shift()))),
+        BinaryOperator::ShiftRight => Value::Number(f64::from(to_int32(l) >> shift())),
+        BinaryOperator::ShiftRightZeroFill => {
+            Value::Number(f64::from((to_int32(l) as u32) >> shift()))
+        }
+        BinaryOperator::LessThan => Value::Bool(compare(left, right, false)),
+        BinaryOperator::GreaterThan => Value::Bool(compare(right, left, false)),
+        BinaryOperator::LessEqualThan => Value::Bool(compare(left, right, true)),
+        BinaryOperator::GreaterEqualThan => Value::Bool(compare(right, left, true)),
+        BinaryOperator::Equality => Value::Bool(loose_equals(left, right)),
+        BinaryOperator::Inequality => Value::Bool(!loose_equals(left, right)),
+        BinaryOperator::StrictEquality => Value::Bool(strict_equals(left, right)),
+        BinaryOperator::StrictInequality => Value::Bool(!strict_equals(left, right)),
+        BinaryOperator::In | BinaryOperator::Instanceof => Value::Dynamic,
+    }
+}
+
+/// `a < b` (or `a <= b`): strings compare by UTF-16 code units, anything else as numbers.
+fn compare(a: &Value<'_>, b: &Value<'_>, or_equal: bool) -> bool {
+    let ordering = match (a, b) {
+        (Value::String(a), Value::String(b)) => Some(a.encode_utf16().cmp(b.encode_utf16())),
+        _ => to_number(a).partial_cmp(&to_number(b)),
+    };
+    ordering.is_some_and(|o| o.is_lt() || (or_equal && o.is_eq()))
+}
+
+fn strict_equals(a: &Value<'_>, b: &Value<'_>) -> bool {
+    match (a, b) {
+        (Value::Null, Value::Null) | (Value::Undefined, Value::Undefined) => true,
+        (Value::Bool(a), Value::Bool(b)) => a == b,
+        (Value::Number(a), Value::Number(b)) => a == b,
+        (Value::String(a), Value::String(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn loose_equals(a: &Value<'_>, b: &Value<'_>) -> bool {
+    match (a, b) {
+        (Value::Null | Value::Undefined, Value::Null | Value::Undefined) => true,
+        (Value::Null | Value::Undefined, _) | (_, Value::Null | Value::Undefined) => false,
+        (Value::String(_), Value::String(_)) => strict_equals(a, b),
+        _ => to_number(a) == to_number(b),
     }
 }

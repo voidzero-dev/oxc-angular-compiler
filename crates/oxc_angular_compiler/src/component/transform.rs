@@ -2579,9 +2579,7 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             // `inputs:`/`outputs:` forms ngtsc rejects, rather than dropping them silently.
-            for error in decorator_io_errors(allocator, class, &string_consts) {
-                result.diagnostics.push(OxcDiagnostic::error(error));
-            }
+            result.diagnostics.extend(decorator_io_errors(allocator, class, &string_consts));
 
             if let Some(mut metadata) = extract_component_metadata(
                 &allocator,

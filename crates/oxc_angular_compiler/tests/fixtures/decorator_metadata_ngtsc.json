@@ -23,7 +23,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<TestDirWithInputs,never,never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,false,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should wrap \"inputs\" and \"outputs\" keys if they contain unsafe characters",
@@ -39,7 +40,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<SomeDir,\"[somedir]\",never,{\"track-type\":{\"alias\":\"track-type\";\"required\":false;};\"track-name\":{\"alias\":\"track-name\";\"required\":false;};\"inputTrackName\":{\"alias\":\"inputTrackName\";\"required\":false;};\"src.xl\":{\"alias\":\"src.xl\";\"required\":false;};\"trackType\":{\"alias\":\"track-type\";\"required\":false;};\"trackName\":{\"alias\":\"track-name\";\"required\":false;};},{\"output-track-type\":\"output-track-type\";\"output-track-name\":\"output-track-name\";\"outputTrackName\":\"outputTrackName\";\"output.event\":\"output.event\";},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should generate the correct declaration for class members decorated with @Input",
@@ -54,7 +56,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<TestDir,\"[dir]\",never,{\"noArgs\":{\"alias\":\"noArgs\";\"required\":false;};\"stringArg\":{\"alias\":\"aliasedStringArg\";\"required\":false;};\"requiredNoAlias\":{\"alias\":\"requiredNoAlias\";\"required\":true;};\"requiredWithAlias\":{\"alias\":\"aliasedRequiredWithAlias\";\"required\":true;};},{},never,never,false,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should generate the correct declaration for directives using the `inputs` array",
@@ -69,7 +72,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<TestDir,\"[dir]\",never,{\"plain\":{\"alias\":\"plain\";\"required\":false;};\"withAlias\":{\"alias\":\"aliasedWithAlias\";\"required\":false;};\"plainLiteral\":{\"alias\":\"plainLiteral\";\"required\":false;};\"aliasedLiteral\":{\"alias\":\"alisedLiteralAlias\";\"required\":false;};\"requiredLiteral\":{\"alias\":\"requiredLiteral\";\"required\":true;};\"requiredAlisedLiteral\":{\"alias\":\"requiredAlisedLiteralAlias\";\"required\":true;};},{},never,never,false,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should handle queries that use an InjectionToken",
@@ -84,7 +88,8 @@
           "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(TOKEN,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.viewChild=_t.first);}}"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should compile an input with a transform function that contains a generic parameter",
@@ -101,7 +106,8 @@
           "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:boolean|string|i1.GenericWrapper<string>;"
         }
       },
-      "dtsImports": ["import * as i1 from \"./types\";"]
+      "dtsImports": ["import * as i1 from \"./types\";"],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should compile an input with a transform function that contains nested generic parameters",
@@ -119,7 +125,8 @@
           "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:boolean|string|i1.GenericWrapper<i2.GenericClass<string>>;"
         }
       },
-      "dtsImports": ["import * as i1 from \"./types\";", "import * as i2 from \"./other-types\";"]
+      "dtsImports": ["import * as i1 from \"./types\";", "import * as i2 from \"./other-types\";"],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should compile an input with an inline transform function",
@@ -136,7 +143,8 @@
           "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:i1.ExternalToNumberType;"
         }
       },
-      "dtsImports": ["import * as i1 from \"external\";"]
+      "dtsImports": ["import * as i1 from \"external\";"],
+      "diagnosticSpans": []
     },
     {
       "name": "ngtsc_spec: should treat an input transform function only with a `this` parameter as unknown",
@@ -152,7 +160,8 @@
           "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "authoring_inputs_spec: should fail if signal input is also declared in `inputs` decorator field.",
@@ -162,7 +171,8 @@
       },
       "diagnostics": ["Input \"data\" is also declared as non-signal in @Directive."],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[159, 180]]
     },
     {
       "name": "authoring_outputs_spec: should fail if used with output declared in @Directive metadata",
@@ -172,7 +182,8 @@
       },
       "diagnostics": ["Output \"click\" is unexpectedly declared in @Directive as well."],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[212, 251]]
     },
     {
       "name": "authoring_outputs_spec: should fail if used with output declared in @Component metadata",
@@ -182,7 +193,8 @@
       },
       "diagnostics": ["Output \"click\" is unexpectedly declared in @Component as well."],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[238, 277]]
     },
     {
       "name": "authoring_models_spec: should report a diagnostic if a model input is also declared in the `inputs` field",
@@ -192,7 +204,8 @@
       },
       "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[160, 182]]
     },
     {
       "name": "compliance/r3_view_compiler_bindings/order_bindings",
@@ -210,7 +223,8 @@
           "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<MyCmp,\"my-cmp\",never,{},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: transform-inlineArrowNoParams",
@@ -231,7 +245,8 @@
           "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: transform-importedFn",
@@ -252,7 +267,8 @@
           "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: transform-thisOnly",
@@ -273,7 +289,8 @@
           "dts:ngAcceptInputType_w": "staticngAcceptInputType_w:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: eval-inputsObj",
@@ -285,7 +302,8 @@
         "Failed to resolve @Directive.inputs to an array Value is of type '{ a: number }'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[125, 131]]
     },
     {
       "name": "probe: eval-inputsCall",
@@ -297,7 +315,8 @@
         "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[152, 156]]
     },
     {
       "name": "probe: eval-inputsRef",
@@ -309,7 +328,8 @@
         "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[142, 143]]
     },
     {
       "name": "probe: eval-inputsElemRef",
@@ -321,7 +341,8 @@
         "@Directive.inputs array can only contain strings or object literals Value is a reference to 'U'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[142, 145]]
     },
     {
       "name": "probe: eval-inputsElemDyn",
@@ -333,7 +354,8 @@
         "@Directive.inputs array can only contain strings or object literals Value is a reference to 'X'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[146, 149]]
     },
     {
       "name": "probe: eval-inputsNameNum",
@@ -345,7 +367,8 @@
         "Value at position 0 of @Directive.inputs array must have a \"name\" property Value is of type 'number'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[125, 136]]
     },
     {
       "name": "probe: eval-inputsNameRef",
@@ -357,7 +380,8 @@
         "Value at position 0 of @Directive.inputs array must have a \"name\" property Value is a reference to 'U'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[142, 153]]
     },
     {
       "name": "probe: eval-multiErr",
@@ -369,7 +393,8 @@
         "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[125, 131]]
     },
     {
       "name": "probe: resolve-fnMultiStmt",
@@ -381,7 +406,8 @@
         "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[130, 134]]
     },
     {
       "name": "probe: resolve-arrowConstFn",
@@ -393,7 +419,8 @@
         "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[109, 113]]
     },
     {
       "name": "probe: resolve-letArr",
@@ -408,7 +435,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: resolve-varArr",
@@ -423,7 +451,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: resolve-letStrElem",
@@ -438,7 +467,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: resolve-inputsTplName",
@@ -453,7 +483,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"w\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: resolve-inputsNameViaConst",
@@ -468,7 +499,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"w\":{\"alias\":\"xw\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: resolve-inputsHole",
@@ -480,7 +512,8 @@
         "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[86, 98]]
     },
     {
       "name": "probe: basic-all-forms",
@@ -513,7 +546,8 @@
           "dts:ngAcceptInputType_y": "staticngAcceptInputType_y:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-duplicateMetadataEntries",
@@ -529,7 +563,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"c\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{\"o\":\"q\";\"p\":\"p\";},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-extraColonSegments",
@@ -545,7 +580,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"b\";\"required\":false;};},{\"o\":\"p\";},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-dtsMemberOverridesImportedTransform",
@@ -561,7 +597,8 @@
           "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-numberSmall",
@@ -576,7 +613,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b1e-7\":{\"alias\":\"b1e-7\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-numberLarge",
@@ -591,7 +629,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"d123456789012345680000\":{\"alias\":\"d123456789012345680000\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-numberMicro",
@@ -606,7 +645,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"e0.000001\":{\"alias\":\"e0.000001\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-numberFraction",
@@ -621,7 +661,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"f1.5\":{\"alias\":\"f1.5\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-infinityGlobal",
@@ -633,7 +674,8 @@
         "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[78, 94]]
     },
     {
       "name": "probe: review-nanGlobal",
@@ -645,7 +687,8 @@
         "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
       ],
       "classes": {},
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": [[78, 89]]
     },
     {
       "name": "probe: review-undefinedKeyword",
@@ -660,7 +703,8 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"uundefined\":{\"alias\":\"uundefined\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
-      "dtsImports": []
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: review-numberExponent",
@@ -675,6 +719,2651 @@
           "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"x1e+21\";\"required\":false;};\"b\":{\"alias\":\"y2.5e+300\";\"required\":false;};},{},never,never,true,never>;"
         }
       },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: eval-binaryPlus",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a' + '', 'b' + 1, 'c' + true, 'd' + null]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b1:\"b1\",ctrue:\"ctrue\",dnull:\"dnull\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b1\":{\"alias\":\"b1\";\"required\":false;};\"ctrue\":{\"alias\":\"ctrue\";\"required\":false;};\"dnull\":{\"alias\":\"dnull\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-binaryArith",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`x${1 + 2 * 3 - 4 / 2 % 3}`, `y${2 ** 10}`, `z${5 & 3}${5 | 3}${5 ^ 3}${1 << 3}${-16 >> 2}${-16 >>> 28}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x5:\"x5\",y1024:\"y1024\",\"z1768-415\":\"z1768-415\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x5\":{\"alias\":\"x5\";\"required\":false;};\"y1024\":{\"alias\":\"y1024\";\"required\":false;};\"z1768-415\":{\"alias\":\"z1768-415\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-binaryCompare",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`a${1 < 2}${1 <= 1}${2 > 3}${2 >= 3}${1 == 1}${'1' === '1'}${1 != 2}${1 !== 1}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{atruetruefalsefalsetruetruetruefalse:\"atruetruefalsefalsetruetruetruefalse\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"atruetruefalsefalsetruetruetruefalse\":{\"alias\":\"atruetruefalsefalsetruetruetruefalse\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-conditional",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst C = true;\n@Directive({selector: '[d]', inputs: C ? ['a'] : ['b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-conditionalFalsy",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst C = '';\n@Directive({selector: '[d]', inputs: C ? ['a'] : ['b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-conditionalDynamic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare function f(): boolean;\n@Directive({selector: '[d]', inputs: f() ? ['a'] : ['b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[116, 135]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-logicalOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst N = null;\n@Directive({selector: '[d]', inputs: N || ['a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-logicalAnd",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'] && ['b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-logicalElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [false || 'a', 'b' && 'c', '' || 'd']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",c:\"c\",d:\"d\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"c\":{\"alias\":\"c\";\"required\":false;};\"d\":{\"alias\":\"d\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-nullish",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst N = null;\n@Directive({selector: '[d]', inputs: N ?? ['a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[101, 111]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-unary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`a${-1}`, `b${+'3'}`, `c${!0}`, `d${~1}`, `e${-'x'}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"a-1\":\"a-1\",b3:\"b3\",ctrue:\"ctrue\",\"d-2\":\"d-2\",eNaN:\"eNaN\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a-1\":{\"alias\":\"a-1\";\"required\":false;};\"b3\":{\"alias\":\"b3\";\"required\":false;};\"ctrue\":{\"alias\":\"ctrue\";\"required\":false;};\"d-2\":{\"alias\":\"d-2\";\"required\":false;};\"eNaN\":{\"alias\":\"eNaN\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [typeof 'a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 97]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-void",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [void 0]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 93]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-tplEnum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x', B = 2 }\nenum N { A, B }\n@Directive({selector: '[d]', inputs: [`a${E.A}`, `b${E.B}`, `c${N.B}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{ax:\"ax\",b2:\"b2\",c1:\"c1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"ax\":{\"alias\":\"ax\";\"required\":false;};\"b2\":{\"alias\":\"b2\";\"required\":false;};\"c1\":{\"alias\":\"c1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-enumMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x' }\n@Directive({selector: '[d]', inputs: [E.A]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[104, 109]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-enumMemberBinary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x' }\n@Directive({selector: '[d]', inputs: [E.A + '', 'y' + E.A]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\",yx:\"yx\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};\"yx\":{\"alias\":\"yx\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-enumWhole",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x' }\n@Directive({selector: '[d]', inputs: E})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type '{ A: E }'."
+      ],
+      "diagnosticSpans": [[104, 105]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-enumMissing",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x' }\n@Directive({selector: '[d]', inputs: [E.B]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[104, 109]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-constEnum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst enum E { A = 'x' }\n@Directive({selector: '[d]', inputs: [`${E.A}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-enumComputedInit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x', B = A + 'y' }\n@Directive({selector: '[d]', inputs: [`${E.B}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[117, 127]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {A} = {A: ['a']};\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructObjRename",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {A: B} = {A: ['a']};\n@Directive({selector: '[d]', inputs: B})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructObjNested",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {A: {B}} = {A: {B: ['a']}};\n@Directive({selector: '[d]', inputs: B})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructArr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst [A, , B] = [['a'], 0, ['b']];\n@Directive({selector: '[d]', inputs: [...A, ...B]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructDefault",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {A = ['z']} = {} as any;\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[116, 117]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructRestArr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst [, ...R] = ['a', 'b', 'c'];\n@Directive({selector: '[d]', inputs: R})\nexport class Dir {}\n"
+      },
+      "diagnostics": ["Failed to resolve @Directive.inputs to an array Value is of type 'string'."],
+      "diagnosticSpans": [[119, 120]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructRestObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {...R} = {R: ['a']};\n@Directive({selector: '[d]', inputs: R})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructFromConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst O = {A: ['a']};\nconst {A} = O;\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-destructStringKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst {'A': B} = {A: ['a']};\n@Directive({selector: '[d]', inputs: B})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[114, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk() { return ['a']; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallParams",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(x: string, y: string) { return [x, y + '2']; }\n@Directive({selector: '[d]', inputs: mk('a', 'b')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b2:\"b2\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b2\":{\"alias\":\"b2\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallDefault",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(x = 'd') { return [x]; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{d:\"d\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"d\":{\"alias\":\"d\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallRest",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(...xs: string[]) { return xs; }\n@Directive({selector: '[d]', inputs: mk('a', 'b')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallMissingArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(x?: string) { return [x]; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[125, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallNested",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction a(x: string) { return x + '1'; }\nfunction b(x: string) { return [a(x), a(x + 'z')]; }\n@Directive({selector: '[d]', inputs: b('q')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{q1:\"q1\",qz1:\"qz1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"q1\":{\"alias\":\"q1\";\"required\":false;};\"qz1\":{\"alias\":\"qz1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallExported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nexport function mk() { return ['a']; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallConstRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst P = 'p';\nfunction mk() { return [P]; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{p:\"p\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"p\":{\"alias\":\"p\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallEmptyReturn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk() { return; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[111, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnCallSpreadArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(a: string, b: string) { return [a, b]; }\nconst ARGS = ['x', 'y'] as const;\n@Directive({selector: '[d]', inputs: mk(...ARGS)})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\",y:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};\"y\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnOverload",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(): string[];\nfunction mk(x?: string) { return ['a']; }\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[152, 156]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnDeclare",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare function mk(): string[];\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 122]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnExpressionConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst mk = function () { return ['a']; };\n@Directive({selector: '[d]', inputs: mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[127, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnParamDestructured",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk({a}: {a: string}) { return [a]; }\n@Directive({selector: '[d]', inputs: mk({a: 'x'})})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[131, 143]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnParamShadow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst x = 'outer';\nfunction mk(x: string) { return [x]; }\n@Directive({selector: '[d]', inputs: mk('inner')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{inner:\"inner\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"inner\":{\"alias\":\"inner\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-fnUsesOuterParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nfunction mk(x: string) { return [x]; }\nfunction outer(y: string) { return mk(y); }\n@Directive({selector: '[d]', inputs: outer('z')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{z:\"z\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"z\":{\"alias\":\"z\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-staticMethodCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nclass U { static mk() { return ['a']; } }\n@Directive({selector: '[d]', inputs: U.mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-staticMethodArrowProp",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nclass U { static mk = () => ['a']; }\n@Directive({selector: '[d]', inputs: U.mk()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[122, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-callNonFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a'];\n@Directive({selector: '[d]', inputs: X()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[102, 105]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-callClass",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nclass U {}\n@Directive({selector: '[d]', inputs: U()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[96, 99]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-concat",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a'];\n@Directive({selector: '[d]', inputs: A.concat(['b'], 'c', [['d']])})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type '[string]'."
+      ],
+      "diagnosticSpans": [[102, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-concatSpread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a'];\nconst B = ['b'];\n@Directive({selector: '[d]', inputs: [...A.concat(B)]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-slice",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a', 'b'];\n@Directive({selector: '[d]', inputs: A.slice()})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-sliceArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a', 'b'];\n@Directive({selector: '[d]', inputs: A.slice(1)})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 117]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-length",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [`n${A.length}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{n2:\"n2\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"n2\":{\"alias\":\"n2\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-stringConcat",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'.concat('b', 1, true, null)]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{ab1truenull:\"ab1truenull\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"ab1truenull\":{\"alias\":\"ab1truenull\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-stringConcatBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'.concat({} as any)]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 108]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-stringLength",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`n${'😀'.length}`, `m${'abc'.length}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 124]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-stringIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['abc'[0]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 95]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-arrayMethodOther",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst A = ['a'];\n@Directive({selector: '[d]', inputs: A.map(x => x)})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[102, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareTuple",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const X: ['a', 'b'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareReadonlyTuple",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const X: readonly ['a', 'b: c'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:[0,\"c\",\"b\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"c\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareNamedTuple",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const X: [first: 'a'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareStringArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const X: string[];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[112, 113]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareTypeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst Y = ['a'];\ndeclare const X: typeof Y;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareLiteralElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const S: 'a';\n@Directive({selector: '[d]', inputs: [S]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareNumberElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare const S: 1;\n@Directive({selector: '[d]', inputs: [`n${S}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{n1:\"n1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"n1\":{\"alias\":\"n1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-declareLet",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare let X: ['a'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-letNoInit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nlet X;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[92, 93]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-letNoInitElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nlet X: string;\n@Directive({selector: '[d]', inputs: [X]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[100, 103]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-varTwice",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nvar X = ['a'];\nvar X = ['b'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-varTwiceFirstEmpty",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nvar X;\nvar X = ['b'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[107, 108]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-unknownName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: FOO})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 88]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-unknownNameElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [FOO]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 90]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-libGlobal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [Infinity]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'Infinity'."
+      ],
+      "diagnosticSpans": [[85, 95]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-namespaceImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({selector: '[d]', inputs: core})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type '(module)'."
+      ],
+      "diagnosticSpans": [[117, 121]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-namespaceImportElem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({selector: '[d]', inputs: [core]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type '(module)'."
+      ],
+      "diagnosticSpans": [[117, 123]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objMethod",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'a', m() {}}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 106]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objShorthand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst name = 'a';\n@Directive({selector: '[d]', inputs: [{name}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objComputedStr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst K = 'name';\n@Directive({selector: '[d]', inputs: [{[K]: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objComputedNum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{[1]: 'x', name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 108]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objNumericKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{1: 'x', name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objComputedNumDescribe",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: {[1]: 'x'}})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 95]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objSpreadArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{...['x'], name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 108]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: eval-objGetter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'a', get x() { return 1; }}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 121]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-spreadNonArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst S = 'ab';\n@Directive({selector: '[d]', inputs: ['x', ...S]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[101, 112]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-spreadUnknown",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare function f(): any;\n@Directive({selector: '[d]', inputs: ['x', ...f()]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[112, 125]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-spreadRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nclass U {}\n@Directive({selector: '[d]', inputs: ['x', ...U]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[96, 107]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-spreadNonArrayOutputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst S = {a: 1};\n@Directive({selector: '[d]', outputs: ['x', ...S]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve outputs at position 1 to a string Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[104, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-spreadObjInArr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst S = {a: 1};\n@Directive({selector: '[d]', inputs: [...S]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[103, 109]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-objSpreadNonObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{...'x', name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 106]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-objSpreadDynamic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare function f(): any;\n@Directive({selector: '[d]', inputs: [{...f(), name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[112, 133]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-enumOutputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nenum E { A = 'x' }\n@Directive({selector: '[d]', outputs: [E.A]})\nexport class Dir {}\n"
+      },
+      "diagnostics": ["Failed to resolve outputs at position 0 to a string Value is of type 'E'."],
+      "diagnosticSpans": [[105, 110]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: msg-anonymousClassRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [class {}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 95]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-satisfies",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'] satisfies string[]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 109]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-typeAssertion",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: <string[]>['a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 100]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-elemSatisfies",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a' satisfies string]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[85, 107]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayStringIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X['0']]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayNumIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X[1]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayFloatIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X[0.5]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 115]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayOutOfRange",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X[5]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[107, 113]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayNegIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X[-1]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[107, 114]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-arrayPropOther",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst X = ['a', 'b'];\n@Directive({selector: '[d]', inputs: [X.foo]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 114]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-objectIndexNum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nconst O = {1: 'a'};\n@Directive({selector: '[d]', inputs: [O[1]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-computedConfigKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nconst K = 'inputs';\n@Directive({selector: '[d]', [K]: ['a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-computedConfigKeyLiteral",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]', ['inputs']: ['a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-stringConfigKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]', 'inputs': ['a'], \"outputs\": ['o']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "outputs": "{o:\"o\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{\"o\":\"o\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-shorthandConfigKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nconst inputs = ['a'];\n@Directive({selector: '[d]', inputs})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: rej-duplicateConfigKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'], inputs: ['b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-proto",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['__proto__', 'b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-protoObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: '__proto__'}, 'b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-protoAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a: __proto__', 'b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"__proto__\",\"a\"],b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"__proto__\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-protoOutputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', outputs: ['__proto__', 'b']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"b\":\"b\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-integerOrder",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['b', '1', 'a', '0', '10', '2']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"0\":{\"alias\":\"0\";\"required\":false;};\"1\":{\"alias\":\"1\";\"required\":false;};\"2\":{\"alias\":\"2\";\"required\":false;};\"10\":{\"alias\":\"10\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "note": "ngtsc leaves integer-like keys unquoted in the JS map (and `01`, `1e3` too, which changes or breaks them); oxc quotes them. The order is compared through the .d.ts."
+    },
+    {
+      "name": "probe: key-integerLike",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['b', '01', '4294967294', '4294967295', '-1', '1.5', '1e3', ' 3']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"3\":{\"alias\":\"3\";\"required\":false;};\"4294967294\":{\"alias\":\"4294967294\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};\"01\":{\"alias\":\"01\";\"required\":false;};\"4294967295\":{\"alias\":\"4294967295\";\"required\":false;};\"-1\":{\"alias\":\"-1\";\"required\":false;};\"1.5\":{\"alias\":\"1.5\";\"required\":false;};\"1e3\":{\"alias\":\"1e3\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "note": "ngtsc leaves integer-like keys unquoted in the JS map (and `01`, `1e3` too, which changes or breaks them); oxc quotes them. The order is compared through the .d.ts."
+    },
+    {
+      "name": "probe: key-integerOutputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', outputs: ['b', '1', 'a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"1\":\"1\";\"b\":\"b\";\"a\":\"a\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "note": "ngtsc leaves integer-like keys unquoted in the JS map (and `01`, `1e3` too, which changes or breaks them); oxc quotes them. The order is compared through the .d.ts."
+    },
+    {
+      "name": "probe: key-integerMerge",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['b', '1']})\nexport class Dir { @Input() a: any; @Input() c: any; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"1\":{\"alias\":\"1\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};\"a\":{\"alias\":\"a\";\"required\":false;};\"c\":{\"alias\":\"c\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "note": "ngtsc leaves integer-like keys unquoted in the JS map (and `01`, `1e3` too, which changes or breaks them); oxc quotes them. The order is compared through the .d.ts."
+    },
+    {
+      "name": "probe: key-protoWithMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['__proto__']})\nexport class Dir { @Input() a: any; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: key-whitespaceAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a:  spaced alias ', ' b ']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"spaced alias\",\"a\"],b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"spaced alias\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: depth-chain300",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst X0 = ['a'];\nconst X1 = X0;\nconst X2 = X1;\nconst X3 = X2;\nconst X4 = X3;\nconst X5 = X4;\nconst X6 = X5;\nconst X7 = X6;\nconst X8 = X7;\nconst X9 = X8;\nconst X10 = X9;\nconst X11 = X10;\nconst X12 = X11;\nconst X13 = X12;\nconst X14 = X13;\nconst X15 = X14;\nconst X16 = X15;\nconst X17 = X16;\nconst X18 = X17;\nconst X19 = X18;\nconst X20 = X19;\nconst X21 = X20;\nconst X22 = X21;\nconst X23 = X22;\nconst X24 = X23;\nconst X25 = X24;\nconst X26 = X25;\nconst X27 = X26;\nconst X28 = X27;\nconst X29 = X28;\nconst X30 = X29;\nconst X31 = X30;\nconst X32 = X31;\nconst X33 = X32;\nconst X34 = X33;\nconst X35 = X34;\nconst X36 = X35;\nconst X37 = X36;\nconst X38 = X37;\nconst X39 = X38;\nconst X40 = X39;\nconst X41 = X40;\nconst X42 = X41;\nconst X43 = X42;\nconst X44 = X43;\nconst X45 = X44;\nconst X46 = X45;\nconst X47 = X46;\nconst X48 = X47;\nconst X49 = X48;\nconst X50 = X49;\nconst X51 = X50;\nconst X52 = X51;\nconst X53 = X52;\nconst X54 = X53;\nconst X55 = X54;\nconst X56 = X55;\nconst X57 = X56;\nconst X58 = X57;\nconst X59 = X58;\nconst X60 = X59;\nconst X61 = X60;\nconst X62 = X61;\nconst X63 = X62;\nconst X64 = X63;\nconst X65 = X64;\nconst X66 = X65;\nconst X67 = X66;\nconst X68 = X67;\nconst X69 = X68;\nconst X70 = X69;\nconst X71 = X70;\nconst X72 = X71;\nconst X73 = X72;\nconst X74 = X73;\nconst X75 = X74;\nconst X76 = X75;\nconst X77 = X76;\nconst X78 = X77;\nconst X79 = X78;\nconst X80 = X79;\nconst X81 = X80;\nconst X82 = X81;\nconst X83 = X82;\nconst X84 = X83;\nconst X85 = X84;\nconst X86 = X85;\nconst X87 = X86;\nconst X88 = X87;\nconst X89 = X88;\nconst X90 = X89;\nconst X91 = X90;\nconst X92 = X91;\nconst X93 = X92;\nconst X94 = X93;\nconst X95 = X94;\nconst X96 = X95;\nconst X97 = X96;\nconst X98 = X97;\nconst X99 = X98;\nconst X100 = X99;\nconst X101 = X100;\nconst X102 = X101;\nconst X103 = X102;\nconst X104 = X103;\nconst X105 = X104;\nconst X106 = X105;\nconst X107 = X106;\nconst X108 = X107;\nconst X109 = X108;\nconst X110 = X109;\nconst X111 = X110;\nconst X112 = X111;\nconst X113 = X112;\nconst X114 = X113;\nconst X115 = X114;\nconst X116 = X115;\nconst X117 = X116;\nconst X118 = X117;\nconst X119 = X118;\nconst X120 = X119;\nconst X121 = X120;\nconst X122 = X121;\nconst X123 = X122;\nconst X124 = X123;\nconst X125 = X124;\nconst X126 = X125;\nconst X127 = X126;\nconst X128 = X127;\nconst X129 = X128;\nconst X130 = X129;\nconst X131 = X130;\nconst X132 = X131;\nconst X133 = X132;\nconst X134 = X133;\nconst X135 = X134;\nconst X136 = X135;\nconst X137 = X136;\nconst X138 = X137;\nconst X139 = X138;\nconst X140 = X139;\nconst X141 = X140;\nconst X142 = X141;\nconst X143 = X142;\nconst X144 = X143;\nconst X145 = X144;\nconst X146 = X145;\nconst X147 = X146;\nconst X148 = X147;\nconst X149 = X148;\nconst X150 = X149;\nconst X151 = X150;\nconst X152 = X151;\nconst X153 = X152;\nconst X154 = X153;\nconst X155 = X154;\nconst X156 = X155;\nconst X157 = X156;\nconst X158 = X157;\nconst X159 = X158;\nconst X160 = X159;\nconst X161 = X160;\nconst X162 = X161;\nconst X163 = X162;\nconst X164 = X163;\nconst X165 = X164;\nconst X166 = X165;\nconst X167 = X166;\nconst X168 = X167;\nconst X169 = X168;\nconst X170 = X169;\nconst X171 = X170;\nconst X172 = X171;\nconst X173 = X172;\nconst X174 = X173;\nconst X175 = X174;\nconst X176 = X175;\nconst X177 = X176;\nconst X178 = X177;\nconst X179 = X178;\nconst X180 = X179;\nconst X181 = X180;\nconst X182 = X181;\nconst X183 = X182;\nconst X184 = X183;\nconst X185 = X184;\nconst X186 = X185;\nconst X187 = X186;\nconst X188 = X187;\nconst X189 = X188;\nconst X190 = X189;\nconst X191 = X190;\nconst X192 = X191;\nconst X193 = X192;\nconst X194 = X193;\nconst X195 = X194;\nconst X196 = X195;\nconst X197 = X196;\nconst X198 = X197;\nconst X199 = X198;\nconst X200 = X199;\nconst X201 = X200;\nconst X202 = X201;\nconst X203 = X202;\nconst X204 = X203;\nconst X205 = X204;\nconst X206 = X205;\nconst X207 = X206;\nconst X208 = X207;\nconst X209 = X208;\nconst X210 = X209;\nconst X211 = X210;\nconst X212 = X211;\nconst X213 = X212;\nconst X214 = X213;\nconst X215 = X214;\nconst X216 = X215;\nconst X217 = X216;\nconst X218 = X217;\nconst X219 = X218;\nconst X220 = X219;\nconst X221 = X220;\nconst X222 = X221;\nconst X223 = X222;\nconst X224 = X223;\nconst X225 = X224;\nconst X226 = X225;\nconst X227 = X226;\nconst X228 = X227;\nconst X229 = X228;\nconst X230 = X229;\nconst X231 = X230;\nconst X232 = X231;\nconst X233 = X232;\nconst X234 = X233;\nconst X235 = X234;\nconst X236 = X235;\nconst X237 = X236;\nconst X238 = X237;\nconst X239 = X238;\nconst X240 = X239;\nconst X241 = X240;\nconst X242 = X241;\nconst X243 = X242;\nconst X244 = X243;\nconst X245 = X244;\nconst X246 = X245;\nconst X247 = X246;\nconst X248 = X247;\nconst X249 = X248;\nconst X250 = X249;\nconst X251 = X250;\nconst X252 = X251;\nconst X253 = X252;\nconst X254 = X253;\nconst X255 = X254;\nconst X256 = X255;\nconst X257 = X256;\nconst X258 = X257;\nconst X259 = X258;\nconst X260 = X259;\nconst X261 = X260;\nconst X262 = X261;\nconst X263 = X262;\nconst X264 = X263;\nconst X265 = X264;\nconst X266 = X265;\nconst X267 = X266;\nconst X268 = X267;\nconst X269 = X268;\nconst X270 = X269;\nconst X271 = X270;\nconst X272 = X271;\nconst X273 = X272;\nconst X274 = X273;\nconst X275 = X274;\nconst X276 = X275;\nconst X277 = X276;\nconst X278 = X277;\nconst X279 = X278;\nconst X280 = X279;\nconst X281 = X280;\nconst X282 = X281;\nconst X283 = X282;\nconst X284 = X283;\nconst X285 = X284;\nconst X286 = X285;\nconst X287 = X286;\nconst X288 = X287;\nconst X289 = X288;\nconst X290 = X289;\nconst X291 = X290;\nconst X292 = X291;\nconst X293 = X292;\nconst X294 = X293;\nconst X295 = X294;\nconst X296 = X295;\nconst X297 = X296;\nconst X298 = X297;\nconst X299 = X298;\n\n@Directive({selector: '[d]', inputs: X299})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: depth-chain1000",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst X0 = ['a'];\nconst X1 = X0;\nconst X2 = X1;\nconst X3 = X2;\nconst X4 = X3;\nconst X5 = X4;\nconst X6 = X5;\nconst X7 = X6;\nconst X8 = X7;\nconst X9 = X8;\nconst X10 = X9;\nconst X11 = X10;\nconst X12 = X11;\nconst X13 = X12;\nconst X14 = X13;\nconst X15 = X14;\nconst X16 = X15;\nconst X17 = X16;\nconst X18 = X17;\nconst X19 = X18;\nconst X20 = X19;\nconst X21 = X20;\nconst X22 = X21;\nconst X23 = X22;\nconst X24 = X23;\nconst X25 = X24;\nconst X26 = X25;\nconst X27 = X26;\nconst X28 = X27;\nconst X29 = X28;\nconst X30 = X29;\nconst X31 = X30;\nconst X32 = X31;\nconst X33 = X32;\nconst X34 = X33;\nconst X35 = X34;\nconst X36 = X35;\nconst X37 = X36;\nconst X38 = X37;\nconst X39 = X38;\nconst X40 = X39;\nconst X41 = X40;\nconst X42 = X41;\nconst X43 = X42;\nconst X44 = X43;\nconst X45 = X44;\nconst X46 = X45;\nconst X47 = X46;\nconst X48 = X47;\nconst X49 = X48;\nconst X50 = X49;\nconst X51 = X50;\nconst X52 = X51;\nconst X53 = X52;\nconst X54 = X53;\nconst X55 = X54;\nconst X56 = X55;\nconst X57 = X56;\nconst X58 = X57;\nconst X59 = X58;\nconst X60 = X59;\nconst X61 = X60;\nconst X62 = X61;\nconst X63 = X62;\nconst X64 = X63;\nconst X65 = X64;\nconst X66 = X65;\nconst X67 = X66;\nconst X68 = X67;\nconst X69 = X68;\nconst X70 = X69;\nconst X71 = X70;\nconst X72 = X71;\nconst X73 = X72;\nconst X74 = X73;\nconst X75 = X74;\nconst X76 = X75;\nconst X77 = X76;\nconst X78 = X77;\nconst X79 = X78;\nconst X80 = X79;\nconst X81 = X80;\nconst X82 = X81;\nconst X83 = X82;\nconst X84 = X83;\nconst X85 = X84;\nconst X86 = X85;\nconst X87 = X86;\nconst X88 = X87;\nconst X89 = X88;\nconst X90 = X89;\nconst X91 = X90;\nconst X92 = X91;\nconst X93 = X92;\nconst X94 = X93;\nconst X95 = X94;\nconst X96 = X95;\nconst X97 = X96;\nconst X98 = X97;\nconst X99 = X98;\nconst X100 = X99;\nconst X101 = X100;\nconst X102 = X101;\nconst X103 = X102;\nconst X104 = X103;\nconst X105 = X104;\nconst X106 = X105;\nconst X107 = X106;\nconst X108 = X107;\nconst X109 = X108;\nconst X110 = X109;\nconst X111 = X110;\nconst X112 = X111;\nconst X113 = X112;\nconst X114 = X113;\nconst X115 = X114;\nconst X116 = X115;\nconst X117 = X116;\nconst X118 = X117;\nconst X119 = X118;\nconst X120 = X119;\nconst X121 = X120;\nconst X122 = X121;\nconst X123 = X122;\nconst X124 = X123;\nconst X125 = X124;\nconst X126 = X125;\nconst X127 = X126;\nconst X128 = X127;\nconst X129 = X128;\nconst X130 = X129;\nconst X131 = X130;\nconst X132 = X131;\nconst X133 = X132;\nconst X134 = X133;\nconst X135 = X134;\nconst X136 = X135;\nconst X137 = X136;\nconst X138 = X137;\nconst X139 = X138;\nconst X140 = X139;\nconst X141 = X140;\nconst X142 = X141;\nconst X143 = X142;\nconst X144 = X143;\nconst X145 = X144;\nconst X146 = X145;\nconst X147 = X146;\nconst X148 = X147;\nconst X149 = X148;\nconst X150 = X149;\nconst X151 = X150;\nconst X152 = X151;\nconst X153 = X152;\nconst X154 = X153;\nconst X155 = X154;\nconst X156 = X155;\nconst X157 = X156;\nconst X158 = X157;\nconst X159 = X158;\nconst X160 = X159;\nconst X161 = X160;\nconst X162 = X161;\nconst X163 = X162;\nconst X164 = X163;\nconst X165 = X164;\nconst X166 = X165;\nconst X167 = X166;\nconst X168 = X167;\nconst X169 = X168;\nconst X170 = X169;\nconst X171 = X170;\nconst X172 = X171;\nconst X173 = X172;\nconst X174 = X173;\nconst X175 = X174;\nconst X176 = X175;\nconst X177 = X176;\nconst X178 = X177;\nconst X179 = X178;\nconst X180 = X179;\nconst X181 = X180;\nconst X182 = X181;\nconst X183 = X182;\nconst X184 = X183;\nconst X185 = X184;\nconst X186 = X185;\nconst X187 = X186;\nconst X188 = X187;\nconst X189 = X188;\nconst X190 = X189;\nconst X191 = X190;\nconst X192 = X191;\nconst X193 = X192;\nconst X194 = X193;\nconst X195 = X194;\nconst X196 = X195;\nconst X197 = X196;\nconst X198 = X197;\nconst X199 = X198;\nconst X200 = X199;\nconst X201 = X200;\nconst X202 = X201;\nconst X203 = X202;\nconst X204 = X203;\nconst X205 = X204;\nconst X206 = X205;\nconst X207 = X206;\nconst X208 = X207;\nconst X209 = X208;\nconst X210 = X209;\nconst X211 = X210;\nconst X212 = X211;\nconst X213 = X212;\nconst X214 = X213;\nconst X215 = X214;\nconst X216 = X215;\nconst X217 = X216;\nconst X218 = X217;\nconst X219 = X218;\nconst X220 = X219;\nconst X221 = X220;\nconst X222 = X221;\nconst X223 = X222;\nconst X224 = X223;\nconst X225 = X224;\nconst X226 = X225;\nconst X227 = X226;\nconst X228 = X227;\nconst X229 = X228;\nconst X230 = X229;\nconst X231 = X230;\nconst X232 = X231;\nconst X233 = X232;\nconst X234 = X233;\nconst X235 = X234;\nconst X236 = X235;\nconst X237 = X236;\nconst X238 = X237;\nconst X239 = X238;\nconst X240 = X239;\nconst X241 = X240;\nconst X242 = X241;\nconst X243 = X242;\nconst X244 = X243;\nconst X245 = X244;\nconst X246 = X245;\nconst X247 = X246;\nconst X248 = X247;\nconst X249 = X248;\nconst X250 = X249;\nconst X251 = X250;\nconst X252 = X251;\nconst X253 = X252;\nconst X254 = X253;\nconst X255 = X254;\nconst X256 = X255;\nconst X257 = X256;\nconst X258 = X257;\nconst X259 = X258;\nconst X260 = X259;\nconst X261 = X260;\nconst X262 = X261;\nconst X263 = X262;\nconst X264 = X263;\nconst X265 = X264;\nconst X266 = X265;\nconst X267 = X266;\nconst X268 = X267;\nconst X269 = X268;\nconst X270 = X269;\nconst X271 = X270;\nconst X272 = X271;\nconst X273 = X272;\nconst X274 = X273;\nconst X275 = X274;\nconst X276 = X275;\nconst X277 = X276;\nconst X278 = X277;\nconst X279 = X278;\nconst X280 = X279;\nconst X281 = X280;\nconst X282 = X281;\nconst X283 = X282;\nconst X284 = X283;\nconst X285 = X284;\nconst X286 = X285;\nconst X287 = X286;\nconst X288 = X287;\nconst X289 = X288;\nconst X290 = X289;\nconst X291 = X290;\nconst X292 = X291;\nconst X293 = X292;\nconst X294 = X293;\nconst X295 = X294;\nconst X296 = X295;\nconst X297 = X296;\nconst X298 = X297;\nconst X299 = X298;\nconst X300 = X299;\nconst X301 = X300;\nconst X302 = X301;\nconst X303 = X302;\nconst X304 = X303;\nconst X305 = X304;\nconst X306 = X305;\nconst X307 = X306;\nconst X308 = X307;\nconst X309 = X308;\nconst X310 = X309;\nconst X311 = X310;\nconst X312 = X311;\nconst X313 = X312;\nconst X314 = X313;\nconst X315 = X314;\nconst X316 = X315;\nconst X317 = X316;\nconst X318 = X317;\nconst X319 = X318;\nconst X320 = X319;\nconst X321 = X320;\nconst X322 = X321;\nconst X323 = X322;\nconst X324 = X323;\nconst X325 = X324;\nconst X326 = X325;\nconst X327 = X326;\nconst X328 = X327;\nconst X329 = X328;\nconst X330 = X329;\nconst X331 = X330;\nconst X332 = X331;\nconst X333 = X332;\nconst X334 = X333;\nconst X335 = X334;\nconst X336 = X335;\nconst X337 = X336;\nconst X338 = X337;\nconst X339 = X338;\nconst X340 = X339;\nconst X341 = X340;\nconst X342 = X341;\nconst X343 = X342;\nconst X344 = X343;\nconst X345 = X344;\nconst X346 = X345;\nconst X347 = X346;\nconst X348 = X347;\nconst X349 = X348;\nconst X350 = X349;\nconst X351 = X350;\nconst X352 = X351;\nconst X353 = X352;\nconst X354 = X353;\nconst X355 = X354;\nconst X356 = X355;\nconst X357 = X356;\nconst X358 = X357;\nconst X359 = X358;\nconst X360 = X359;\nconst X361 = X360;\nconst X362 = X361;\nconst X363 = X362;\nconst X364 = X363;\nconst X365 = X364;\nconst X366 = X365;\nconst X367 = X366;\nconst X368 = X367;\nconst X369 = X368;\nconst X370 = X369;\nconst X371 = X370;\nconst X372 = X371;\nconst X373 = X372;\nconst X374 = X373;\nconst X375 = X374;\nconst X376 = X375;\nconst X377 = X376;\nconst X378 = X377;\nconst X379 = X378;\nconst X380 = X379;\nconst X381 = X380;\nconst X382 = X381;\nconst X383 = X382;\nconst X384 = X383;\nconst X385 = X384;\nconst X386 = X385;\nconst X387 = X386;\nconst X388 = X387;\nconst X389 = X388;\nconst X390 = X389;\nconst X391 = X390;\nconst X392 = X391;\nconst X393 = X392;\nconst X394 = X393;\nconst X395 = X394;\nconst X396 = X395;\nconst X397 = X396;\nconst X398 = X397;\nconst X399 = X398;\nconst X400 = X399;\nconst X401 = X400;\nconst X402 = X401;\nconst X403 = X402;\nconst X404 = X403;\nconst X405 = X404;\nconst X406 = X405;\nconst X407 = X406;\nconst X408 = X407;\nconst X409 = X408;\nconst X410 = X409;\nconst X411 = X410;\nconst X412 = X411;\nconst X413 = X412;\nconst X414 = X413;\nconst X415 = X414;\nconst X416 = X415;\nconst X417 = X416;\nconst X418 = X417;\nconst X419 = X418;\nconst X420 = X419;\nconst X421 = X420;\nconst X422 = X421;\nconst X423 = X422;\nconst X424 = X423;\nconst X425 = X424;\nconst X426 = X425;\nconst X427 = X426;\nconst X428 = X427;\nconst X429 = X428;\nconst X430 = X429;\nconst X431 = X430;\nconst X432 = X431;\nconst X433 = X432;\nconst X434 = X433;\nconst X435 = X434;\nconst X436 = X435;\nconst X437 = X436;\nconst X438 = X437;\nconst X439 = X438;\nconst X440 = X439;\nconst X441 = X440;\nconst X442 = X441;\nconst X443 = X442;\nconst X444 = X443;\nconst X445 = X444;\nconst X446 = X445;\nconst X447 = X446;\nconst X448 = X447;\nconst X449 = X448;\nconst X450 = X449;\nconst X451 = X450;\nconst X452 = X451;\nconst X453 = X452;\nconst X454 = X453;\nconst X455 = X454;\nconst X456 = X455;\nconst X457 = X456;\nconst X458 = X457;\nconst X459 = X458;\nconst X460 = X459;\nconst X461 = X460;\nconst X462 = X461;\nconst X463 = X462;\nconst X464 = X463;\nconst X465 = X464;\nconst X466 = X465;\nconst X467 = X466;\nconst X468 = X467;\nconst X469 = X468;\nconst X470 = X469;\nconst X471 = X470;\nconst X472 = X471;\nconst X473 = X472;\nconst X474 = X473;\nconst X475 = X474;\nconst X476 = X475;\nconst X477 = X476;\nconst X478 = X477;\nconst X479 = X478;\nconst X480 = X479;\nconst X481 = X480;\nconst X482 = X481;\nconst X483 = X482;\nconst X484 = X483;\nconst X485 = X484;\nconst X486 = X485;\nconst X487 = X486;\nconst X488 = X487;\nconst X489 = X488;\nconst X490 = X489;\nconst X491 = X490;\nconst X492 = X491;\nconst X493 = X492;\nconst X494 = X493;\nconst X495 = X494;\nconst X496 = X495;\nconst X497 = X496;\nconst X498 = X497;\nconst X499 = X498;\nconst X500 = X499;\nconst X501 = X500;\nconst X502 = X501;\nconst X503 = X502;\nconst X504 = X503;\nconst X505 = X504;\nconst X506 = X505;\nconst X507 = X506;\nconst X508 = X507;\nconst X509 = X508;\nconst X510 = X509;\nconst X511 = X510;\nconst X512 = X511;\nconst X513 = X512;\nconst X514 = X513;\nconst X515 = X514;\nconst X516 = X515;\nconst X517 = X516;\nconst X518 = X517;\nconst X519 = X518;\nconst X520 = X519;\nconst X521 = X520;\nconst X522 = X521;\nconst X523 = X522;\nconst X524 = X523;\nconst X525 = X524;\nconst X526 = X525;\nconst X527 = X526;\nconst X528 = X527;\nconst X529 = X528;\nconst X530 = X529;\nconst X531 = X530;\nconst X532 = X531;\nconst X533 = X532;\nconst X534 = X533;\nconst X535 = X534;\nconst X536 = X535;\nconst X537 = X536;\nconst X538 = X537;\nconst X539 = X538;\nconst X540 = X539;\nconst X541 = X540;\nconst X542 = X541;\nconst X543 = X542;\nconst X544 = X543;\nconst X545 = X544;\nconst X546 = X545;\nconst X547 = X546;\nconst X548 = X547;\nconst X549 = X548;\nconst X550 = X549;\nconst X551 = X550;\nconst X552 = X551;\nconst X553 = X552;\nconst X554 = X553;\nconst X555 = X554;\nconst X556 = X555;\nconst X557 = X556;\nconst X558 = X557;\nconst X559 = X558;\nconst X560 = X559;\nconst X561 = X560;\nconst X562 = X561;\nconst X563 = X562;\nconst X564 = X563;\nconst X565 = X564;\nconst X566 = X565;\nconst X567 = X566;\nconst X568 = X567;\nconst X569 = X568;\nconst X570 = X569;\nconst X571 = X570;\nconst X572 = X571;\nconst X573 = X572;\nconst X574 = X573;\nconst X575 = X574;\nconst X576 = X575;\nconst X577 = X576;\nconst X578 = X577;\nconst X579 = X578;\nconst X580 = X579;\nconst X581 = X580;\nconst X582 = X581;\nconst X583 = X582;\nconst X584 = X583;\nconst X585 = X584;\nconst X586 = X585;\nconst X587 = X586;\nconst X588 = X587;\nconst X589 = X588;\nconst X590 = X589;\nconst X591 = X590;\nconst X592 = X591;\nconst X593 = X592;\nconst X594 = X593;\nconst X595 = X594;\nconst X596 = X595;\nconst X597 = X596;\nconst X598 = X597;\nconst X599 = X598;\nconst X600 = X599;\nconst X601 = X600;\nconst X602 = X601;\nconst X603 = X602;\nconst X604 = X603;\nconst X605 = X604;\nconst X606 = X605;\nconst X607 = X606;\nconst X608 = X607;\nconst X609 = X608;\nconst X610 = X609;\nconst X611 = X610;\nconst X612 = X611;\nconst X613 = X612;\nconst X614 = X613;\nconst X615 = X614;\nconst X616 = X615;\nconst X617 = X616;\nconst X618 = X617;\nconst X619 = X618;\nconst X620 = X619;\nconst X621 = X620;\nconst X622 = X621;\nconst X623 = X622;\nconst X624 = X623;\nconst X625 = X624;\nconst X626 = X625;\nconst X627 = X626;\nconst X628 = X627;\nconst X629 = X628;\nconst X630 = X629;\nconst X631 = X630;\nconst X632 = X631;\nconst X633 = X632;\nconst X634 = X633;\nconst X635 = X634;\nconst X636 = X635;\nconst X637 = X636;\nconst X638 = X637;\nconst X639 = X638;\nconst X640 = X639;\nconst X641 = X640;\nconst X642 = X641;\nconst X643 = X642;\nconst X644 = X643;\nconst X645 = X644;\nconst X646 = X645;\nconst X647 = X646;\nconst X648 = X647;\nconst X649 = X648;\nconst X650 = X649;\nconst X651 = X650;\nconst X652 = X651;\nconst X653 = X652;\nconst X654 = X653;\nconst X655 = X654;\nconst X656 = X655;\nconst X657 = X656;\nconst X658 = X657;\nconst X659 = X658;\nconst X660 = X659;\nconst X661 = X660;\nconst X662 = X661;\nconst X663 = X662;\nconst X664 = X663;\nconst X665 = X664;\nconst X666 = X665;\nconst X667 = X666;\nconst X668 = X667;\nconst X669 = X668;\nconst X670 = X669;\nconst X671 = X670;\nconst X672 = X671;\nconst X673 = X672;\nconst X674 = X673;\nconst X675 = X674;\nconst X676 = X675;\nconst X677 = X676;\nconst X678 = X677;\nconst X679 = X678;\nconst X680 = X679;\nconst X681 = X680;\nconst X682 = X681;\nconst X683 = X682;\nconst X684 = X683;\nconst X685 = X684;\nconst X686 = X685;\nconst X687 = X686;\nconst X688 = X687;\nconst X689 = X688;\nconst X690 = X689;\nconst X691 = X690;\nconst X692 = X691;\nconst X693 = X692;\nconst X694 = X693;\nconst X695 = X694;\nconst X696 = X695;\nconst X697 = X696;\nconst X698 = X697;\nconst X699 = X698;\nconst X700 = X699;\nconst X701 = X700;\nconst X702 = X701;\nconst X703 = X702;\nconst X704 = X703;\nconst X705 = X704;\nconst X706 = X705;\nconst X707 = X706;\nconst X708 = X707;\nconst X709 = X708;\nconst X710 = X709;\nconst X711 = X710;\nconst X712 = X711;\nconst X713 = X712;\nconst X714 = X713;\nconst X715 = X714;\nconst X716 = X715;\nconst X717 = X716;\nconst X718 = X717;\nconst X719 = X718;\nconst X720 = X719;\nconst X721 = X720;\nconst X722 = X721;\nconst X723 = X722;\nconst X724 = X723;\nconst X725 = X724;\nconst X726 = X725;\nconst X727 = X726;\nconst X728 = X727;\nconst X729 = X728;\nconst X730 = X729;\nconst X731 = X730;\nconst X732 = X731;\nconst X733 = X732;\nconst X734 = X733;\nconst X735 = X734;\nconst X736 = X735;\nconst X737 = X736;\nconst X738 = X737;\nconst X739 = X738;\nconst X740 = X739;\nconst X741 = X740;\nconst X742 = X741;\nconst X743 = X742;\nconst X744 = X743;\nconst X745 = X744;\nconst X746 = X745;\nconst X747 = X746;\nconst X748 = X747;\nconst X749 = X748;\nconst X750 = X749;\nconst X751 = X750;\nconst X752 = X751;\nconst X753 = X752;\nconst X754 = X753;\nconst X755 = X754;\nconst X756 = X755;\nconst X757 = X756;\nconst X758 = X757;\nconst X759 = X758;\nconst X760 = X759;\nconst X761 = X760;\nconst X762 = X761;\nconst X763 = X762;\nconst X764 = X763;\nconst X765 = X764;\nconst X766 = X765;\nconst X767 = X766;\nconst X768 = X767;\nconst X769 = X768;\nconst X770 = X769;\nconst X771 = X770;\nconst X772 = X771;\nconst X773 = X772;\nconst X774 = X773;\nconst X775 = X774;\nconst X776 = X775;\nconst X777 = X776;\nconst X778 = X777;\nconst X779 = X778;\nconst X780 = X779;\nconst X781 = X780;\nconst X782 = X781;\nconst X783 = X782;\nconst X784 = X783;\nconst X785 = X784;\nconst X786 = X785;\nconst X787 = X786;\nconst X788 = X787;\nconst X789 = X788;\nconst X790 = X789;\nconst X791 = X790;\nconst X792 = X791;\nconst X793 = X792;\nconst X794 = X793;\nconst X795 = X794;\nconst X796 = X795;\nconst X797 = X796;\nconst X798 = X797;\nconst X799 = X798;\nconst X800 = X799;\nconst X801 = X800;\nconst X802 = X801;\nconst X803 = X802;\nconst X804 = X803;\nconst X805 = X804;\nconst X806 = X805;\nconst X807 = X806;\nconst X808 = X807;\nconst X809 = X808;\nconst X810 = X809;\nconst X811 = X810;\nconst X812 = X811;\nconst X813 = X812;\nconst X814 = X813;\nconst X815 = X814;\nconst X816 = X815;\nconst X817 = X816;\nconst X818 = X817;\nconst X819 = X818;\nconst X820 = X819;\nconst X821 = X820;\nconst X822 = X821;\nconst X823 = X822;\nconst X824 = X823;\nconst X825 = X824;\nconst X826 = X825;\nconst X827 = X826;\nconst X828 = X827;\nconst X829 = X828;\nconst X830 = X829;\nconst X831 = X830;\nconst X832 = X831;\nconst X833 = X832;\nconst X834 = X833;\nconst X835 = X834;\nconst X836 = X835;\nconst X837 = X836;\nconst X838 = X837;\nconst X839 = X838;\nconst X840 = X839;\nconst X841 = X840;\nconst X842 = X841;\nconst X843 = X842;\nconst X844 = X843;\nconst X845 = X844;\nconst X846 = X845;\nconst X847 = X846;\nconst X848 = X847;\nconst X849 = X848;\nconst X850 = X849;\nconst X851 = X850;\nconst X852 = X851;\nconst X853 = X852;\nconst X854 = X853;\nconst X855 = X854;\nconst X856 = X855;\nconst X857 = X856;\nconst X858 = X857;\nconst X859 = X858;\nconst X860 = X859;\nconst X861 = X860;\nconst X862 = X861;\nconst X863 = X862;\nconst X864 = X863;\nconst X865 = X864;\nconst X866 = X865;\nconst X867 = X866;\nconst X868 = X867;\nconst X869 = X868;\nconst X870 = X869;\nconst X871 = X870;\nconst X872 = X871;\nconst X873 = X872;\nconst X874 = X873;\nconst X875 = X874;\nconst X876 = X875;\nconst X877 = X876;\nconst X878 = X877;\nconst X879 = X878;\nconst X880 = X879;\nconst X881 = X880;\nconst X882 = X881;\nconst X883 = X882;\nconst X884 = X883;\nconst X885 = X884;\nconst X886 = X885;\nconst X887 = X886;\nconst X888 = X887;\nconst X889 = X888;\nconst X890 = X889;\nconst X891 = X890;\nconst X892 = X891;\nconst X893 = X892;\nconst X894 = X893;\nconst X895 = X894;\nconst X896 = X895;\nconst X897 = X896;\nconst X898 = X897;\nconst X899 = X898;\nconst X900 = X899;\nconst X901 = X900;\nconst X902 = X901;\nconst X903 = X902;\nconst X904 = X903;\nconst X905 = X904;\nconst X906 = X905;\nconst X907 = X906;\nconst X908 = X907;\nconst X909 = X908;\nconst X910 = X909;\nconst X911 = X910;\nconst X912 = X911;\nconst X913 = X912;\nconst X914 = X913;\nconst X915 = X914;\nconst X916 = X915;\nconst X917 = X916;\nconst X918 = X917;\nconst X919 = X918;\nconst X920 = X919;\nconst X921 = X920;\nconst X922 = X921;\nconst X923 = X922;\nconst X924 = X923;\nconst X925 = X924;\nconst X926 = X925;\nconst X927 = X926;\nconst X928 = X927;\nconst X929 = X928;\nconst X930 = X929;\nconst X931 = X930;\nconst X932 = X931;\nconst X933 = X932;\nconst X934 = X933;\nconst X935 = X934;\nconst X936 = X935;\nconst X937 = X936;\nconst X938 = X937;\nconst X939 = X938;\nconst X940 = X939;\nconst X941 = X940;\nconst X942 = X941;\nconst X943 = X942;\nconst X944 = X943;\nconst X945 = X944;\nconst X946 = X945;\nconst X947 = X946;\nconst X948 = X947;\nconst X949 = X948;\nconst X950 = X949;\nconst X951 = X950;\nconst X952 = X951;\nconst X953 = X952;\nconst X954 = X953;\nconst X955 = X954;\nconst X956 = X955;\nconst X957 = X956;\nconst X958 = X957;\nconst X959 = X958;\nconst X960 = X959;\nconst X961 = X960;\nconst X962 = X961;\nconst X963 = X962;\nconst X964 = X963;\nconst X965 = X964;\nconst X966 = X965;\nconst X967 = X966;\nconst X968 = X967;\nconst X969 = X968;\nconst X970 = X969;\nconst X971 = X970;\nconst X972 = X971;\nconst X973 = X972;\nconst X974 = X973;\nconst X975 = X974;\nconst X976 = X975;\nconst X977 = X976;\nconst X978 = X977;\nconst X979 = X978;\nconst X980 = X979;\nconst X981 = X980;\nconst X982 = X981;\nconst X983 = X982;\nconst X984 = X983;\nconst X985 = X984;\nconst X986 = X985;\nconst X987 = X986;\nconst X988 = X987;\nconst X989 = X988;\nconst X990 = X989;\nconst X991 = X990;\nconst X992 = X991;\nconst X993 = X992;\nconst X994 = X993;\nconst X995 = X994;\nconst X996 = X995;\nconst X997 = X996;\nconst X998 = X997;\nconst X999 = X998;\n\n@Directive({selector: '[d]', inputs: X999})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: depth-chainSpread300",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst X0 = ['a'];\nconst X1 = [...X0];\nconst X2 = [...X1];\nconst X3 = [...X2];\nconst X4 = [...X3];\nconst X5 = [...X4];\nconst X6 = [...X5];\nconst X7 = [...X6];\nconst X8 = [...X7];\nconst X9 = [...X8];\nconst X10 = [...X9];\nconst X11 = [...X10];\nconst X12 = [...X11];\nconst X13 = [...X12];\nconst X14 = [...X13];\nconst X15 = [...X14];\nconst X16 = [...X15];\nconst X17 = [...X16];\nconst X18 = [...X17];\nconst X19 = [...X18];\nconst X20 = [...X19];\nconst X21 = [...X20];\nconst X22 = [...X21];\nconst X23 = [...X22];\nconst X24 = [...X23];\nconst X25 = [...X24];\nconst X26 = [...X25];\nconst X27 = [...X26];\nconst X28 = [...X27];\nconst X29 = [...X28];\nconst X30 = [...X29];\nconst X31 = [...X30];\nconst X32 = [...X31];\nconst X33 = [...X32];\nconst X34 = [...X33];\nconst X35 = [...X34];\nconst X36 = [...X35];\nconst X37 = [...X36];\nconst X38 = [...X37];\nconst X39 = [...X38];\nconst X40 = [...X39];\nconst X41 = [...X40];\nconst X42 = [...X41];\nconst X43 = [...X42];\nconst X44 = [...X43];\nconst X45 = [...X44];\nconst X46 = [...X45];\nconst X47 = [...X46];\nconst X48 = [...X47];\nconst X49 = [...X48];\nconst X50 = [...X49];\nconst X51 = [...X50];\nconst X52 = [...X51];\nconst X53 = [...X52];\nconst X54 = [...X53];\nconst X55 = [...X54];\nconst X56 = [...X55];\nconst X57 = [...X56];\nconst X58 = [...X57];\nconst X59 = [...X58];\nconst X60 = [...X59];\nconst X61 = [...X60];\nconst X62 = [...X61];\nconst X63 = [...X62];\nconst X64 = [...X63];\nconst X65 = [...X64];\nconst X66 = [...X65];\nconst X67 = [...X66];\nconst X68 = [...X67];\nconst X69 = [...X68];\nconst X70 = [...X69];\nconst X71 = [...X70];\nconst X72 = [...X71];\nconst X73 = [...X72];\nconst X74 = [...X73];\nconst X75 = [...X74];\nconst X76 = [...X75];\nconst X77 = [...X76];\nconst X78 = [...X77];\nconst X79 = [...X78];\nconst X80 = [...X79];\nconst X81 = [...X80];\nconst X82 = [...X81];\nconst X83 = [...X82];\nconst X84 = [...X83];\nconst X85 = [...X84];\nconst X86 = [...X85];\nconst X87 = [...X86];\nconst X88 = [...X87];\nconst X89 = [...X88];\nconst X90 = [...X89];\nconst X91 = [...X90];\nconst X92 = [...X91];\nconst X93 = [...X92];\nconst X94 = [...X93];\nconst X95 = [...X94];\nconst X96 = [...X95];\nconst X97 = [...X96];\nconst X98 = [...X97];\nconst X99 = [...X98];\nconst X100 = [...X99];\nconst X101 = [...X100];\nconst X102 = [...X101];\nconst X103 = [...X102];\nconst X104 = [...X103];\nconst X105 = [...X104];\nconst X106 = [...X105];\nconst X107 = [...X106];\nconst X108 = [...X107];\nconst X109 = [...X108];\nconst X110 = [...X109];\nconst X111 = [...X110];\nconst X112 = [...X111];\nconst X113 = [...X112];\nconst X114 = [...X113];\nconst X115 = [...X114];\nconst X116 = [...X115];\nconst X117 = [...X116];\nconst X118 = [...X117];\nconst X119 = [...X118];\nconst X120 = [...X119];\nconst X121 = [...X120];\nconst X122 = [...X121];\nconst X123 = [...X122];\nconst X124 = [...X123];\nconst X125 = [...X124];\nconst X126 = [...X125];\nconst X127 = [...X126];\nconst X128 = [...X127];\nconst X129 = [...X128];\nconst X130 = [...X129];\nconst X131 = [...X130];\nconst X132 = [...X131];\nconst X133 = [...X132];\nconst X134 = [...X133];\nconst X135 = [...X134];\nconst X136 = [...X135];\nconst X137 = [...X136];\nconst X138 = [...X137];\nconst X139 = [...X138];\nconst X140 = [...X139];\nconst X141 = [...X140];\nconst X142 = [...X141];\nconst X143 = [...X142];\nconst X144 = [...X143];\nconst X145 = [...X144];\nconst X146 = [...X145];\nconst X147 = [...X146];\nconst X148 = [...X147];\nconst X149 = [...X148];\nconst X150 = [...X149];\nconst X151 = [...X150];\nconst X152 = [...X151];\nconst X153 = [...X152];\nconst X154 = [...X153];\nconst X155 = [...X154];\nconst X156 = [...X155];\nconst X157 = [...X156];\nconst X158 = [...X157];\nconst X159 = [...X158];\nconst X160 = [...X159];\nconst X161 = [...X160];\nconst X162 = [...X161];\nconst X163 = [...X162];\nconst X164 = [...X163];\nconst X165 = [...X164];\nconst X166 = [...X165];\nconst X167 = [...X166];\nconst X168 = [...X167];\nconst X169 = [...X168];\nconst X170 = [...X169];\nconst X171 = [...X170];\nconst X172 = [...X171];\nconst X173 = [...X172];\nconst X174 = [...X173];\nconst X175 = [...X174];\nconst X176 = [...X175];\nconst X177 = [...X176];\nconst X178 = [...X177];\nconst X179 = [...X178];\nconst X180 = [...X179];\nconst X181 = [...X180];\nconst X182 = [...X181];\nconst X183 = [...X182];\nconst X184 = [...X183];\nconst X185 = [...X184];\nconst X186 = [...X185];\nconst X187 = [...X186];\nconst X188 = [...X187];\nconst X189 = [...X188];\nconst X190 = [...X189];\nconst X191 = [...X190];\nconst X192 = [...X191];\nconst X193 = [...X192];\nconst X194 = [...X193];\nconst X195 = [...X194];\nconst X196 = [...X195];\nconst X197 = [...X196];\nconst X198 = [...X197];\nconst X199 = [...X198];\nconst X200 = [...X199];\nconst X201 = [...X200];\nconst X202 = [...X201];\nconst X203 = [...X202];\nconst X204 = [...X203];\nconst X205 = [...X204];\nconst X206 = [...X205];\nconst X207 = [...X206];\nconst X208 = [...X207];\nconst X209 = [...X208];\nconst X210 = [...X209];\nconst X211 = [...X210];\nconst X212 = [...X211];\nconst X213 = [...X212];\nconst X214 = [...X213];\nconst X215 = [...X214];\nconst X216 = [...X215];\nconst X217 = [...X216];\nconst X218 = [...X217];\nconst X219 = [...X218];\nconst X220 = [...X219];\nconst X221 = [...X220];\nconst X222 = [...X221];\nconst X223 = [...X222];\nconst X224 = [...X223];\nconst X225 = [...X224];\nconst X226 = [...X225];\nconst X227 = [...X226];\nconst X228 = [...X227];\nconst X229 = [...X228];\nconst X230 = [...X229];\nconst X231 = [...X230];\nconst X232 = [...X231];\nconst X233 = [...X232];\nconst X234 = [...X233];\nconst X235 = [...X234];\nconst X236 = [...X235];\nconst X237 = [...X236];\nconst X238 = [...X237];\nconst X239 = [...X238];\nconst X240 = [...X239];\nconst X241 = [...X240];\nconst X242 = [...X241];\nconst X243 = [...X242];\nconst X244 = [...X243];\nconst X245 = [...X244];\nconst X246 = [...X245];\nconst X247 = [...X246];\nconst X248 = [...X247];\nconst X249 = [...X248];\nconst X250 = [...X249];\nconst X251 = [...X250];\nconst X252 = [...X251];\nconst X253 = [...X252];\nconst X254 = [...X253];\nconst X255 = [...X254];\nconst X256 = [...X255];\nconst X257 = [...X256];\nconst X258 = [...X257];\nconst X259 = [...X258];\nconst X260 = [...X259];\nconst X261 = [...X260];\nconst X262 = [...X261];\nconst X263 = [...X262];\nconst X264 = [...X263];\nconst X265 = [...X264];\nconst X266 = [...X265];\nconst X267 = [...X266];\nconst X268 = [...X267];\nconst X269 = [...X268];\nconst X270 = [...X269];\nconst X271 = [...X270];\nconst X272 = [...X271];\nconst X273 = [...X272];\nconst X274 = [...X273];\nconst X275 = [...X274];\nconst X276 = [...X275];\nconst X277 = [...X276];\nconst X278 = [...X277];\nconst X279 = [...X278];\nconst X280 = [...X279];\nconst X281 = [...X280];\nconst X282 = [...X281];\nconst X283 = [...X282];\nconst X284 = [...X283];\nconst X285 = [...X284];\nconst X286 = [...X285];\nconst X287 = [...X286];\nconst X288 = [...X287];\nconst X289 = [...X288];\nconst X290 = [...X289];\nconst X291 = [...X290];\nconst X292 = [...X291];\nconst X293 = [...X292];\nconst X294 = [...X293];\nconst X295 = [...X294];\nconst X296 = [...X295];\nconst X297 = [...X296];\nconst X298 = [...X297];\nconst X299 = [...X298];\n\n@Directive({selector: '[d]', inputs: X299})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: depth-chainSpread1000",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst X0 = ['a'];\nconst X1 = [...X0];\nconst X2 = [...X1];\nconst X3 = [...X2];\nconst X4 = [...X3];\nconst X5 = [...X4];\nconst X6 = [...X5];\nconst X7 = [...X6];\nconst X8 = [...X7];\nconst X9 = [...X8];\nconst X10 = [...X9];\nconst X11 = [...X10];\nconst X12 = [...X11];\nconst X13 = [...X12];\nconst X14 = [...X13];\nconst X15 = [...X14];\nconst X16 = [...X15];\nconst X17 = [...X16];\nconst X18 = [...X17];\nconst X19 = [...X18];\nconst X20 = [...X19];\nconst X21 = [...X20];\nconst X22 = [...X21];\nconst X23 = [...X22];\nconst X24 = [...X23];\nconst X25 = [...X24];\nconst X26 = [...X25];\nconst X27 = [...X26];\nconst X28 = [...X27];\nconst X29 = [...X28];\nconst X30 = [...X29];\nconst X31 = [...X30];\nconst X32 = [...X31];\nconst X33 = [...X32];\nconst X34 = [...X33];\nconst X35 = [...X34];\nconst X36 = [...X35];\nconst X37 = [...X36];\nconst X38 = [...X37];\nconst X39 = [...X38];\nconst X40 = [...X39];\nconst X41 = [...X40];\nconst X42 = [...X41];\nconst X43 = [...X42];\nconst X44 = [...X43];\nconst X45 = [...X44];\nconst X46 = [...X45];\nconst X47 = [...X46];\nconst X48 = [...X47];\nconst X49 = [...X48];\nconst X50 = [...X49];\nconst X51 = [...X50];\nconst X52 = [...X51];\nconst X53 = [...X52];\nconst X54 = [...X53];\nconst X55 = [...X54];\nconst X56 = [...X55];\nconst X57 = [...X56];\nconst X58 = [...X57];\nconst X59 = [...X58];\nconst X60 = [...X59];\nconst X61 = [...X60];\nconst X62 = [...X61];\nconst X63 = [...X62];\nconst X64 = [...X63];\nconst X65 = [...X64];\nconst X66 = [...X65];\nconst X67 = [...X66];\nconst X68 = [...X67];\nconst X69 = [...X68];\nconst X70 = [...X69];\nconst X71 = [...X70];\nconst X72 = [...X71];\nconst X73 = [...X72];\nconst X74 = [...X73];\nconst X75 = [...X74];\nconst X76 = [...X75];\nconst X77 = [...X76];\nconst X78 = [...X77];\nconst X79 = [...X78];\nconst X80 = [...X79];\nconst X81 = [...X80];\nconst X82 = [...X81];\nconst X83 = [...X82];\nconst X84 = [...X83];\nconst X85 = [...X84];\nconst X86 = [...X85];\nconst X87 = [...X86];\nconst X88 = [...X87];\nconst X89 = [...X88];\nconst X90 = [...X89];\nconst X91 = [...X90];\nconst X92 = [...X91];\nconst X93 = [...X92];\nconst X94 = [...X93];\nconst X95 = [...X94];\nconst X96 = [...X95];\nconst X97 = [...X96];\nconst X98 = [...X97];\nconst X99 = [...X98];\nconst X100 = [...X99];\nconst X101 = [...X100];\nconst X102 = [...X101];\nconst X103 = [...X102];\nconst X104 = [...X103];\nconst X105 = [...X104];\nconst X106 = [...X105];\nconst X107 = [...X106];\nconst X108 = [...X107];\nconst X109 = [...X108];\nconst X110 = [...X109];\nconst X111 = [...X110];\nconst X112 = [...X111];\nconst X113 = [...X112];\nconst X114 = [...X113];\nconst X115 = [...X114];\nconst X116 = [...X115];\nconst X117 = [...X116];\nconst X118 = [...X117];\nconst X119 = [...X118];\nconst X120 = [...X119];\nconst X121 = [...X120];\nconst X122 = [...X121];\nconst X123 = [...X122];\nconst X124 = [...X123];\nconst X125 = [...X124];\nconst X126 = [...X125];\nconst X127 = [...X126];\nconst X128 = [...X127];\nconst X129 = [...X128];\nconst X130 = [...X129];\nconst X131 = [...X130];\nconst X132 = [...X131];\nconst X133 = [...X132];\nconst X134 = [...X133];\nconst X135 = [...X134];\nconst X136 = [...X135];\nconst X137 = [...X136];\nconst X138 = [...X137];\nconst X139 = [...X138];\nconst X140 = [...X139];\nconst X141 = [...X140];\nconst X142 = [...X141];\nconst X143 = [...X142];\nconst X144 = [...X143];\nconst X145 = [...X144];\nconst X146 = [...X145];\nconst X147 = [...X146];\nconst X148 = [...X147];\nconst X149 = [...X148];\nconst X150 = [...X149];\nconst X151 = [...X150];\nconst X152 = [...X151];\nconst X153 = [...X152];\nconst X154 = [...X153];\nconst X155 = [...X154];\nconst X156 = [...X155];\nconst X157 = [...X156];\nconst X158 = [...X157];\nconst X159 = [...X158];\nconst X160 = [...X159];\nconst X161 = [...X160];\nconst X162 = [...X161];\nconst X163 = [...X162];\nconst X164 = [...X163];\nconst X165 = [...X164];\nconst X166 = [...X165];\nconst X167 = [...X166];\nconst X168 = [...X167];\nconst X169 = [...X168];\nconst X170 = [...X169];\nconst X171 = [...X170];\nconst X172 = [...X171];\nconst X173 = [...X172];\nconst X174 = [...X173];\nconst X175 = [...X174];\nconst X176 = [...X175];\nconst X177 = [...X176];\nconst X178 = [...X177];\nconst X179 = [...X178];\nconst X180 = [...X179];\nconst X181 = [...X180];\nconst X182 = [...X181];\nconst X183 = [...X182];\nconst X184 = [...X183];\nconst X185 = [...X184];\nconst X186 = [...X185];\nconst X187 = [...X186];\nconst X188 = [...X187];\nconst X189 = [...X188];\nconst X190 = [...X189];\nconst X191 = [...X190];\nconst X192 = [...X191];\nconst X193 = [...X192];\nconst X194 = [...X193];\nconst X195 = [...X194];\nconst X196 = [...X195];\nconst X197 = [...X196];\nconst X198 = [...X197];\nconst X199 = [...X198];\nconst X200 = [...X199];\nconst X201 = [...X200];\nconst X202 = [...X201];\nconst X203 = [...X202];\nconst X204 = [...X203];\nconst X205 = [...X204];\nconst X206 = [...X205];\nconst X207 = [...X206];\nconst X208 = [...X207];\nconst X209 = [...X208];\nconst X210 = [...X209];\nconst X211 = [...X210];\nconst X212 = [...X211];\nconst X213 = [...X212];\nconst X214 = [...X213];\nconst X215 = [...X214];\nconst X216 = [...X215];\nconst X217 = [...X216];\nconst X218 = [...X217];\nconst X219 = [...X218];\nconst X220 = [...X219];\nconst X221 = [...X220];\nconst X222 = [...X221];\nconst X223 = [...X222];\nconst X224 = [...X223];\nconst X225 = [...X224];\nconst X226 = [...X225];\nconst X227 = [...X226];\nconst X228 = [...X227];\nconst X229 = [...X228];\nconst X230 = [...X229];\nconst X231 = [...X230];\nconst X232 = [...X231];\nconst X233 = [...X232];\nconst X234 = [...X233];\nconst X235 = [...X234];\nconst X236 = [...X235];\nconst X237 = [...X236];\nconst X238 = [...X237];\nconst X239 = [...X238];\nconst X240 = [...X239];\nconst X241 = [...X240];\nconst X242 = [...X241];\nconst X243 = [...X242];\nconst X244 = [...X243];\nconst X245 = [...X244];\nconst X246 = [...X245];\nconst X247 = [...X246];\nconst X248 = [...X247];\nconst X249 = [...X248];\nconst X250 = [...X249];\nconst X251 = [...X250];\nconst X252 = [...X251];\nconst X253 = [...X252];\nconst X254 = [...X253];\nconst X255 = [...X254];\nconst X256 = [...X255];\nconst X257 = [...X256];\nconst X258 = [...X257];\nconst X259 = [...X258];\nconst X260 = [...X259];\nconst X261 = [...X260];\nconst X262 = [...X261];\nconst X263 = [...X262];\nconst X264 = [...X263];\nconst X265 = [...X264];\nconst X266 = [...X265];\nconst X267 = [...X266];\nconst X268 = [...X267];\nconst X269 = [...X268];\nconst X270 = [...X269];\nconst X271 = [...X270];\nconst X272 = [...X271];\nconst X273 = [...X272];\nconst X274 = [...X273];\nconst X275 = [...X274];\nconst X276 = [...X275];\nconst X277 = [...X276];\nconst X278 = [...X277];\nconst X279 = [...X278];\nconst X280 = [...X279];\nconst X281 = [...X280];\nconst X282 = [...X281];\nconst X283 = [...X282];\nconst X284 = [...X283];\nconst X285 = [...X284];\nconst X286 = [...X285];\nconst X287 = [...X286];\nconst X288 = [...X287];\nconst X289 = [...X288];\nconst X290 = [...X289];\nconst X291 = [...X290];\nconst X292 = [...X291];\nconst X293 = [...X292];\nconst X294 = [...X293];\nconst X295 = [...X294];\nconst X296 = [...X295];\nconst X297 = [...X296];\nconst X298 = [...X297];\nconst X299 = [...X298];\nconst X300 = [...X299];\nconst X301 = [...X300];\nconst X302 = [...X301];\nconst X303 = [...X302];\nconst X304 = [...X303];\nconst X305 = [...X304];\nconst X306 = [...X305];\nconst X307 = [...X306];\nconst X308 = [...X307];\nconst X309 = [...X308];\nconst X310 = [...X309];\nconst X311 = [...X310];\nconst X312 = [...X311];\nconst X313 = [...X312];\nconst X314 = [...X313];\nconst X315 = [...X314];\nconst X316 = [...X315];\nconst X317 = [...X316];\nconst X318 = [...X317];\nconst X319 = [...X318];\nconst X320 = [...X319];\nconst X321 = [...X320];\nconst X322 = [...X321];\nconst X323 = [...X322];\nconst X324 = [...X323];\nconst X325 = [...X324];\nconst X326 = [...X325];\nconst X327 = [...X326];\nconst X328 = [...X327];\nconst X329 = [...X328];\nconst X330 = [...X329];\nconst X331 = [...X330];\nconst X332 = [...X331];\nconst X333 = [...X332];\nconst X334 = [...X333];\nconst X335 = [...X334];\nconst X336 = [...X335];\nconst X337 = [...X336];\nconst X338 = [...X337];\nconst X339 = [...X338];\nconst X340 = [...X339];\nconst X341 = [...X340];\nconst X342 = [...X341];\nconst X343 = [...X342];\nconst X344 = [...X343];\nconst X345 = [...X344];\nconst X346 = [...X345];\nconst X347 = [...X346];\nconst X348 = [...X347];\nconst X349 = [...X348];\nconst X350 = [...X349];\nconst X351 = [...X350];\nconst X352 = [...X351];\nconst X353 = [...X352];\nconst X354 = [...X353];\nconst X355 = [...X354];\nconst X356 = [...X355];\nconst X357 = [...X356];\nconst X358 = [...X357];\nconst X359 = [...X358];\nconst X360 = [...X359];\nconst X361 = [...X360];\nconst X362 = [...X361];\nconst X363 = [...X362];\nconst X364 = [...X363];\nconst X365 = [...X364];\nconst X366 = [...X365];\nconst X367 = [...X366];\nconst X368 = [...X367];\nconst X369 = [...X368];\nconst X370 = [...X369];\nconst X371 = [...X370];\nconst X372 = [...X371];\nconst X373 = [...X372];\nconst X374 = [...X373];\nconst X375 = [...X374];\nconst X376 = [...X375];\nconst X377 = [...X376];\nconst X378 = [...X377];\nconst X379 = [...X378];\nconst X380 = [...X379];\nconst X381 = [...X380];\nconst X382 = [...X381];\nconst X383 = [...X382];\nconst X384 = [...X383];\nconst X385 = [...X384];\nconst X386 = [...X385];\nconst X387 = [...X386];\nconst X388 = [...X387];\nconst X389 = [...X388];\nconst X390 = [...X389];\nconst X391 = [...X390];\nconst X392 = [...X391];\nconst X393 = [...X392];\nconst X394 = [...X393];\nconst X395 = [...X394];\nconst X396 = [...X395];\nconst X397 = [...X396];\nconst X398 = [...X397];\nconst X399 = [...X398];\nconst X400 = [...X399];\nconst X401 = [...X400];\nconst X402 = [...X401];\nconst X403 = [...X402];\nconst X404 = [...X403];\nconst X405 = [...X404];\nconst X406 = [...X405];\nconst X407 = [...X406];\nconst X408 = [...X407];\nconst X409 = [...X408];\nconst X410 = [...X409];\nconst X411 = [...X410];\nconst X412 = [...X411];\nconst X413 = [...X412];\nconst X414 = [...X413];\nconst X415 = [...X414];\nconst X416 = [...X415];\nconst X417 = [...X416];\nconst X418 = [...X417];\nconst X419 = [...X418];\nconst X420 = [...X419];\nconst X421 = [...X420];\nconst X422 = [...X421];\nconst X423 = [...X422];\nconst X424 = [...X423];\nconst X425 = [...X424];\nconst X426 = [...X425];\nconst X427 = [...X426];\nconst X428 = [...X427];\nconst X429 = [...X428];\nconst X430 = [...X429];\nconst X431 = [...X430];\nconst X432 = [...X431];\nconst X433 = [...X432];\nconst X434 = [...X433];\nconst X435 = [...X434];\nconst X436 = [...X435];\nconst X437 = [...X436];\nconst X438 = [...X437];\nconst X439 = [...X438];\nconst X440 = [...X439];\nconst X441 = [...X440];\nconst X442 = [...X441];\nconst X443 = [...X442];\nconst X444 = [...X443];\nconst X445 = [...X444];\nconst X446 = [...X445];\nconst X447 = [...X446];\nconst X448 = [...X447];\nconst X449 = [...X448];\nconst X450 = [...X449];\nconst X451 = [...X450];\nconst X452 = [...X451];\nconst X453 = [...X452];\nconst X454 = [...X453];\nconst X455 = [...X454];\nconst X456 = [...X455];\nconst X457 = [...X456];\nconst X458 = [...X457];\nconst X459 = [...X458];\nconst X460 = [...X459];\nconst X461 = [...X460];\nconst X462 = [...X461];\nconst X463 = [...X462];\nconst X464 = [...X463];\nconst X465 = [...X464];\nconst X466 = [...X465];\nconst X467 = [...X466];\nconst X468 = [...X467];\nconst X469 = [...X468];\nconst X470 = [...X469];\nconst X471 = [...X470];\nconst X472 = [...X471];\nconst X473 = [...X472];\nconst X474 = [...X473];\nconst X475 = [...X474];\nconst X476 = [...X475];\nconst X477 = [...X476];\nconst X478 = [...X477];\nconst X479 = [...X478];\nconst X480 = [...X479];\nconst X481 = [...X480];\nconst X482 = [...X481];\nconst X483 = [...X482];\nconst X484 = [...X483];\nconst X485 = [...X484];\nconst X486 = [...X485];\nconst X487 = [...X486];\nconst X488 = [...X487];\nconst X489 = [...X488];\nconst X490 = [...X489];\nconst X491 = [...X490];\nconst X492 = [...X491];\nconst X493 = [...X492];\nconst X494 = [...X493];\nconst X495 = [...X494];\nconst X496 = [...X495];\nconst X497 = [...X496];\nconst X498 = [...X497];\nconst X499 = [...X498];\nconst X500 = [...X499];\nconst X501 = [...X500];\nconst X502 = [...X501];\nconst X503 = [...X502];\nconst X504 = [...X503];\nconst X505 = [...X504];\nconst X506 = [...X505];\nconst X507 = [...X506];\nconst X508 = [...X507];\nconst X509 = [...X508];\nconst X510 = [...X509];\nconst X511 = [...X510];\nconst X512 = [...X511];\nconst X513 = [...X512];\nconst X514 = [...X513];\nconst X515 = [...X514];\nconst X516 = [...X515];\nconst X517 = [...X516];\nconst X518 = [...X517];\nconst X519 = [...X518];\nconst X520 = [...X519];\nconst X521 = [...X520];\nconst X522 = [...X521];\nconst X523 = [...X522];\nconst X524 = [...X523];\nconst X525 = [...X524];\nconst X526 = [...X525];\nconst X527 = [...X526];\nconst X528 = [...X527];\nconst X529 = [...X528];\nconst X530 = [...X529];\nconst X531 = [...X530];\nconst X532 = [...X531];\nconst X533 = [...X532];\nconst X534 = [...X533];\nconst X535 = [...X534];\nconst X536 = [...X535];\nconst X537 = [...X536];\nconst X538 = [...X537];\nconst X539 = [...X538];\nconst X540 = [...X539];\nconst X541 = [...X540];\nconst X542 = [...X541];\nconst X543 = [...X542];\nconst X544 = [...X543];\nconst X545 = [...X544];\nconst X546 = [...X545];\nconst X547 = [...X546];\nconst X548 = [...X547];\nconst X549 = [...X548];\nconst X550 = [...X549];\nconst X551 = [...X550];\nconst X552 = [...X551];\nconst X553 = [...X552];\nconst X554 = [...X553];\nconst X555 = [...X554];\nconst X556 = [...X555];\nconst X557 = [...X556];\nconst X558 = [...X557];\nconst X559 = [...X558];\nconst X560 = [...X559];\nconst X561 = [...X560];\nconst X562 = [...X561];\nconst X563 = [...X562];\nconst X564 = [...X563];\nconst X565 = [...X564];\nconst X566 = [...X565];\nconst X567 = [...X566];\nconst X568 = [...X567];\nconst X569 = [...X568];\nconst X570 = [...X569];\nconst X571 = [...X570];\nconst X572 = [...X571];\nconst X573 = [...X572];\nconst X574 = [...X573];\nconst X575 = [...X574];\nconst X576 = [...X575];\nconst X577 = [...X576];\nconst X578 = [...X577];\nconst X579 = [...X578];\nconst X580 = [...X579];\nconst X581 = [...X580];\nconst X582 = [...X581];\nconst X583 = [...X582];\nconst X584 = [...X583];\nconst X585 = [...X584];\nconst X586 = [...X585];\nconst X587 = [...X586];\nconst X588 = [...X587];\nconst X589 = [...X588];\nconst X590 = [...X589];\nconst X591 = [...X590];\nconst X592 = [...X591];\nconst X593 = [...X592];\nconst X594 = [...X593];\nconst X595 = [...X594];\nconst X596 = [...X595];\nconst X597 = [...X596];\nconst X598 = [...X597];\nconst X599 = [...X598];\nconst X600 = [...X599];\nconst X601 = [...X600];\nconst X602 = [...X601];\nconst X603 = [...X602];\nconst X604 = [...X603];\nconst X605 = [...X604];\nconst X606 = [...X605];\nconst X607 = [...X606];\nconst X608 = [...X607];\nconst X609 = [...X608];\nconst X610 = [...X609];\nconst X611 = [...X610];\nconst X612 = [...X611];\nconst X613 = [...X612];\nconst X614 = [...X613];\nconst X615 = [...X614];\nconst X616 = [...X615];\nconst X617 = [...X616];\nconst X618 = [...X617];\nconst X619 = [...X618];\nconst X620 = [...X619];\nconst X621 = [...X620];\nconst X622 = [...X621];\nconst X623 = [...X622];\nconst X624 = [...X623];\nconst X625 = [...X624];\nconst X626 = [...X625];\nconst X627 = [...X626];\nconst X628 = [...X627];\nconst X629 = [...X628];\nconst X630 = [...X629];\nconst X631 = [...X630];\nconst X632 = [...X631];\nconst X633 = [...X632];\nconst X634 = [...X633];\nconst X635 = [...X634];\nconst X636 = [...X635];\nconst X637 = [...X636];\nconst X638 = [...X637];\nconst X639 = [...X638];\nconst X640 = [...X639];\nconst X641 = [...X640];\nconst X642 = [...X641];\nconst X643 = [...X642];\nconst X644 = [...X643];\nconst X645 = [...X644];\nconst X646 = [...X645];\nconst X647 = [...X646];\nconst X648 = [...X647];\nconst X649 = [...X648];\nconst X650 = [...X649];\nconst X651 = [...X650];\nconst X652 = [...X651];\nconst X653 = [...X652];\nconst X654 = [...X653];\nconst X655 = [...X654];\nconst X656 = [...X655];\nconst X657 = [...X656];\nconst X658 = [...X657];\nconst X659 = [...X658];\nconst X660 = [...X659];\nconst X661 = [...X660];\nconst X662 = [...X661];\nconst X663 = [...X662];\nconst X664 = [...X663];\nconst X665 = [...X664];\nconst X666 = [...X665];\nconst X667 = [...X666];\nconst X668 = [...X667];\nconst X669 = [...X668];\nconst X670 = [...X669];\nconst X671 = [...X670];\nconst X672 = [...X671];\nconst X673 = [...X672];\nconst X674 = [...X673];\nconst X675 = [...X674];\nconst X676 = [...X675];\nconst X677 = [...X676];\nconst X678 = [...X677];\nconst X679 = [...X678];\nconst X680 = [...X679];\nconst X681 = [...X680];\nconst X682 = [...X681];\nconst X683 = [...X682];\nconst X684 = [...X683];\nconst X685 = [...X684];\nconst X686 = [...X685];\nconst X687 = [...X686];\nconst X688 = [...X687];\nconst X689 = [...X688];\nconst X690 = [...X689];\nconst X691 = [...X690];\nconst X692 = [...X691];\nconst X693 = [...X692];\nconst X694 = [...X693];\nconst X695 = [...X694];\nconst X696 = [...X695];\nconst X697 = [...X696];\nconst X698 = [...X697];\nconst X699 = [...X698];\nconst X700 = [...X699];\nconst X701 = [...X700];\nconst X702 = [...X701];\nconst X703 = [...X702];\nconst X704 = [...X703];\nconst X705 = [...X704];\nconst X706 = [...X705];\nconst X707 = [...X706];\nconst X708 = [...X707];\nconst X709 = [...X708];\nconst X710 = [...X709];\nconst X711 = [...X710];\nconst X712 = [...X711];\nconst X713 = [...X712];\nconst X714 = [...X713];\nconst X715 = [...X714];\nconst X716 = [...X715];\nconst X717 = [...X716];\nconst X718 = [...X717];\nconst X719 = [...X718];\nconst X720 = [...X719];\nconst X721 = [...X720];\nconst X722 = [...X721];\nconst X723 = [...X722];\nconst X724 = [...X723];\nconst X725 = [...X724];\nconst X726 = [...X725];\nconst X727 = [...X726];\nconst X728 = [...X727];\nconst X729 = [...X728];\nconst X730 = [...X729];\nconst X731 = [...X730];\nconst X732 = [...X731];\nconst X733 = [...X732];\nconst X734 = [...X733];\nconst X735 = [...X734];\nconst X736 = [...X735];\nconst X737 = [...X736];\nconst X738 = [...X737];\nconst X739 = [...X738];\nconst X740 = [...X739];\nconst X741 = [...X740];\nconst X742 = [...X741];\nconst X743 = [...X742];\nconst X744 = [...X743];\nconst X745 = [...X744];\nconst X746 = [...X745];\nconst X747 = [...X746];\nconst X748 = [...X747];\nconst X749 = [...X748];\nconst X750 = [...X749];\nconst X751 = [...X750];\nconst X752 = [...X751];\nconst X753 = [...X752];\nconst X754 = [...X753];\nconst X755 = [...X754];\nconst X756 = [...X755];\nconst X757 = [...X756];\nconst X758 = [...X757];\nconst X759 = [...X758];\nconst X760 = [...X759];\nconst X761 = [...X760];\nconst X762 = [...X761];\nconst X763 = [...X762];\nconst X764 = [...X763];\nconst X765 = [...X764];\nconst X766 = [...X765];\nconst X767 = [...X766];\nconst X768 = [...X767];\nconst X769 = [...X768];\nconst X770 = [...X769];\nconst X771 = [...X770];\nconst X772 = [...X771];\nconst X773 = [...X772];\nconst X774 = [...X773];\nconst X775 = [...X774];\nconst X776 = [...X775];\nconst X777 = [...X776];\nconst X778 = [...X777];\nconst X779 = [...X778];\nconst X780 = [...X779];\nconst X781 = [...X780];\nconst X782 = [...X781];\nconst X783 = [...X782];\nconst X784 = [...X783];\nconst X785 = [...X784];\nconst X786 = [...X785];\nconst X787 = [...X786];\nconst X788 = [...X787];\nconst X789 = [...X788];\nconst X790 = [...X789];\nconst X791 = [...X790];\nconst X792 = [...X791];\nconst X793 = [...X792];\nconst X794 = [...X793];\nconst X795 = [...X794];\nconst X796 = [...X795];\nconst X797 = [...X796];\nconst X798 = [...X797];\nconst X799 = [...X798];\nconst X800 = [...X799];\nconst X801 = [...X800];\nconst X802 = [...X801];\nconst X803 = [...X802];\nconst X804 = [...X803];\nconst X805 = [...X804];\nconst X806 = [...X805];\nconst X807 = [...X806];\nconst X808 = [...X807];\nconst X809 = [...X808];\nconst X810 = [...X809];\nconst X811 = [...X810];\nconst X812 = [...X811];\nconst X813 = [...X812];\nconst X814 = [...X813];\nconst X815 = [...X814];\nconst X816 = [...X815];\nconst X817 = [...X816];\nconst X818 = [...X817];\nconst X819 = [...X818];\nconst X820 = [...X819];\nconst X821 = [...X820];\nconst X822 = [...X821];\nconst X823 = [...X822];\nconst X824 = [...X823];\nconst X825 = [...X824];\nconst X826 = [...X825];\nconst X827 = [...X826];\nconst X828 = [...X827];\nconst X829 = [...X828];\nconst X830 = [...X829];\nconst X831 = [...X830];\nconst X832 = [...X831];\nconst X833 = [...X832];\nconst X834 = [...X833];\nconst X835 = [...X834];\nconst X836 = [...X835];\nconst X837 = [...X836];\nconst X838 = [...X837];\nconst X839 = [...X838];\nconst X840 = [...X839];\nconst X841 = [...X840];\nconst X842 = [...X841];\nconst X843 = [...X842];\nconst X844 = [...X843];\nconst X845 = [...X844];\nconst X846 = [...X845];\nconst X847 = [...X846];\nconst X848 = [...X847];\nconst X849 = [...X848];\nconst X850 = [...X849];\nconst X851 = [...X850];\nconst X852 = [...X851];\nconst X853 = [...X852];\nconst X854 = [...X853];\nconst X855 = [...X854];\nconst X856 = [...X855];\nconst X857 = [...X856];\nconst X858 = [...X857];\nconst X859 = [...X858];\nconst X860 = [...X859];\nconst X861 = [...X860];\nconst X862 = [...X861];\nconst X863 = [...X862];\nconst X864 = [...X863];\nconst X865 = [...X864];\nconst X866 = [...X865];\nconst X867 = [...X866];\nconst X868 = [...X867];\nconst X869 = [...X868];\nconst X870 = [...X869];\nconst X871 = [...X870];\nconst X872 = [...X871];\nconst X873 = [...X872];\nconst X874 = [...X873];\nconst X875 = [...X874];\nconst X876 = [...X875];\nconst X877 = [...X876];\nconst X878 = [...X877];\nconst X879 = [...X878];\nconst X880 = [...X879];\nconst X881 = [...X880];\nconst X882 = [...X881];\nconst X883 = [...X882];\nconst X884 = [...X883];\nconst X885 = [...X884];\nconst X886 = [...X885];\nconst X887 = [...X886];\nconst X888 = [...X887];\nconst X889 = [...X888];\nconst X890 = [...X889];\nconst X891 = [...X890];\nconst X892 = [...X891];\nconst X893 = [...X892];\nconst X894 = [...X893];\nconst X895 = [...X894];\nconst X896 = [...X895];\nconst X897 = [...X896];\nconst X898 = [...X897];\nconst X899 = [...X898];\nconst X900 = [...X899];\nconst X901 = [...X900];\nconst X902 = [...X901];\nconst X903 = [...X902];\nconst X904 = [...X903];\nconst X905 = [...X904];\nconst X906 = [...X905];\nconst X907 = [...X906];\nconst X908 = [...X907];\nconst X909 = [...X908];\nconst X910 = [...X909];\nconst X911 = [...X910];\nconst X912 = [...X911];\nconst X913 = [...X912];\nconst X914 = [...X913];\nconst X915 = [...X914];\nconst X916 = [...X915];\nconst X917 = [...X916];\nconst X918 = [...X917];\nconst X919 = [...X918];\nconst X920 = [...X919];\nconst X921 = [...X920];\nconst X922 = [...X921];\nconst X923 = [...X922];\nconst X924 = [...X923];\nconst X925 = [...X924];\nconst X926 = [...X925];\nconst X927 = [...X926];\nconst X928 = [...X927];\nconst X929 = [...X928];\nconst X930 = [...X929];\nconst X931 = [...X930];\nconst X932 = [...X931];\nconst X933 = [...X932];\nconst X934 = [...X933];\nconst X935 = [...X934];\nconst X936 = [...X935];\nconst X937 = [...X936];\nconst X938 = [...X937];\nconst X939 = [...X938];\nconst X940 = [...X939];\nconst X941 = [...X940];\nconst X942 = [...X941];\nconst X943 = [...X942];\nconst X944 = [...X943];\nconst X945 = [...X944];\nconst X946 = [...X945];\nconst X947 = [...X946];\nconst X948 = [...X947];\nconst X949 = [...X948];\nconst X950 = [...X949];\nconst X951 = [...X950];\nconst X952 = [...X951];\nconst X953 = [...X952];\nconst X954 = [...X953];\nconst X955 = [...X954];\nconst X956 = [...X955];\nconst X957 = [...X956];\nconst X958 = [...X957];\nconst X959 = [...X958];\nconst X960 = [...X959];\nconst X961 = [...X960];\nconst X962 = [...X961];\nconst X963 = [...X962];\nconst X964 = [...X963];\nconst X965 = [...X964];\nconst X966 = [...X965];\nconst X967 = [...X966];\nconst X968 = [...X967];\nconst X969 = [...X968];\nconst X970 = [...X969];\nconst X971 = [...X970];\nconst X972 = [...X971];\nconst X973 = [...X972];\nconst X974 = [...X973];\nconst X975 = [...X974];\nconst X976 = [...X975];\nconst X977 = [...X976];\nconst X978 = [...X977];\nconst X979 = [...X978];\nconst X980 = [...X979];\nconst X981 = [...X980];\nconst X982 = [...X981];\nconst X983 = [...X982];\nconst X984 = [...X983];\nconst X985 = [...X984];\nconst X986 = [...X985];\nconst X987 = [...X986];\nconst X988 = [...X987];\nconst X989 = [...X988];\nconst X990 = [...X989];\nconst X991 = [...X990];\nconst X992 = [...X991];\nconst X993 = [...X992];\nconst X994 = [...X993];\nconst X995 = [...X994];\nconst X996 = [...X995];\nconst X997 = [...X996];\nconst X998 = [...X997];\nconst X999 = [...X998];\n\n@Directive({selector: '[d]', inputs: X999})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-enumIndex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { A = 5, B, C = 'c', D }\n@Directive({selector: '[d]', inputs: [`x${E.A}${E.B}${E.C}${E.D}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x51c3:\"x51c3\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x51c3\":{\"alias\":\"x51c3\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-enumStringKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { 'x-y' = 'q' }\n@Directive({selector: '[d]', inputs: [`${E['x-y']}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{q:\"q\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"q\":{\"alias\":\"q\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-enumSelfRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { A = 'x', B = A }\n@Directive({selector: '[d]', inputs: [`${E.B}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[133, 143]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-enumTwice",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { A = 'x' }\nenum E { B = 1 }\n@Directive({selector: '[d]', inputs: [`${E.A}`, `${E.B}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\",undefined:\"undefined\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};\"undefined\":{\"alias\":\"undefined\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-enumOutsideConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst A = 'outer';\nenum E { A = 'x', B = A }\n@Directive({selector: '[d]', inputs: [`${E.B}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[152, 162]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-thisParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nfunction mk(this: any, x: string) { return [x]; }\n@Directive({selector: '[d]', inputs: mk('a', 'b')})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-typeofQualified",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { A = 'x' }\ndeclare const X: typeof E.A;\n@Directive({selector: '[d]', inputs: [X]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'A'."
+      ],
+      "diagnosticSpans": [[155, 158]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-tupleNonLiteral",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: ['a', string];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[139, 140]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-tupleNeg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: [-1];\n@Directive({selector: '[d]', inputs: [`${X[0]}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"-1\":\"-1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"-1\":{\"alias\":\"-1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-tupleTemplateType",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: [`a`];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareTypeRefClass",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U {}\ndeclare const X: U;\n@Directive({selector: '[d]', inputs: [X]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[138, 141]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareTypeRefAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ntype T = ['a'];\ndeclare const X: T;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[143, 144]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareTupleOptional",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: ['a'?];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[132, 133]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareTupleRest",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: ['a', ...string[]];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[144, 145]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareUnion",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: ['a'] | ['b'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[139, 140]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareNull",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare const X: [null, true, 1];\n@Directive({selector: '[d]', inputs: [`${X[0]}${X[1]}${X[2]}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{nulltrue1:\"nulltrue1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"nulltrue1\":{\"alias\":\"nulltrue1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareExport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nexport declare const X: ['a'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-declareVar",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare var X: ['a'];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-describeObjOrder",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: {b: 1, 1: 2, a: {c: 1}, 'x-y': [1]}})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type '{ b: number; 1: number; a: object; 'x-y': Array }'."
+      ],
+      "diagnosticSpans": [[107, 142]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-describeNested",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [[{a: 1}, [1]]]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type '[object, Array]'."
+      ],
+      "diagnosticSpans": [[107, 122]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-describeFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst A = ['a'];\n@Directive({selector: '[d]', inputs: [A.concat]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'Function'."
+      ],
+      "diagnosticSpans": [[124, 134]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-describeBuiltinStr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a'.concat]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'Function'."
+      ],
+      "diagnosticSpans": [[107, 119]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-staticMethodRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U { static m() { return 1; } }\n@Directive({selector: '[d]', inputs: [U.m]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'm'."
+      ],
+      "diagnosticSpans": [[144, 149]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-staticFieldUndefined",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U { static m: string; }\n@Directive({selector: '[d]', inputs: [U.m]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'm'."
+      ],
+      "diagnosticSpans": [[137, 142]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-staticPrototype",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U {}\n@Directive({selector: '[d]', inputs: [U.prototype]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[118, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-staticInstanceMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U { m = 'a'; }\n@Directive({selector: '[d]', inputs: [U.m]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[128, 133]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-fnRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nfunction mk() { return 1; }\n@Directive({selector: '[d]', inputs: [mk]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'mk'."
+      ],
+      "diagnosticSpans": [[135, 139]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-fnRefMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nfunction mk() { return 1; }\n@Directive({selector: '[d]', inputs: [mk.name]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[135, 144]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-mathPI",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${Math.PI}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 121]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-condEnumZero",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nenum E { A }\n@Directive({selector: '[d]', inputs: E.A ? ['t'] : ['f']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{t:\"t\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"t\":{\"alias\":\"t\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-unaryArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${-['5']}${+[]}${!['a']}${~['3']}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"-50false-4\":\"-50false-4\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"-50false-4\":{\"alias\":\"-50false-4\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-binaryArrayOperand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [['a'] + '']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 119]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-andRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nclass U {}\n@Directive({selector: '[d]', inputs: [U && 'a', null && U]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'null'."
+      ],
+      "diagnosticSpans": [[118, 139]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-orDynamicRhs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\ndeclare function f(): any;\n@Directive({selector: '[d]', inputs: ['a' || f()]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[134, 146]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-plusNumStr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`x${1 + 2 + '3'}${'1' - 1}${'0x10' * 1}${' 12 ' * 1}${'' * 1}${'1e3' * 1}${'abc' * 1}${null + 1}${undefined + 1}${true + true}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x330161201000NaN1NaN2:\"x330161201000NaN1NaN2\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x330161201000NaN1NaN2\":{\"alias\":\"x330161201000NaN1NaN2\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-looseEq",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${null == undefined}${'1' == 1}${true == 1}${null == 0}${'' == 0}${'a' < 'b'}${'10' < '9'}${'10' < 9}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{truetruetruefalsetruetruetruefalse:\"truetruetruefalsetruetruetruefalse\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"truetruetruefalsetruetruetruefalse\":{\"alias\":\"truetruetruefalsetruetruetruefalse\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-divZero",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${1 / 0}${-1 / 0}${0 / 0}${5 % 0}${-0}${2 ** -1}${7 % -3}${-7 % 3}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"Infinity-InfinityNaNNaN00.51-1\":\"Infinity-InfinityNaNNaN00.51-1\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"Infinity-InfinityNaNNaN00.51-1\":{\"alias\":\"Infinity-InfinityNaNNaN00.51-1\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-bitwise",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${2 ** 31 | 0}${1.9 | 0}${-1 >>> 0}${1 << 33}${'3' & 1}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"-21474836481429496729521\":\"-21474836481429496729521\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"-21474836481429496729521\":{\"alias\":\"-21474836481429496729521\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-hexLiteral",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${0x1F}${1_000}${0b11}${0o7}${.5}${5.}${1e-7}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{\"311000370.551e-7\":\"311000370.551e-7\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"311000370.551e-7\":{\"alias\":\"311000370.551e-7\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-bigint",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [`${1n}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 116]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-regex",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [/a/]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 112]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-new",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [new String('a')]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 124]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-optionalChain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst O = {a: 'x'};\n@Directive({selector: '[d]', inputs: [O?.a]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-nonNull",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst O = {a: 'x'};\n@Directive({selector: '[d]', inputs: [O.a!]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-asConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['a', 'b'] as const})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-parenSeq",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [('x', 'a')]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 119]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-assign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nlet Y;\n@Directive({selector: '[d]', inputs: [Y = 'a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[114, 123]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-classExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [class Foo {}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 121]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-objProtoKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{__proto__: 'x', name: 'a'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-objDupKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'a', name: 'b'}]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-objDescribeDup",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: {a: 1, b: 2, a: 'x'}})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type '{ a: string; b: number }'."
+      ],
+      "diagnosticSpans": [[107, 127]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-objIndexUndefinedKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst O = {a: 1};\n@Directive({selector: '[d]', inputs: [`${O.b}`]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{undefined:\"undefined\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"undefined\":{\"alias\":\"undefined\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-arrayHoleDescribe",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [, 'a']})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[107, 114]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-arrayInArrayDescribe",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: {a: [1, [2]]}})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type '{ a: Array }'."
+      ],
+      "diagnosticSpans": [[107, 120]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: misc-emptyArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: []})\nexport class Dir {}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-signalCollision",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['v']})\nexport class Dir {\n  v = input<string>();\n}\n"
+      },
+      "diagnostics": ["Input \"v\" is also declared as non-signal in @Directive."],
+      "diagnosticSpans": [[136, 156]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-outputCollision",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', outputs: ['o']})\nexport class Dir {\n  o = output<string>();\n}\n"
+      },
+      "diagnostics": ["Output \"o\" is unexpectedly declared in @Directive as well."],
+      "diagnosticSpans": [[137, 158]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-decoratedCollision",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['v']})\nexport class Dir {\n  /** doc */ @Input() w: any;\n  // c\n  readonly v = model<string>();\n}\n"
+      },
+      "diagnostics": ["Input \"v\" is also declared as non-signal in @Directive."],
+      "diagnosticSpans": [[173, 202]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-shorthandInputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nconst inputs = [1];\n@Directive({selector: '[d]', inputs})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[90, 96]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-multiline",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: [\n    'a',\n    2,\n  ]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[107, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-unicode",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\nconst S = '😀';\n@Directive({selector: '[d]', inputs: [S, 1]})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[123, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: span-parenthesized",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, input, output, model} from '@angular/core';\n@Directive({selector: '[d]', inputs: (([1]))})\nexport class Dir {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[107, 114]],
+      "classes": {},
       "dtsImports": []
     }
   ]

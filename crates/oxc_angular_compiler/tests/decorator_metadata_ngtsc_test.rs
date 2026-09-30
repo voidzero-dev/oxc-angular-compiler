@@ -22,17 +22,52 @@
 use std::collections::BTreeMap;
 
 use oxc_allocator::Allocator;
-use oxc_angular_compiler::{TransformOptions, transform_angular_file};
+use oxc_angular_compiler::{TransformOptions, TransformResult, transform_angular_file};
 use serde_json::Value;
 
 const FIXTURES: &str = include_str!("fixtures/decorator_metadata_ngtsc.json");
 
+/// `s` without the characters `drop` matches, except inside string literals:
+/// `"a b"` stays `"a b"`, so a stray space in an emitted name is a mismatch.
+fn strip_outside_strings(s: &str, drop: impl Fn(char) -> bool) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if matches!(c, '"' | '\'' | '`') {
+            out.push(c);
+            while let Some(inner) = chars.next() {
+                out.push(inner);
+                if inner == '\\' {
+                    out.extend(chars.next());
+                } else if inner == c {
+                    break;
+                }
+            }
+        } else if !drop(c) {
+            out.push(c);
+        }
+    }
+    out
+}
+
 fn strip(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect()
+    strip_outside_strings(s, char::is_whitespace)
 }
 
 fn strip_parens(s: &str) -> String {
-    s.chars().filter(|c| *c != '(' && *c != ')').collect()
+    strip_outside_strings(s, |c| c == '(' || c == ')')
+}
+
+/// A UTF-16 offset (what ngtsc reports) as a byte offset into `source`.
+fn byte_offset(source: &str, utf16: u64) -> usize {
+    let mut units = 0;
+    for (at, c) in source.char_indices() {
+        if units >= utf16 {
+            return at;
+        }
+        units += c.len_utf16() as u64;
+    }
+    source.len()
 }
 
 /// The balanced `{...}` / `(...)` / `[...]` starting at byte `open`.
@@ -198,6 +233,40 @@ fn decorator_metadata_matches_ngtsc() {
                 "{name}\n  diagnostics\n    ngtsc: {expected:?}\n    oxc:   {actual:?}"
             ));
         }
+        // Where each diagnostic points, when the fixture records it.
+        if let Some(spans) = fixture.get("diagnosticSpans").and_then(Value::as_array) {
+            let expected: Vec<Option<(usize, usize)>> = spans
+                .iter()
+                .map(|span| {
+                    let span = span.as_array()?;
+                    let offset = |i: usize| byte_offset(source, span[i].as_u64().unwrap());
+                    Some((offset(0), offset(1)))
+                })
+                .collect();
+            let actual: Vec<Option<(usize, usize)>> = result
+                .diagnostics
+                .iter()
+                .filter(|d| d.severity == oxc_diagnostics::Severity::Error)
+                .map(|d| {
+                    let label = d.labels.first()?;
+                    let (offset, len) = (label.offset() as usize, label.len() as usize);
+                    Some((offset, offset + len))
+                })
+                .collect();
+            if actual != expected {
+                let text = |spans: &[Option<(usize, usize)>]| {
+                    spans
+                        .iter()
+                        .map(|s| s.map(|(start, end)| &source[start..end]))
+                        .collect::<Vec<_>>()
+                };
+                failures.push(format!(
+                    "{name}\n  diagnostic spans\n    ngtsc: {:?}\n    oxc:   {:?}",
+                    text(&expected),
+                    text(&actual)
+                ));
+            }
+        }
 
         // ngtsc emits nothing for a class it rejects.
         if !expected.is_empty() {
@@ -230,5 +299,147 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 45, "fixtures compared");
+    assert_eq!(compared, 229, "fixtures compared");
+}
+
+fn transform(source: &str) -> TransformResult {
+    let allocator = Allocator::default();
+    transform_angular_file(&allocator, "test.ts", source, Some(&TransformOptions::default()), None)
+}
+
+/// Each error's message and the source text it points at.
+fn errors(result: &TransformResult, source: &str) -> Vec<(String, String)> {
+    result
+        .diagnostics
+        .iter()
+        .filter(|d| d.severity == oxc_diagnostics::Severity::Error)
+        .map(|d| {
+            let label = d
+                .labels
+                .first()
+                .map_or("", |l| &source[l.offset() as usize..(l.offset() + l.len()) as usize]);
+            (d.message.to_string(), label.to_string())
+        })
+        .collect()
+}
+
+/// ngtsc reads a value imported from another file and compiles these (checked
+/// with @angular/compiler-cli 22.1.7 and the export in a second file). oxc sees
+/// one file, so it can't, and says so rather than guessing: a dropped alias or
+/// `required` flag would compile a different binding.
+#[test]
+fn values_imported_from_another_module_are_reported_as_unreadable() {
+    let cases = [
+        ("inputs: SHARED", "SHARED", "SHARED", "inputs"),
+        ("inputs: [...SHARED, 'x']", "SHARED", "[...SHARED, 'x']", "inputs"),
+        ("inputs: [NAME]", "NAME", "[NAME]", "inputs"),
+        ("inputs: [ns.NAME]", "NAME", "[ns.NAME]", "inputs"),
+        ("inputs: [{name: 'x', alias: ALIAS}]", "ALIAS", "[{name: 'x', alias: ALIAS}]", "inputs"),
+        ("inputs: [{name: 'x', required: REQ}]", "REQ", "[{name: 'x', required: REQ}]", "inputs"),
+        ("inputs: SHARED.concat(['x'])", "SHARED", "SHARED.concat(['x'])", "inputs"),
+        ("inputs: [`${NAME}x`]", "NAME", "[`${NAME}x`]", "inputs"),
+        ("inputs: C ? ['a'] : ['b']", "C", "C ? ['a'] : ['b']", "inputs"),
+        ("inputs: mk()", "mk", "mk()", "inputs"),
+        ("outputs: [...OUTS]", "OUTS", "[...OUTS]", "outputs"),
+    ];
+    for (meta, name, span, field) in cases {
+        let source = format!(
+            "import {{Directive}} from '@angular/core';
+import {{SHARED, NAME, ALIAS, REQ, OUTS, C, mk}} from './shared';
+import * as ns from './shared';
+@Directive({{selector: '[d]', {meta}}})
+export class Dir {{}}
+"
+        );
+        let result = transform(&source);
+        let message = format!(
+            "@Directive.{field} depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        );
+        assert_eq!(errors(&result, &source), vec![(message, span.to_string())], "{meta}");
+    }
+
+    // A reference is all a transform needs: nothing to evaluate.
+    let source = "import {Directive} from '@angular/core';
+import {fn} from './shared';
+@Directive({selector: '[d]', inputs: [{name: 'x', transform: fn}]})
+export class Dir {}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",fn]}"#), "{}", result.code);
+}
+
+/// Inputs ngtsc can't compile either (it overflows its stack on the recursive
+/// ones and on a chain of 3000 consts) must not overflow oxc's stack or hang.
+#[test]
+fn evaluation_is_bounded() {
+    let header = "import {Directive} from '@angular/core';\n";
+    let class = |inputs: &str| {
+        format!("@Directive({{selector: '[d]', inputs: {inputs}}})\nexport class Dir {{}}\n")
+    };
+    let chain = |n: usize, link: &dyn Fn(usize) -> String| {
+        let mut source = format!("{header}const X0 = ['a'];\n");
+        for i in 1..n {
+            source += &format!("const X{i} = {};\n", link(i - 1));
+        }
+        source + &class(&format!("X{}", n - 1))
+    };
+    let unreadable =
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically.";
+    let cases = [
+        // Long chains are evaluated one link at a time.
+        (chain(3000, &|prev| format!("X{prev}")), None),
+        (chain(3000, &|prev| format!("[...X{prev}]")), None),
+        (
+            format!(
+                "{header}{}const X3000 = ['a'];\n{}",
+                (0..3000).map(|i| format!("const X{i} = [...X{}];\n", i + 1)).collect::<String>(),
+                class("X0")
+            ),
+            None,
+        ),
+        // Cycles and recursion.
+        (format!("{header}const A: any = B;\nconst B: any = A;\n{}", class("A")), Some(unreadable)),
+        (
+            format!("{header}function f(): any {{ return f(); }}\n{}", class("f()")),
+            Some(unreadable),
+        ),
+        (
+            format!(
+                "{header}function f(x: any): any {{ return x ? f(x) : f(x); }}\n{}",
+                class("f(1)")
+            ),
+            Some(unreadable),
+        ),
+        (format!("{header}class U {{ static a: any = U.a; }}\n{}", class("U.a")), Some(unreadable)),
+        (format!("{header}enum E {{ A = E.A }}\n{}", class("[`${E.A}`]")), None),
+        // Exponential growth.
+        (
+            format!(
+                "{header}const A0 = ['a'];\n{}{}",
+                (1..64)
+                    .map(|i| format!("const A{i} = [...A{0}, ...A{0}];\n", i - 1))
+                    .collect::<String>(),
+                class("A63")
+            ),
+            Some(unreadable),
+        ),
+        (
+            format!(
+                "{header}function f(n: number): any {{ return n > 0 ? [...f(n - 1), ...f(n - 1)] : ['a']; }}\n{}",
+                class("f(64)")
+            ),
+            None,
+        ),
+    ];
+    for (source, expected) in cases {
+        let result = transform(&source);
+        let messages: Vec<String> = errors(&result, &source).into_iter().map(|e| e.0).collect();
+        match expected {
+            Some(expected) => assert_eq!(messages, vec![expected.to_string()]),
+            // Anything but a crash (a dynamic element is reported, not compiled).
+            None => assert!(messages.len() <= 1, "{messages:?}"),
+        }
+    }
 }
