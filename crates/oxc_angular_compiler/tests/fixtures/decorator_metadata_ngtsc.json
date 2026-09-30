@@ -8688,6 +8688,310 @@
         }
       },
       "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-fn-transform-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string) { return 1; } }\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: NS.fn}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[195, 200]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-fn-transform-member",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string) { return 1; } }\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: NS.fn}) a: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[206, 211]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-generic-fn-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn<T>(v: T) { return 1; } }\ndeclare const T: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: T}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": ["Input transform function cannot be generic Value is a reference to 'fn'."],
+      "diagnosticSpans": [[88, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-untyped-fn-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v) { return 1; } }\ndeclare const T: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: T}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform function first parameter must have a type Value is a reference to 'fn'."
+      ],
+      "diagnosticSpans": [[88, 123]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-member-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: U}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[73, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-meta-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: U}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[73, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-typeof-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\ndeclare const X: typeof U;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: X}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[73, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-exported-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nexport namespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: U}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[73, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-merged-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export type T = string; }\nnamespace U { export const a = 1; }\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: U}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[113, 148]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-overload",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string): number; export function fn(v: any) { return 1; } }\ndeclare const T: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: T}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-t494-static",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C { static t(v: string) { return 1; } } }\ndeclare const X: typeof NS.C;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: X.t}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",t]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `t` for `transform: X.t` (a static method of a class declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `X.t`"
+    },
+    {
+      "name": "probe: r6-t494-static-generic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C { static t<T>(v: T) { return 1; } } }\ndeclare const X: typeof NS.C;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: X.t}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": ["Input transform function cannot be generic Value is a reference to 't'."],
+      "diagnosticSpans": [[105, 136]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-local-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { type T = string; export function fn(v: T) { return 1; } }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "diagnosticSpans": [[127, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-exported-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export type T = string; export function fn(v: T) { return 1; } }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:T;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-t494-namespace-member-clash",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: U}]})\nexport class Dir {\n  a: any;\n  static ngAcceptInputType_a: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'U'."],
+      "diagnosticSpans": [[73, 131]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-alias-generic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f<T>(v: T) { return 1; } }\nimport f = U.f;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: f}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform function cannot be generic Value is a reference to 'f'."],
+      "diagnosticSpans": [[87, 127]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-nested-namespace-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export namespace V { export const a = 1; } }\ndeclare const X: typeof U.V;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: X}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'V'."],
+      "diagnosticSpans": [[87, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-ambient-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace NS { type T = string; function fn(v: T): number; }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "diagnosticSpans": [[128, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-ambient-export-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace NS { export type T = string; function fn(v: T): number; }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:T;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-t494-merged-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export type T = string; }\nnamespace NS { export function fn(v: T) { return 1; } }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:T;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-t494-outer-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ntype T = string;\nnamespace NS { export function fn(v: T) { return 1; } }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "diagnosticSpans": [[127, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-local-class-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { class K {} export function fn(v: K) { return 1; } }\ndeclare const F: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: F}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "diagnosticSpans": [[121, 122]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-t494-arrow-local-type",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { interface I { a: 1 } export const INPUTS = [{name: 'a', transform: (v: I) => 1}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "diagnosticSpans": [[159, 160]],
+      "classes": {},
+      "dtsImports": []
     }
   ]
 }

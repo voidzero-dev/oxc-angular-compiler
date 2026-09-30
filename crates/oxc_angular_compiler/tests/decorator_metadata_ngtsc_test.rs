@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 557, "fixtures compared");
+    assert_eq!(compared, 575, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -834,30 +834,34 @@ fn transform_declared_in_another_file_is_reported_on_the_expression() {
 
 /// A name the file declares as a namespace or an `import x = ...` alias isn't
 /// a global declared elsewhere, so it isn't assumed to be a function the way
-/// `atob` is. ngtsc 22.1.7 rejects `transform: U` too, as "Value is a reference
-/// to 'U'" (oxc doesn't evaluate namespaces), and accepts `transform: f`
-/// (oxc doesn't follow the alias).
+/// `atob` is: it's resolved like ngtsc 22.1.7 does. `transform: U` is a
+/// reference to the namespace (at its declaration), and `transform: f` is the
+/// function the alias names, emitted by the alias's name. The snapshot's
+/// `r6-nsval-*` and `r6-alias-*` probes cover more forms.
 #[test]
 fn file_namespaces_and_aliases_are_not_assumed_to_be_global_functions() {
-    let namespace = "namespace U { export function f(v: string) { return 1; } }\n";
-    for (pre, expr) in
-        [(namespace.to_string(), "U"), (format!("{namespace}import f = U.f;\n"), "f")]
-    {
-        let source = format!(
-            "import {{Directive, Input}} from '@angular/core';\n{pre}\
+    let namespace = "namespace U { export function f(v: string) { return 1; } }";
+    let source = |pre: &str, expr: &str| {
+        format!(
+            "import {{Directive, Input}} from '@angular/core';\n{pre}\n\
              @Directive({{selector: '[d]'}})\n\
              export class Dir {{\n  @Input({{transform: {expr}}}) x: any;\n}}\n"
-        );
-        assert_eq!(
-            errors(&transform(&source), &source),
-            vec![(
-                "Input transform must be a function Value could not be determined statically."
-                    .to_string(),
-                expr.to_string()
-            )],
-            "{expr}"
-        );
-    }
+        )
+    };
+
+    let with_namespace = source(namespace, "U");
+    assert_eq!(
+        errors(&transform(&with_namespace), &with_namespace),
+        vec![(
+            "Input transform must be a function Value is a reference to 'U'.".to_string(),
+            namespace.to_string()
+        )]
+    );
+
+    let with_alias = source(&format!("{namespace}\nimport f = U.f;"), "f");
+    let result = transform(&with_alias);
+    assert_eq!(errors(&result, &with_alias), vec![]);
+    assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",f]}"#), "{}", result.code);
 }
 
 /// A shorthand `{ transform }` naming a global is looked up through

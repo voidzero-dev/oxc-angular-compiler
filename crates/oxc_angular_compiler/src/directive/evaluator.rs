@@ -106,14 +106,17 @@ struct NamespaceBlock<'a> {
     /// The namespace's name, qualified from the top level (`A.B`).
     name: String,
     span: Span,
+    /// The statement that declares it (with `export`), where ngtsc's
+    /// diagnostics point.
+    statement: Span,
 }
 
 /// What `typeof A.B.X` names, for `A.B` a namespace the file declares.
 enum Qualified<'a> {
     /// The value `X` declared (and exported) in a namespace block.
     Declared(usize, &'a str),
-    /// The (instantiated) namespace `X`.
-    Namespace(&'a str),
+    /// The (instantiated) namespace `X`, and its id.
+    Namespace(&'a str, usize),
     /// Nothing TypeScript can resolve: `X` isn't exported, or doesn't exist.
     Missing,
 }
@@ -216,7 +219,7 @@ impl<'a> FileScope<'a> {
             match decl {
                 Declaration::TSNamespaceDeclaration(ns) => {
                     scope.unread.insert(ns.id.name.as_str());
-                    scope.namespace(ns, None, exported, false);
+                    scope.namespace(ns, None, exported, false, stmt.span());
                 }
                 Declaration::TSImportEqualsDeclaration(alias) => {
                     scope.unread.insert(alias.id.name.as_str());
@@ -229,13 +232,15 @@ impl<'a> FileScope<'a> {
     }
 
     /// Collects the namespace `ns`, declared in `parent` (`None`: at the top
-    /// level), and in an ambient context (`declare namespace`) if `ambient`.
+    /// level) by `statement`, and in an ambient context (`declare namespace`)
+    /// if `ambient`.
     fn namespace(
         &mut self,
         ns: &'a TSNamespaceDeclaration<'a>,
         parent: Option<usize>,
         exported: bool,
         ambient: bool,
+        statement: Span,
     ) {
         let name = ns.id.name.as_str();
         // Every declaration in an ambient namespace is exported, with or
@@ -271,12 +276,13 @@ impl<'a> FileScope<'a> {
             parent,
             name: qualified,
             span: ns.span,
+            statement,
             ..NamespaceBlock::default()
         });
         let statements = match &ns.body {
             // `namespace A.B {}`: `B` is an exported member of `A`.
             TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
-                self.namespace(inner, Some(index), true, ambient);
+                self.namespace(inner, Some(index), true, ambient, inner.span);
                 return;
             }
             TSNamespaceDeclarationBody::TSModuleBlock(block) => &block.body,
@@ -287,11 +293,17 @@ impl<'a> FileScope<'a> {
             let (decl, exported, span) = match stmt {
                 Statement::ExportDeclaration(export) => (&export.declaration, true, export.span),
                 _ => match stmt.as_declaration() {
-                    Some(decl) => (decl, ambient, decl.span()),
+                    Some(decl) => (decl, false, decl.span()),
                     None => continue,
                 },
             };
             scope.declaration(decl, exported, span);
+            // Without `export` it isn't statically exported for ngtsc (see
+            // `UnexportedType`), but still visible outside the namespace.
+            let exported = exported || ambient;
+            if exported {
+                scope.exported.extend(value_names(decl));
+            }
             match decl {
                 Declaration::FunctionDeclaration(f) => {
                     self.declared_in.insert(std::ptr::from_ref::<Function>(f) as usize, index);
@@ -305,13 +317,15 @@ impl<'a> FileScope<'a> {
                         }
                     }
                 }
-                Declaration::TSNamespaceDeclaration(inner) => nested.push((&**inner, exported)),
+                Declaration::TSNamespaceDeclaration(inner) => {
+                    nested.push((&**inner, exported, span));
+                }
                 _ => {}
             }
         }
         self.blocks[index].scope = scope;
-        for (inner, exported) in nested {
-            self.namespace(inner, Some(index), exported, ambient);
+        for (inner, exported, span) in nested {
+            self.namespace(inner, Some(index), exported, ambient, span);
         }
     }
 
@@ -320,21 +334,74 @@ impl<'a> FileScope<'a> {
     fn mark_instantiated(&mut self) {
         loop {
             let before = self.instantiated.len();
-            for block in &self.blocks {
-                let scope = &block.scope;
-                let values = !scope.variables.is_empty()
-                    || !scope.functions.is_empty()
-                    || !scope.classes.is_empty()
-                    || !scope.enums.is_empty()
-                    || block.namespaces.values().any(|id| self.instantiated.contains(id));
-                if values && !self.instantiated.contains(&block.namespace) {
-                    self.instantiated.insert(block.namespace);
+            for b in 0..self.blocks.len() {
+                if self.block_has_values(b) {
+                    self.instantiated.insert(self.blocks[b].namespace);
                 }
             }
             if self.instantiated.len() == before {
                 break;
             }
         }
+    }
+
+    /// Whether the namespace block `b` declares a value: a variable,
+    /// function, class or enum, or an instantiated namespace.
+    fn block_has_values(&self, b: usize) -> bool {
+        let block = &self.blocks[b];
+        let scope = &block.scope;
+        !scope.variables.is_empty()
+            || !scope.functions.is_empty()
+            || !scope.classes.is_empty()
+            || !scope.enums.is_empty()
+            || block.namespaces.values().any(|id| self.instantiated.contains(id))
+    }
+
+    /// A reference to the (instantiated) namespace `name` with the id `id`,
+    /// which ngtsc points at the first declaration of it that declares a value.
+    fn namespace_reference<'v>(&self, name: &str, id: usize) -> Value<'v> {
+        let span = (0..self.blocks.len())
+            .find(|&b| self.blocks[b].namespace == id && self.block_has_values(b))
+            .map_or(Span::default(), |b| self.blocks[b].statement);
+        Value::Reference { name: name.into(), kind: RefKind::Namespace(span) }
+    }
+
+    /// The innermost namespace block whose declaration contains `span`.
+    fn block_at(&self, span: Span) -> Option<usize> {
+        (0..self.blocks.len())
+            .filter(|&b| self.blocks[b].span.contains_inclusive(span))
+            .min_by_key(|&b| self.blocks[b].span.size())
+    }
+
+    /// For a type named `name` in the namespace block `block` (`None`: at the
+    /// top level), whether ngtsc's `isStaticallyExported` holds for the
+    /// declaration it resolves to (see [`Self::type_is_exported`]): in a
+    /// namespace, whether it's marked `export`. `None` for a name the file
+    /// doesn't declare as a type.
+    fn type_is_exported_in(&self, block: Option<usize>, name: &str) -> Option<bool> {
+        let mut current = block;
+        while let Some(b) = current {
+            let namespace = self.blocks[b].namespace;
+            if let Some(exported) = self.blocks[b].scope.types.get(name) {
+                return Some(*exported);
+            }
+            // Exported from another body of the namespace.
+            if self
+                .blocks
+                .iter()
+                .any(|o| o.namespace == namespace && o.scope.types.get(name) == Some(&true))
+            {
+                return Some(true);
+            }
+            current = self.blocks[b].parent;
+        }
+        self.type_is_exported(name)
+    }
+
+    /// The declarations of the scope (a namespace block or the top level) the
+    /// function, static method or class `node` is declared in.
+    fn scope_of<T>(&self, node: &T) -> &FileScope<'a> {
+        self.declarations(self.block_of(node))
     }
 
     /// Whether the namespace block `b` itself declares the value `name`: a
@@ -460,10 +527,12 @@ impl<'a> FileScope<'a> {
                 None => return Some(Qualified::Missing),
             }
         }
-        Some(match self.exporting_block(namespace, last) {
-            Some(b) if self.blocks[b].namespaces.contains_key(last) => Qualified::Namespace(last),
-            Some(b) => Qualified::Declared(b, last),
-            None => Qualified::Missing,
+        let Some(b) = self.exporting_block(namespace, last) else {
+            return Some(Qualified::Missing);
+        };
+        Some(match self.blocks[b].namespaces.get(last) {
+            Some(id) => Qualified::Namespace(last, *id),
+            None => Qualified::Declared(b, last),
         })
     }
 
@@ -471,10 +540,7 @@ impl<'a> FileScope<'a> {
     /// that namespace's declarations (or an enclosing one's), which don't
     /// resolve at the top level.
     pub(crate) fn namespace_used_by(&self, expr: &Expression<'a>) -> Option<&str> {
-        let span = expr.span();
-        let block = (0..self.blocks.len())
-            .filter(|&b| self.blocks[b].span.contains_inclusive(span))
-            .min_by_key(|&b| self.blocks[b].span.size())?;
+        let block = self.block_at(expr.span())?;
         let frame = Frame::at(Some(block));
         let mut uses = UsesFrame::new(&frame, self);
         uses.visit_expression(expr);
@@ -541,10 +607,12 @@ impl<'a> FileScope<'a> {
     /// implementation is `function`: its first overload, if any. That's
     /// TypeScript's value declaration, the one ngtsc checks as a transform.
     fn first_declaration(&self, name: &str, function: &'a Function<'a>) -> &'a Function<'a> {
-        if self.is_top_level_function(name, function) {
-            return self.first_functions.get(name).copied().unwrap_or(function);
+        // In the namespace it's declared in, if any.
+        let scope = self.scope_of(function);
+        if scope.is_top_level_function(name, function) {
+            return scope.first_functions.get(name).copied().unwrap_or(function);
         }
-        self.first_static_method(function).map_or(function, |m| &m.value)
+        scope.first_static_method(function).map_or(function, |m| &m.value)
     }
 
     /// The first declaration of the static method whose implementation is
@@ -655,20 +723,44 @@ impl<'a> FileScope<'a> {
     /// The type parameters of the innermost same-file function or static
     /// method (the functions the evaluator calls) whose body contains `span`.
     fn enclosing_type_parameters(&self, span: Span) -> Option<&'a TSTypeParameterDeclaration<'a>> {
-        let methods = self.classes.values().flat_map(|class| {
+        // Declared at the top level or in a namespace.
+        let scopes = || std::iter::once(self).chain(self.blocks.iter().map(|b| &b.scope));
+        let methods = scopes().flat_map(|scope| scope.classes.values()).flat_map(|class| {
             class.body.body.iter().filter_map(|el| match el {
                 ClassElement::MethodDefinition(m) if m.r#static => Some(&*m.value),
                 _ => None,
             })
         });
-        self.functions
-            .values()
+        scopes()
+            .flat_map(|scope| scope.functions.values())
             .map(|(function, _)| *function)
             .chain(methods)
             .filter(|f| f.body.as_ref().is_some_and(|body| body.span.contains_inclusive(span)))
             .min_by_key(|f| f.span.size())
             .and_then(|f| f.type_parameters.as_deref())
     }
+}
+
+/// The values a declaration declares (not its types, or a namespace).
+fn value_names<'a>(decl: &'a Declaration<'a>) -> std::vec::Vec<&'a str> {
+    let mut names = std::vec::Vec::new();
+    match decl {
+        Declaration::VariableDeclaration(vars) => {
+            for var in &vars.declarations {
+                let mut bindings = std::vec::Vec::new();
+                collect_bindings(&var.id, &mut std::vec::Vec::new(), &mut bindings);
+                names.extend(bindings.into_iter().map(|(name, _)| name));
+            }
+        }
+        Declaration::FunctionDeclaration(f) => {
+            names.extend(f.id.as_ref().map(|id| id.name.as_str()))
+        }
+        Declaration::ClassDeclaration(c) => names.extend(c.id.as_ref().map(|id| id.name.as_str())),
+        Declaration::TSEnumDeclaration(e) => names.push(e.id.name.as_str()),
+        Declaration::TSImportEqualsDeclaration(a) => names.push(a.id.name.as_str()),
+        _ => {}
+    }
+    names
 }
 
 /// The names a binding pattern declares, each with its path into the initializer.
@@ -814,6 +906,9 @@ pub(crate) enum RefKind<'a> {
     /// A static getter or setter, or a static property without an
     /// initializer, declared at the span.
     StaticMember(Span),
+    /// A namespace that declares a value, whose first declaration that does
+    /// is at the span.
+    Namespace(Span),
     /// Any other declaration (a `declare`d variable, an enum member, ...).
     Other,
 }
@@ -1629,7 +1724,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         };
         namespace
             .filter(|id| file.instantiated.contains(id))
-            .map(|_| Value::Reference { name: name.into(), kind: RefKind::Other })
+            .map(|id| file.namespace_reference(name, *id))
     }
 
     /// The value of an import-equals alias declared in `block`: what its
@@ -1651,8 +1746,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             TSModuleReference::IdentifierReference(id) => {
                 return match scope.namespace_of(block, id.name.as_str(), 0) {
                     Some(ns) if scope.instantiated.contains(&ns) => {
-                        let name = scope.namespace_names[ns];
-                        Value::Reference { name: name.into(), kind: RefKind::Other }
+                        scope.namespace_reference(scope.namespace_names[ns], ns)
                     }
                     _ => Value::Dynamic,
                 };
@@ -1664,9 +1758,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             Some(Qualified::Declared(b, member)) => {
                 self.declared(Some(b), member, depth).unwrap_or(Value::Dynamic)
             }
-            Some(Qualified::Namespace(name)) => {
-                Value::Reference { name: name.into(), kind: RefKind::Other }
-            }
+            Some(Qualified::Namespace(name, id)) => scope.namespace_reference(name, id),
             _ => Value::Dynamic,
         }
     }
@@ -1882,8 +1974,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         Some(Qualified::Declared(b, member)) => {
                             return self.declared(Some(b), member, depth).unwrap_or(Value::Dynamic);
                         }
-                        Some(Qualified::Namespace(name)) => {
-                            return Value::Reference { name: name.into(), kind: RefKind::Other };
+                        Some(Qualified::Namespace(name, id)) => {
+                            return scope.namespace_reference(name, id);
                         }
                         Some(Qualified::Missing) => return Value::Dynamic,
                         None => {}
@@ -2310,8 +2402,10 @@ pub(crate) fn transform_error<'a>(
                 Value::Function(_) => scope.enclosing_type_parameters(def.span()),
                 _ => None,
             };
+            // Its types resolve where it's written, in a namespace or not.
+            let block = scope.block_at(def.span());
             let mut check =
-                UnexportedType { scope, type_params: std::vec::Vec::new(), found: false };
+                UnexportedType { scope, block, type_params: std::vec::Vec::new(), found: false };
             check.with_params(helper_params, |check| {
                 check.with_params(class_params, |check| check.visit_ts_type(ty));
             });
@@ -2332,17 +2426,22 @@ fn value_node_span(value: &Value<'_>, expr_span: Span, scope: &FileScope<'_>) ->
     let declared = |name: &str| scope.declaration_spans.get(name).copied();
     let span = match value {
         Value::Function(def) => Some(def.span()),
+        // Declared at the top level or in a namespace.
         Value::Reference { name, kind: RefKind::Function(function, _) } => {
+            let scope = scope.scope_of(*function);
             if scope.is_top_level_function(name, function) {
-                declared(name)
+                scope.declaration_spans.get(name.as_str()).copied()
             } else {
                 scope.first_static_method(function).map(|m| m.span)
             }
         }
-        Value::Reference { kind: RefKind::Class(class), .. } => {
-            class.id.as_ref().and_then(|id| declared(id.name.as_str()))
-        }
-        Value::Reference { kind: RefKind::StaticMember(span), .. } => Some(*span),
+        Value::Reference { kind: RefKind::Class(class), .. } => class
+            .id
+            .as_ref()
+            .and_then(|id| scope.scope_of(*class).declaration_spans.get(id.name.as_str()).copied()),
+        Value::Reference {
+            kind: RefKind::StaticMember(span) | RefKind::Namespace(span), ..
+        } => Some(*span),
         Value::Reference { name, kind: RefKind::Other }
             if matches!(scope.variables.get(name.as_str()), Some(Variable::Declared(_))) =>
         {
@@ -2360,6 +2459,8 @@ fn value_node_span(value: &Value<'_>, expr_span: Span, scope: &FileScope<'_>) ->
 /// left side of `X.Y` aren't type references, so they're never checked.
 struct UnexportedType<'s, 'a> {
     scope: &'s FileScope<'a>,
+    /// The namespace block the function is written in (`None`: the top level).
+    block: Option<usize>,
     /// The type parameters in scope, innermost last.
     type_params: std::vec::Vec<&'a str>,
     found: bool,
@@ -2388,7 +2489,7 @@ impl<'a> Visit<'a> for UnexportedType<'_, 'a> {
             let exported = if self.type_params.contains(&name) {
                 Some(false)
             } else {
-                self.scope.type_is_exported(name)
+                self.scope.type_is_exported_in(self.block, name)
             };
             self.found |= exported == Some(false);
         }
