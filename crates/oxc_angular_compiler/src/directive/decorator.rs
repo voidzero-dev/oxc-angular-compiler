@@ -1074,6 +1074,20 @@ pub fn decorator_io_errors<'a>(
             // `@Input(...)`, as ngtsc's `tryParseInputFieldMapping` reads it.
             let decorator =
                 super::property_decorators::member_decorator(decorators, "Input", consts);
+            // ngtsc rejects `@Input` on a signal input or model before reading
+            // the decorator.
+            if let (Some(decorator), Some(value)) = (decorator, value) {
+                let message = if is_initializer_api_call(value, consts, &[INPUT_API]) {
+                    Some("Using @Input with a signal input is not allowed.")
+                } else if is_initializer_api_call(value, consts, &[MODEL_API]) {
+                    Some("Using @Input with a model input is not allowed.")
+                } else {
+                    None
+                };
+                if let Some(message) = message {
+                    return Some((message.to_string(), decorator.span));
+                }
+            }
             let error =
                 decorator.and_then(|d| input_decorator_error(d, &name, class, consts, &evaluator));
             if error.is_some() {
@@ -1094,16 +1108,31 @@ pub fn decorator_io_errors<'a>(
         class.body.body.iter().find_map(|element| {
             // `@Output(...)`, as ngtsc's `tryParseDecoratorOutput` reads it, on
             // the members an output is compiled from.
-            let decorators = match element {
-                ClassElement::PropertyDefinition(p) => Some(&p.decorators),
-                ClassElement::AccessorProperty(p) => Some(&p.decorators),
-                _ => None,
+            let (decorators, value) = match element {
+                ClassElement::PropertyDefinition(p) => (Some(&p.decorators), p.value.as_ref()),
+                ClassElement::AccessorProperty(p) => (Some(&p.decorators), p.value.as_ref()),
+                _ => (None, None),
             };
             let decorator = decorators.and_then(|decorators| {
                 super::property_decorators::member_decorator(decorators, "Output", consts)
             });
             if let Some(error) = decorator.and_then(|d| output_decorator_error(d, &evaluator)) {
                 return Some(error);
+            }
+            // Then `@Output` on an `output()` or a model, like ngtsc's
+            // `parseOutputFields`.
+            if let (Some(decorator), Some(value)) = (decorator, value) {
+                let apis = [OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API];
+                let message = if is_initializer_api_call(value, consts, &apis) {
+                    Some("Using \"@Output\" with \"output()\" is not allowed.")
+                } else if is_initializer_api_call(value, consts, &[MODEL_API]) {
+                    Some("Using @Output with a model input is not allowed.")
+                } else {
+                    None
+                };
+                if let Some(message) = message {
+                    return Some((message.to_string(), decorator.span));
+                }
             }
             let ClassElement::PropertyDefinition(prop) = element else { return None };
             let (value, name) = (prop.value.as_ref()?, prop.key.static_name()?);

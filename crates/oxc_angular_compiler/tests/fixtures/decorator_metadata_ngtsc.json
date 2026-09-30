@@ -12848,6 +12848,532 @@
       "skip": "a global declared outside the file is dynamic in oxc wherever its value is used (here in a condition or `||`), since oxc can't tell it from a name declared nowhere, so the transform isn't a function; ngtsc reads its declaration and picks `atob`"
     },
     {
+      "name": "probe: signalDecorator-in-direct",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-alias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport {input as inp} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = inp(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[220, 228]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-ns",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport * as ng from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = ng.input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[213, 221]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-nsDecorator",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport * as ng from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @ng.Input() value = ng.input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[213, 224]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-required",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input.required<number>();\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-nsRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport * as ng from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = ng.input.required<number>();\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[213, 221]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-model",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = model(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a model input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-modelRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = model.required<number>();\n}\n"
+      },
+      "diagnostics": ["Using @Input with a model input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-local",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, model, output, ViewChild, viewChild} from '@angular/core';\nfunction input(v: number) { return v; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-undeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-aliasArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input('a') value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 187]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-badArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(1 as any) value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 192]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-twoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input('a', 'b' as any) value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 199]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-afterBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(1 as any) a: any;\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[176, 192]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-beforeBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0);\n  @Input(1 as any) a: any;\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-meta",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['value']})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[195, 203]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-metaOther",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['other']})\nexport class Dir {\n  @Input() value = input(0);\n  other = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[195, 203]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-metaBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]', inputs: [1 as any]})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[162, 172]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-static",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() static value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-component",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Component({selector: 'c', template: ''})\nexport class Dir {\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[188, 196]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-transform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: string) => 1}) value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[176, 213]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-andOutput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() @Output() value = model(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a model input is not allowed."],
+      "diagnosticSpans": [[176, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-outputOnInputMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() a = output();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "outputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{\"a\":\"a\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-direct",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = output();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[176, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-alias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport {output as out} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = out();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[221, 230]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-ns",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport * as ng from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = ng.output();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[213, 222]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-fromObs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\nimport {outputFromObservable} from '@angular/core/rxjs-interop';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = outputFromObservable(new EventEmitter<string>());\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[241, 250]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-model",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = model(0);\n}\n"
+      },
+      "diagnostics": ["Using @Output with a model input is not allowed."],
+      "diagnosticSpans": [[176, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-modelRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = model.required<number>();\n}\n"
+      },
+      "diagnostics": ["Using @Output with a model input is not allowed."],
+      "diagnosticSpans": [[176, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-badArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(1 as any) e = output();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[176, 193]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-afterBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(1 as any) a = new EventEmitter();\n  @Output() e = output();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[176, 193]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-meta",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]', outputs: ['e']})\nexport class Dir {\n  @Output() e = output();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[192, 201]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-inputFirst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = output();\n  @Input() value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[202, 210]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-static",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() static e = output();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[176, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-inputOnOutput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, output, ViewChild, viewChild} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{e:[1,\"e\"]}",
+          "outputs": "{e:\"e\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"e\":{\"alias\":\"e\";\"required\":false;\"isSignal\":true;};},{\"e\":\"e\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-foreign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, model, output, ViewChild, viewChild} from '@angular/core';\nimport {input} from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0);\n}\n",
+        "other.ts": "export function input(v: number) { return v; }\nexport function model(v: number) { return v; }\nexport function output() { return 1; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-foreignModel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, output, ViewChild, viewChild} from '@angular/core';\nimport {model} from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = model(0);\n}\n",
+        "other.ts": "export function input(v: number) { return v; }\nexport function model(v: number) { return v; }\nexport function output() { return 1; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-foreign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, input, model, ViewChild, viewChild} from '@angular/core';\nimport {output} from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = output();\n}\n",
+        "other.ts": "export function input(v: number) { return v; }\nexport function model(v: number) { return v; }\nexport function output() { return 1; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"e\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"e\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-accessor",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, input, model, output} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() accessor value = input(0);\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[129, 137]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-out-accessor",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, input, model, output} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() accessor e = output();\n}\n"
+      },
+      "diagnostics": ["Using \"@Output\" with \"output()\" is not allowed."],
+      "diagnosticSpans": [[129, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-setter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, input, model, output} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() set value(v: any) {}\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-parens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, input, model, output} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = (input(0));\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[129, 137]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signalDecorator-in-asAny",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, input, model, output} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input() value = input(0) as any;\n}\n"
+      },
+      "diagnostics": ["Using @Input with a signal input is not allowed."],
+      "diagnosticSpans": [[129, 137]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "probe: shortCircuit-metaOr",
       "origin": "probe",
       "files": {
