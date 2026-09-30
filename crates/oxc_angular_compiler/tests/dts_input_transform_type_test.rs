@@ -120,6 +120,41 @@ fn import_types_are_unknown() {
     check(&[("import('./other').Other", "unknown"), ("typeof import('./other')", "unknown")]);
 }
 
+/// An enum member (`Color.Red`): ngtsc 22.1.7 throws while emitting the
+/// `.d.ts` ("Unsupported WrappedNodeExpr in TypeTranslatorVisitor:
+/// EnumMember"), so there's nothing to match. oxc keeps the type as written
+/// rather than shortening it to `Red` like other qualified names the file
+/// declares (`NS.T` is written `T`, see the snapshot's `probe: dts-qualified*`).
+#[test]
+fn enum_member_type_is_kept_as_written() {
+    check(&[("Color.Red", "Color.Red"), ("Color.Red | Color.Green", "Color.Red | Color.Green")]);
+}
+
+/// An overloaded static method is typed from its first declaration, as an
+/// overloaded function is (ngtsc 22.1.7 writes `string` here). The snapshot
+/// can't hold this case: ngtsc compiles the transform to the bare method name
+/// `c`, which oxc deliberately doesn't.
+#[test]
+fn overloaded_static_method_is_typed_from_its_first_declaration() {
+    let source = "import {Directive, Input} from '@angular/core';
+export class U { static c(v: string): number; static c(v: string | number) { return 1; } }
+@Directive({selector: '[d]'})
+export class Dir {
+  @Input({transform: U.c}) x!: number;
+}
+";
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "t.ts",
+        source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    let decl = result.dts_declarations.iter().find(|d| d.class_name == "Dir").unwrap();
+    assert!(decl.members.contains("static ngAcceptInputType_x: string;"), "{}", decl.members);
+}
+
 /// The type in the transform, and what ngtsc writes for it.
 const MATCH: &[(&str, &str)] = &[
     ("{[K in 'a']: Signal<number>}", "{ [K in \"a\"]: i0.Signal<number>; }"),

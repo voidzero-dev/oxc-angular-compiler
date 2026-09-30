@@ -275,6 +275,14 @@ fn decorator_metadata_matches_ngtsc() {
         let oxc = oxc_classes(&result.code, &result.dts_declarations);
         for (class, members) in fixture["classes"].as_object().unwrap() {
             for (key, value) in members.as_object().unwrap() {
+                // A `static ngAcceptInputType_*` the class declares itself comes
+                // from TypeScript's declaration emit, not from ngtsc; oxc only
+                // writes the members it generates.
+                if key.starts_with("dts:ngAcceptInputType_")
+                    && source.contains(&format!("static {}:", &key["dts:".len()..]))
+                {
+                    continue;
+                }
                 let expected = accept_type_without_other_modules(key, value.as_str().unwrap());
                 let expected = expected.as_str();
                 let actual =

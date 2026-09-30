@@ -5825,7 +5825,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>Size[v]]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:keyoftypeofSize;"
         }
       },
       "dtsImports": []
@@ -5841,7 +5842,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:typeofLocal;"
         }
       },
       "dtsImports": []
@@ -5857,7 +5859,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:InstanceType<typeofLocal>;"
         }
       },
       "dtsImports": []
@@ -5873,7 +5876,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:ReturnType<typeofLocal.create>;"
         }
       },
       "dtsImports": []
@@ -5889,7 +5893,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
         }
       },
       "dtsImports": []
@@ -5905,7 +5910,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
         }
       },
       "dtsImports": []
@@ -5921,7 +5927,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:typeofE;"
         }
       },
       "dtsImports": []
@@ -5989,7 +5996,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6074,7 +6082,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",b]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6090,7 +6099,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6106,7 +6116,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6122,7 +6133,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6138,7 +6150,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",b]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6289,7 +6302,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Foo;"
         }
       },
       "dtsImports": []
@@ -6305,7 +6319,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:C;"
         }
       },
       "dtsImports": []
@@ -6321,7 +6336,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:E;"
         }
       },
       "dtsImports": []
@@ -6337,7 +6353,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Foo;"
         }
       },
       "dtsImports": []
@@ -6353,7 +6370,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",toNum]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Foo;"
         }
       },
       "dtsImports": []
@@ -6497,7 +6515,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",parseInt]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6567,7 +6586,8 @@
           "inputs": "{value:[2,\"value\",\"value\",(v)=>1]}",
           "outputs": "{changed:\"changed\"}",
           "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"ref\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.ref=_t.first);}}",
-          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{\"changed\":\"changed\";},never,never,true,never>;"
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{\"changed\":\"changed\";},never,never,true,never>;",
+          "dts:ngAcceptInputType_value": "staticngAcceptInputType_value:string;"
         }
       },
       "dtsImports": []
@@ -6674,7 +6694,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",isNaN]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:number;"
         }
       },
       "dtsImports": []
@@ -6690,7 +6711,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",escape]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6706,7 +6728,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",eval]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6722,7 +6745,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",decodeURI]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6749,7 +6773,9 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",parseInt]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ngAcceptInputType_y": "staticngAcceptInputType_y:string;",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -6765,7 +6791,8 @@
       "classes": {
         "Dir": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": []
@@ -7838,6 +7865,302 @@
       "classes": {},
       "dtsImports": [],
       "diagnosticSpans": [[142, 163]]
+    },
+    {
+      "name": "probe: dts-qualifiedNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.T) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedNestedNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace A { export namespace B { export type T = string; } }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: A.B.T) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedDottedNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace A.B { export type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: A.B.T) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedNamespaceGeneric",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export interface Box<T> { v: T } }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.Box<string>) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Box<string>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedInTypeArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: Array<NS.T>) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Array<T>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedDeclareNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare namespace D { type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: D.T) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedNamespaceClass",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export class K {} }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.K) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:K;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedExportedNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nexport namespace NS { export type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.T) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedGlobal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: Intl.NumberFormat) => 1}) x!: number;\n}\n"
+      },
+      "skip": "a qualified name whose head is a global (`Intl.NumberFormat`): ngtsc writes only its last part (`NumberFormat`), which doesn't resolve in the .d.ts; oxc keeps it as written",
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:NumberFormat;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedGlobalNamespaceGeneric",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: Intl.NumberFormat | Date) => 1}) x!: number;\n}\n"
+      },
+      "skip": "a qualified name whose head is a global (`Intl.NumberFormat`): ngtsc writes only its last part (`NumberFormat`), which doesn't resolve in the .d.ts; oxc keeps it as written",
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:NumberFormat|Date;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedInUnionAndArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export type T = string; export type U = number; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.T | NS.U[]) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T|U[];"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-typeofQualified",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace NS { export const x = 1; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: typeof NS.x) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:typeofNS.x;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-coreNamespaceQualified",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Directive({selector: '[d]'})\nexport class Dir {\n  @ng.Input({transform: (v: ng.Signal<string> | ng.TemplateRef<any>) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:i0.Signal<string>|i0.TemplateRef<any>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-coreNamedQualifiedTypeArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nimport {TemplateRef} from '@angular/core';\nnamespace NS { export type T = string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: Array<NS.T> | TemplateRef<NS.T>) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:Array<T>|i0.TemplateRef<T>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-overloadFirstDecl",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nexport function toNum(v: string): number;\nexport function toNum(v: string | number): number;\nexport function toNum(v: any): number { return 1; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: toNum}) x!: number;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform function cannot have multiple signatures Value is a reference to 'toNum'."
+      ],
+      "diagnosticSpans": [[48, 89]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedNamedImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nimport {NS} from './ns';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.T) => 1}) x!: number;\n}\n",
+        "ns.ts": "export namespace NS { export type T = string; }\n"
+      },
+      "skip": "a qualified name through a named import (`import {NS} from './ns'`, `NS.T`): ngtsc writes only `T` and imports nothing; oxc writes `unknown`, as for other types from another module",
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:T;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: dts-libFunctions",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: decodeURI}) decodeURIX!: any;\n  @Input({transform: decodeURIComponent}) decodeURIComponentX!: any;\n  @Input({transform: encodeURI}) encodeURIX!: any;\n  @Input({transform: encodeURIComponent}) encodeURIComponentX!: any;\n  @Input({transform: escape}) escapeX!: any;\n  @Input({transform: eval}) evalX!: any;\n  @Input({transform: isFinite}) isFiniteX!: any;\n  @Input({transform: isNaN}) isNaNX!: any;\n  @Input({transform: parseFloat}) parseFloatX!: any;\n  @Input({transform: parseInt}) parseIntX!: any;\n  @Input({transform: unescape}) unescapeX!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{decodeURIX:[2,\"decodeURIX\",\"decodeURIX\",decodeURI],decodeURIComponentX:[2,\"decodeURIComponentX\",\"decodeURIComponentX\",decodeURIComponent],encodeURIX:[2,\"encodeURIX\",\"encodeURIX\",encodeURI],encodeURIComponentX:[2,\"encodeURIComponentX\",\"encodeURIComponentX\",encodeURIComponent],escapeX:[2,\"escapeX\",\"escapeX\",escape],evalX:[2,\"evalX\",\"evalX\",eval],isFiniteX:[2,\"isFiniteX\",\"isFiniteX\",isFinite],isNaNX:[2,\"isNaNX\",\"isNaNX\",isNaN],parseFloatX:[2,\"parseFloatX\",\"parseFloatX\",parseFloat],parseIntX:[2,\"parseIntX\",\"parseIntX\",parseInt],unescapeX:[2,\"unescapeX\",\"unescapeX\",unescape]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"decodeURIX\":{\"alias\":\"decodeURIX\";\"required\":false;};\"decodeURIComponentX\":{\"alias\":\"decodeURIComponentX\";\"required\":false;};\"encodeURIX\":{\"alias\":\"encodeURIX\";\"required\":false;};\"encodeURIComponentX\":{\"alias\":\"encodeURIComponentX\";\"required\":false;};\"escapeX\":{\"alias\":\"escapeX\";\"required\":false;};\"evalX\":{\"alias\":\"evalX\";\"required\":false;};\"isFiniteX\":{\"alias\":\"isFiniteX\";\"required\":false;};\"isNaNX\":{\"alias\":\"isNaNX\";\"required\":false;};\"parseFloatX\":{\"alias\":\"parseFloatX\";\"required\":false;};\"parseIntX\":{\"alias\":\"parseIntX\";\"required\":false;};\"unescapeX\":{\"alias\":\"unescapeX\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_decodeURIX": "staticngAcceptInputType_decodeURIX:string;",
+          "dts:ngAcceptInputType_decodeURIComponentX": "staticngAcceptInputType_decodeURIComponentX:string;",
+          "dts:ngAcceptInputType_encodeURIX": "staticngAcceptInputType_encodeURIX:string;",
+          "dts:ngAcceptInputType_encodeURIComponentX": "staticngAcceptInputType_encodeURIComponentX:string|number|boolean;",
+          "dts:ngAcceptInputType_escapeX": "staticngAcceptInputType_escapeX:string;",
+          "dts:ngAcceptInputType_evalX": "staticngAcceptInputType_evalX:string;",
+          "dts:ngAcceptInputType_isFiniteX": "staticngAcceptInputType_isFiniteX:number;",
+          "dts:ngAcceptInputType_isNaNX": "staticngAcceptInputType_isNaNX:number;",
+          "dts:ngAcceptInputType_parseFloatX": "staticngAcceptInputType_parseFloatX:string;",
+          "dts:ngAcceptInputType_parseIntX": "staticngAcceptInputType_parseIntX:string;",
+          "dts:ngAcceptInputType_unescapeX": "staticngAcceptInputType_unescapeX:string;"
+        }
+      },
+      "dtsImports": []
     },
     {
       "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constFalse",

@@ -193,7 +193,27 @@ impl TypePrinter<'_, '_> {
 
     /// `@angular/core` names become `i0.Name`; local and global names stay as
     /// written; names from other modules set `other_module`.
+    ///
+    /// A qualified name whose head the file declares (`NS.T`, `C.T` for a
+    /// class merged with a namespace, `A.B.T`) is written as its last part,
+    /// `T`: ngtsc emits the declaration `T` resolves to by its own name. An enum
+    /// member (`E.A`) stays as written, since ngtsc can't emit one at all.
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
+        if let TSTypeName::QualifiedName(q) = name {
+            let mut left = &q.left;
+            let mut depth = 1;
+            while let TSTypeName::QualifiedName(inner) = left {
+                left = &inner.left;
+                depth += 1;
+            }
+            if let TSTypeName::IdentifierReference(head) = left
+                && self.scope.import(head.name.as_str()).is_none()
+                && self.scope.declares(head.name.as_str())
+                && !(depth == 1 && self.scope.is_enum(head.name.as_str()))
+            {
+                return Some(q.right.name.to_string());
+            }
+        }
         let (head, rest) = match name {
             TSTypeName::IdentifierReference(id) => (id.name.as_str(), String::new()),
             TSTypeName::QualifiedName(q) => {

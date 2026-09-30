@@ -59,6 +59,8 @@ pub(crate) struct FileScope<'a> {
     /// Interfaces, type aliases, classes and enums declared in the file, and
     /// whether the first declaration of each is itself marked `export`.
     types: HashMap<&'a str, bool>,
+    /// Namespaces (`namespace NS {}`, `declare namespace NS {}`, `module NS {}`).
+    namespaces: HashSet<&'a str>,
     /// Where each top-level function, class and variable is first declared, as
     /// ngtsc's diagnostics point at it: the whole statement (with `export`) for
     /// a function or class, the declarator (`x: T`) for a variable.
@@ -592,8 +594,27 @@ impl<'a> FileScope<'a> {
                 self.aliases.entry(alias.id.name.as_str()).or_insert(&alias.module_reference);
                 name(self, alias.id.name.as_str());
             }
+            Declaration::TSNamespaceDeclaration(ns) => {
+                self.namespaces.insert(ns.id.name.as_str());
+            }
             _ => {}
         }
+    }
+
+    /// Whether the file declares `name` at its top level: a namespace, class,
+    /// function, variable, enum, interface or type alias.
+    pub(crate) fn declares(&self, name: &str) -> bool {
+        self.namespaces.contains(name)
+            || self.types.contains_key(name)
+            || self.classes.contains_key(name)
+            || self.enums.contains_key(name)
+            || self.functions.contains_key(name)
+            || self.variables.contains_key(name)
+    }
+
+    /// Whether `name` is an enum declared in the file.
+    pub(crate) fn is_enum(&self, name: &str) -> bool {
+        self.enums.contains_key(name)
     }
 
     /// Whether `function` is the top-level function declaration called `name`
@@ -1149,20 +1170,26 @@ const ES_GLOBALS: &[&str] = &[
 ];
 
 /// The globals in [`ES_GLOBALS`] declared as functions (`declare function`),
-/// each with a single signature; the others are `declare var`s.
-const ES_GLOBAL_FUNCTIONS: &[&str] = &[
-    "decodeURI",
-    "decodeURIComponent",
-    "encodeURI",
-    "encodeURIComponent",
-    "escape",
-    "eval",
-    "isFinite",
-    "isNaN",
-    "parseFloat",
-    "parseInt",
-    "unescape",
+/// each with a single signature, and the type of its first parameter as
+/// TypeScript's `lib.es5.d.ts` declares it; the others are `declare var`s.
+const ES_GLOBAL_FUNCTIONS: &[(&str, &str)] = &[
+    ("decodeURI", "string"),
+    ("decodeURIComponent", "string"),
+    ("encodeURI", "string"),
+    ("encodeURIComponent", "string | number | boolean"),
+    ("escape", "string"),
+    ("eval", "string"),
+    ("isFinite", "number"),
+    ("isNaN", "number"),
+    ("parseFloat", "string"),
+    ("parseInt", "string"),
+    ("unescape", "string"),
 ];
+
+/// The first parameter type of [`ES_GLOBAL_FUNCTIONS`]'s `name`.
+fn es_global_function_param(name: &str) -> Option<&'static str> {
+    ES_GLOBAL_FUNCTIONS.iter().find(|(n, _)| *n == name).map(|(_, ty)| *ty)
+}
 
 /// Bounds a chain of import-equals aliases (`import A = B; import B = A;`).
 const MAX_ALIASES: u16 = 64;
@@ -2344,7 +2371,7 @@ pub(crate) fn transform_error<'a>(
         // A `declare function` of TypeScript's library: neither generic nor
         // overloaded.
         Value::Reference { name, kind: RefKind::Global }
-            if ES_GLOBAL_FUNCTIONS.contains(&name.as_str()) =>
+            if es_global_function_param(name).is_some() =>
         {
             return clash();
         }
@@ -3070,31 +3097,47 @@ fn loose_equals(a: &Value<'_>, b: &Value<'_>) -> bool {
 // `.d.ts` input transform types
 // =============================================================================
 
+/// An input transform whose first parameter the `.d.ts` can be typed with.
+#[derive(Clone, Copy)]
+enum Transform<'a> {
+    /// A function defined in this file (its first declaration).
+    Def(FnDef<'a>),
+    /// A function of TypeScript's library: the type of its first parameter.
+    Lib(&'static str),
+}
+
 /// The `.d.ts` type of each input transform's first parameter, for
 /// `static ngAcceptInputType_<name>: T;`.
 ///
-/// Only transforms defined in this file are covered; imported ones can't be
-/// inspected and are left out.
+/// Only transforms defined in this file or in TypeScript's library
+/// ([`ES_GLOBAL_FUNCTIONS`]) are covered; imported ones can't be inspected and
+/// are left out.
 pub fn input_transform_types<'a>(
     class: &'a Class<'a>,
     consts: &super::StringConsts<'a>,
     source: &'a str,
 ) -> HashMap<String, String> {
     let evaluator = Evaluator::new(consts);
+    let scope = consts.scope();
     // The transform that ends up compiled for each input: a member `@Input`
     // overrides an `inputs:` entry, like the compiled inputs map.
-    let mut transforms: std::vec::Vec<(String, Option<FnDef<'a>>)> = std::vec::Vec::new();
+    let mut transforms: std::vec::Vec<(String, Option<Transform<'a>>)> = std::vec::Vec::new();
     let mut record = |name: String, value: &Value<'a>| {
-        let def = match value {
-            Value::Function(def) => Some(*def),
-            Value::Reference { kind: RefKind::Function(function, _), .. } => {
-                Some(FnDef::Function(function))
+        let transform = match value {
+            Value::Function(def) => Some(Transform::Def(*def)),
+            // An overloaded function or static method is typed from its first
+            // declaration, as ngtsc does.
+            Value::Reference { name, kind: RefKind::Function(function, _) } => {
+                Some(Transform::Def(FnDef::Function(scope.first_declaration(name, function))))
+            }
+            Value::Reference { name, kind: RefKind::Global } => {
+                es_global_function_param(name).map(Transform::Lib)
             }
             _ => None,
         };
         match transforms.iter_mut().find(|(n, _)| *n == name) {
-            Some(entry) => entry.1 = def,
-            None => transforms.push((name, def)),
+            Some(entry) => entry.1 = transform,
+            None => transforms.push((name, transform)),
         }
     };
     if let Some((Some(config), _)) = super::angular_decorator_config(class)
@@ -3127,14 +3170,15 @@ pub fn input_transform_types<'a>(
 
     transforms
         .into_iter()
-        .filter_map(|(name, def)| {
-            let ty = match def?.first_param_type().ok()? {
+        .filter_map(|(name, transform)| {
+            let def = match transform? {
+                Transform::Def(def) => def,
+                Transform::Lib(ty) => return Some((name, ty.to_string())),
+            };
+            let ty = match def.first_param_type().ok()? {
                 Some(ty) => {
-                    let mut printer = super::dts_type::TypePrinter {
-                        scope: consts.scope(),
-                        source,
-                        other_module: false,
-                    };
+                    let mut printer =
+                        super::dts_type::TypePrinter { scope, source, other_module: false };
                     let ty = printer.print(ty);
                     if printer.other_module {
                         return None;
