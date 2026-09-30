@@ -695,17 +695,38 @@ fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) ->
 /// The same for a transform written in a namespace that uses the namespace's
 /// declarations (`transform: fn`, with `fn` declared in the namespace), for
 /// which ngtsc emits the bare names.
-fn scoped_transform_error(input: &str, expr: &Expression<'_>, consts: &StringConsts<'_>) -> String {
+///
+/// `subject` is where the transform is declared: `@Directive.inputs` or `@Input`.
+fn scoped_transform_error(
+    subject: &str,
+    input: &str,
+    expr: &Expression<'_>,
+    consts: &StringConsts<'_>,
+) -> String {
     match consts.scope().namespace_used_by(expr) {
         Some(namespace) => format!(
-            "@Directive.inputs: the transform of \"{input}\" uses a declaration of namespace \
+            "{subject}: the transform of \"{input}\" uses a declaration of namespace \
              {namespace}, which isn't in scope outside it. OXC can't emit it there."
         ),
         None => format!(
-            "@Directive.inputs: the transform of \"{input}\" uses a parameter of the function \
+            "{subject}: the transform of \"{input}\" uses a parameter of the function \
              it's written in. OXC can't emit it outside that function."
         ),
     }
+}
+
+/// Whether [`transform_expression`] has no expression to emit for a transform
+/// it was given, because it uses the parameters of the function it's written
+/// in (see [`scoped_transform_error`]).
+fn is_out_of_scope(transform: &Prop<'_>, consts: &StringConsts<'_>) -> bool {
+    transform.expr.is_some() && transform.origin.is_none() && !is_named_function(transform, consts)
+}
+
+/// Whether a transform is emitted as the name of the same-file function it
+/// resolves to (see [`transform_expression`]).
+fn is_named_function(transform: &Prop<'_>, consts: &StringConsts<'_>) -> bool {
+    matches!(&transform.value, Value::Reference { name, kind: RefKind::Function(function, _) }
+        if consts.scope().is_top_level_function(name, function))
 }
 
 /// Parse `inputs:` / `outputs:` from a decorator metadata object.
@@ -867,8 +888,10 @@ fn parse_input_object<'a>(
             let error =
                 transform_error(transform, Some(position), name, class, consts.scope(), span)
                     .or_else(|| match transform {
-                        Prop { expr: Some(written), origin: None, .. } if expr.is_none() => {
-                            Some((scoped_transform_error(name, written, consts), span))
+                        Prop { expr: Some(written), .. } if is_out_of_scope(transform, consts) => {
+                            let message =
+                                scoped_transform_error("@Directive.inputs", name, written, consts);
+                            Some((message, span))
                         }
                         _ => None,
                     });
@@ -901,9 +924,7 @@ pub(crate) fn transform_expression<'a>(
     consts: &StringConsts<'a>,
 ) -> Option<OutputExpression<'a>> {
     match &transform.value {
-        Value::Reference { name, kind: RefKind::Function(function, _) }
-            if consts.scope().is_top_level_function(name, function) =>
-        {
+        Value::Reference { name, .. } if is_named_function(transform, consts) => {
             Some(OutputAstBuilder::variable(allocator, Ident::from(allocator.alloc_str(name))))
         }
         _ => convert_oxc_expression(allocator, transform.origin?, source_text),
@@ -1045,7 +1066,17 @@ pub fn decorator_io_errors<'a>(
                 let options = evaluator.evaluate(options);
                 if let Some(transform) = options.prop("transform") {
                     let error =
-                        transform_error(transform, None, &name, class, consts.scope(), span);
+                        transform_error(transform, None, &name, class, consts.scope(), span)
+                            .or_else(|| match transform {
+                                Prop { expr: Some(written), .. }
+                                    if is_out_of_scope(transform, consts) =>
+                                {
+                                    let message =
+                                        scoped_transform_error("@Input", &name, written, consts);
+                                    Some((message, span))
+                                }
+                                _ => None,
+                            });
                     if error.is_some() {
                         return error;
                     }

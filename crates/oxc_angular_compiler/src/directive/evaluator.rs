@@ -602,6 +602,24 @@ impl<'a> FileScope<'a> {
     pub(crate) fn import(&self, name: &str) -> Option<Import<'a>> {
         self.imports.get(name).copied()
     }
+
+    /// The type parameters of the innermost same-file function or static
+    /// method (the functions the evaluator calls) whose body contains `span`.
+    fn enclosing_type_parameters(&self, span: Span) -> Option<&'a TSTypeParameterDeclaration<'a>> {
+        let methods = self.classes.values().flat_map(|class| {
+            class.body.body.iter().filter_map(|el| match el {
+                ClassElement::MethodDefinition(m) if m.r#static => Some(&*m.value),
+                _ => None,
+            })
+        });
+        self.functions
+            .values()
+            .map(|(function, _)| *function)
+            .chain(methods)
+            .filter(|f| f.body.as_ref().is_some_and(|body| body.span.contains_inclusive(span)))
+            .min_by_key(|f| f.span.size())
+            .and_then(|f| f.type_parameters.as_deref())
+    }
 }
 
 /// The names a binding pattern declares, each with its path into the initializer.
@@ -1273,10 +1291,19 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     let Some(key) = self.property_key(&p.key, p.computed, depth, frame) else {
                         return Value::Dynamic;
                     };
-                    let value = match &p.value {
-                        Expression::ArrowFunctionExpression(f) => Value::Function(FnDef::Arrow(f)),
-                        Expression::FunctionExpression(f) => Value::Function(FnDef::Function(f)),
-                        value => self.eval(value, depth, frame),
+                    let value = match (&p.value, function_value(&p.value)) {
+                        (_, Some(function)) => function,
+                        // `{ transform }` reads a parameter as it is: ngtsc
+                        // looks a shorthand up by its declaration, which
+                        // doesn't make a function expression opaque the way
+                        // naming it does (see `identifier`).
+                        (Expression::Identifier(id), None) if p.shorthand => {
+                            match frame.bindings.get(id.name.as_str()) {
+                                Some(binding) => binding.value.clone(),
+                                None => self.eval(&p.value, depth, frame),
+                            }
+                        }
+                        (value, None) => self.eval(value, depth, frame),
                     };
                     let origin = self.origin(&p.value, frame);
                     props.push(Prop { key, value, expr: Some(&p.value), origin });
@@ -1439,7 +1466,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
 
     fn identifier(&self, name: &'a str, depth: u16, frame: &Frame<'a>) -> Value<'a> {
         if let Some(binding) = frame.bindings.get(name) {
-            return binding.value.clone();
+            return match &binding.value {
+                // A function expression passed as an argument isn't
+                // analyzable through the parameter's name (ngtsc wraps it in
+                // a dynamic value for that identifier).
+                Value::Function(_) => Value::Dynamic,
+                value => value.clone(),
+            };
         }
         let scope = self.consts.scope();
         // Inside a namespace, its declarations (and its enclosing ones') come first.
@@ -1825,8 +1858,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         // Each argument's value, and where it was written.
         let mut args = std::vec::Vec::new();
         let mut origins = std::vec::Vec::new();
+        let mut spread_seen = false;
         for arg in &call.arguments {
             if let Argument::SpreadElement(spread) = arg {
+                spread_seen = true;
                 let values = self.spread(&spread.argument, depth, frame);
                 let known = self
                     .element_origins(&spread.argument, frame)
@@ -1835,7 +1870,14 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 args.extend(values);
             } else {
                 let expr = arg.to_expression();
-                args.push(self.eval(expr, depth, frame));
+                let value = self.eval(expr, depth, frame);
+                // A function expression passed as an argument (or as a default
+                // value) stays analyzable in the parameter, as ngtsc binds the
+                // value as it is, up to the first spread.
+                args.push(match function_value(expr) {
+                    Some(function) if !spread_seen => function,
+                    _ => value,
+                });
                 origins.push(self.origin(expr, frame));
             }
         }
@@ -1848,7 +1890,9 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             let binding = match args.get(i + offset) {
                 None | Some(Value::Undefined) if param.initializer.is_some() => {
                     param.initializer.as_ref().map(|init| {
-                        Binding::new(self.eval(init, depth, &scope), self.origin(init, &scope))
+                        let value =
+                            function_value(init).unwrap_or_else(|| self.eval(init, depth, &scope));
+                        Binding::new(value, self.origin(init, &scope))
                     })
                 }
                 arg => arg.map(|value| {
@@ -2140,9 +2184,17 @@ pub(crate) fn transform_error<'a>(
             let in_class = matches!(value, Value::Function(_))
                 && class.body.span.contains_inclusive(def.span());
             let class_params = class.type_parameters.as_deref().filter(|_| in_class);
+            // One written in a function the metadata calls sees that
+            // function's type parameters.
+            let helper_params = match value {
+                Value::Function(_) => scope.enclosing_type_parameters(def.span()),
+                _ => None,
+            };
             let mut check =
                 UnexportedType { scope, type_params: std::vec::Vec::new(), found: false };
-            check.with_params(class_params, |check| check.visit_ts_type(ty));
+            check.with_params(helper_params, |check| {
+                check.with_params(class_params, |check| check.visit_ts_type(ty));
+            });
             check.found.then(|| {
                 (
                     "Symbol must be exported in order to be used as the type of an Input transform function"
@@ -2293,6 +2345,16 @@ struct Mentions<'a>(std::vec::Vec<&'a str>);
 impl<'a> Visit<'a> for Mentions<'a> {
     fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
         self.0.push(id.name.as_str());
+    }
+}
+
+/// An arrow or function expression written in place, which ngtsc can analyze
+/// as an input transform.
+fn function_value<'a>(expr: &'a Expression<'a>) -> Option<Value<'a>> {
+    match expr {
+        Expression::ArrowFunctionExpression(f) => Some(Value::Function(FnDef::Arrow(f))),
+        Expression::FunctionExpression(f) => Some(Value::Function(FnDef::Function(f))),
+        _ => None,
     }
 }
 

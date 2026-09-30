@@ -5875,6 +5875,154 @@
       "dtsImports": []
     },
     {
+      "name": "probe: scope-shadow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nexport function toBool(v: unknown): boolean { return !!v; }\nfunction make(name: string, toBool: any) { return [{ name, transform: toBool }]; }\n@Directive({ selector: '[d]', inputs: make('x', (v: string) => v.length) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[173, 179]]
+    },
+    {
+      "name": "probe: scope-paramMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nexport function toBool(v: unknown): boolean { return !!v; }\nconst T = { toBool };\nfunction make(name: string, transform: any) { return [{ name, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x', T.toBool) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-memberOpts",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input, booleanAttribute } from '@angular/core';\nfunction opts(t: any) { return { transform: t }; }\n@Directive({ selector: '[d]' })\nexport class D { @Input(opts(booleanAttribute)) x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-genericHelper",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make<T>(n: string) { return [{ name: n, transform: (v: T) => v }]; }\n@Directive({ selector: '[d]', inputs: make<string>('x') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[107, 108]]
+    },
+    {
+      "name": "probe: scope-objParamFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nexport function toBool(v: unknown): boolean { return !!v; }\nfunction make(o: any) { return [{ name: 'x', transform: o.t }]; }\n@Directive({ selector: '[d]', inputs: make({ t: toBool }) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-paramArrowNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make(name: string, t: any) { return [{ name, transform: t }]; }\n@Directive({ selector: '[d]', inputs: make('x', (v: string) => v.length) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[108, 109]]
+    },
+    {
+      "name": "probe: scope-memberOptsArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nfunction opts(transform: any) { return { transform }; }\n@Directive({ selector: '[d]' })\nexport class D { @Input(opts((v: string) => v.length)) x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-this",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nclass H { static make() { return [{ name: 'x', transform: this.t }]; } }\n@Directive({ selector: '[d]', inputs: H.make() })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[119, 125]]
+    },
+    {
+      "name": "probe: scope-arguments",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nfunction make() { return [{ name: 'x', transform: arguments[0] }]; }\n@Directive({ selector: '[d]', inputs: make(booleanAttribute) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[111, 123]]
+    },
+    {
+      "name": "probe: scope-defaultArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make(n: string, transform: any = (v: string) => v.length) { return [{ name: n, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
       "name": "probe: shortCircuit-metaOr",
       "origin": "probe",
       "files": {

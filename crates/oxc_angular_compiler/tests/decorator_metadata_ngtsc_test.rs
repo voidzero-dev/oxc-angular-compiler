@@ -19,7 +19,7 @@
 //! merged safely into bundled declaration files; `i0` (`@angular/core`) is
 //! always imported, so those types are kept.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use oxc_allocator::Allocator;
 use oxc_angular_compiler::{TransformOptions, TransformResult, transform_angular_file};
@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 496, "fixtures compared");
+    assert_eq!(compared, 506, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -380,25 +380,32 @@ export class Dir {}
 /// A transform returned by a function the metadata calls is emitted where the
 /// directive is compiled, outside that function. A parameter becomes the
 /// argument it was passed (the snapshot's `scope-*` probes); anything else that
-/// uses the function's parameters, `this` or `arguments` would mean something
-/// else there, or nothing. ngtsc 22.1.7 emits `(v) => v + name` as written
-/// (`name` is then `window.name`) and `booleanAttribute` for `o.t` (the name
-/// the argument was first given); oxc reports these instead.
+/// uses the function's parameters would mean something else there, or nothing.
+/// ngtsc 22.1.7 emits `(v) => v + name` as written (`name` is then
+/// `window.name`) and `booleanAttribute` for `o.t` (the name the argument was
+/// first given); oxc reports these instead. (`this` and `arguments` there
+/// aren't analyzable, so ngtsc rejects those itself: `scope-this`,
+/// `scope-arguments`.)
 #[test]
 fn transforms_using_the_parameters_of_a_called_function_are_reported() {
     let cases = [
         (
             "function make(name: string) { return [{ name, transform: (v: string) => v + name }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(o: any) { return [{ name: 'x', transform: o.t }]; }",
+            "inputs: make({ t: booleanAttribute })",
+            "@Directive.inputs",
             "make({ t: booleanAttribute })",
         ),
-        ("class H { static make() { return [{ name: 'x', transform: this.t }]; } }", "H.make()"),
         (
-            "function make() { return [{ name: 'x', transform: arguments[0] }]; }",
-            "make(booleanAttribute)",
+            "function opts(n: string) { return { transform: (v: string) => v + n }; }",
+            "",
+            "@Input",
+            "opts('a')",
         ),
         // Scoped like JavaScript: only a nested non-arrow function has its own
         // `arguments`, and a name declared in a block isn't in scope after it
@@ -452,22 +459,21 @@ function make(name: string) { return [{ name: 'x', transform: (v: string) => id<
             "make('x')",
         ),
     ];
-    for (helper, inputs) in cases {
+    for (helper, meta, subject, span) in cases {
+        let member = if meta.is_empty() { "@Input(opts('a')) x: any;" } else { "x: any;" };
         let source = format!(
-            "import {{Directive, booleanAttribute}} from '@angular/core';
+            "import {{Directive, Input, booleanAttribute}} from '@angular/core';
 {helper}
-@Directive({{selector: '[d]', inputs: {inputs}}})
-export class Dir {{ x: any; }}
+@Directive({{selector: '[d]', {meta}}})
+export class Dir {{ {member} }}
 "
         );
         let result = transform(&source);
-        let message = "@Directive.inputs: the transform of \"x\" uses a parameter of the \
-                       function it's written in. OXC can't emit it outside that function.";
-        assert_eq!(
-            errors(&result, &source),
-            vec![(message.to_string(), inputs.to_string())],
-            "{helper}"
+        let message = format!(
+            "{subject}: the transform of \"x\" uses a parameter of the function it's \
+             written in. OXC can't emit it outside that function."
         );
+        assert_eq!(errors(&result, &source), vec![(message, span.to_string())], "{helper}");
     }
 }
 
@@ -791,4 +797,32 @@ import * as NS from 'foreign-decorators';
             assert_eq!(code.contains(part), compiled, "{part} in\n{code}");
         }
     }
+}
+
+/// `resolved_imports` points an imported name at the file that declares it
+/// (past a barrel). It doesn't change which module the import is from, so
+/// `@core.Input()` through `import * as core from '@angular/core'` is still
+/// Angular's when `core` is mapped.
+#[test]
+fn namespaced_member_decorators_ignore_resolved_import_paths() {
+    let source = "import {Component} from '@angular/core';
+import * as core from '@angular/core';
+@Component({selector: 'c', template: ''})
+export class Cmp {
+  @core.Input() x: any;
+  @core.Output() y: any;
+}
+";
+    let options = TransformOptions {
+        resolved_imports: Some(HashMap::from([(
+            "core".to_string(),
+            "../node_modules/@angular/core/fesm2022/core.mjs".to_string(),
+        )])),
+        ..TransformOptions::default()
+    };
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "test.ts", source, Some(&options), None);
+    let code = strip(&result.code);
+    assert!(code.contains(r#"inputs:{x:"x"}"#), "{}", result.code);
+    assert!(code.contains(r#"outputs:{y:"y"}"#), "{}", result.code);
 }
