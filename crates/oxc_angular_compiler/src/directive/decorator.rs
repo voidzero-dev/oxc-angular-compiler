@@ -973,7 +973,7 @@ pub(crate) fn resolve_member_transforms<'a>(
             _ => continue,
         };
         let Some(name) = key.static_name() else { continue };
-        let options = super::property_decorators::input_decorator_options(decorators);
+        let options = super::property_decorators::input_decorator_options(decorators, consts);
         let Some(options) = options else { continue };
         let options = evaluator.evaluate(options);
         let Some(transform) = options.prop("transform") else { continue };
@@ -1084,7 +1084,7 @@ pub fn decorator_io_errors<'a>(
             };
             let name = key.static_name()?;
             // `@Input({ transform })`
-            let options = super::property_decorators::input_decorator_options(decorators);
+            let options = super::property_decorators::input_decorator_options(decorators, consts);
             if let Some(options) = options {
                 let span = options.span();
                 let options = evaluator.evaluate(options);

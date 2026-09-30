@@ -429,14 +429,19 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         consts: Option<&super::StringConsts<'a>>,
     ) -> Self {
         // Extract inputs from @Input decorators
-        let inputs =
-            super::property_decorators::extract_input_metadata(allocator, class, source_text);
+        let inputs = super::property_decorators::extract_input_metadata_in(
+            allocator,
+            class,
+            source_text,
+            consts,
+        );
         for input in inputs {
             self = self.add_input(input);
         }
 
         // Extract outputs from @Output decorators
-        let outputs = super::property_decorators::extract_output_metadata(allocator, class);
+        let outputs =
+            super::property_decorators::extract_output_metadata_in(allocator, class, consts);
         for (class_name, binding_name) in outputs {
             self = self.add_output(class_name, binding_name);
         }
@@ -465,7 +470,8 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
 
         // Extract host bindings from @HostBinding
         // Wrap with brackets: "class.active" -> "[class.active]"
-        let host_bindings = super::property_decorators::extract_host_bindings(allocator, class);
+        let host_bindings =
+            super::property_decorators::extract_host_bindings_in(allocator, class, consts);
         for (host_prop, class_prop) in host_bindings {
             // Add to host.properties with wrapped key
             let wrapped_key =
@@ -476,7 +482,8 @@ impl<'a> R3DirectiveMetadataBuilder<'a> {
         // Extract host listeners from @HostListener
         // Wrap event name with parentheses and build method expression with args
         // Reference: Angular's shared.ts:713 - `bindings.listeners[eventName] = \`${member.name}(${args.join(',')})\``
-        let host_listeners = super::property_decorators::extract_host_listeners(allocator, class);
+        let host_listeners =
+            super::property_decorators::extract_host_listeners_in(allocator, class, consts);
         for (event_name, method_name, args) in host_listeners {
             // Wrap event name: "click" -> "(click)"
             let wrapped_key =

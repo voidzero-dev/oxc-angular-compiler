@@ -11,8 +11,6 @@
 //! These decorators are found on class properties and methods, and define
 //! how the directive/component interacts with its parent context.
 
-use std::cell::RefCell;
-
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
     Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
@@ -29,30 +27,16 @@ use crate::output::oxc_converter::convert_oxc_expression;
 // Helper Functions
 // ============================================================================
 
-thread_local! {
-    /// The local names of `import * as ns from '@angular/core'` in the file
-    /// being compiled (see [`CoreNamespaces`]).
-    static CORE_NAMESPACES: RefCell<std::vec::Vec<String>> =
-        const { RefCell::new(std::vec::Vec::new()) };
-}
-
-/// While alive, member decorators written through these namespace imports of
-/// `@angular/core` (`@core.Input()`) are recognised. ngtsc only reads a
-/// namespaced member decorator whose namespace imports `@angular/core`, and the
-/// functions here that extract member decorators don't see the file's imports.
-pub(crate) struct CoreNamespaces(std::vec::Vec<String>);
-
-impl CoreNamespaces {
-    pub(crate) fn enter(names: std::vec::Vec<String>) -> Self {
-        Self(CORE_NAMESPACES.with(|current| current.replace(names)))
-    }
-}
-
-impl Drop for CoreNamespaces {
-    fn drop(&mut self) {
-        let previous = std::mem::take(&mut self.0);
-        CORE_NAMESPACES.with(|current| *current.borrow_mut() = previous);
-    }
+/// Whether `name` is a namespace import of `@angular/core`
+/// (`import * as core from '@angular/core'`) in the file `consts` was collected
+/// from. Without the file (`None`), no name is.
+///
+/// ngtsc only reads a namespaced member decorator (`@core.Input()`) or
+/// `core.forwardRef(...)` through such an import (`getImportOfIdentifier`).
+fn is_core_namespace(consts: Option<&super::StringConsts<'_>>, name: &str) -> bool {
+    consts
+        .and_then(|consts| consts.scope().import(name))
+        .is_some_and(|import| import.module == "@angular/core" && import.imported.is_none())
 }
 
 /// Find a decorator by name from a list of decorators.
@@ -60,21 +44,20 @@ impl Drop for CoreNamespaces {
 /// Searches for decorators that are either:
 /// - Simple identifiers: `@Input`
 /// - Call expressions: `@Input()` or `@Input('alias')`
-/// - Either of those through a namespace import of `@angular/core` (see
-///   [`CoreNamespaces`]): `@core.Input()`
+/// - Either of those through a namespace import of `@angular/core` in the
+///   file `consts` was collected from (see [`is_core_namespace`]): `@core.Input()`
 ///
 /// Returns the first matching decorator.
 fn find_decorator_by_name<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
     name: &str,
+    consts: Option<&super::StringConsts<'_>>,
 ) -> Option<&'a Decorator<'a>> {
-    let is_core_namespace =
-        |ns: &str| CORE_NAMESPACES.with(|names| names.borrow().iter().any(|n| n == ns));
     let is_name = |expr: &Expression<'_>| match expr {
         Expression::Identifier(id) => id.name == name,
         Expression::StaticMemberExpression(m) => {
             m.property.name == name
-                && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(&ns.name))
+                && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(consts, &ns.name))
         }
         _ => false,
     };
@@ -87,8 +70,9 @@ fn find_decorator_by_name<'a>(
 /// The options argument of an `@Input(...)` decorator, if any.
 pub(crate) fn input_decorator_options<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
+    consts: &super::StringConsts<'_>,
 ) -> Option<&'a Expression<'a>> {
-    match &find_decorator_by_name(decorators, "Input")?.expression {
+    match &find_decorator_by_name(decorators, "Input", Some(consts))?.expression {
         Expression::CallExpression(call) => call.arguments.first()?.as_expression(),
         _ => None,
     }
@@ -131,14 +115,25 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 /// Mirrors ngtsc's `tryUnwrapForwardRef`: `forwardRef(() => X)`,
 /// `forwardRef(function () { return X; })`, looking through parentheses and
 /// `as` casts. Returns `None` for anything else.
-fn try_unwrap_forward_ref<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+///
+/// Like ngtsc, `ns.forwardRef(...)` is only unwrapped when `ns` is a namespace
+/// import of `@angular/core` (see [`is_core_namespace`]); `util.forwardRef`
+/// on any other object is kept as written. A bare `forwardRef` is matched by
+/// name.
+fn try_unwrap_forward_ref<'a>(
+    expr: &'a Expression<'a>,
+    consts: Option<&super::StringConsts<'_>>,
+) -> Option<&'a Expression<'a>> {
     let Expression::CallExpression(call) = unwrap_expression(expr) else { return None };
-    let callee = match &call.callee {
-        Expression::Identifier(id) => id.name.as_str(),
-        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
-        _ => return None,
+    let is_forward_ref = match &call.callee {
+        Expression::Identifier(id) => id.name == "forwardRef",
+        Expression::StaticMemberExpression(m) => {
+            m.property.name == "forwardRef"
+                && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(consts, &ns.name))
+        }
+        _ => false,
     };
-    if callee != "forwardRef" || call.arguments.len() != 1 {
+    if !is_forward_ref || call.arguments.len() != 1 {
         return None;
     }
     let body = match unwrap_expression(call.arguments[0].as_expression()?) {
@@ -547,13 +542,25 @@ pub fn extract_input_metadata<'a>(
     class: &'a Class<'a>,
     source_text: Option<&'a str>,
 ) -> Vec<'a, R3InputMetadata<'a>> {
+    extract_input_metadata_in(allocator, class, source_text, None)
+}
+
+/// [`extract_input_metadata`] for a class in the file `consts` was collected
+/// from, which also recognises `@core.Input()` through a namespace import of
+/// `@angular/core` (see [`is_core_namespace`]).
+pub fn extract_input_metadata_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, R3InputMetadata<'a>> {
     let mut inputs = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
             ClassElement::PropertyDefinition(prop) => {
                 // First check for @Input decorator
-                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Input") {
+                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Input", consts) {
                     let Some(class_property_name) = get_property_key_name(&prop.key) else {
                         continue;
                     };
@@ -591,7 +598,8 @@ pub fn extract_input_metadata<'a>(
             }
 
             ClassElement::AccessorProperty(prop) => {
-                let Some(decorator) = find_decorator_by_name(&prop.decorators, "Input") else {
+                let Some(decorator) = find_decorator_by_name(&prop.decorators, "Input", consts)
+                else {
                     continue;
                 };
 
@@ -615,7 +623,8 @@ pub fn extract_input_metadata<'a>(
 
             // Methods with @Input decorator (setter-based inputs)
             ClassElement::MethodDefinition(method) => {
-                let Some(decorator) = find_decorator_by_name(&method.decorators, "Input") else {
+                let Some(decorator) = find_decorator_by_name(&method.decorators, "Input", consts)
+                else {
                     continue;
                 };
 
@@ -698,13 +707,25 @@ pub fn extract_output_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
+    extract_output_metadata_in(allocator, class, None)
+}
+
+/// [`extract_output_metadata`] for a class in the file `consts` was collected
+/// from, which also recognises `@core.Output()` through a namespace import of
+/// `@angular/core` (see [`is_core_namespace`]).
+pub fn extract_output_metadata_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut outputs = Vec::new_in(&allocator);
 
     for element in &class.body.body {
         match element {
             ClassElement::PropertyDefinition(prop) => {
                 // First check for @Output decorator
-                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Output") {
+                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Output", consts)
+                {
                     let Some(class_property_name) = get_property_key_name(&prop.key) else {
                         continue;
                     };
@@ -736,7 +757,8 @@ pub fn extract_output_metadata<'a>(
             }
 
             ClassElement::AccessorProperty(prop) => {
-                let Some(decorator) = find_decorator_by_name(&prop.decorators, "Output") else {
+                let Some(decorator) = find_decorator_by_name(&prop.decorators, "Output", consts)
+                else {
                     continue;
                 };
 
@@ -834,7 +856,7 @@ fn parse_query_config<'a>(
 
     // The predicate: a string selector, a string array, or a type/token.
     // forwardRef isn't included in compiled output.
-    let node = try_unwrap_forward_ref(first_arg).unwrap_or(first_arg);
+    let node = try_unwrap_forward_ref(first_arg, consts).unwrap_or(first_arg);
     let selectors = match (consts, node) {
         (Some(consts), _) => match super::evaluator::Evaluator::new(consts).evaluate(node) {
             super::evaluator::Value::String(s) => Some(std::vec![s]),
@@ -942,6 +964,7 @@ fn try_parse_signal_query<'a>(
     value: &'a Expression<'a>,
     property_name: Ident<'a>,
     source_text: Option<&'a str>,
+    consts: Option<&super::StringConsts<'a>>,
 ) -> Option<(SignalQueryType, R3QueryMetadata<'a>)> {
     // Check if the value is a call expression (unwrapping `as`/parenthesized).
     let call_expr = match unwrap_initializer_api_expr(value) {
@@ -1016,7 +1039,7 @@ fn try_parse_signal_query<'a>(
         _ => {
             let expr = predicate_arg.to_expression();
             // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
-            let unwrapped_expr = try_unwrap_forward_ref(expr).unwrap_or(expr);
+            let unwrapped_expr = try_unwrap_forward_ref(expr, consts).unwrap_or(expr);
             let output_expr = convert_oxc_expression(allocator, unwrapped_expr, source_text)?;
             QueryPredicate::Type(output_expr)
         }
@@ -1113,9 +1136,13 @@ pub(crate) fn extract_view_queries_in<'a>(
                 // Check for signal-based view queries first (viewChild(), viewChildren())
                 if let Some(value) = &prop.value {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
-                        if let Some((query_type, metadata)) =
-                            try_parse_signal_query(allocator, value, property_name, source_text)
-                        {
+                        if let Some((query_type, metadata)) = try_parse_signal_query(
+                            allocator,
+                            value,
+                            property_name,
+                            source_text,
+                            consts,
+                        ) {
                             if query_type.is_view_query() {
                                 signal_queries.push(metadata);
                                 continue;
@@ -1125,7 +1152,9 @@ pub(crate) fn extract_view_queries_in<'a>(
                 }
 
                 // Check for decorator-based queries (@ViewChild, @ViewChildren)
-                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "ViewChild") {
+                if let Some(decorator) =
+                    find_decorator_by_name(&prop.decorators, "ViewChild", consts)
+                {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         let config = parse_query_config(
                             allocator,
@@ -1148,7 +1177,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                         }
                     }
                 } else if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ViewChildren")
+                    find_decorator_by_name(&prop.decorators, "ViewChildren", consts)
                 {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         let config = parse_query_config(
@@ -1177,7 +1206,9 @@ pub(crate) fn extract_view_queries_in<'a>(
                 if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
             {
                 // Check for decorator-based queries on setters/getters
-                if let Some(decorator) = find_decorator_by_name(&method.decorators, "ViewChild") {
+                if let Some(decorator) =
+                    find_decorator_by_name(&method.decorators, "ViewChild", consts)
+                {
                     if let Some(property_name) = get_property_key_name(&method.key) {
                         let config = parse_query_config(
                             allocator,
@@ -1200,7 +1231,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                         }
                     }
                 } else if let Some(decorator) =
-                    find_decorator_by_name(&method.decorators, "ViewChildren")
+                    find_decorator_by_name(&method.decorators, "ViewChildren", consts)
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
                         let config = parse_query_config(
@@ -1287,9 +1318,13 @@ pub(crate) fn extract_content_queries_in<'a>(
                 // Check for signal-based content queries first (contentChild(), contentChildren())
                 if let Some(value) = &prop.value {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
-                        if let Some((query_type, metadata)) =
-                            try_parse_signal_query(allocator, value, property_name, source_text)
-                        {
+                        if let Some((query_type, metadata)) = try_parse_signal_query(
+                            allocator,
+                            value,
+                            property_name,
+                            source_text,
+                            consts,
+                        ) {
                             if !query_type.is_view_query() {
                                 signal_queries.push(metadata);
                                 continue;
@@ -1299,7 +1334,9 @@ pub(crate) fn extract_content_queries_in<'a>(
                 }
 
                 // Check for decorator-based queries (@ContentChild, @ContentChildren)
-                if let Some(decorator) = find_decorator_by_name(&prop.decorators, "ContentChild") {
+                if let Some(decorator) =
+                    find_decorator_by_name(&prop.decorators, "ContentChild", consts)
+                {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         let config = parse_query_config(
                             allocator,
@@ -1322,7 +1359,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                         }
                     }
                 } else if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ContentChildren")
+                    find_decorator_by_name(&prop.decorators, "ContentChildren", consts)
                 {
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         let config = parse_query_config(
@@ -1351,7 +1388,8 @@ pub(crate) fn extract_content_queries_in<'a>(
                 if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
             {
                 // Check for decorator-based queries on setters/getters
-                if let Some(decorator) = find_decorator_by_name(&method.decorators, "ContentChild")
+                if let Some(decorator) =
+                    find_decorator_by_name(&method.decorators, "ContentChild", consts)
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
                         let config = parse_query_config(
@@ -1375,7 +1413,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                         }
                     }
                 } else if let Some(decorator) =
-                    find_decorator_by_name(&method.decorators, "ContentChildren")
+                    find_decorator_by_name(&method.decorators, "ContentChildren", consts)
                 {
                     if let Some(property_name) = get_property_key_name(&method.key) {
                         let config = parse_query_config(
@@ -1434,6 +1472,16 @@ pub fn extract_host_bindings<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
+    extract_host_bindings_in(allocator, class, None)
+}
+
+/// [`extract_host_bindings`] for a class in the file `consts` was collected
+/// from, which also recognises `@core.HostBinding()` (see [`is_core_namespace`]).
+pub(crate) fn extract_host_bindings_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut bindings = Vec::new_in(&allocator);
 
     for element in &class.body.body {
@@ -1450,7 +1498,7 @@ pub fn extract_host_bindings<'a>(
             _ => continue,
         };
 
-        let Some(decorator) = find_decorator_by_name(decorators, "HostBinding") else {
+        let Some(decorator) = find_decorator_by_name(decorators, "HostBinding", consts) else {
             continue;
         };
 
@@ -1506,6 +1554,16 @@ pub fn extract_host_listeners<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>, Vec<'a, Ident<'a>>)> {
+    extract_host_listeners_in(allocator, class, None)
+}
+
+/// [`extract_host_listeners`] for a class in the file `consts` was collected
+/// from, which also recognises `@core.HostListener()` (see [`is_core_namespace`]).
+pub(crate) fn extract_host_listeners_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    consts: Option<&super::StringConsts<'a>>,
+) -> Vec<'a, (Ident<'a>, Ident<'a>, Vec<'a, Ident<'a>>)> {
     let mut listeners = Vec::new_in(&allocator);
 
     for element in &class.body.body {
@@ -1520,7 +1578,7 @@ pub fn extract_host_listeners<'a>(
             _ => continue,
         };
 
-        let Some(decorator) = find_decorator_by_name(decorators, "HostListener") else {
+        let Some(decorator) = find_decorator_by_name(decorators, "HostListener", consts) else {
             continue;
         };
 
@@ -1709,11 +1767,9 @@ pub(crate) fn parse_decorator_queries<'a>(
                 .filter(|i| i.module == "@angular/core")
                 .and_then(|i| i.imported),
             Expression::StaticMemberExpression(m) => match &m.object {
-                Expression::Identifier(ns) => consts
-                    .scope()
-                    .import(ns.name.as_str())
-                    .filter(|i| i.module == "@angular/core" && i.imported.is_none())
-                    .map(|_| m.property.name.as_str()),
+                Expression::Identifier(ns) if is_core_namespace(Some(consts), &ns.name) => {
+                    Some(m.property.name.as_str())
+                }
                 _ => None,
             },
             _ => None,
@@ -1724,6 +1780,7 @@ pub(crate) fn parse_decorator_queries<'a>(
         };
         match decorator_query(
             allocator,
+            consts,
             &evaluator,
             type_name,
             new_expr,
@@ -1753,8 +1810,14 @@ pub(crate) fn parse_decorator_queries<'a>(
         .filter_map(|element| {
             let ClassElement::PropertyDefinition(prop) = element else { return None };
             let name = get_property_key_name(&prop.key)?;
-            try_parse_signal_query(allocator, prop.value.as_ref()?, name.clone(), source_text)
-                .map(|_| name)
+            try_parse_signal_query(
+                allocator,
+                prop.value.as_ref()?,
+                name.clone(),
+                source_text,
+                Some(consts),
+            )
+            .map(|_| name)
         })
         .collect();
     // ngtsc checks the content queries first, and reports the `new` expression.
@@ -1779,6 +1842,7 @@ pub(crate) fn parse_decorator_queries<'a>(
 /// the node ngtsc reports it on.
 fn decorator_query<'a>(
     allocator: &'a Allocator,
+    consts: &super::StringConsts<'a>,
     evaluator: &super::evaluator::Evaluator<'_, 'a>,
     name: &str,
     new_expr: &'a oxc_ast::ast::NewExpression<'a>,
@@ -1790,7 +1854,7 @@ fn decorator_query<'a>(
     let Some(first) = args.first().and_then(Argument::as_expression) else {
         return Err((format!("@{name} must have arguments"), new_expr.span));
     };
-    let node = try_unwrap_forward_ref(first).unwrap_or(first);
+    let node = try_unwrap_forward_ref(first, Some(consts)).unwrap_or(first);
     let at_node = |message: String| (message, node.span());
     let predicate = match evaluator.evaluate(node) {
         Value::Reference { .. } | Value::Dynamic | Value::Function(_) => {
@@ -1807,9 +1871,14 @@ fn decorator_query<'a>(
             let mut selectors = Vec::new_in(&allocator);
             for (i, item) in items.iter().enumerate() {
                 let Value::String(s) = item else {
-                    return Err(at_node(format!(
-                        "Failed to resolve @{name} predicate at position {i} to a string{}",
-                        item.wrong_type_suffix()
+                    return Err(at_node(super::decorator::value_error(
+                        &format!("@{name} predicate"),
+                        || {
+                            format!(
+                                "Failed to resolve @{name} predicate at position {i} to a string"
+                            )
+                        },
+                        item,
                     )));
                 };
                 selectors.push(Ident::from(allocator.alloc_str(s)));
@@ -1836,9 +1905,10 @@ fn decorator_query<'a>(
             let flag = |option: &str, span: Span| match evaluator.evaluate(value) {
                 Value::Bool(b) => Ok(b),
                 other => Err((
-                    format!(
-                        "@{name} options.{option} must be a boolean{}",
-                        other.wrong_type_suffix()
+                    super::decorator::value_error(
+                        &format!("@{name} options.{option}"),
+                        || format!("@{name} options.{option} must be a boolean"),
+                        &other,
                     ),
                     span,
                 )),

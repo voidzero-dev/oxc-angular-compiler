@@ -2536,30 +2536,6 @@ pub fn transform_angular_file(
         }
     }
 
-    // `@core.Input()` and the other member decorators through a namespace
-    // import of `@angular/core`, as written: `resolved_imports` may have
-    // pointed the import map's entry at another path.
-    let _core_namespaces = crate::directive::CoreNamespaces::enter(
-        parser_ret
-            .program
-            .body
-            .iter()
-            .filter_map(|stmt| match stmt {
-                Statement::ImportDeclaration(import) if import.source.value == "@angular/core" => {
-                    import.specifiers.as_ref()
-                }
-                _ => None,
-            })
-            .flatten()
-            .filter_map(|spec| match spec {
-                ImportDeclarationSpecifier::ImportNamespaceSpecifier(ns) => {
-                    Some(ns.local.name.to_string())
-                }
-                _ => None,
-            })
-            .collect(),
-    );
-
     // 2. Walk AST to find @Component decorated classes and extract metadata
     for stmt in &parser_ret.program.body {
         let (class, stmt_start) = match stmt {

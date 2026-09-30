@@ -113,8 +113,9 @@ pub use directive::{
     R3QueryMetadata, StringConsts, collect_string_consts, compile_directive,
     compile_directive_from_metadata, extract_class_queries, extract_content_queries,
     extract_directive_metadata, extract_host_bindings, extract_host_listeners,
-    extract_input_metadata, extract_output_metadata, extract_view_queries,
-    find_directive_decorator_span, generate_directive_definitions,
+    extract_input_metadata, extract_input_metadata_in, extract_output_metadata,
+    extract_output_metadata_in, extract_view_queries, find_directive_decorator_span,
+    generate_directive_definitions,
 };
 
 // Re-export injectable types

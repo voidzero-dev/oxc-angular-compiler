@@ -6957,6 +6957,152 @@
       "diagnosticSpans": [[123, 124]]
     },
     {
+      "name": "probe: queries-forwardRef-localObjectMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild, ContentChildren, forwardRef, viewChild} from '@angular/core';\nclass Foo {}\nconst util = {forwardRef};\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @ViewChild(util.forwardRef(() => Foo)) foo: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(util.forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-localObjectQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild, ContentChildren, forwardRef, viewChild} from '@angular/core';\nclass Foo {}\nconst util = {forwardRef};\n@Component({selector: 'c', template: '', queries: {foo: new ViewChild(util.forwardRef(() => Foo))}})\nexport class Cmp {\n  foo: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(util.forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-localObjectSignal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild, ContentChildren, forwardRef, viewChild} from '@angular/core';\nclass Foo {}\nconst util = {forwardRef};\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  foo = viewChild(util.forwardRef(() => Foo));\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.foo,util.forwardRef(()=>Foo),5);}if(rf&2){i0.ɵɵqueryAdvance();}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-coreNamespaceMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as core from '@angular/core';\nclass Foo {}\n@core.Component({selector: 'c', template: ''})\nexport class Cmp {\n  @core.ViewChild(core.forwardRef(() => Foo)) foo: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-coreNamespaceQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as core from '@angular/core';\nclass Foo {}\n@core.Component({selector: 'c', template: '', queries: {foo: new core.ViewChild(core.forwardRef(function () { return Foo; }))}})\nexport class Cmp {\n  foo: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-coreNamespaceSignal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as core from '@angular/core';\nclass Foo {}\n@core.Component({selector: 'c', template: ''})\nexport class Cmp {\n  foo = core.viewChild(core.forwardRef(() => Foo));\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.foo,Foo,5);}if(rf&2){i0.ɵɵqueryAdvance();}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-foreignNamespaceMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild} from '@angular/core';\nimport * as other from './other';\nclass Foo {}\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @ViewChild(other.forwardRef(() => Foo)) foo: any;\n  @ViewChild(other.forwardRef(function () { return Foo; })) bar: any;\n}\n",
+        "other.ts": "export function forwardRef(fn: () => any) { return fn(); }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(other.forwardRef(()=>Foo),5)(other.forwardRef(function(){returnFoo;}),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.bar=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-foreignNamespaceQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild} from '@angular/core';\nimport * as other from './other';\nclass Foo {}\n@Component({selector: 'c', template: '', queries: {foo: new ViewChild(other.forwardRef(() => Foo))}})\nexport class Cmp {\n  foo: any;\n}\n",
+        "other.ts": "export function forwardRef(fn: () => any) { return fn(); }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(other.forwardRef(()=>Foo),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-forwardRef-bareForwardRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, ViewChild, ContentChildren, forwardRef, viewChild} from '@angular/core';\nclass Foo {}\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @ViewChild(forwardRef(() => Foo)) foo: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(Foo,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.foo=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: transform-global-atob",
       "origin": "probe",
       "files": {

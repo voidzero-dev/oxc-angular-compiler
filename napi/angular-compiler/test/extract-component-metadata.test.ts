@@ -37,3 +37,36 @@ export class X {
     ])
   })
 })
+
+// ngtsc reads `@NS.Input()` and the other member decorators only when `NS` is a
+// namespace import of `@angular/core`.
+describe('extractComponentMetadataSync namespaced member decorators', () => {
+  const source = (module: string) => `
+import { Component } from '@angular/core';
+import * as NS from '${module}';
+
+@Component({ selector: 'app-x', template: '<div #ref></div>' })
+export class X {
+  @NS.Input() value!: string;
+  @NS.Output() changed: any;
+  @NS.ViewChild('ref') ref: any;
+  @NS.HostListener('click') onClick() {}
+}
+`
+
+  it('reads them through a namespace import of @angular/core', () => {
+    const [component] = extractComponentMetadataSync(source('@angular/core'), 'x.component.ts')
+    expect(component.inputs?.map((i) => i.classPropertyName)).toEqual(['value'])
+    expect(component.outputs?.map((o) => o.classPropertyName)).toEqual(['changed'])
+    expect(component.viewQueries?.map((q) => q.propertyName)).toEqual(['ref'])
+    expect(component.host?.listeners).toEqual([['(click)', 'onClick()']])
+  })
+
+  it('ignores them through any other namespace', () => {
+    const [component] = extractComponentMetadataSync(source('foreign-decorators'), 'x.component.ts')
+    expect(component.inputs ?? []).toEqual([])
+    expect(component.outputs ?? []).toEqual([])
+    expect(component.viewQueries ?? []).toEqual([])
+    expect(component.host?.listeners ?? []).toEqual([])
+  })
+})

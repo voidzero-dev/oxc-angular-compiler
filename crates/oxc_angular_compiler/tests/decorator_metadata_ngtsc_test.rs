@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 611, "fixtures compared");
+    assert_eq!(compared, 620, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -926,7 +926,14 @@ export class Cmp {
     let foreign = "import {Component} from '@angular/core';
 import * as NS from 'foreign-decorators';
 @Component({selector: 'c', template: '<div #ref></div>'})";
-    for (header, compiled) in [(core, true), (foreign, false)] {
+    let core_directive = "import * as NS from '@angular/core';
+@NS.Directive({selector: '[d]'})";
+    let foreign_directive = "import {Directive} from '@angular/core';
+import * as NS from 'foreign-decorators';
+@Directive({selector: '[d]'})";
+    for (header, compiled) in
+        [(core, true), (foreign, false), (core_directive, true), (foreign_directive, false)]
+    {
         let code = transform(&format!("{header}{members}")).code;
         for part in ["viewQuery", "ɵɵclassProp(\"a\"", "ɵɵlistener(\"click\""] {
             assert_eq!(code.contains(part), compiled, "{part} in\n{code}");
@@ -960,4 +967,104 @@ export class Cmp {
     let code = strip(&result.code);
     assert!(code.contains(r#"inputs:{x:"x"}"#), "{}", result.code);
     assert!(code.contains(r#"outputs:{y:"y"}"#), "{}", result.code);
+}
+
+/// The same through the extraction API (what the NAPI
+/// `extractComponentMetadataSync` reports): given the file, `@NS.Input()` and
+/// friends count only for a namespace import of `@angular/core`; without it,
+/// none do.
+#[test]
+fn namespaced_member_decorators_through_the_extraction_api() {
+    use oxc_angular_compiler::{
+        collect_string_consts, extract_class_queries, extract_input_metadata,
+        extract_input_metadata_in, extract_output_metadata_in,
+    };
+    use oxc_ast::ast::{Declaration, Statement};
+    let members = "
+export class Cmp {
+  @NS.Input() value!: string;
+  @NS.Output() changed: any;
+  @NS.ViewChild('ref') ref: any;
+}
+";
+    for (module, extracted) in [("@angular/core", 1), ("foreign-decorators", 0)] {
+        let source = format!("import * as NS from '{module}';\n{members}");
+        let allocator = Allocator::default();
+        let program = oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts())
+            .parse()
+            .program;
+        let program = allocator.alloc(program);
+        let class = program
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .unwrap();
+        let consts = collect_string_consts(&allocator, program);
+        let inputs = extract_input_metadata_in(&allocator, class, Some(&source), Some(&consts));
+        let outputs = extract_output_metadata_in(&allocator, class, Some(&consts));
+        let (view, _) = extract_class_queries(&allocator, class, Some(&source), &consts);
+        assert_eq!((inputs.len(), outputs.len(), view.len()), (extracted, extracted, extracted));
+        // Without the file's imports no namespace is known to be Angular's.
+        assert!(extract_input_metadata(&allocator, class, Some(&source)).is_empty());
+    }
+}
+
+/// `queries:` values imported from another file: ngtsc 22.1.7 reads the file
+/// and compiles all of these (`probe: queries-imported*`, with
+/// `export const FLAG = true; export const SELS = ['a', 'b']; export const SEL
+/// = 'b';` in `./flags`). oxc can't, and says so rather than reporting
+/// ngtsc's wrong-type error for a value it hasn't read.
+#[test]
+fn imported_query_values_are_reported_as_unreadable() {
+    let cases = [
+        (
+            "new ContentChildren('el', {descendants: FLAG})",
+            "@ContentChildren options.descendants",
+            "FLAG",
+            "FLAG",
+        ),
+        ("new ViewChild('el', {static: FLAG})", "@ViewChild options.static", "FLAG", "'el'"),
+        (
+            "new ContentChildren('el', {emitDistinctChangesOnly: FLAG})",
+            "@ContentChildren options.emitDistinctChangesOnly",
+            "FLAG",
+            "FLAG",
+        ),
+        (
+            "new ContentChildren('el', {descendants: flags.FLAG})",
+            "@ContentChildren options.descendants",
+            "FLAG",
+            "flags.FLAG",
+        ),
+        ("new ViewChild([...SELS])", "@ViewChild predicate", "SELS", "[...SELS]"),
+        ("new ViewChild(['a', SEL])", "@ViewChild predicate", "SEL", "['a', SEL]"),
+        ("new ViewChild(['a', flags.SEL])", "@ViewChild predicate", "SEL", "['a', flags.SEL]"),
+    ];
+    for (query, subject, name, span) in cases {
+        let source = format!(
+            "import {{Component, ViewChild, ContentChildren}} from '@angular/core';
+import {{FLAG, SELS, SEL}} from './flags';
+import * as flags from './flags';
+@Component({{selector: 'c', template: '', queries: {{el: {query}}}}})
+export class Cmp {{
+  el: any;
+}}
+"
+        );
+        let message = format!(
+            "{subject} depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(message, span.to_string())],
+            "{query}"
+        );
+    }
 }

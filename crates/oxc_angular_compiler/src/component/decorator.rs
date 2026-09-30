@@ -18,8 +18,8 @@ use super::metadata::{
 };
 use super::transform::ImportMap;
 use crate::directive::{
-    StringConsts, extract_host_bindings, extract_host_listeners, extract_input_metadata,
-    extract_output_metadata, merge_by_class_property, parse_decorator_io,
+    StringConsts, extract_host_bindings_in, extract_host_listeners_in, extract_input_metadata_in,
+    extract_output_metadata_in, merge_by_class_property, parse_decorator_io,
     resolve_member_transforms,
 };
 use crate::output::oxc_converter::convert_oxc_expression;
@@ -214,8 +214,8 @@ pub fn extract_component_metadata<'a>(
 
     // Extract host bindings and listeners from @HostBinding/@HostListener decorators on class members
     // These are merged with any host metadata from the @Component({ host: {} }) property
-    let host_bindings = extract_host_bindings(allocator, class);
-    let host_listeners = extract_host_listeners(allocator, class);
+    let host_bindings = extract_host_bindings_in(allocator, class, Some(consts));
+    let host_listeners = extract_host_listeners_in(allocator, class, Some(consts));
 
     if !host_bindings.is_empty() || !host_listeners.is_empty() {
         let host = metadata.host.get_or_insert_with(|| HostMetadata::new(allocator));
@@ -267,14 +267,15 @@ pub fn extract_component_metadata<'a>(
     let io = parse_decorator_io(allocator, config_obj, class, source_text, consts);
     metadata.inputs = merge_by_class_property(
         io.inputs,
-        extract_input_metadata(allocator, class, source_text),
+        extract_input_metadata_in(allocator, class, source_text, Some(consts)),
         |i| i.class_property_name.as_str(),
     );
     resolve_member_transforms(allocator, class, source_text, consts, &mut metadata.inputs);
-    metadata.outputs =
-        merge_by_class_property(io.outputs, extract_output_metadata(allocator, class), |o| {
-            o.0.as_str()
-        });
+    metadata.outputs = merge_by_class_property(
+        io.outputs,
+        extract_output_metadata_in(allocator, class, Some(consts)),
+        |o| o.0.as_str(),
+    );
 
     // Detect if ngOnChanges lifecycle hook is implemented
     // Similar to Angular's: const usesOnChanges = members.some(member => ...)
