@@ -3365,6 +3365,389 @@
       "diagnosticSpans": [[107, 114]],
       "classes": {},
       "dtsImports": []
+    },
+    {
+      "name": "probe: scope-paramImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nfunction make(name: string, transform: any) { return [{ name, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x', booleanAttribute) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-paramLocal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nexport function toBool(v: unknown): boolean { return !!v; }\nfunction make(name: string, transform: any) { return [{ name, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x', toBool) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-paramArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make(name: string, transform: any) { return [{ name, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x', (v: string) => v.length) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-bodyRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nexport function toBool(v: unknown): boolean { return !!v; }\nfunction make(name: string) { return [{ name, transform: toBool }]; }\n@Directive({ selector: '[d]', inputs: make('x') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-constObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nconst X = { name: 'x', transform: booleanAttribute };\n@Directive({ selector: '[d]', inputs: [X] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-staticMethod",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nclass H { static make(t: any) { return [{ name: 'x', transform: t }]; } }\n@Directive({ selector: '[d]', inputs: H.make(booleanAttribute) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-nestedHelper",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nfunction inner(n: string, t: any) { return [{ name: n, transform: t }]; }\nfunction outer(t: any) { return inner('x', t); }\n@Directive({ selector: '[d]', inputs: outer(booleanAttribute) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-defaultParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute } from '@angular/core';\nfunction make(n: string, t: any = booleanAttribute) { return [{ name: n, transform: t }]; }\n@Directive({ selector: '[d]', inputs: make('x') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-aliasParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make(n: string, a: string) { return [{ name: n, alias: a }]; }\n@Directive({ selector: '[d]', inputs: make('x', 'why') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[0,\"why\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"why\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-aliasImportParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, booleanAttribute as ba } from '@angular/core';\nfunction make(name: string, transform: any) { return [{ name, transform }]; }\n@Directive({ selector: '[d]', inputs: make('x', ba) })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-bodyArrowSafe",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nfunction make(name: string) { return [{ name, transform: (v: string) => v.length }]; }\n@Directive({ selector: '[d]', inputs: make('x') })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-inputCoreAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, input as inp } from '@angular/core';\n@Directive({ selector: '[d]', inputs: ['value'] })\nexport class D { value = inp(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[125, 139]]
+    },
+    {
+      "name": "probe: initializerApi-inputRequiredCoreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({ selector: '[d]', inputs: ['value'] })\nexport class D { value = core.input.required(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[150, 180]]
+    },
+    {
+      "name": "probe: initializerApi-modelCoreOutputsMeta",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, model } from '@angular/core';\n@Directive({ selector: '[d]', outputs: ['valueChange'] })\nexport class D { value = model(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{value:[1,\"value\"]}",
+          "outputs": "{valueChange:\"valueChange\",value:\"valueChange\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};},{\"valueChange\":\"valueChange\";\"value\":\"valueChange\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-modelCoreAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, model as m } from '@angular/core';\n@Directive({ selector: '[d]', inputs: ['value'] })\nexport class D { value = m(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[123, 135]]
+    },
+    {
+      "name": "probe: initializerApi-inputAsCast",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, input } from '@angular/core';\n@Directive({ selector: '[d]', inputs: ['value'] })\nexport class D { value = (input() as any); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Input \"value\" is also declared as non-signal in @Directive."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[118, 143]]
+    },
+    {
+      "name": "probe: initializerApi-inputTypeOnlyImportCast",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport type { input } from '@angular/core';\n@Directive({ selector: '[d]', inputs: ['value'] })\nexport class D { value = (input as any)(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-outputOtherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport { output } from './other';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = output(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-outputFromObservable",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport { outputFromObservable } from '@angular/core/rxjs-interop';\nimport { Subject } from 'rxjs';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = outputFromObservable(new Subject<void>()); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Output \"changed\" is unexpectedly declared in @Directive as well."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[213, 265]]
+    },
+    {
+      "name": "probe: initializerApi-outputFromObservableOtherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport { outputFromObservable } from './other';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = outputFromObservable(null); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-outputFromObservableNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport * as rx from '@angular/core/rxjs-interop';\nimport { Subject } from 'rxjs';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = rx.outputFromObservable(new Subject<void>()); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Output \"changed\" is unexpectedly declared in @Directive as well."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[196, 251]]
+    },
+    {
+      "name": "probe: initializerApi-outputFromObservableOnCoreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = (core as any).outputFromObservable(null); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: initializerApi-outputCoreAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, output as out } from '@angular/core';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = out(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Output \"changed\" is unexpectedly declared in @Directive as well."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[129, 145]]
+    },
+    {
+      "name": "probe: initializerApi-outputCoreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = core.output(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": ["Output \"changed\" is unexpectedly declared in @Directive as well."],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[153, 177]]
+    },
+    {
+      "name": "probe: initializerApi-outputLocalFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive } from '@angular/core';\nconst output = (): any => null;\n@Directive({ selector: '[d]', outputs: ['changed'] })\nexport class D { changed = output(); }\n",
+        "other.ts": "export function input(...a: any[]): any { return null; }\nexport namespace input { export function required(...a: any[]): any { return null; } }\nexport function model(...a: any[]): any { return null; }\nexport function output(...a: any[]): any { return null; }\nexport function outputFromObservable(...a: any[]): any { return null; }\nexport function viewChild(...a: any[]): any { return null; }\nexport function viewChildren(...a: any[]): any { return null; }\nexport function contentChild(...a: any[]): any { return null; }\nexport function contentChildren(...a: any[]): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
     }
   ]
 }

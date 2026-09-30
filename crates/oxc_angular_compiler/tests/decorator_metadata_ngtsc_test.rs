@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 229, "fixtures compared");
+    assert_eq!(compared, 254, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -368,6 +368,80 @@ export class Dir {}
     let result = transform(source);
     assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
     assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",fn]}"#), "{}", result.code);
+}
+
+/// A transform returned by a function the metadata calls is emitted where the
+/// directive is compiled, outside that function. A parameter becomes the
+/// argument it was passed (the snapshot's `scope-*` probes); anything else that
+/// uses the function's parameters, `this` or `arguments` would mean something
+/// else there, or nothing. ngtsc 22.1.7 emits `(v) => v + name` as written
+/// (`name` is then `window.name`) and `booleanAttribute` for `o.t` (the name
+/// the argument was first given); oxc reports these instead.
+#[test]
+fn transforms_using_the_parameters_of_a_called_function_are_reported() {
+    let cases = [
+        (
+            "function make(name: string) { return [{ name, transform: (v: string) => v + name }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(o: any) { return [{ name: 'x', transform: o.t }]; }",
+            "make({ t: booleanAttribute })",
+        ),
+        ("class H { static make() { return [{ name: 'x', transform: this.t }]; } }", "H.make()"),
+        (
+            "function make() { return [{ name: 'x', transform: arguments[0] }]; }",
+            "make(booleanAttribute)",
+        ),
+    ];
+    for (helper, inputs) in cases {
+        let source = format!(
+            "import {{Directive, booleanAttribute}} from '@angular/core';
+{helper}
+@Directive({{selector: '[d]', inputs: {inputs}}})
+export class Dir {{ x: any; }}
+"
+        );
+        let result = transform(&source);
+        let message = "@Directive.inputs: the transform of \"x\" uses a parameter of the \
+                       function it's written in. OXC can't emit it outside that function.";
+        assert_eq!(
+            errors(&result, &source),
+            vec![(message.to_string(), inputs.to_string())],
+            "{helper}"
+        );
+    }
+}
+
+/// ngtsc reports a signal input or output also listed in `inputs:` /
+/// `outputs:` only for Angular's own `input()`, `model()`, `output()` and
+/// `outputFromObservable()`: imported from their module by name (under any
+/// alias) or through a namespace import. ngtsc 22.1.7 compiles these without
+/// an error, since `input` here isn't Angular's. The snapshot's
+/// `initializerApi-*` probes cover the ones ngtsc rejects, and the outputs.
+///
+/// oxc still compiles such a member as a signal input (it recognises signal
+/// members by name), where ngtsc makes it a plain one: that's why these compare
+/// only the diagnostics.
+#[test]
+fn only_angular_initializer_apis_collide_with_metadata() {
+    let cases = [
+        ("import * as local from './other';", "local.input()"),
+        ("import {input} from './other';", "input()"),
+        ("import {input} from './other';", "input.required()"),
+        ("import {model} from './other';", "model()"),
+    ];
+    for (import, initializer) in cases {
+        let source = format!(
+            "import {{Directive}} from '@angular/core';
+{import}
+@Directive({{selector: '[d]', inputs: ['value']}})
+export class Dir {{ value = {initializer}; }}
+"
+        );
+        let result = transform(&source);
+        assert_eq!(errors(&result, &source), vec![], "{import} {initializer}");
+    }
 }
 
 /// Inputs ngtsc can't compile either (it overflows its stack on the recursive

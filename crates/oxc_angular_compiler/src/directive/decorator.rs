@@ -686,6 +686,17 @@ fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) ->
     }
 }
 
+/// oxc's error for a transform written inside a function that the metadata
+/// calls, using that function's parameters (`transform: (v) => v + name`), so
+/// it would mean something else, or nothing, where the metadata is compiled.
+/// ngtsc copies it there anyway.
+fn scoped_transform_error(input: &str) -> String {
+    format!(
+        "@Directive.inputs: the transform of \"{input}\" uses a parameter of the function \
+         it's written in. OXC can't emit it outside that function."
+    )
+}
+
 /// Parse `inputs:` / `outputs:` from a decorator metadata object.
 ///
 /// Reference: `parseInputsArray` / `parseOutputsArray` in
@@ -823,9 +834,15 @@ fn parse_input_object<'a>(
     }
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
-    let transform_function = item
-        .prop("transform")
-        .and_then(|t| convert_oxc_expression(allocator, t.expr?, source_text));
+    let transform_function = match item.prop("transform") {
+        Some(transform) if transform.expr.is_some() && transform.origin.is_none() => {
+            return Some(scoped_transform_error(name));
+        }
+        Some(transform) => {
+            transform.origin.and_then(|e| convert_oxc_expression(allocator, e, source_text))
+        }
+        None => None,
+    };
     upsert_input(
         &mut io.inputs,
         R3InputMetadata {
@@ -931,10 +948,7 @@ pub fn decorator_io_errors<'a>(
             let name = prop.key.static_name()?;
             // A signal input only collides with a metadata entry of the same name.
             let value = prop.value.as_ref().filter(|_| meta_inputs.contains(&name.as_ref()))?;
-            let signal = Ident::from(allocator.alloc_str(&name));
-            let is_input = super::try_parse_signal_model(allocator, value, signal.clone())
-                .is_some()
-                || super::try_parse_signal_input(allocator, value, signal).is_some();
+            let is_input = is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API]);
             is_input.then(|| {
                 let message = format!(
                     "Input \"{name}\" is also declared as non-signal in @{decorator_name}."
@@ -950,10 +964,11 @@ pub fn decorator_io_errors<'a>(
             if !meta_outputs.contains(&name.as_ref()) {
                 return None;
             }
-            let signal = Ident::from(allocator.alloc_str(&name));
-            let is_output = super::try_parse_signal_model(allocator, value, signal.clone())
-                .is_some()
-                || super::try_parse_signal_output(value, signal).is_some();
+            let is_output = is_initializer_api_call(
+                value,
+                consts,
+                &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, MODEL_API],
+            );
             is_output.then(|| {
                 let message = format!(
                     "Output \"{name}\" is unexpectedly declared in @{decorator_name} as well."
@@ -971,6 +986,55 @@ pub fn decorator_io_errors<'a>(
         .map(|(message, span)| OxcDiagnostic::error(message).with_label(span))
         .into_iter()
         .collect()
+}
+
+/// An initializer API: its function name and the module exporting it.
+pub(crate) type InitializerApi = (&'static str, &'static str);
+pub(crate) const INPUT_API: InitializerApi = ("input", "@angular/core");
+pub(crate) const MODEL_API: InitializerApi = ("model", "@angular/core");
+pub(crate) const OUTPUT_API: InitializerApi = ("output", "@angular/core");
+pub(crate) const OUTPUT_FROM_OBSERVABLE_API: InitializerApi =
+    ("outputFromObservable", "@angular/core/rxjs-interop");
+
+/// Whether `value` calls one of `apis`, as ngtsc's `tryParseInitializerApi`
+/// recognises them: `f()` or `f.required()` with `f` imported by name from the
+/// API's module (under any alias), or `ns.f()` or `ns.f.required()` with `ns`
+/// a namespace import of it, looking through `as` and parentheses. A function
+/// only named like an API (a local one, or one from another module) isn't one.
+pub(crate) fn is_initializer_api_call(
+    value: &Expression<'_>,
+    consts: &StringConsts<'_>,
+    apis: &[InitializerApi],
+) -> bool {
+    let Expression::CallExpression(call) = super::unwrap_initializer_api_expr(value) else {
+        return false;
+    };
+    let scope = consts.scope();
+    // `f`, imported by name.
+    let named = |f: &Expression<'_>| {
+        let Expression::Identifier(id) = f else { return false };
+        scope.import(&id.name).is_some_and(|import| {
+            apis.iter()
+                .any(|&(name, module)| import.imported == Some(name) && import.module == module)
+        })
+    };
+    // `ns.f`, through a namespace import.
+    let namespaced = |f: &Expression<'_>| {
+        let Expression::StaticMemberExpression(member) = f else { return false };
+        let Expression::Identifier(ns) = &member.object else { return false };
+        scope.import(&ns.name).is_some_and(|import| {
+            import.imported.is_none()
+                && apis
+                    .iter()
+                    .any(|&(name, module)| member.property.name == name && import.module == module)
+        })
+    };
+    let callee = &call.callee;
+    named(callee)
+        || namespaced(callee)
+        || matches!(callee, Expression::StaticMemberExpression(required)
+            if required.property.name == "required"
+                && (named(&required.object) || namespaced(&required.object)))
 }
 
 /// Extract host metadata from a host object expression.

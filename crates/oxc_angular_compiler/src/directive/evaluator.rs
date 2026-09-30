@@ -18,9 +18,9 @@ use oxc_ast::ast::{
     ConditionalExpression, Declaration, ExportDefaultDeclarationKind, Expression, Function,
     IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
     ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
-    Statement, StaticMemberExpression, TSEnumDeclaration, TSEnumMemberName, TSLiteral,
+    Statement, StaticMemberExpression, Super, TSEnumDeclaration, TSEnumMemberName, TSLiteral,
     TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator, TSTypeQueryExprName,
-    TemplateLiteral, UnaryExpression,
+    TemplateLiteral, ThisExpression, UnaryExpression,
 };
 use oxc_ast_visit::Visit;
 use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
@@ -66,9 +66,11 @@ enum PathKey<'a> {
     Unknown,
 }
 
-/// An import binding: unless it's a namespace import, the name it's exported under.
+/// An import binding: the module it's imported from and, unless it's a
+/// namespace import, the name it's exported under.
 #[derive(Clone, Copy)]
 pub(crate) struct Import<'a> {
+    pub module: &'a str,
     pub imported: Option<&'a str>,
 }
 
@@ -78,6 +80,7 @@ impl<'a> FileScope<'a> {
         for stmt in &program.body {
             match stmt {
                 Statement::ImportDeclaration(import) => {
+                    let module = import.source.value.as_str();
                     for spec in import.specifiers.iter().flatten() {
                         let (local, imported) = match spec {
                             ImportDeclarationSpecifier::ImportSpecifier(s) => {
@@ -95,7 +98,7 @@ impl<'a> FileScope<'a> {
                                 (s.local.name.as_str(), None)
                             }
                         };
-                        scope.imports.insert(local, Import { imported });
+                        scope.imports.insert(local, Import { module, imported });
                     }
                 }
                 Statement::ExportDeclaration(export) => {
@@ -195,6 +198,10 @@ impl<'a> FileScope<'a> {
         if exported {
             self.exported.insert(id);
         }
+    }
+
+    pub(crate) fn import(&self, name: &str) -> Option<Import<'a>> {
+        self.imports.get(name).copied()
     }
 }
 
@@ -305,6 +312,11 @@ pub(crate) struct Prop<'a> {
     pub key: String,
     pub value: Value<'a>,
     pub expr: Option<&'a Expression<'a>>,
+    /// `expr` as it can be written where the metadata is compiled, if it can
+    /// (see [`Evaluator::origin`]): the same expression outside a function,
+    /// the argument a parameter was passed, or `None` for an expression that
+    /// uses the parameters of the function it's written in.
+    pub origin: Option<&'a Expression<'a>>,
 }
 
 impl<'a> Value<'a> {
@@ -491,7 +503,22 @@ const FUEL: u32 = 1 << 22;
 
 /// Parameter bindings of the function being evaluated, or the members of the
 /// enum whose initializers are being evaluated.
-type Frame<'a> = HashMap<&'a str, Value<'a>>;
+#[derive(Default)]
+struct Frame<'a> {
+    bindings: HashMap<&'a str, Binding<'a>>,
+    /// Evaluating the body of a called function, whose parameters, `this` and
+    /// `arguments` don't exist where the metadata is compiled.
+    in_call: bool,
+}
+
+/// A name bound in a [`Frame`].
+#[derive(Clone)]
+struct Binding<'a> {
+    value: Value<'a>,
+    /// For a parameter, the argument it was passed, when that can be written
+    /// where the metadata is compiled (see [`Evaluator::origin`]).
+    origin: Option<&'a Expression<'a>>,
+}
 
 /// A property key or index, as ngtsc's `accessHelper` receives it.
 #[derive(Clone, Copy)]
@@ -518,6 +545,26 @@ impl<'s, 'a> Evaluator<'s, 'a> {
 
     pub(crate) fn evaluate(&self, expr: &'a Expression<'a>) -> Value<'a> {
         self.eval(expr, 0, &Frame::default())
+    }
+
+    /// `expr` (evaluated in `frame`) as it can be written where the metadata is
+    /// compiled. Outside a called function that's `expr` itself. In one, a
+    /// parameter stands for the argument it was passed (ngtsc emits the
+    /// identifier the argument's reference was first named by, or the argument
+    /// itself); any other expression is kept only if it doesn't use the
+    /// function's parameters, `this` or `arguments`, which don't exist there.
+    fn origin(&self, expr: &'a Expression<'a>, frame: &Frame<'a>) -> Option<&'a Expression<'a>> {
+        if !frame.in_call {
+            return Some(expr);
+        }
+        if let Expression::Identifier(id) = expr
+            && let Some(binding) = frame.bindings.get(id.name.as_str())
+        {
+            return binding.origin;
+        }
+        let mut uses = UsesFrame { frame, found: false };
+        uses.visit_expression(expr);
+        (!uses.found).then_some(expr)
     }
 
     /// Use up `amount` of the fuel; `false` once it has run out.
@@ -614,7 +661,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         return Value::Dynamic;
                     };
                     let value = self.eval(&p.value, depth, frame);
-                    props.push(Prop { key, value, expr: Some(&p.value) });
+                    let origin = self.origin(&p.value, frame);
+                    props.push(Prop { key, value, expr: Some(&p.value), origin });
                 }
                 ObjectPropertyKind::SpreadProperty(spread) => {
                     match self.eval(&spread.argument, depth, frame) {
@@ -769,8 +817,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     }
 
     fn identifier(&self, name: &'a str, depth: u16, frame: &Frame<'a>) -> Value<'a> {
-        if let Some(value) = frame.get(name) {
-            return value.clone();
+        if let Some(binding) = frame.bindings.get(name) {
+            return binding.value.clone();
         }
         let scope = self.consts.scope();
         if scope.variables.contains_key(name) || scope.enums.contains_key(name) {
@@ -902,13 +950,17 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             }
         };
         // Inside the initializers, a member's name refers to the member.
-        let frame: Frame<'a> = e
+        let bindings = e
             .body
             .members
             .iter()
             .filter_map(|m| name_of(&m.id))
-            .map(|n| (n, Value::Reference { name: n.into(), kind: RefKind::Other }))
+            .map(|n| {
+                let value = Value::Reference { name: n.into(), kind: RefKind::Other };
+                (n, Binding { value, origin: None })
+            })
             .collect();
+        let frame = Frame { bindings, in_call: false };
         let props = e
             .body
             .members
@@ -921,7 +973,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     None => Value::Number(index as f64),
                 };
                 let value = Value::Enum { name: e.id.name.to_string(), value: Box::new(value) };
-                Some(Prop { key: key.to_string(), value, expr: None })
+                Some(Prop { key: key.to_string(), value, expr: None, origin: None })
             })
             .collect();
         Value::Object(props)
@@ -1026,22 +1078,38 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             return Value::Dynamic;
         }
         let args = self.arguments(call, depth, frame);
+        // Where each argument was written, while they line up with the values
+        // (up to the first spread).
+        let origins: std::vec::Vec<_> = call
+            .arguments
+            .iter()
+            .map_while(Argument::as_expression)
+            .map(|arg| self.origin(arg, frame))
+            .collect();
         // ngtsc counts a `this` parameter as the first one.
         let offset = usize::from(function.this_param.is_some());
-        let mut scope = Frame::default();
+        let mut scope = Frame { bindings: HashMap::new(), in_call: true };
         for (i, param) in function.params.items.iter().enumerate() {
-            let arg = match args.get(i + offset) {
+            let binding = match args.get(i + offset) {
                 None | Some(Value::Undefined) if param.initializer.is_some() => {
-                    param.initializer.as_ref().map(|init| self.eval(init, depth, &scope))
+                    param.initializer.as_ref().map(|init| Binding {
+                        value: self.eval(init, depth, &scope),
+                        origin: self.origin(init, &scope),
+                    })
                 }
-                arg => arg.cloned(),
+                arg => arg.map(|value| Binding {
+                    value: value.clone(),
+                    origin: origins.get(i + offset).copied().flatten(),
+                }),
             };
-            bind(&mut scope, &param.pattern, arg.unwrap_or(Value::Undefined));
+            let binding = binding.unwrap_or(Binding { value: Value::Undefined, origin: None });
+            bind(&mut scope, &param.pattern, binding);
         }
         if let Some(rest) = &function.params.rest {
             let start = function.params.items.len() + offset;
             let rest_args = args.get(start..).map_or_else(std::vec::Vec::new, <[_]>::to_vec);
-            bind(&mut scope, &rest.rest.argument, Value::Array(rest_args));
+            let binding = Binding { value: Value::Array(rest_args), origin: None };
+            bind(&mut scope, &rest.rest.argument, binding);
         }
         ret.argument.as_ref().map_or(Value::Undefined, |e| self.eval(e, depth, &scope))
     }
@@ -1192,15 +1260,38 @@ impl<'a> Visit<'a> for Mentions<'a> {
 }
 
 /// Bind a parameter: a destructured parameter's names aren't evaluated.
-fn bind<'a>(frame: &mut Frame<'a>, pattern: &'a BindingPattern<'a>, value: Value<'a>) {
+fn bind<'a>(frame: &mut Frame<'a>, pattern: &'a BindingPattern<'a>, binding: Binding<'a>) {
     if let BindingPattern::BindingIdentifier(id) = pattern {
-        frame.insert(id.name.as_str(), value);
+        frame.bindings.insert(id.name.as_str(), binding);
         return;
     }
     let mut names = std::vec::Vec::new();
     collect_bindings(pattern, &mut std::vec::Vec::new(), &mut names);
     for (name, _) in names {
-        frame.insert(name, Value::Dynamic);
+        frame.bindings.insert(name, Binding { value: Value::Dynamic, origin: None });
+    }
+}
+
+/// Whether an expression uses a name bound in a called function's frame, or
+/// that function's `this` or `arguments`. Nested functions aren't told apart,
+/// so a parameter of their own with the same name counts too.
+struct UsesFrame<'f, 'a> {
+    frame: &'f Frame<'a>,
+    found: bool,
+}
+
+impl<'a> Visit<'a> for UsesFrame<'_, 'a> {
+    fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
+        let name = id.name.as_str();
+        self.found |= name == "arguments" || self.frame.bindings.contains_key(name);
+    }
+
+    fn visit_this_expression(&mut self, _: &ThisExpression) {
+        self.found = true;
+    }
+
+    fn visit_super(&mut self, _: &Super) {
+        self.found = true;
     }
 }
 
