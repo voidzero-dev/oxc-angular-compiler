@@ -9446,6 +9446,176 @@
       "dtsImports": []
     },
     {
+      "name": "probe: shortCircuit-qMetaOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild('x' || NAME)}})\nexport class Cmp {\n  item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMetaCond",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(true ? 'x' : NAME)}})\nexport class Cmp {\n  item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMetaStaticOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild('x', {static: true || FLAG})}})\nexport class Cmp {\n  item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMetaReadOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild('x', {read: 0 || Token})}})\nexport class Cmp {\n  item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5,0||Token);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMetaPredOrToken",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(0 || Token)}})\nexport class Cmp {\n  item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(0||Token,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMemberOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x' || NAME) item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMemberCond",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(false ? NAME : 'x') item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMemberStaticOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: true || FLAG}) item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMemberStaticCond",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 1 ? true : FLAG}) item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-qMemberDescOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: false && FLAG}) item: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"item\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: scope-typeOnly-returnType",
       "origin": "probe",
       "files": {
