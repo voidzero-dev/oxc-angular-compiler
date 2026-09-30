@@ -252,12 +252,14 @@ export class Dir {{
 /// An alias of another module (`import R = require('./other')`, or of an
 /// import) follows the rule for other modules: `unknown`. ngtsc 22.1.7 writes
 /// the bare name there (`Other`, `T`), which doesn't resolve in its `.d.ts`.
-/// An alias of `@angular/core` becomes `i0.X` (ngtsc: the bare `Signal<number>`,
-/// equally unresolved), and one of a global is written as its target
-/// (`Intl.NumberFormat`, where ngtsc writes `NumberFormat`).
+/// An alias of `@angular/core`, through a namespace import or
+/// `import Core = require('@angular/core')`, becomes `i0.X` (ngtsc: the bare
+/// `Signal<number>`, equally unresolved; it throws on a `require` declared in
+/// a namespace, which TypeScript also rejects), and one of a global is written
+/// as its target (`Intl.NumberFormat`, where ngtsc writes `NumberFormat`).
 #[test]
 fn import_equals_aliases_of_other_modules_and_globals() {
-    let cases: [(&str, &[&str], &[&str]); 4] = [
+    let cases: [(&str, &[&str], &[&str]); 5] = [
         (
             "import R = require('./other');\n",
             &["R.Other", "R.Inner.T", "typeof R.FLAG", "R.Other | string"],
@@ -272,6 +274,31 @@ fn import_equals_aliases_of_other_modules_and_globals() {
             "import * as ng from '@angular/core';\nimport S = ng.Signal;\nimport Core = ng;\n",
             &["S<number>", "Core.Signal<string>", "Core.ElementRef"],
             &["i0.Signal<number>", "i0.Signal<string>", "i0.ElementRef"],
+        ),
+        (
+            "import Core = require('@angular/core');\nimport S = Core.Signal;\nimport C2 = Core;\nexport import Ex = require('@angular/core');\nnamespace NS { export import S2 = Core.Signal; export import C3 = Core; }\nnamespace NR { export import Core2 = require('@angular/core'); }\n",
+            &[
+                "Core.Signal<string>",
+                "Core.ElementRef | null",
+                "S<number>",
+                "C2.Signal<string>",
+                "Ex.ElementRef",
+                "NS.S2<string>",
+                "NS.C3.ElementRef",
+                "NR.Core2.Signal<string>",
+                "typeof Core.booleanAttribute",
+            ],
+            &[
+                "i0.Signal<string>",
+                "i0.ElementRef | null",
+                "i0.Signal<number>",
+                "i0.Signal<string>",
+                "i0.ElementRef",
+                "i0.Signal<string>",
+                "i0.ElementRef",
+                "i0.Signal<string>",
+                "typeof Core.booleanAttribute",
+            ],
         ),
         (
             "import NF = Intl.NumberFormat;\nimport I = Intl;\n",

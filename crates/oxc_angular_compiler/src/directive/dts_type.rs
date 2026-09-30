@@ -205,8 +205,9 @@ impl TypePrinter<'_, '_> {
     /// declared in a namespace, `NS.A`) stands for its target, as ngtsc
     /// resolves it: `A.T`, `C` and `NS.A` are written as the name of the
     /// declaration they resolve to. An alias of another module
-    /// (`import R = require('m')`, or of an import) is that module's; ngtsc
-    /// writes the bare name there, which doesn't resolve.
+    /// (`import R = require('m')`, or of an import) is that module's, and one
+    /// of `@angular/core` gives `i0.X`; ngtsc writes the bare name there,
+    /// which doesn't resolve.
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
         let mut parts = std::vec::Vec::new();
         entity_parts(name, &mut parts)?;
@@ -220,6 +221,12 @@ impl TypePrinter<'_, '_> {
                 },
             };
             match target {
+                // `import Core = require('@angular/core')`: `Core.X` is
+                // `i0.X`, like a namespace import's member.
+                AliasTarget::Module("@angular/core") => {
+                    let rest: String = parts[len..].iter().map(|m| format!(".{m}")).collect();
+                    return Some(format!("i0{rest}"));
+                }
                 AliasTarget::Module(_) => {
                     self.other_module = true;
                     return Some(parts.join("."));
