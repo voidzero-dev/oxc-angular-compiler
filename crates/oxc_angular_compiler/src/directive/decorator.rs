@@ -15,7 +15,7 @@ use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
-use super::evaluator::{Evaluator, FileScope, Value};
+use super::evaluator::{Evaluator, FileScope, Prop, Value};
 use super::metadata::{
     R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata, R3HostMetadata,
     R3InputMetadata,
@@ -690,11 +690,21 @@ fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) ->
 /// calls, using that function's parameters (`transform: (v) => v + name`), so
 /// it would mean something else, or nothing, where the metadata is compiled.
 /// ngtsc copies it there anyway.
-fn scoped_transform_error(input: &str) -> String {
-    format!(
-        "@Directive.inputs: the transform of \"{input}\" uses a parameter of the function \
-         it's written in. OXC can't emit it outside that function."
-    )
+///
+/// The same for a transform written in a namespace that uses the namespace's
+/// declarations (`transform: fn`, with `fn` declared in the namespace), for
+/// which ngtsc emits the bare names.
+fn scoped_transform_error(input: &str, expr: &Expression<'_>, consts: &StringConsts<'_>) -> String {
+    match consts.scope().namespace_used_by(expr) {
+        Some(namespace) => format!(
+            "@Directive.inputs: the transform of \"{input}\" uses a declaration of namespace \
+             {namespace}, which isn't in scope outside it. OXC can't emit it there."
+        ),
+        None => format!(
+            "@Directive.inputs: the transform of \"{input}\" uses a parameter of the function \
+             it's written in. OXC can't emit it outside that function."
+        ),
+    }
 }
 
 /// Parse `inputs:` / `outputs:` from a decorator metadata object.
@@ -734,7 +744,7 @@ pub(crate) fn parse_decorator_io<'a>(
                             None
                         }
                         Value::Object(_) => {
-                            parse_input_object(allocator, &mut io, item, i, source_text)
+                            parse_input_object(allocator, &mut io, item, i, source_text, consts)
                         }
                         other => Some(io_error(
                             "inputs",
@@ -813,6 +823,7 @@ fn parse_input_object<'a>(
     item: &Value<'a>,
     position: usize,
     source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
 ) -> Option<String> {
     let name = match item.prop("name").map(|p| &p.value) {
         Some(Value::String(name)) => name.as_str(),
@@ -835,8 +846,8 @@ fn parse_input_object<'a>(
     let alias = item.prop("alias").and_then(|p| p.value.as_str()).unwrap_or(name);
     let required = matches!(item.prop("required").map(|p| &p.value), Some(Value::Bool(true)));
     let transform_function = match item.prop("transform") {
-        Some(transform) if transform.expr.is_some() && transform.origin.is_none() => {
-            return Some(scoped_transform_error(name));
+        Some(Prop { expr: Some(expr), origin: None, .. }) => {
+            return Some(scoped_transform_error(name, expr, consts));
         }
         Some(transform) => {
             transform.origin.and_then(|e| convert_oxc_expression(allocator, e, source_text))

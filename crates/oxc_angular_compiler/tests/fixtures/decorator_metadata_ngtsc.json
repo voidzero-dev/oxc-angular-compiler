@@ -4563,6 +4563,1194 @@
         }
       },
       "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\n@Directive({selector: '[d]', inputs: NS.INPUTS})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[163, 172]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-exported-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nexport namespace NS { export const INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-module-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nmodule NS { export const INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-nested-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export namespace Inner { export const X = ['a']; } }\ndeclare const Y: typeof NS.Inner.X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-nested-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export namespace Inner { export const X = ['a']; } }\n@Directive({selector: '[d]', inputs: NS.Inner.X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[178, 188]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-dotted-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace A.B { export const X = ['a']; }\ndeclare const Y: typeof A.B.X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-nonexported-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[184, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-declare-typed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace NS { const INPUTS: ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[191, 192]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-declare-export-typed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace NS { export const INPUTS: ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[198, 199]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-declare-const-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export declare const INPUTS: ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-inner-ref",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 'a'; export const INPUTS = [P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-shadow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nconst P = 'top';\nnamespace NS { const P = 'a'; export const INPUTS = [P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  top: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-merged-exported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const P = 'a'; }\nnamespace NS { export const INPUTS = [P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-merged-private",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 'a'; }\nconst P = 'b';\nnamespace NS { export const INPUTS = [P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-top-ref",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nconst P = 'a';\nnamespace NS { export const INPUTS = [P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-self-qualified",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const P = 'a'; export const INPUTS = [NS.P]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[214, 215]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-nested-outer-ref",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 'a'; export namespace Inner { export const X = [P, 'b']; } }\ndeclare const Y: typeof NS.Inner.X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-let",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export let INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-var-uninit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export let INPUTS; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[181, 182]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-destructure",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const {INPUTS} = {INPUTS: ['a']}; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-enum-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export enum E { A = 'a' } }\ndeclare const X: typeof NS.E;\n@Directive({selector: '[d]', inputs: [X.A]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[183, 188]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-enum-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export enum E { A = 'a' } }\n@Directive({selector: '[d]', inputs: [NS.E.A]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[153, 161]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-enum-member-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export enum E { A = 'a' } }\ndeclare const X: typeof NS.E.A;\n@Directive({selector: '[d]', inputs: [X]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'A'."
+      ],
+      "diagnosticSpans": [[185, 188]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-class-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C { static I = ['a']; } }\ndeclare const X: typeof NS.C;\n@Directive({selector: '[d]', inputs: X.I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-whole-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\ndeclare const X: typeof NS;\n@Directive({selector: '[d]', inputs: X.INPUTS})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[191, 199]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-fn-transform-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string) { return 1; } }\ndeclare const T: typeof NS.fn;\n@Directive({selector: '[d]', inputs: [{name: 'a', transform: T}]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-ns-fn-transform-member-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string) { return 1; } }\ndeclare const T: typeof NS.fn;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: T}) a: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits `fn` for `transform: T` with `declare const T: typeof NS.fn` (a function declared in a namespace), an identifier that isn't in scope, so its output throws a ReferenceError when the module loads; oxc keeps `T`"
+    },
+    {
+      "name": "probe: r6-ns-fn-call-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function make() { return ['a']; } }\ndeclare const F: typeof NS.make;\n@Directive({selector: '[d]', inputs: F()})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-alias-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\nconst Y = X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof-member-object",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const CFG = {i: ['a']}; }\ndeclare const X: typeof NS.CFG;\n@Directive({selector: '[d]', inputs: X.i})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-outputs-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const OUTS = ['a']; }\ndeclare const X: typeof NS.OUTS;\n@Directive({selector: '[d]', outputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"a\":\"a\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof-inside-ns",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const A = ['a']; export declare const B: typeof A; }\ndeclare const X: typeof NS.B;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof-imported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nimport {SHARED} from './other';\nnamespace NS { export const INPUTS = SHARED; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n",
+        "other.ts": "export const SHARED = ['a'];\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
+    },
+    {
+      "name": "probe: r6-tpl-enum-value",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nenum E { [`A`] = 'a' }\n@Directive({selector: '[d]', inputs: [E.A]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[133, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-tpl-enum-value-ns",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export enum E { [`A`] = 'a' } }\ndeclare const X: typeof NS.E;\n@Directive({selector: '[d]', inputs: [X.A]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[187, 192]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-shadow-top-typeof-name",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nconst INPUTS = ['top'];\nnamespace NS { export const INPUTS = ['a']; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  top: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof-unknown-member",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\ndeclare const X: typeof NS.MISSING;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[199, 200]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-fn-ref-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export function fn(v: string) { return 1; } export const INPUTS = [{name: 'a', transform: fn}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",fn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "the transform is written in a namespace and uses the namespace's declarations; ngtsc emits it as written (`fn`, `(v) => P`), which isn't in scope where the directive is compiled, so its output throws a ReferenceError when the module loads; oxc reports it (see `transforms_using_a_namespace_s_declarations_are_reported`)"
+    },
+    {
+      "name": "probe: r6-ns-arrow-local-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 1; export const INPUTS = [{name: 'a', transform: (v: string) => P}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",(v)=>P]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "the transform is written in a namespace and uses the namespace's declarations; ngtsc emits it as written (`fn`, `(v) => P`), which isn't in scope where the directive is compiled, so its output throws a ReferenceError when the module loads; oxc reports it (see `transforms_using_a_namespace_s_declarations_are_reported`)"
+    },
+    {
+      "name": "probe: r6-ns-imported-transform-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nimport {booleanAttribute} from '@angular/core';\nnamespace NS { export const INPUTS = [{name: 'a', transform: booleanAttribute}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n",
+        "other.ts": "export const SHARED = ['a'];\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-whole-direct",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\ndeclare const X: typeof NS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'NS'."
+      ],
+      "diagnosticSpans": [[191, 192]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-value-direct",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\n@Directive({selector: '[d]', inputs: NS})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'NS'."
+      ],
+      "diagnosticSpans": [[163, 165]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeref-class",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C {} }\ndeclare const X: [NS.C];\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'C'."
+      ],
+      "diagnosticSpans": [[170, 171]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-enum-merged",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nenum E { A = 'a' }\nnamespace E { export const I = ['a']; }\ndeclare const X: typeof E.I;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-fn-body-ns-ref",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 'a'; export function make() { return [P]; } }\ndeclare const F: typeof NS.make;\n@Directive({selector: '[d]', inputs: F()})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-class-static-ns-ref",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { const P = 'a'; export class C { static I = [P]; } }\ndeclare const X: typeof NS.C;\n@Directive({selector: '[d]', inputs: X.I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-typeof-chain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const A = ['a']; export const B = [...A, 'b']; }\ndeclare const X: typeof NS.B;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-local-nested-member",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { namespace Hidden { export const X = ['a']; } }\ndeclare const Y: typeof NS.Hidden.X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'Y'."
+      ],
+      "diagnosticSpans": [[209, 210]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-dotted-merge",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace A.B { export const X = 'a'; }\nnamespace A { export namespace B { export const Y = [X, 'b']; } }\ndeclare const Z: typeof A.B.Y;\n@Directive({selector: '[d]', inputs: Z})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\",b:\"b\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};\"b\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-shadowed-head",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS = ['a']; }\nnamespace Outer { const NS = {INPUTS: ['b']}; export declare const X: typeof NS.INPUTS; }\ndeclare const Y: typeof Outer.X;\n@Directive({selector: '[d]', inputs: Y})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'INPUTS'."
+      ],
+      "diagnosticSpans": [[279, 280]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-inputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[169, 170]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-inputs-arr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]', inputs: [U]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[169, 172]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-empty-declare-module",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare module M { }\n@Directive({selector: '[d]', inputs: M})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[131, 132]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-types-only",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace N { export type T = string; }\n@Directive({selector: '[d]', inputs: N})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[150, 151]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-declare",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace U { function f(v: string): number; }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[165, 166]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-constenum-only",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export const enum E { A } }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[152, 153]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-nested-inst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export namespace V { export const a = 1; } }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[169, 170]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-nested-noninst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export namespace V { export type T = 1; } }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[168, 169]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-declare-const-only",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\ndeclare namespace U { const a: number; }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[151, 152]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-class-only",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { class C {} }\n@Directive({selector: '[d]', inputs: U})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'U'."
+      ],
+      "diagnosticSpans": [[137, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-typeof-noninst-inner",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export namespace V { export type T = 1; } export const a = 1; }\ndeclare const X: typeof U.V;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'X'."
+      ],
+      "diagnosticSpans": [[217, 218]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-typeof-inst-inner",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export namespace V { export const b = 1; } }\ndeclare const X: typeof U.V;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'V'."
+      ],
+      "diagnosticSpans": [[198, 199]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-nsval-block-shadow-noninst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nconst P = ['a'];\nnamespace U { namespace P { export type T = 1; } export const I = P; }\ndeclare const X: typeof U.I;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-inputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport I = NS.INPUTS;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-nested",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export namespace Inner { export const X = ['a']; } }\nimport I = NS.Inner.X;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport A = NS;\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'NS'."
+      ],
+      "diagnosticSpans": [[178, 179]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-namespace-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport A = NS;\ndeclare const X: typeof A.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-in-ns",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nnamespace O { export import J = NS.INPUTS; }\ndeclare const X: typeof O.J;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-in-ns-local",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nnamespace O { import J = NS.INPUTS; export const K = J; }\ndeclare const X: typeof O.K;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-missing",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport I = NS.MISSING;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[186, 187]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-cycle",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace A { export import B = C.D; }\nnamespace C { export import D = A.B; }\nimport I = A.B;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[204, 205]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-of-alias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport I = NS.INPUTS;\nimport J = I;\n@Directive({selector: '[d]', inputs: J})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[199, 200]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-exported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nexport import I = NS.INPUTS;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-enum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export enum E { A = 'a' } }\nimport E = NS.E;\n@Directive({selector: '[d]', inputs: [E.A]})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[170, 175]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-typeonly-value",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export type T = string; }\nimport T = NS.T;\n@Directive({selector: '[d]', inputs: T})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[168, 169]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-noninst-namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace M { export type T = 1; }\nimport A = M;\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[159, 160]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-qualified-noninst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace O { export namespace M { export type T = 1; } export const z = 1; }\nimport A = O.M;\n@Directive({selector: '[d]', inputs: A})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[204, 205]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-alias-namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport A = NS;\nimport B = A;\n@Directive({selector: '[d]', inputs: B})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.inputs to an array Value is a reference to 'NS'."
+      ],
+      "diagnosticSpans": [[192, 193]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-alias-namespace-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport A = NS;\nimport B = A;\ndeclare const X: typeof B.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-qualified-through-alias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS: ['a'] = ['a']; }\nimport A = NS;\nimport I = A.INPUTS;\n@Directive({selector: '[d]', inputs: I})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
     }
   ]
 }

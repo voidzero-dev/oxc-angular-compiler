@@ -21,12 +21,14 @@ use oxc_ast::ast::{
     IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
     ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
     Statement, StaticBlock, StaticMemberExpression, Super, SwitchStatement, TSEnumDeclaration,
-    TSEnumMemberName, TSInterfaceDeclaration, TSLiteral, TSTupleElement, TSType,
-    TSTypeAliasDeclaration, TSTypeName, TSTypeOperatorOperator, TSTypeParameterDeclaration,
-    TSTypeParameterInstantiation, TSTypeQueryExprName, TemplateLiteral, ThisExpression,
-    UnaryExpression, VariableDeclaration, VariableDeclarationKind,
+    TSEnumMemberName, TSInterfaceDeclaration, TSLiteral, TSModuleReference, TSNamespaceDeclaration,
+    TSNamespaceDeclarationBody, TSQualifiedName, TSTupleElement, TSType, TSTypeAliasDeclaration,
+    TSTypeName, TSTypeOperatorOperator, TSTypeParameterDeclaration, TSTypeParameterInstantiation,
+    TSTypeQueryExprName, TemplateLiteral, ThisExpression, UnaryExpression, VariableDeclaration,
+    VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
+use oxc_span::{GetSpan, Span};
 use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use oxc_syntax::scope::ScopeFlags;
 
@@ -49,6 +51,56 @@ pub(crate) struct FileScope<'a> {
     exported: HashSet<&'a str>,
     /// Interfaces, type aliases, classes and enums declared in the file.
     types: HashSet<&'a str>,
+    /// Import-equals aliases (`import A = NS.T`, `export import A = NS`,
+    /// `import A = require('m')`): what each stands for.
+    aliases: HashMap<&'a str, &'a TSModuleReference<'a>>,
+    /// The bodies of the file's namespaces (`namespace NS { ... }`, nested
+    /// ones included), which ngtsc reads through `typeof NS.X`.
+    blocks: std::vec::Vec<NamespaceBlock<'a>>,
+    /// The id of each top-level namespace (see [`NamespaceBlock::namespace`]).
+    namespace_ids: HashMap<&'a str, usize>,
+    /// The id of the namespace exported as `name` from namespace `n`, by `(n, name)`.
+    member_namespaces: HashMap<(usize, &'a str), usize>,
+    /// The block each function, class and static method declared in a
+    /// namespace is written in, by the address of its node.
+    declared_in: HashMap<usize, usize>,
+    /// The name of each namespace, by id.
+    namespace_names: std::vec::Vec<&'a str>,
+    /// The ids of the instantiated namespaces: those that declare a value
+    /// (a variable, function, class or enum, or an instantiated namespace),
+    /// which makes the namespace a value too. TypeScript gives the others no
+    /// value (`M` in `namespace M { type T = 1; }` isn't one).
+    instantiated: HashSet<usize>,
+}
+
+/// The body of a namespace declaration (`namespace NS { ... }`).
+#[derive(Default)]
+struct NamespaceBlock<'a> {
+    /// The namespace it belongs to. TypeScript merges namespaces declared with
+    /// the same name in the same place (`namespace NS {}` twice, or
+    /// `namespace A.B {}` and `namespace A { export namespace B {} }`), so
+    /// their bodies share the id.
+    namespace: usize,
+    /// The block it's written in, or `None` at the top level.
+    parent: Option<usize>,
+    /// Its declarations, collected like the top level's (with `export`ed
+    /// names in `exported`).
+    scope: FileScope<'a>,
+    /// The namespaces declared directly in it, with their ids.
+    namespaces: HashMap<&'a str, usize>,
+    /// The namespace's name, qualified from the top level (`A.B`).
+    name: String,
+    span: Span,
+}
+
+/// What `typeof A.B.X` names, for `A.B` a namespace the file declares.
+enum Qualified<'a> {
+    /// The value `X` declared (and exported) in a namespace block.
+    Declared(usize, &'a str),
+    /// The (instantiated) namespace `X`.
+    Namespace(&'a str),
+    /// Nothing TypeScript can resolve: `X` isn't exported, or doesn't exist.
+    Missing,
 }
 
 /// A top-level variable binding.
@@ -132,7 +184,273 @@ impl<'a> FileScope<'a> {
                 }
             }
         }
+        for stmt in &program.body {
+            let (decl, exported) = match stmt {
+                Statement::ExportDeclaration(export) => (&export.declaration, true),
+                _ => match stmt.as_declaration() {
+                    Some(decl) => (decl, false),
+                    None => continue,
+                },
+            };
+            if let Declaration::TSNamespaceDeclaration(ns) = decl {
+                scope.namespace(ns, None, exported, false);
+            }
+        }
+        scope.mark_instantiated();
         scope
+    }
+
+    /// Collects the namespace `ns`, declared in `parent` (`None`: at the top
+    /// level), and in an ambient context (`declare namespace`) if `ambient`.
+    fn namespace(
+        &mut self,
+        ns: &'a TSNamespaceDeclaration<'a>,
+        parent: Option<usize>,
+        exported: bool,
+        ambient: bool,
+    ) {
+        let name = ns.id.name.as_str();
+        // Every declaration in an ambient namespace is exported, with or
+        // without `export` (TypeScript's `ExportContext`).
+        let ambient = ambient || ns.declare;
+        // Top-level namespaces merge by name, exported ones by the namespace
+        // they're a member of, and others only within their block.
+        let next = self.namespace_names.len();
+        let id = match parent {
+            None => *self.namespace_ids.entry(name).or_insert(next),
+            Some(p) if exported => {
+                let key = (self.blocks[p].namespace, name);
+                *self.member_namespaces.entry(key).or_insert(next)
+            }
+            Some(p) => self.blocks[p].namespaces.get(name).copied().unwrap_or(next),
+        };
+        if id == next {
+            self.namespace_names.push(name);
+        }
+        let qualified = match parent {
+            Some(p) => format!("{}.{name}", self.blocks[p].name),
+            None => name.to_string(),
+        };
+        if let Some(p) = parent {
+            self.blocks[p].namespaces.insert(name, id);
+            if exported {
+                self.blocks[p].scope.exported.insert(name);
+            }
+        }
+        let index = self.blocks.len();
+        self.blocks.push(NamespaceBlock {
+            namespace: id,
+            parent,
+            name: qualified,
+            span: ns.span,
+            ..NamespaceBlock::default()
+        });
+        let statements = match &ns.body {
+            // `namespace A.B {}`: `B` is an exported member of `A`.
+            TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+                self.namespace(inner, Some(index), true, ambient);
+                return;
+            }
+            TSNamespaceDeclarationBody::TSModuleBlock(block) => &block.body,
+        };
+        let mut scope = FileScope::default();
+        let mut nested = std::vec::Vec::new();
+        for stmt in statements {
+            let (decl, exported) = match stmt {
+                Statement::ExportDeclaration(export) => (&export.declaration, true),
+                _ => match stmt.as_declaration() {
+                    Some(decl) => (decl, ambient),
+                    None => continue,
+                },
+            };
+            scope.declaration(decl, exported);
+            match decl {
+                Declaration::FunctionDeclaration(f) => {
+                    self.declared_in.insert(std::ptr::from_ref::<Function>(f) as usize, index);
+                }
+                Declaration::ClassDeclaration(class) => {
+                    self.declared_in.insert(std::ptr::from_ref::<Class>(class) as usize, index);
+                    for element in &class.body.body {
+                        if let ClassElement::MethodDefinition(m) = element {
+                            let method = std::ptr::from_ref::<Function>(&m.value) as usize;
+                            self.declared_in.insert(method, index);
+                        }
+                    }
+                }
+                Declaration::TSNamespaceDeclaration(inner) => nested.push((&**inner, exported)),
+                _ => {}
+            }
+        }
+        self.blocks[index].scope = scope;
+        for (inner, exported) in nested {
+            self.namespace(inner, Some(index), exported, ambient);
+        }
+    }
+
+    /// Marks the namespaces that declare a value as instantiated (see
+    /// [`Self::instantiated`]), once they're all collected.
+    fn mark_instantiated(&mut self) {
+        loop {
+            let before = self.instantiated.len();
+            for block in &self.blocks {
+                let scope = &block.scope;
+                let values = !scope.variables.is_empty()
+                    || !scope.functions.is_empty()
+                    || !scope.classes.is_empty()
+                    || !scope.enums.is_empty()
+                    || block.namespaces.values().any(|id| self.instantiated.contains(id));
+                if values && !self.instantiated.contains(&block.namespace) {
+                    self.instantiated.insert(block.namespace);
+                }
+            }
+            if self.instantiated.len() == before {
+                break;
+            }
+        }
+    }
+
+    /// Whether the namespace block `b` itself declares the value `name`: a
+    /// variable, function, class, enum, import-equals alias or instantiated
+    /// namespace.
+    fn block_declares(&self, b: usize, name: &str) -> bool {
+        let block = &self.blocks[b];
+        block.namespaces.get(name).is_some_and(|id| self.instantiated.contains(id))
+            || block.scope.aliases.contains_key(name)
+            || block.scope.variables.contains_key(name)
+            || block.scope.functions.contains_key(name)
+            || block.scope.enums.contains_key(name)
+            || block.scope.classes.contains_key(name)
+    }
+
+    /// A block of the namespace `namespace` that exports the value or namespace `name`.
+    fn exporting_block(&self, namespace: usize, name: &str) -> Option<usize> {
+        (0..self.blocks.len()).find(|&b| {
+            self.blocks[b].namespace == namespace
+                && self.blocks[b].scope.exported.contains(name)
+                && self.block_declares(b, name)
+        })
+    }
+
+    /// The namespace block whose declaration `name` refers to inside block
+    /// `from`: the block's own, one its namespace exports from another of its
+    /// bodies, or the same for each enclosing block. `None` when the name is
+    /// resolved at the top level.
+    fn declaring_block(&self, from: usize, name: &str) -> Option<usize> {
+        let mut current = Some(from);
+        while let Some(b) = current {
+            if self.block_declares(b, name) {
+                return Some(b);
+            }
+            if let Some(other) = self.exporting_block(self.blocks[b].namespace, name) {
+                return Some(other);
+            }
+            current = self.blocks[b].parent;
+        }
+        None
+    }
+
+    /// The id of the namespace `name` names in `from` (`None`: the top level),
+    /// as the head of a qualified name: a namespace, or an import-equals alias
+    /// of one, declared there or in an enclosing block. `None` when `name` is
+    /// something else.
+    fn namespace_of(&self, from: Option<usize>, name: &str, depth: u16) -> Option<usize> {
+        if depth > MAX_ALIASES {
+            return None;
+        }
+        let mut current = from;
+        while let Some(b) = current {
+            let block = &self.blocks[b];
+            if let Some(id) = block.namespaces.get(name) {
+                return Some(*id);
+            }
+            if let Some(reference) = block.scope.aliases.get(name) {
+                return self.alias_namespace(Some(b), reference, depth + 1);
+            }
+            if self.block_declares(b, name) {
+                return None;
+            }
+            if let Some(id) = self.member_namespaces.get(&(block.namespace, name)) {
+                return Some(*id);
+            }
+            if let Some(other) = self.exporting_block(block.namespace, name) {
+                let reference = self.blocks[other].scope.aliases.get(name)?;
+                return self.alias_namespace(Some(other), reference, depth + 1);
+            }
+            current = block.parent;
+        }
+        if let Some(id) = self.namespace_ids.get(name) {
+            return Some(*id);
+        }
+        let reference = self.aliases.get(name)?;
+        self.alias_namespace(None, reference, depth + 1)
+    }
+
+    /// The id of the namespace an import-equals alias declared in `block`
+    /// stands for, if it's one.
+    fn alias_namespace(
+        &self,
+        block: Option<usize>,
+        reference: &TSModuleReference<'_>,
+        depth: u16,
+    ) -> Option<usize> {
+        let parts = match reference {
+            TSModuleReference::IdentifierReference(id) => std::vec![id.name.as_str()],
+            TSModuleReference::QualifiedName(q) => qualified_parts(q)?,
+            TSModuleReference::ExternalModuleReference(_) => return None,
+        };
+        let mut id = self.namespace_of(block, parts[0], depth)?;
+        for part in &parts[1..] {
+            id = *self.member_namespaces.get(&(id, *part))?;
+        }
+        Some(id)
+    }
+
+    /// The declarations of the block `block`, or of the top level for `None`.
+    fn declarations(&self, block: Option<usize>) -> &FileScope<'a> {
+        block.map_or(self, |b| &self.blocks[b].scope)
+    }
+
+    /// The block a function, static method or class declared in a namespace is
+    /// written in, or `None` for one declared at the top level.
+    fn block_of<T>(&self, node: &T) -> Option<usize> {
+        self.declared_in.get(&(std::ptr::from_ref(node) as usize)).copied()
+    }
+
+    /// What the qualified name `parts` (`["A", "B", "X"]` for `A.B.X`),
+    /// written in `from`, names when its head is a namespace the file
+    /// declares, as TypeScript resolves it: each part after the head is an
+    /// exported member of the namespace before it. `None` when the head, or a
+    /// part before the last, isn't a namespace.
+    fn qualified(&self, from: Option<usize>, parts: &[&'a str]) -> Option<Qualified<'a>> {
+        let (head, rest) = parts.split_first()?;
+        let (last, middle) = rest.split_last()?;
+        let mut namespace = self.namespace_of(from, head, 0)?;
+        for part in middle {
+            match self.member_namespaces.get(&(namespace, *part)) {
+                Some(id) => namespace = *id,
+                None if self.exporting_block(namespace, part).is_some() => return None,
+                None => return Some(Qualified::Missing),
+            }
+        }
+        Some(match self.exporting_block(namespace, last) {
+            Some(b) if self.blocks[b].namespaces.contains_key(last) => Qualified::Namespace(last),
+            Some(b) => Qualified::Declared(b, last),
+            None => Qualified::Missing,
+        })
+    }
+
+    /// The qualified name of the namespace `expr` is written in, when it uses
+    /// that namespace's declarations (or an enclosing one's), which don't
+    /// resolve at the top level.
+    pub(crate) fn namespace_used_by(&self, expr: &Expression<'a>) -> Option<&str> {
+        let span = expr.span();
+        let block = (0..self.blocks.len())
+            .filter(|&b| self.blocks[b].span.contains_inclusive(span))
+            .min_by_key(|&b| self.blocks[b].span.size())?;
+        let frame = Frame::at(Some(block));
+        let mut uses = UsesFrame::new(&frame, self);
+        uses.visit_expression(expr);
+        uses.found.then(|| self.blocks[block].name.as_str())
     }
 
     fn declaration(&mut self, decl: &'a Declaration<'a>, exported: bool) {
@@ -174,6 +492,10 @@ impl<'a> FileScope<'a> {
             Declaration::TSTypeAliasDeclaration(t) => {
                 self.types.insert(t.id.name.as_str());
                 name(self, t.id.name.as_str());
+            }
+            Declaration::TSImportEqualsDeclaration(alias) => {
+                self.aliases.entry(alias.id.name.as_str()).or_insert(&alias.module_reference);
+                name(self, alias.id.name.as_str());
             }
             _ => {}
         }
@@ -257,6 +579,31 @@ fn collect_bindings<'a>(
             }
         }
     }
+}
+
+/// The parts of a qualified name, head first (`["A", "B", "X"]` for `A.B.X`).
+fn qualified_parts_of<'a>(name: &TSTypeName<'a>) -> Option<std::vec::Vec<&'a str>> {
+    fn parts<'a>(name: &TSTypeName<'a>, out: &mut std::vec::Vec<&'a str>) -> Option<()> {
+        match name {
+            TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
+            TSTypeName::QualifiedName(q) => {
+                parts(&q.left, out)?;
+                out.push(q.right.name.as_str());
+            }
+            TSTypeName::ThisExpression(_) => return None,
+        }
+        Some(())
+    }
+    let mut out = std::vec::Vec::new();
+    parts(name, &mut out)?;
+    Some(out)
+}
+
+/// [`qualified_parts_of`] for the name in `typeof A.B.X`.
+fn qualified_parts<'a>(name: &TSQualifiedName<'a>) -> Option<std::vec::Vec<&'a str>> {
+    let mut out = qualified_parts_of(&name.left)?;
+    out.push(name.right.name.as_str());
+    Some(out)
 }
 
 /// What a declaration reference resolves to.
@@ -497,6 +844,9 @@ const ES_GLOBALS: &[&str] = &[
     "WeakSet",
 ];
 
+/// Bounds a chain of import-equals aliases (`import A = B; import B = A;`).
+const MAX_ALIASES: u16 = 64;
+
 /// Bounds expression nesting (including calls), to keep deeply nested values
 /// off the end of the stack; a debug build uses about 2 KiB per level. Chains of
 /// consts don't nest (see [`Evaluator::evaluate_dependencies`]).
@@ -514,7 +864,21 @@ struct Frame<'a> {
     /// Evaluating the body of a called function, whose parameters, `this` and
     /// `arguments` don't exist where the metadata is compiled.
     in_call: bool,
+    /// The namespace block the code being evaluated is written in, whose
+    /// names resolve before the top level's (`None`: the top level).
+    block: Option<usize>,
 }
+
+impl Frame<'_> {
+    /// The frame for code written directly in `block`.
+    fn at(block: Option<usize>) -> Self {
+        Self { block, ..Self::default() }
+    }
+}
+
+/// A variable or enum the evaluator caches: the namespace block that declares
+/// it (`None`: the top level) and its name.
+type Slot<'a> = (Option<usize>, &'a str);
 
 /// A name bound in a [`Frame`].
 #[derive(Clone)]
@@ -544,11 +908,11 @@ enum Key<'k> {
 pub(crate) struct Evaluator<'s, 'a> {
     /// The file's declarations are only looked at when an identifier is resolved.
     consts: &'s super::StringConsts<'a>,
-    /// Top-level variables and enums already evaluated (with their weight), so a
-    /// chain of consts that each reference the previous one several times stays
+    /// Variables and enums already evaluated (with their weight), so a chain
+    /// of consts that each reference the previous one several times stays
     /// linear. `None` while one is being evaluated, which makes a circular
     /// reference dynamic (ngtsc overflows its stack on those).
-    variables: RefCell<HashMap<&'a str, Option<(Value<'a>, u32)>>>,
+    variables: RefCell<HashMap<Slot<'a>, Option<(Value<'a>, u32)>>>,
     fuel: Cell<u32>,
 }
 
@@ -567,8 +931,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     /// identifier the argument's reference was first named by, or the argument
     /// itself); any other expression is kept only if it doesn't use the
     /// function's parameters, `this` or `arguments`, which don't exist there.
+    ///
+    /// The same goes for an expression written in a namespace: it's kept only
+    /// if it doesn't use the namespace's declarations, which aren't in scope
+    /// at the top level either.
     fn origin(&self, expr: &'a Expression<'a>, frame: &Frame<'a>) -> Option<&'a Expression<'a>> {
-        if !frame.in_call {
+        if !frame.in_call && frame.block.is_none() {
             return Some(expr);
         }
         if let Expression::Identifier(id) = expr
@@ -588,7 +956,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 _ => None,
             };
         }
-        let mut uses = UsesFrame::new(frame);
+        let mut uses = UsesFrame::new(frame, self.consts.scope());
         uses.visit_expression(expr);
         (!uses.found).then_some(expr)
     }
@@ -652,7 +1020,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         None => self.element_origins_at(binding.origin?, &Frame::default(), depth),
                     };
                 }
-                match self.consts.scope().variables.get(name)? {
+                let scope = self.consts.scope();
+                // A namespace's declarations are written where they don't
+                // resolve at the top level.
+                if frame.block.and_then(|from| scope.declaring_block(from, name)).is_some() {
+                    return None;
+                }
+                match scope.variables.get(name)? {
                     // Top-level declarations don't see the caller's parameters.
                     Variable::Init(init, path) if path.is_empty() => {
                         self.element_origins_at(init, &Frame::default(), depth)
@@ -922,17 +1296,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             return binding.value.clone();
         }
         let scope = self.consts.scope();
-        if scope.variables.contains_key(name) || scope.enums.contains_key(name) {
-            return self.top_level(name, depth);
+        // Inside a namespace, its declarations (and its enclosing ones') come first.
+        if let Some(block) = frame.block.and_then(|from| scope.declaring_block(from, name)) {
+            return self.declared(Some(block), name, depth).unwrap_or(Value::Dynamic);
         }
-        if let Some((function, overloads)) = scope.functions.get(name) {
-            return Value::Reference {
-                name: name.into(),
-                kind: RefKind::Function(function, *overloads),
-            };
-        }
-        if let Some(class) = scope.classes.get(name) {
-            return Value::Reference { name: name.into(), kind: RefKind::Class(class) };
+        if let Some(value) = self.declared(None, name, depth) {
+            return value;
         }
         if let Some(import) = scope.imports.get(name) {
             return match import.imported {
@@ -953,70 +1322,152 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
     }
 
-    /// A top-level variable's or enum's value, evaluated once.
-    fn top_level(&self, name: &'a str, depth: u16) -> Value<'a> {
-        if let Some(cached) = self.variables.borrow().get(name) {
+    /// The value of `name` when `block` (`None`: the top level) declares it
+    /// as a variable, enum, function, class or namespace. A namespace is a
+    /// reference to it, and an `import x = ...` alias in a namespace is dynamic.
+    fn declared(&self, block: Option<usize>, name: &'a str, depth: u16) -> Option<Value<'a>> {
+        let file = self.consts.scope();
+        let scope = file.declarations(block);
+        if scope.variables.contains_key(name) || scope.enums.contains_key(name) {
+            return Some(self.stored((block, name), depth));
+        }
+        if let Some((function, overloads)) = scope.functions.get(name) {
+            let kind = RefKind::Function(function, *overloads);
+            return Some(Value::Reference { name: name.into(), kind });
+        }
+        if let Some(class) = scope.classes.get(name) {
+            return Some(Value::Reference { name: name.into(), kind: RefKind::Class(class) });
+        }
+        if let Some(reference) = scope.aliases.get(name) {
+            return Some(self.alias(block, reference, depth));
+        }
+        let namespace = match block {
+            Some(b) => file.blocks[b]
+                .namespaces
+                .get(name)
+                .or_else(|| file.member_namespaces.get(&(file.blocks[b].namespace, name))),
+            None => file.namespace_ids.get(name),
+        };
+        namespace
+            .filter(|id| file.instantiated.contains(id))
+            .map(|_| Value::Reference { name: name.into(), kind: RefKind::Other })
+    }
+
+    /// The value of an import-equals alias declared in `block`: what its
+    /// entity names (`import f = NS.f` is `NS.f`), resolved where the alias
+    /// is written. Another module's (`import m = require('m')`) is dynamic.
+    fn alias(
+        &self,
+        block: Option<usize>,
+        reference: &'a TSModuleReference<'a>,
+        depth: u16,
+    ) -> Value<'a> {
+        if depth > MAX_DEPTH || !self.spend(1) {
+            return Value::Dynamic;
+        }
+        let depth = depth + 1;
+        let scope = self.consts.scope();
+        let parts = match reference {
+            // TypeScript resolves `import A = B` only as a namespace.
+            TSModuleReference::IdentifierReference(id) => {
+                return match scope.namespace_of(block, id.name.as_str(), 0) {
+                    Some(ns) if scope.instantiated.contains(&ns) => {
+                        let name = scope.namespace_names[ns];
+                        Value::Reference { name: name.into(), kind: RefKind::Other }
+                    }
+                    _ => Value::Dynamic,
+                };
+            }
+            TSModuleReference::QualifiedName(q) => qualified_parts(q),
+            TSModuleReference::ExternalModuleReference(_) => None,
+        };
+        match parts.and_then(|parts| scope.qualified(block, &parts)) {
+            Some(Qualified::Declared(b, member)) => {
+                self.declared(Some(b), member, depth).unwrap_or(Value::Dynamic)
+            }
+            Some(Qualified::Namespace(name)) => {
+                Value::Reference { name: name.into(), kind: RefKind::Other }
+            }
+            _ => Value::Dynamic,
+        }
+    }
+
+    /// A variable's or enum's value, evaluated once.
+    fn stored(&self, slot: Slot<'a>, depth: u16) -> Value<'a> {
+        if let Some(cached) = self.variables.borrow().get(&slot) {
             return match cached {
                 Some((value, weight)) if self.spend(*weight) => value.clone(),
                 _ => Value::Dynamic,
             };
         }
-        self.evaluate_dependencies(name, depth);
-        self.evaluate_top_level(name, depth)
+        self.evaluate_dependencies(slot, depth);
+        self.evaluate_top_level(slot, depth)
+    }
+
+    /// Where the variable or enum `name`, mentioned in code written in
+    /// `block`, is declared, if it's one.
+    fn slot(&self, block: Option<usize>, name: &'a str) -> Option<Slot<'a>> {
+        let scope = self.consts.scope();
+        let block = block.and_then(|from| scope.declaring_block(from, name));
+        let declarations = scope.declarations(block);
+        (declarations.variables.contains_key(name) || declarations.enums.contains_key(name))
+            .then_some((block, name))
     }
 
     /// Evaluates the top-level bindings `root`'s initializer mentions (and theirs)
     /// before `root`, deepest first, so a long chain of consts
     /// (`const X2 = [...X1]`) is evaluated one link at a time instead of
     /// recursively through the whole chain.
-    fn evaluate_dependencies(&self, root: &'a str, depth: u16) {
+    fn evaluate_dependencies(&self, root: Slot<'a>, depth: u16) {
         let scope = self.consts.scope();
-        let pending = |name: &str| {
-            (scope.variables.contains_key(name) || scope.enums.contains_key(name))
-                && !self.variables.borrow().contains_key(name)
-        };
+        let pending = |slot: &Slot<'a>| !self.variables.borrow().contains_key(slot);
         let mut seen = HashSet::from([root]);
         let mut stack = vec![(root, false)];
-        while let Some((name, ready)) = stack.pop() {
+        while let Some((slot, ready)) = stack.pop() {
             if ready {
-                if name != root && pending(name) {
-                    self.evaluate_top_level(name, depth);
+                if slot != root && pending(&slot) {
+                    self.evaluate_top_level(slot, depth);
                 }
                 continue;
             }
-            stack.push((name, true));
+            stack.push((slot, true));
             let mut mentions = Mentions(std::vec::Vec::new());
-            match (scope.variables.get(name), scope.enums.get(name)) {
+            let declarations = scope.declarations(slot.0);
+            match (declarations.variables.get(slot.1), declarations.enums.get(slot.1)) {
                 (Some(Variable::Init(init, _)), _) => mentions.visit_expression(init),
                 (_, Some(e)) => mentions.visit_ts_enum_declaration(e),
                 _ => {}
             }
             for dep in mentions.0 {
-                if pending(dep) && seen.insert(dep) {
+                if let Some(dep) = self.slot(slot.0, dep)
+                    && pending(&dep)
+                    && seen.insert(dep)
+                {
                     stack.push((dep, false));
                 }
             }
         }
     }
 
-    fn evaluate_top_level(&self, name: &'a str, depth: u16) -> Value<'a> {
-        let scope = self.consts.scope();
-        self.variables.borrow_mut().insert(name, None);
-        let value = match (scope.variables.get(name), scope.enums.get(name)) {
-            (Some(variable), _) => self.variable(name, variable, depth),
-            (_, Some(e)) => self.enumeration(e, depth),
+    fn evaluate_top_level(&self, slot: Slot<'a>, depth: u16) -> Value<'a> {
+        let scope = self.consts.scope().declarations(slot.0);
+        self.variables.borrow_mut().insert(slot, None);
+        let value = match (scope.variables.get(slot.1), scope.enums.get(slot.1)) {
+            (Some(variable), _) => self.variable(slot, variable, depth),
+            (_, Some(e)) => self.enumeration(e, depth, slot.0),
             _ => Value::Dynamic,
         };
         let weight = value.weight();
-        self.variables.borrow_mut().insert(name, Some((value.clone(), weight)));
+        self.variables.borrow_mut().insert(slot, Some((value.clone(), weight)));
         value
     }
 
-    fn variable(&self, name: &'a str, variable: &Variable<'a>, depth: u16) -> Value<'a> {
+    fn variable(&self, slot: Slot<'a>, variable: &Variable<'a>, depth: u16) -> Value<'a> {
+        let (block, name) = slot;
         match variable {
-            // Top-level declarations don't see the caller's parameters.
+            // Declarations don't see the caller's parameters.
             Variable::Init(init, path) => {
-                let mut value = self.eval(init, depth, &Frame::default());
+                let mut value = self.eval(init, depth, &Frame::at(block));
                 for key in path {
                     value = match key {
                         PathKey::Index(i) => self.member(value, Key::Num(*i as f64), depth),
@@ -1030,7 +1481,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 value
             }
             // A literal type is its value; otherwise it's a reference to the variable.
-            Variable::Declared(ty) => match ty.map(|ty| self.eval_type(ty, depth)) {
+            Variable::Declared(ty) => match ty.map(|ty| self.eval_type(ty, depth, block)) {
                 Some(value) if !matches!(value, Value::Dynamic) => value,
                 _ => Value::Reference { name: name.into(), kind: RefKind::Other },
             },
@@ -1040,7 +1491,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
 
     /// ngtsc's `visitEnumDeclaration`: a map of members to enum values. A member
     /// without an initializer is its index (not the previous member plus one).
-    fn enumeration(&self, e: &'a TSEnumDeclaration<'a>, depth: u16) -> Value<'a> {
+    fn enumeration(
+        &self,
+        e: &'a TSEnumDeclaration<'a>,
+        depth: u16,
+        block: Option<usize>,
+    ) -> Value<'a> {
         let name_of = |member: &'a TSEnumMemberName<'a>| match member {
             TSEnumMemberName::Identifier(id) => Some(id.name.as_str()),
             TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => {
@@ -1061,7 +1517,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 (n, Binding::new(value, None))
             })
             .collect();
-        let frame = Frame { bindings, in_call: false };
+        let frame = Frame { bindings, in_call: false, block };
         let props = e
             .body
             .members
@@ -1080,8 +1536,9 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         Value::Object(props)
     }
 
-    /// ngtsc's `visitType`, for `declare const X: T`.
-    fn eval_type(&self, ty: &'a TSType<'a>, depth: u16) -> Value<'a> {
+    /// ngtsc's `visitType`, for `declare const X: T` written in `block`
+    /// (`None`: at the top level).
+    fn eval_type(&self, ty: &'a TSType<'a>, depth: u16, block: Option<usize>) -> Value<'a> {
         if depth > MAX_DEPTH || !self.spend(1) {
             return Value::Dynamic;
         }
@@ -1098,7 +1555,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     .and_then(|q| q.value.cooked.as_ref())
                     .map_or(Value::Dynamic, |c| Value::String(c.to_string())),
                 TSLiteral::UnaryExpression(u) => {
-                    match self.eval(&u.argument, depth, &Frame::default()) {
+                    match self.eval(&u.argument, depth, &Frame::at(block)) {
                         Value::Dynamic => Value::Dynamic,
                         value => unary(u.operator, &value),
                     }
@@ -1106,20 +1563,37 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 _ => Value::Dynamic,
             },
             TSType::TSTupleType(tuple) => Value::Array(
-                tuple.element_types.iter().map(|el| self.eval_tuple_element(el, depth)).collect(),
+                tuple
+                    .element_types
+                    .iter()
+                    .map(|el| self.eval_tuple_element(el, depth, block))
+                    .collect(),
             ),
             TSType::TSNamedTupleMember(member) => {
-                self.eval_tuple_element(&member.element_type, depth)
+                self.eval_tuple_element(&member.element_type, depth, block)
             }
             TSType::TSTypeOperatorType(op) if op.operator == TSTypeOperatorOperator::Readonly => {
-                self.eval_type(&op.type_annotation, depth)
+                self.eval_type(&op.type_annotation, depth, block)
             }
             TSType::TSTypeQuery(query) => match &query.expr_name {
                 TSTypeQueryExprName::IdentifierReference(id) => {
-                    self.identifier(id.name.as_str(), depth, &Frame::default())
+                    self.identifier(id.name.as_str(), depth, &Frame::at(block))
                 }
-                // `typeof E.A` is a reference to the declaration of `A`.
                 TSTypeQueryExprName::QualifiedName(name) => {
+                    // `typeof NS.X`, for a namespace `NS` the file declares,
+                    // is the value `X` the namespace exports.
+                    let scope = self.consts.scope();
+                    match qualified_parts(name).and_then(|parts| scope.qualified(block, &parts)) {
+                        Some(Qualified::Declared(b, member)) => {
+                            return self.declared(Some(b), member, depth).unwrap_or(Value::Dynamic);
+                        }
+                        Some(Qualified::Namespace(name)) => {
+                            return Value::Reference { name: name.into(), kind: RefKind::Other };
+                        }
+                        Some(Qualified::Missing) => return Value::Dynamic,
+                        None => {}
+                    }
+                    // Otherwise, `typeof E.A` is a reference to the declaration of `A`.
                     let mut left = &name.left;
                     while let TSTypeName::QualifiedName(q) = left {
                         left = &q.left;
@@ -1133,12 +1607,24 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             },
             // A type naming a class is a reference to it.
             TSType::TSTypeReference(reference) => {
-                let name = match &reference.type_name {
-                    TSTypeName::IdentifierReference(id) => id.name.as_str(),
-                    TSTypeName::QualifiedName(q) => q.right.name.as_str(),
+                let scope = self.consts.scope();
+                let (block, name) = match &reference.type_name {
+                    TSTypeName::IdentifierReference(id) => {
+                        let name = id.name.as_str();
+                        (block.and_then(|from| scope.declaring_block(from, name)), name)
+                    }
+                    TSTypeName::QualifiedName(q) => {
+                        match qualified_parts_of(&reference.type_name)
+                            .and_then(|parts| scope.qualified(block, &parts))
+                        {
+                            Some(Qualified::Declared(b, name)) => (Some(b), name),
+                            Some(_) => return Value::Dynamic,
+                            None => (None, q.right.name.as_str()),
+                        }
+                    }
                     TSTypeName::ThisExpression(_) => return Value::Dynamic,
                 };
-                match self.consts.scope().classes.get(name) {
+                match scope.declarations(block).classes.get(name) {
                     Some(class) => {
                         Value::Reference { name: name.into(), kind: RefKind::Class(class) }
                     }
@@ -1149,8 +1635,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
     }
 
-    fn eval_tuple_element(&self, element: &'a TSTupleElement<'a>, depth: u16) -> Value<'a> {
-        element.as_ts_type().map_or(Value::Dynamic, |ty| self.eval_type(ty, depth))
+    fn eval_tuple_element(
+        &self,
+        element: &'a TSTupleElement<'a>,
+        depth: u16,
+        block: Option<usize>,
+    ) -> Value<'a> {
+        element.as_ts_type().map_or(Value::Dynamic, |ty| self.eval_type(ty, depth, block))
     }
 
     /// ngtsc's `visitCallExpression`: builtins, and same-file functions whose
@@ -1197,7 +1688,9 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
         // ngtsc counts a `this` parameter as the first one.
         let offset = usize::from(function.this_param.is_some());
-        let mut scope = Frame { bindings: HashMap::new(), in_call: true };
+        // Its body sees the declarations where it's written.
+        let block = self.consts.scope().block_of(function);
+        let mut scope = Frame { bindings: HashMap::new(), in_call: true, block };
         for (i, param) in function.params.items.iter().enumerate() {
             let binding = match args.get(i + offset) {
                 None | Some(Value::Undefined) if param.initializer.is_some() => {
@@ -1343,7 +1836,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         && p.key.static_name().is_some_and(|n| n == key) =>
                 {
                     return match &p.value {
-                        Some(value) => self.eval(value, depth, &Frame::default()),
+                        Some(value) => {
+                            let block = self.consts.scope().block_of(class);
+                            self.eval(value, depth, &Frame::at(block))
+                        }
                         None => Value::Reference { name: key.into(), kind: RefKind::Other },
                     };
                 }
@@ -1388,6 +1884,8 @@ fn bind<'a>(frame: &mut Frame<'a>, pattern: &'a BindingPattern<'a>, binding: Bin
 /// and a nested non-arrow function has its own `this` and `arguments`.
 struct UsesFrame<'f, 'a> {
     frame: &'f Frame<'a>,
+    /// Resolves the names of the namespace block the frame is in, if any.
+    scope: &'f FileScope<'a>,
     found: bool,
     /// The names each scope entered inside the expression declares, innermost last.
     scopes: std::vec::Vec<std::vec::Vec<String>>,
@@ -1399,8 +1897,15 @@ struct UsesFrame<'f, 'a> {
 }
 
 impl<'f, 'a> UsesFrame<'f, 'a> {
-    fn new(frame: &'f Frame<'a>) -> Self {
-        Self { frame, found: false, scopes: std::vec::Vec::new(), own_arguments: 0, own_this: 0 }
+    fn new(frame: &'f Frame<'a>, scope: &'f FileScope<'a>) -> Self {
+        Self {
+            frame,
+            scope,
+            found: false,
+            scopes: std::vec::Vec::new(),
+            own_arguments: 0,
+            own_this: 0,
+        }
     }
 
     fn declared(&self, name: &str) -> bool {
@@ -1502,19 +2007,21 @@ fn body_names(body: &FunctionBody<'_>, out: &mut std::vec::Vec<String>) {
 impl<'a> Visit<'a> for UsesFrame<'_, 'a> {
     fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
         let name = id.name.as_str();
-        self.found |= if name == "arguments" {
+        let in_namespace =
+            || self.frame.block.and_then(|from| self.scope.declaring_block(from, name)).is_some();
+        self.found |= if name == "arguments" && self.frame.in_call {
             self.own_arguments == 0 && !self.declared(name)
         } else {
-            self.frame.bindings.contains_key(name) && !self.declared(name)
+            (self.frame.bindings.contains_key(name) || in_namespace()) && !self.declared(name)
         };
     }
 
     fn visit_this_expression(&mut self, _: &ThisExpression) {
-        self.found |= self.own_this == 0;
+        self.found |= self.frame.in_call && self.own_this == 0;
     }
 
     fn visit_super(&mut self, _: &Super) {
-        self.found |= self.own_this == 0;
+        self.found |= self.frame.in_call && self.own_this == 0;
     }
 
     // Types are erased from the emitted code, so a name used only in one

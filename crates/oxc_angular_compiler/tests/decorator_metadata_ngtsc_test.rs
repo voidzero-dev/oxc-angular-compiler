@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 304, "fixtures compared");
+    assert_eq!(compared, 380, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -471,6 +471,82 @@ export class Dir {{ x: any; }}
     }
 }
 
+/// A value ngtsc reads through `typeof NS.X` is written in the namespace, so a
+/// transform in it that uses the namespace's declarations means nothing where
+/// the directive is compiled. ngtsc 22.1.7 emits these as written (`fn`,
+/// `(v) => P`), which throws a ReferenceError when the module loads; oxc
+/// reports them. The snapshot's `r6-ns-*` probes cover the values it reads.
+#[test]
+fn transforms_using_a_namespace_s_declarations_are_reported() {
+    let cases = [
+        (
+            "namespace NS { export function fn(v: string) { return 1; } export const INPUTS = [{ name: 'x', transform: fn }]; }",
+            "typeof NS.INPUTS",
+            "X",
+            "NS",
+        ),
+        (
+            "namespace NS { const P = 1; export const INPUTS = [{ name: 'x', transform: (v: string) => P }]; }",
+            "typeof NS.INPUTS",
+            "X",
+            "NS",
+        ),
+        (
+            "namespace NS { const P = 1; export namespace Inner { export const INPUTS = [{ name: 'x', transform: (v: string) => P }]; } }",
+            "typeof NS.Inner.INPUTS",
+            "X",
+            "NS.Inner",
+        ),
+        (
+            "namespace NS { const P = 1; export function make() { return [{ name: 'x', transform: (v: string) => P }]; } }",
+            "typeof NS.make",
+            "X()",
+            "NS",
+        ),
+    ];
+    for (namespace, ty, inputs, name) in cases {
+        let source = format!(
+            "import {{Directive}} from '@angular/core';
+{namespace}
+declare const X: {ty};
+@Directive({{selector: '[d]', inputs: {inputs}}})
+export class Dir {{ x: any; }}
+"
+        );
+        let result = transform(&source);
+        let message = format!(
+            "@Directive.inputs: the transform of \"x\" uses a declaration of namespace {name}, \
+             which isn't in scope outside it. OXC can't emit it there."
+        );
+        assert_eq!(errors(&result, &source), vec![(message, inputs.to_string())], "{namespace}");
+    }
+
+    // Names that resolve at the top level are emitted: the transform's own
+    // parameters, a top-level function and an import.
+    let source = "import {Directive, booleanAttribute} from '@angular/core';
+function top(v: string) { return 1; }
+namespace NS {
+  export const INPUTS = [
+    { name: 'a', transform: (v: string) => v.length },
+    { name: 'b', transform: top },
+    { name: 'c', transform: booleanAttribute },
+  ];
+}
+declare const X: typeof NS.INPUTS;
+@Directive({selector: '[d]', inputs: X})
+export class Dir { a: any; b: any; c: any; }
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    assert!(
+        strip(&result.code).contains(
+            r#"inputs:{a:[2,"a","a",(v)=>v.length],b:[2,"b","b",top],c:[2,"c","c",booleanAttribute]}"#
+        ),
+        "{}",
+        result.code
+    );
+}
+
 /// ngtsc reports a signal input or output also listed in `inputs:` /
 /// `outputs:` only for Angular's own `input()`, `model()`, `output()` and
 /// `outputFromObservable()`: imported from their module by name (under any
@@ -528,6 +604,15 @@ fn evaluation_is_bounded() {
                 "{header}{}const X3000 = ['a'];\n{}",
                 (0..3000).map(|i| format!("const X{i} = [...X{}];\n", i + 1)).collect::<String>(),
                 class("X0")
+            ),
+            None,
+        ),
+        // ... also in a namespace, read through `typeof`.
+        (
+            format!(
+                "{header}namespace NS {{\nconst X0 = ['a'];\n{}export const Y = X2999;\n}}\ndeclare const Z: typeof NS.Y;\n{}",
+                (1..3000).map(|i| format!("const X{i} = [...X{}];\n", i - 1)).collect::<String>(),
+                class("Z")
             ),
             None,
         ),
