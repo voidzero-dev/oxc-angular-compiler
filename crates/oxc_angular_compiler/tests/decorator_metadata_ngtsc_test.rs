@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 274, "fixtures compared");
+    assert_eq!(compared, 287, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -339,6 +339,13 @@ fn values_imported_from_another_module_are_reported_as_unreadable() {
         ("inputs: SHARED.concat(['x'])", "SHARED", "SHARED.concat(['x'])", "inputs"),
         ("inputs: [`${NAME}x`]", "NAME", "[`${NAME}x`]", "inputs"),
         ("inputs: C ? ['a'] : ['b']", "C", "C ? ['a'] : ['b']", "inputs"),
+        // `&&` / `||` need an import only when it decides or is the result
+        // (the snapshot's `shortCircuit-*` probes are the ones that don't).
+        ("inputs: [NAME || 'x']", "NAME", "[NAME || 'x']", "inputs"),
+        ("inputs: ['' || NAME]", "NAME", "['' || NAME]", "inputs"),
+        ("inputs: ['x' && NAME]", "NAME", "['x' && NAME]", "inputs"),
+        ("inputs: 1 ? SHARED : ['x']", "SHARED", "1 ? SHARED : ['x']", "inputs"),
+        ("outputs: [0 || NAME]", "NAME", "[0 || NAME]", "outputs"),
         ("inputs: mk()", "mk", "mk()", "inputs"),
         ("outputs: [...OUTS]", "OUTS", "[...OUTS]", "outputs"),
     ];

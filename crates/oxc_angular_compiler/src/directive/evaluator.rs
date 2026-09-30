@@ -863,11 +863,15 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         if l.operator == LogicalOperator::Coalesce {
             return Value::Dynamic;
         }
+        // ngtsc evaluates both operands, and either being dynamic makes the
+        // result dynamic. An import only matters when it's the left operand
+        // (which picks the result) or the operand picked: `'a' || NAME` is
+        // `'a'` whatever `NAME` is.
         let left = self.eval(&l.left, depth, frame);
         let right = self.eval(&l.right, depth, frame);
         match (left, right) {
             (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
-            (value, _) | (_, value) if value.is_import() => value,
+            (left, _) if left.is_import() => left,
             (left, right) => match (l.operator, left.truthy()) {
                 (LogicalOperator::And, true) | (LogicalOperator::Or, false) => right,
                 _ => left,
