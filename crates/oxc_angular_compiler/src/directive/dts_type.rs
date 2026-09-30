@@ -201,23 +201,31 @@ impl TypePrinter<'_, '_> {
     /// resolves to by its own name. An enum member (`E.A`, `NS.E.A`) stays as
     /// written, since ngtsc can't emit one at all.
     ///
-    /// An import-equals alias (`import A = NS`, `import C = NS.T`) stands for
-    /// its target, as ngtsc resolves it: `A.T` and `C` are written `T`. An
-    /// alias of another module (`import R = require('m')`, or of an import) is
-    /// that module's; ngtsc writes the bare name there, which doesn't resolve.
+    /// An import-equals alias (`import A = NS`, `import C = NS.T`, or one
+    /// declared in a namespace, `NS.A`) stands for its target, as ngtsc
+    /// resolves it: `A.T`, `C` and `NS.A` are written as the name of the
+    /// declaration they resolve to. An alias of another module
+    /// (`import R = require('m')`, or of an import) is that module's; ngtsc
+    /// writes the bare name there, which doesn't resolve.
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
         let mut parts = std::vec::Vec::new();
         entity_parts(name, &mut parts)?;
         // Aliases can name aliases; a cycle is a TypeScript error.
         for _ in 0..16 {
-            match self.scope.alias(parts[0]) {
-                None => return Some(self.resolved_name(&parts)),
-                Some(AliasTarget::Module(_)) => {
+            let (len, target) = match self.scope.alias(parts[0]) {
+                Some(target) => (1, target),
+                None => match self.scope.namespace_alias(&parts) {
+                    Some(found) => found,
+                    None => return Some(self.resolved_name(&parts)),
+                },
+            };
+            match target {
+                AliasTarget::Module(_) => {
                     self.other_module = true;
                     return Some(parts.join("."));
                 }
-                Some(AliasTarget::Entity(target)) => {
-                    parts.splice(0..1, target);
+                AliasTarget::Entity(target) => {
+                    parts.splice(0..len, target);
                 }
             }
         }

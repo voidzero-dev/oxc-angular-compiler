@@ -292,6 +292,147 @@ export class Dir {{
     }
 }
 
+/// Declarations for [`namespace_member_aliases_are_typed_like_their_target`]
+/// and [`namespace_member_aliases_of_other_modules_and_globals`]: import-equals
+/// aliases declared in namespaces, of names that namespace, an enclosing one
+/// or the file declares.
+const NAMESPACE_ALIASES: &str = "import * as ng from '@angular/core';
+import * as oth from './other';
+export class Local { a = 1; }
+export namespace Local { export interface M { m: 1 } }
+export function Fn() {}
+export namespace Fn { export interface Z { z: 1 } }
+export enum En { A }
+export namespace En { export interface Q { q: 1 } }
+export namespace Other { export interface T { c: 1 } export namespace Deep { export interface U { d: 1 } } }
+export namespace NS {
+  export import Alias = Local;
+  export namespace Inner { export import Alias2 = Local; export import Up = Alias; }
+  export import A1 = Local;
+  export import A2 = A1;
+  export import OT = Other.T;
+  export import O = Other;
+  export import OD = Other.Deep;
+  export class In2 { i = 1; }
+  export namespace In2 { export interface W { w: 1 } }
+  export import Rel = In2;
+  export import FA = Fn;
+  export import EA = En;
+  export import Core = ng;
+  export import CoreE = ng.ElementRef;
+  export import Oth = oth;
+  export import OthT = oth.FooNs.T;
+  export import NF = Intl.NumberFormat;
+  export import G = Inner.Alias2;
+  export import N2 = NS2;
+}
+export namespace NS2 { export import B = NS.Alias; export interface V { v: 1 } }
+export class Local3 { b = 1; }
+export namespace Local3 { export import Self = Local3; export import MM = Local.M; }
+import X = NS.Alias;
+import Y = NS.Inner;
+";
+
+/// `accept_members` for [`NAMESPACE_ALIASES`] with `types`.
+fn namespace_alias_members(types: &[&str]) -> Vec<String> {
+    accept_members(&format!(
+        "import {{Directive, Input}} from '@angular/core';
+{NAMESPACE_ALIASES}@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+        members_typed(types)
+    ))
+}
+
+/// An alias declared in a namespace (`NS.Alias`, `NS.Inner.Alias2`, an alias
+/// of an alias, or one whose target is named from the namespace's scope) is
+/// written as the declaration it resolves to: ngtsc 22.1.7 wrote each expected
+/// type for [`NAMESPACE_ALIASES`], one type per compile.
+#[test]
+fn namespace_member_aliases_are_typed_like_their_target() {
+    let cases = [
+        ("NS.Alias", "Local"),
+        ("NS.Alias.M", "M"),
+        ("NS.Inner.Alias2", "Local"),
+        ("NS.Inner.Alias2.M", "M"),
+        ("NS.Inner.Up", "Local"),
+        ("NS.A2", "Local"),
+        ("NS.A2.M", "M"),
+        ("NS.OT", "T"),
+        ("NS.O.T", "T"),
+        ("NS.O.Deep.U", "U"),
+        ("NS.OD.U", "U"),
+        ("NS.Rel", "In2"),
+        ("NS.Rel.W", "W"),
+        ("NS.In2", "In2"),
+        ("NS.FA.Z", "Z"),
+        ("NS.EA", "En"),
+        ("NS.EA.Q", "Q"),
+        ("NS.G", "Local"),
+        ("NS.N2.V", "V"),
+        ("NS.N2.B", "Local"),
+        ("NS2.B", "Local"),
+        ("Local3.Self", "Local3"),
+        ("Local3.MM", "M"),
+        ("X", "Local"),
+        ("X.M", "M"),
+        ("Y.Alias2", "Local"),
+        ("Y.Up", "Local"),
+        ("Array<NS.Alias>", "Array<Local>"),
+        ("typeof NS.Alias", "typeof NS.Alias"),
+        ("NS.Alias | NS.A2", "Local | Local"),
+        ("{ k: NS.Inner.Alias2 }", "{ k: Local; }"),
+    ];
+    let types: Vec<&str> = cases.iter().map(|(ty, _)| *ty).collect();
+    let expected: Vec<&str> = cases.iter().map(|(_, expected)| *expected).collect();
+    assert_eq!(namespace_alias_members(&types), expect_members(&expected));
+}
+
+/// A namespace member alias of another module, `@angular/core` or a global
+/// follows the rules for a top-level alias (see
+/// `import_equals_aliases_of_other_modules_and_globals`). ngtsc 22.1.7 writes
+/// the bare `ElementRef`, `Foo`, `T` (none of which resolve in its `.d.ts`)
+/// and `NumberFormat`. It throws on the enum member `NS.EA.A`, which oxc
+/// writes as the member it resolves to, like `E.A`.
+#[test]
+fn namespace_member_aliases_of_other_modules_and_globals() {
+    let cases = [
+        ("NS.Core.ElementRef", "i0.ElementRef"),
+        ("NS.CoreE", "i0.ElementRef"),
+        ("NS.Oth.Foo", "unknown"),
+        ("NS.OthT", "unknown"),
+        ("NS.NF", "Intl.NumberFormat"),
+        ("NS.EA.A", "En.A"),
+    ];
+    let types: Vec<&str> = cases.iter().map(|(ty, _)| *ty).collect();
+    let expected: Vec<&str> = cases.iter().map(|(_, expected)| *expected).collect();
+    assert_eq!(namespace_alias_members(&types), expect_members(&expected));
+}
+
+/// A transform that's a global declared outside the file (the DOM's `atob`, a
+/// project's `declare function`) is assumed to be a function but can't be
+/// inspected, so its type is `unknown`, like an imported transform's. ngtsc
+/// 22.1.7 reads the lib and writes `string` for `atob` and `any` for `alert`.
+/// A function of TypeScript's ES lib (`parseInt`) is typed.
+#[test]
+fn global_transforms_declared_outside_the_file_are_unknown() {
+    let source = "import {Directive, Input} from '@angular/core';
+const t = atob;
+@Directive({selector: '[d]', inputs: [{name: 'x0', transform: alert}]})
+export class Dir {
+  x0!: string;
+  @Input({transform: atob}) x1!: string;
+  @Input({transform: t}) x2!: string;
+  @Input({transform: parseInt}) x3!: number;
+}
+";
+    assert_eq!(
+        accept_members(source),
+        expect_members(&["unknown", "unknown", "unknown", "string"])
+    );
+}
+
 /// A name in a namespace merged with an enum (`E.T`) is shortened like any
 /// other qualified local name, as ngtsc 22.1.7 does: only an actual enum
 /// member (`E.A`, also from a second declaration of the enum) is kept as

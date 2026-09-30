@@ -181,6 +181,102 @@ pub(crate) enum AliasTarget<'a> {
     Entity(std::vec::Vec<&'a str>),
 }
 
+impl<'a> AliasTarget<'a> {
+    fn of(reference: &'a TSModuleReference<'a>) -> Option<Self> {
+        fn parts<'a>(name: &'a TSTypeName<'a>, out: &mut std::vec::Vec<&'a str>) -> Option<()> {
+            match name {
+                TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
+                TSTypeName::QualifiedName(q) => {
+                    parts(&q.left, out)?;
+                    out.push(q.right.name.as_str());
+                }
+                TSTypeName::ThisExpression(_) => return None,
+            }
+            Some(())
+        }
+        Some(match reference {
+            TSModuleReference::ExternalModuleReference(m) => {
+                AliasTarget::Module(m.expression.value.as_str())
+            }
+            TSModuleReference::IdentifierReference(id) => {
+                AliasTarget::Entity(std::vec![id.name.as_str()])
+            }
+            TSModuleReference::QualifiedName(q) => {
+                let mut out = std::vec::Vec::new();
+                parts(&q.left, &mut out)?;
+                out.push(q.right.name.as_str());
+                AliasTarget::Entity(out)
+            }
+        })
+    }
+}
+
+/// A declaration directly in a namespace, as far as names resolve through it.
+enum NamespaceMember<'a> {
+    Namespace(&'a TSNamespaceDeclaration<'a>),
+    Alias(&'a TSModuleReference<'a>),
+    Other,
+}
+
+/// The declarations directly in the namespace `ns`, by name.
+fn namespace_members<'a>(
+    ns: &'a TSNamespaceDeclaration<'a>,
+) -> std::vec::Vec<(&'a str, NamespaceMember<'a>)> {
+    let statements = match &ns.body {
+        // `namespace A.B {}`: `B` is the only member of `A`.
+        TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+            return std::vec![(inner.id.name.as_str(), NamespaceMember::Namespace(inner))];
+        }
+        TSNamespaceDeclarationBody::TSModuleBlock(block) => &block.body,
+    };
+    let mut members = std::vec::Vec::new();
+    for statement in statements {
+        let decl = match statement {
+            Statement::ExportDeclaration(export) => &export.declaration,
+            _ => match statement.as_declaration() {
+                Some(decl) => decl,
+                None => continue,
+            },
+        };
+        match decl {
+            Declaration::TSNamespaceDeclaration(inner) => {
+                members.push((inner.id.name.as_str(), NamespaceMember::Namespace(inner)));
+            }
+            Declaration::TSImportEqualsDeclaration(alias) => {
+                members.push((
+                    alias.id.name.as_str(),
+                    NamespaceMember::Alias(&alias.module_reference),
+                ));
+            }
+            Declaration::VariableDeclaration(vars) => {
+                for var in &vars.declarations {
+                    let mut bindings = std::vec::Vec::new();
+                    collect_bindings(&var.id, &mut std::vec::Vec::new(), &mut bindings);
+                    members
+                        .extend(bindings.into_iter().map(|(id, _)| (id, NamespaceMember::Other)));
+                }
+            }
+            Declaration::FunctionDeclaration(f) => {
+                members.extend(f.id.as_ref().map(|id| (id.name.as_str(), NamespaceMember::Other)));
+            }
+            Declaration::ClassDeclaration(c) => {
+                members.extend(c.id.as_ref().map(|id| (id.name.as_str(), NamespaceMember::Other)));
+            }
+            Declaration::TSEnumDeclaration(e) => {
+                members.push((e.id.name.as_str(), NamespaceMember::Other));
+            }
+            Declaration::TSInterfaceDeclaration(i) => {
+                members.push((i.id.name.as_str(), NamespaceMember::Other));
+            }
+            Declaration::TSTypeAliasDeclaration(t) => {
+                members.push((t.id.name.as_str(), NamespaceMember::Other));
+            }
+            _ => {}
+        }
+    }
+    members
+}
+
 /// A top-level variable binding.
 enum Variable<'a> {
     /// A name bound by a declaration with an initializer, and the path to it
@@ -689,31 +785,64 @@ impl<'a> FileScope<'a> {
 
     /// What `name` stands for when it's a top-level import-equals alias.
     pub(crate) fn alias(&self, name: &str) -> Option<AliasTarget<'a>> {
-        fn parts<'a>(name: &'a TSTypeName<'a>, out: &mut std::vec::Vec<&'a str>) -> Option<()> {
-            match name {
-                TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
-                TSTypeName::QualifiedName(q) => {
-                    parts(&q.left, out)?;
-                    out.push(q.right.name.as_str());
-                }
-                TSTypeName::ThisExpression(_) => return None,
+        AliasTarget::of(self.aliases.get(name)?)
+    }
+
+    /// For the qualified name `parts` (head first) whose head is a namespace
+    /// the file declares, the first member that's an import-equals alias
+    /// declared in the namespace before it (`NS.A` for
+    /// `namespace NS { export import A = X; }`): how many parts it covers, and
+    /// what they stand for. The alias's target is named from inside its
+    /// namespace, so its head resolves there first, then in the enclosing
+    /// namespaces, then at the top level: `X` is `["NS", "X"]` when `NS`
+    /// declares `X`.
+    pub(crate) fn namespace_alias<'p>(&self, parts: &[&'p str]) -> Option<(usize, AliasTarget<'p>)>
+    where
+        'a: 'p,
+    {
+        let mut decls = self.namespaces.get(parts.first()?)?.clone();
+        // The members of `parts[..=k]`, for each namespace `k` walked through.
+        let mut scopes: std::vec::Vec<std::vec::Vec<(&'a str, NamespaceMember<'a>)>> =
+            std::vec::Vec::new();
+        for (i, name) in parts.iter().enumerate().skip(1) {
+            let members: std::vec::Vec<_> =
+                decls.iter().flat_map(|ns| namespace_members(ns)).collect();
+            let alias = members.iter().find_map(|(n, m)| match m {
+                NamespaceMember::Alias(reference) if n == name => Some(*reference),
+                _ => None,
+            });
+            decls = members
+                .iter()
+                .filter_map(|(n, m)| match m {
+                    NamespaceMember::Namespace(ns) if n == name => Some(*ns),
+                    _ => None,
+                })
+                .collect();
+            scopes.push(members);
+            if let Some(reference) = alias {
+                return Some((
+                    i + 1,
+                    match AliasTarget::of(reference)? {
+                        AliasTarget::Module(m) => AliasTarget::Module(m),
+                        AliasTarget::Entity(target) => {
+                            let head = target[0];
+                            let path = match scopes
+                                .iter()
+                                .rposition(|members| members.iter().any(|(n, _)| *n == head))
+                            {
+                                Some(k) => parts[..=k].iter().copied().chain(target).collect(),
+                                None => target,
+                            };
+                            AliasTarget::Entity(path)
+                        }
+                    },
+                ));
             }
-            Some(())
+            if decls.is_empty() {
+                return None;
+            }
         }
-        Some(match self.aliases.get(name)? {
-            TSModuleReference::ExternalModuleReference(m) => {
-                AliasTarget::Module(m.expression.value.as_str())
-            }
-            TSModuleReference::IdentifierReference(id) => {
-                AliasTarget::Entity(std::vec![id.name.as_str()])
-            }
-            TSModuleReference::QualifiedName(q) => {
-                let mut out = std::vec::Vec::new();
-                parts(&q.left, &mut out)?;
-                out.push(q.right.name.as_str());
-                AliasTarget::Entity(out)
-            }
-        })
+        None
     }
 
     /// Whether `function` is the top-level function declaration called `name`
