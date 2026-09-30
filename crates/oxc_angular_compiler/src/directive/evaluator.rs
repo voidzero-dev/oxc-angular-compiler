@@ -603,6 +603,45 @@ impl<'a> FileScope<'a> {
         self.imports.get(name).copied()
     }
 
+    /// The expression the top-level variable `name` is initialized with: its
+    /// initializer or, destructured from an object or array literal, the part
+    /// it binds (`transform` in `const { transform } = { transform: f }` is `f`).
+    fn initializer(&self, name: &str) -> Option<&'a Expression<'a>> {
+        let Variable::Init(init, path) = self.variables.get(name)? else { return None };
+        let mut init: &'a Expression<'a> = init;
+        for key in path {
+            init = match (key, init.without_parentheses()) {
+                (PathKey::Key(k), Expression::ObjectExpression(obj)) => {
+                    // A spread could replace the property: only a literal one counts.
+                    let spread = |p: &ObjectPropertyKind<'_>| {
+                        matches!(p, ObjectPropertyKind::SpreadProperty(_))
+                    };
+                    if obj.properties.iter().any(spread) {
+                        return None;
+                    }
+                    obj.properties.iter().rev().find_map(|p| match p {
+                        ObjectPropertyKind::ObjectProperty(p)
+                            if !p.computed && p.key.static_name().is_some_and(|n| n == *k) =>
+                        {
+                            Some(&p.value)
+                        }
+                        _ => None,
+                    })?
+                }
+                // Up to the element, every one must be a plain expression.
+                (PathKey::Index(i), Expression::ArrayExpression(arr)) => {
+                    let before = arr.elements.get(..=*i)?;
+                    if !before.iter().all(ArrayExpressionElement::is_expression) {
+                        return None;
+                    }
+                    before[*i].as_expression()?
+                }
+                _ => return None,
+            };
+        }
+        Some(init)
+    }
+
     /// The type parameters of the innermost same-file function or static
     /// method (the functions the evaluator calls) whose body contains `span`.
     fn enclosing_type_parameters(&self, span: Span) -> Option<&'a TSTypeParameterDeclaration<'a>> {
@@ -1298,15 +1337,33 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         // doesn't make a function expression opaque the way
                         // naming it does (see `identifier`).
                         (Expression::Identifier(id), None) if p.shorthand => {
-                            match frame.bindings.get(id.name.as_str()) {
+                            let name = id.name.as_str();
+                            match frame.bindings.get(name) {
                                 Some(binding) => binding.value.clone(),
-                                None => self.eval(&p.value, depth, frame),
+                                None => match self.slot(frame.block, name) {
+                                    Some(slot) => self.stored(slot, depth),
+                                    None => self.eval(&p.value, depth, frame),
+                                },
                             }
                         }
                         (value, None) => self.eval(value, depth, frame),
                     };
-                    let origin = self.origin(&p.value, frame);
-                    props.push(Prop { key, value, expr: Some(&p.value), origin });
+                    let mut expr = &p.value;
+                    let mut origin = self.origin(&p.value, frame);
+                    // A shorthand for a variable stands for its initializer
+                    // (what ngtsc emits, or points its error at).
+                    if let Expression::Identifier(id) = &p.value
+                        && p.shorthand
+                        && !frame.bindings.contains_key(id.name.as_str())
+                        && let Some((block, name)) = self.slot(frame.block, id.name.as_str())
+                        && let Some(init) =
+                            self.consts.scope().declarations(block).initializer(name)
+                        && matches!(value, Value::Function(_) | Value::Dynamic)
+                    {
+                        expr = init;
+                        origin = self.origin(init, &Frame::at(block));
+                    }
+                    props.push(Prop { key, value, expr: Some(expr), origin });
                 }
                 ObjectPropertyKind::SpreadProperty(spread) => {
                     match self.eval(&spread.argument, depth, frame) {
@@ -1511,7 +1568,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let file = self.consts.scope();
         let scope = file.declarations(block);
         if scope.variables.contains_key(name) || scope.enums.contains_key(name) {
-            return Some(self.stored((block, name), depth));
+            return Some(match self.stored((block, name), depth) {
+                // A function expression isn't analyzable through the
+                // variable's name (ngtsc wraps it in a dynamic value for that
+                // identifier).
+                Value::Function(_) => Value::Dynamic,
+                value => value,
+            });
         }
         if let Some((function, overloads)) = scope.functions.get(name) {
             let kind = RefKind::Function(function, *overloads);
@@ -1648,12 +1711,28 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let (block, name) = slot;
         match variable {
             // Declarations don't see the caller's parameters.
+            // A function expression initializer stays analyzable (ngtsc visits
+            // it as is); naming the variable makes it opaque (see
+            // `identifier`), but a shorthand property doesn't (see `object`).
             Variable::Init(init, path) => {
+                let scope = self.consts.scope().declarations(block);
+                if let Some(function) = scope.initializer(name).and_then(function_value) {
+                    return function;
+                }
                 let mut value = self.eval(init, depth, &Frame::at(block));
                 for key in path {
                     value = match key {
                         PathKey::Index(i) => self.member(value, Key::Num(*i as f64), depth),
-                        PathKey::Key(k) => self.member(value, Key::Str(k), depth),
+                        // Destructuring reads a property as it is, so a
+                        // function expression there stays analyzable too.
+                        PathKey::Key(k) => match value {
+                            Value::Object(props) => props
+                                .into_iter()
+                                .rev()
+                                .find(|p| p.key == *k)
+                                .map_or(Value::Undefined, |p| p.value),
+                            value => self.member(value, Key::Str(k), depth),
+                        },
                         PathKey::Unknown => Value::Dynamic,
                     };
                     if matches!(value, Value::Dynamic) {
@@ -1858,6 +1937,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         // Each argument's value, and where it was written.
         let mut args = std::vec::Vec::new();
         let mut origins = std::vec::Vec::new();
+        // A function expression passed as an argument (or as a default value)
+        // stays analyzable in the parameter it's bound to, as ngtsc binds the
+        // value as it is; but not after a spread, or in a rest parameter.
+        let mut functions = std::vec::Vec::new();
         let mut spread_seen = false;
         for arg in &call.arguments {
             if let Argument::SpreadElement(spread) = arg {
@@ -1870,14 +1953,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 args.extend(values);
             } else {
                 let expr = arg.to_expression();
-                let value = self.eval(expr, depth, frame);
-                // A function expression passed as an argument (or as a default
-                // value) stays analyzable in the parameter, as ngtsc binds the
-                // value as it is, up to the first spread.
-                args.push(match function_value(expr) {
-                    Some(function) if !spread_seen => function,
-                    _ => value,
-                });
+                if !spread_seen {
+                    functions.push(function_value(expr));
+                }
+                args.push(self.eval(expr, depth, frame));
                 origins.push(self.origin(expr, frame));
             }
         }
@@ -1895,8 +1974,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         Binding::new(value, self.origin(init, &scope))
                     })
                 }
-                arg => arg.map(|value| {
-                    Binding::new(value.clone(), origins.get(i + offset).copied().flatten())
+                arg => arg.map(|arg| {
+                    let function = functions.get(i + offset).cloned().flatten();
+                    Binding::new(
+                        function.unwrap_or_else(|| arg.clone()),
+                        origins.get(i + offset).copied().flatten(),
+                    )
                 }),
             };
             let binding = binding.unwrap_or(Binding::new(Value::Undefined, None));

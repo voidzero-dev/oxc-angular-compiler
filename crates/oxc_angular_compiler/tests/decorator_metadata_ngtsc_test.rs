@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 506, "fixtures compared");
+    assert_eq!(compared, 537, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -412,22 +412,32 @@ fn transforms_using_the_parameters_of_a_called_function_are_reported() {
         // (the snapshot's `scope-shadowed*` probes are the names that are).
         (
             "function make(name: string) { return [{ name, transform: (v: string) => arguments.length }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name, transform: (v: string) => { { const name = v; } return name; } }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name, transform: (v: string) => ({ [name]: v }) }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name, transform: (v: string) => { switch (name) { case 'x': let name = v; return name; } return v; } }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name, transform: function (v: string) { return (() => name)(); } }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         // Types are erased (the snapshot's `scope-typeOnly-*` probes), but the
@@ -435,27 +445,39 @@ fn transforms_using_the_parameters_of_a_called_function_are_reported() {
         // `satisfies` and `<T>x`, a parameter's default and a call's arguments.
         (
             "function make(name: string) { return [{ name: 'x', transform: (v: string) => name! }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name: 'x', transform: (v: string) => name as typeof name }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name: 'x', transform: (v: string) => name satisfies string }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name: 'x', transform: (v: string) => <typeof name>name }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function make(name: string) { return [{ name: 'x', transform: (v: string, d: typeof name = name) => v }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
         (
             "function id<T>(v: T) { return v; }
 function make(name: string) { return [{ name: 'x', transform: (v: string) => id<typeof name>(name) }]; }",
+            "inputs: make('x')",
+            "@Directive.inputs",
             "make('x')",
         ),
     ];

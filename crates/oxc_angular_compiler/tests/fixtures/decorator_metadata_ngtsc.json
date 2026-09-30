@@ -6023,6 +6023,448 @@
       "diagnosticSpans": []
     },
     {
+      "name": "probe: shorthand-constArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-constArrowNamedSame",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform: transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[156, 165]]
+    },
+    {
+      "name": "probe: shorthand-constArrowNamedOther",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst t = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform: t }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[148, 149]]
+    },
+    {
+      "name": "probe: shorthand-constFunctionExpression",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = function (v: string) { return v.length; };\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",function(v){returnv.length;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-letArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nlet transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-constArrowTyped",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform: (v: string) => number = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-constArrowParenthesized",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = ((v: string) => v.length);\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[68, 93]]
+    },
+    {
+      "name": "probe: shorthand-constArrowAs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = ((v: string) => v.length) as any;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[68, 100]]
+    },
+    {
+      "name": "probe: shorthand-constChain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst a = (v: string) => v.length;\nconst transform = a;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[103, 104]]
+    },
+    {
+      "name": "probe: shorthand-inConstObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\nconst X = { name: 'x', transform };\n@Directive({ selector: '[d]', inputs: [X] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-constArrowUntyped",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v) => v;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform function first parameter must have a type Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[68, 76]]
+    },
+    {
+      "name": "probe: shorthand-constArrowGeneric",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = <T>(v: T) => v;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform function cannot be generic Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[68, 82]]
+    },
+    {
+      "name": "probe: shorthand-objectDestructured",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst { transform } = { transform: (v: string) => v.length };\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-exportedConstArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nexport const transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-varRedeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nvar transform = (v: string) => v.length;\nvar transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-spreadConstObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\nconst B = { transform };\n@Directive({ selector: '[d]', inputs: [{ name: 'x', ...B }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-constArrowUnexportedType",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\ninterface Foo { a: string }\nconst transform = (v: Foo) => 1;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Symbol must be exported in order to be used as the type of an Input transform function"
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[100, 103]]
+    },
+    {
+      "name": "probe: shorthand-constArrowClash",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; static ngAcceptInputType_x: string; }\n"
+      },
+      "diagnostics": [
+        "Class cannot have both a transform function on Input x and a static member called ngAcceptInputType_x"
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[68, 91]]
+    },
+    {
+      "name": "probe: shorthand-arrayDestructured",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst [transform] = [(v: string) => v.length];\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-objectDestructuredNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst t = (v: string) => v.length;\nconst { transform } = { transform: t };\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[120, 121]]
+    },
+    {
+      "name": "probe: shorthand-nestedDestructured",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst { o: { transform } } = { o: { transform: (v: string) => v.length } };\n@Directive({ selector: '[d]', inputs: [{ name: 'x', transform }] })\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-memberConstArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\n@Directive({ selector: '[d]' })\nexport class D { @Input({ transform }) x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: shorthand-memberConstArrowNamedSame",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\n@Directive({ selector: '[d]' })\nexport class D { @Input({ transform: transform }) x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[162, 171]]
+    },
+    {
+      "name": "probe: shorthand-memberConstArrowNamedOther",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst t = (v: string) => v.length;\n@Directive({ selector: '[d]' })\nexport class D { @Input({ transform: t }) x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[154, 155]]
+    },
+    {
+      "name": "probe: shorthand-memberOptionsConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import { Directive, Input } from '@angular/core';\nconst transform = (v: string) => v.length;\nconst OPTS = { transform };\n@Directive({ selector: '[d]' })\nexport class D { @Input(OPTS) x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadConstFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nconst args = ['x', (v: string) => v.trim()] as const;\n@Directive({selector: '[d]', inputs: make(...args)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[173, 174]]
+    },
+    {
+      "name": "probe: scope-spreadFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\n@Directive({selector: '[d]', inputs: make('x', ...[(v: string) => v.trim()])})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[123, 124]]
+    },
+    {
+      "name": "probe: scope-restFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(...a: any[]) { return [{name: a[0], transform: a[1]}]; }\n@Directive({selector: '[d]', inputs: make('x', (v: string) => v.trim())})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[120, 124]]
+    },
+    {
+      "name": "probe: scope-restAfterParamFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(name: string, ...ts: any[]) { return [{name, transform: ts[0]}]; }\n@Directive({selector: '[d]', inputs: make('x', (v: string) => v.trim())})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[129, 134]]
+    },
+    {
+      "name": "probe: scope-spreadRestThroughFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nfunction outer(...a: any[]) { return make(...a); }\n@Directive({selector: '[d]', inputs: outer('x', (v: string) => v.trim())})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[123, 124]]
+    },
+    {
+      "name": "probe: scope-functionAfterSpread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nconst pre = ['x'];\n@Directive({selector: '[d]', inputs: make(...pre, (v: string) => v.trim())})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "diagnosticSpans": [[123, 124]]
+    },
+    {
       "name": "probe: shortCircuit-metaOr",
       "origin": "probe",
       "files": {
