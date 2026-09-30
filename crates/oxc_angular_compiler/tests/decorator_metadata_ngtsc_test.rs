@@ -377,6 +377,60 @@ export class Dir {}
     assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",fn]}"#), "{}", result.code);
 }
 
+/// The same for an `@Input(...)` argument: ngtsc 22.1.7 reads these from
+/// `./shared` (with `export const OPTS = {alias: 'y'}`, it compiles the input
+/// as `y`). oxc can't, so it reports them instead of compiling the input
+/// without its alias, `required` flag or transform.
+#[test]
+fn input_decorator_options_imported_from_another_module_are_reported() {
+    let cases = [
+        ("@Input(OPTS) x: any;", "OPTS", "OPTS"),
+        ("@Input((OPTS)) x: any;", "OPTS", "(OPTS)"),
+        ("@Input(NAME) x: any;", "NAME", "NAME"),
+        ("@Input(ns.OPTS) x: any;", "OPTS", "ns.OPTS"),
+        ("@Input({...OPTS}) x: any;", "OPTS", "{...OPTS}"),
+        ("@Input({alias: 'z', ...OPTS}) x: any;", "OPTS", "{alias: 'z', ...OPTS}"),
+        ("@Input(LOCAL) x: any;", "OPTS", "LOCAL"),
+        ("@Input({alias: NAME}) x: any;", "NAME", "{alias: NAME}"),
+        ("@Input({required: REQ}) x: any;", "REQ", "{required: REQ}"),
+        ("@Input(OPTS) set x(v: any) {}", "OPTS", "OPTS"),
+    ];
+    for (member, name, span) in cases {
+        let source = format!(
+            "import {{Directive, Input}} from '@angular/core';
+import {{OPTS, NAME, REQ}} from './shared';
+import * as ns from './shared';
+const LOCAL = OPTS;
+@Directive({{selector: '[d]'}})
+export class Dir {{
+  {member}
+}}
+"
+        );
+        let message = format!(
+            "@Input depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(message, span.to_string())],
+            "{member}"
+        );
+    }
+
+    // An imported transform is a reference: nothing to evaluate.
+    let source = "import {Directive, Input} from '@angular/core';
+import {fn} from './shared';
+@Directive({selector: '[d]'})
+export class Dir {
+  @Input({alias: 'y', transform: fn}) x: any;
+}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    assert!(strip(&result.code).contains(r#"inputs:{x:[2,"y","x",fn]}"#), "{}", result.code);
+}
+
 /// A transform returned by a function the metadata calls is emitted where the
 /// directive is compiled, outside that function. A parameter becomes the
 /// argument it was passed (the snapshot's `scope-*` probes); anything else that

@@ -675,16 +675,26 @@ pub(super) fn config_property<'a>(
     })
 }
 
-/// ngtsc's error for `value` in `@Directive.{field}`, or, when the value comes
-/// from another module, why oxc can't tell (ngtsc would read that file).
-fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) -> String {
+/// ngtsc's error for a `value` of the wrong type (`message` and the line
+/// describing the value), or, when the value comes from another module, why oxc
+/// can't tell: ngtsc would read that file, and `subject` depends on it.
+pub(super) fn value_error(
+    subject: &str,
+    message: impl FnOnce() -> String,
+    value: &Value<'_>,
+) -> String {
     match value {
         Value::Reference { name, .. } if value.is_import() => format!(
-            "@Directive.{field} depends on '{name}', which is imported from another module. \
+            "{subject} depends on '{name}', which is imported from another module. \
              OXC compiles one file at a time and cannot evaluate values from other files."
         ),
         _ => format!("{}{}", message(), value.wrong_type_suffix()),
     }
+}
+
+/// [`value_error`] for `value` in `@Directive.{field}`.
+fn io_error(field: &str, message: impl FnOnce() -> String, value: &Value<'_>) -> String {
+    value_error(&format!("@Directive.{field}"), message, value)
 }
 
 /// oxc's error for a transform written inside a function that the metadata
@@ -1064,6 +1074,17 @@ pub fn decorator_io_errors<'a>(
             if let Some(options) = options {
                 let span = options.span();
                 let options = evaluator.evaluate(options);
+                // ngtsc reads imported options (or an imported alias or
+                // `required`) from their file; oxc can't, and compiling the
+                // input without them would be a different binding.
+                let imported = std::iter::once(&options)
+                    .chain(
+                        ["alias", "required"].iter().filter_map(|k| Some(&options.prop(k)?.value)),
+                    )
+                    .find(|value| value.is_import());
+                if let Some(value) = imported {
+                    return Some((value_error("@Input", String::new, value), span));
+                }
                 if let Some(transform) = options.prop("transform") {
                     let error =
                         transform_error(transform, None, &name, class, consts.scope(), span)
