@@ -3748,6 +3748,331 @@
       },
       "dtsImports": [],
       "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (value: string) => value.trim()}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(value)=>value.trim()]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { const value = v.trim(); return value; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{constvalue=v.trim();returnvalue;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { function value(s: string) { return s; } return value(v); }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{functionvalue(s){returns;}returnvalue(v);}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByLoopAndCatch",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { let r = v; for (const value of [v]) { r += value; } try { r += v; } catch (value) { r += value; } return r; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{letr=v;for(constvalueof[v]){r+=value;}try{r+=v;}catch(value){r+=value;}returnr;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedInNestedArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { var q = () => { var value = 2; return value; }; return q() + v; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{varq=()=>{varvalue=2;returnvalue;};returnq()+v;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByClass",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { class value {}; return new value() + v; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{classvalue{};returnnewvalue()+v;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-ownArguments",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: function (v: string) { return arguments.length ? v : v + v; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",function(v){returnarguments.length?v:v+v;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-ownThis",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: function (v: string) { return this ? v : (() => arguments[0])(); }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",function(v){returnthis?v:(()=>arguments[0])();}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-hoistedVar",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => { if (v) { var value = v; } return value; }}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>{if(v){varvalue=v;}returnvalue;}]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByClassName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: (v: string) => new (class value { m() { return value; } })().m() && v}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>new(classvalue{m(){returnvalue;}})().m()&&v]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-shadowedByDestructuredParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction make(value: string) { return [{name: 'x', transform: ({value}: {value: string}) => value}]; }\n@Directive({selector: '[d]', inputs: make('v')})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",({value})=>value]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadConstArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nconst args = ['x', booleanAttribute] as const;\n@Directive({selector: '[d]', inputs: make(...args)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-restParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(...a: any[]) { return [{name: a[0], transform: a[1]}]; }\n@Directive({selector: '[d]', inputs: make('x', booleanAttribute)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-restAfterParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, ...ts: any[]) { return [{name, transform: ts[0]}]; }\n@Directive({selector: '[d]', inputs: make('x', booleanAttribute)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadArrayLiteral",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\n@Directive({selector: '[d]', inputs: make(...['x', toBool])})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadAfterArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\n@Directive({selector: '[d]', inputs: make('x', ...[toBool])})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadRestThrough",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nfunction outer(...a: any[]) { return make(...a); }\n@Directive({selector: '[d]', inputs: outer('x', toBool)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-restLocalFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, ...ts: any[]) { return [{name, transform: ts[0]}]; }\n@Directive({selector: '[d]', inputs: make('x', toBool)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",toBool]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-spreadBeforeArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nexport function toBool(v: string) { return !!v; }\nfunction make(name: string, t: any, u: any) { return [{name, transform: u}]; }\nconst pre = ['x'];\n@Directive({selector: '[d]', inputs: make(...pre, toBool, booleanAttribute)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: scope-restSpreadImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, booleanAttribute} from '@angular/core';\nfunction make(name: string, t: any) { return [{name, transform: t}]; }\nfunction outer(name: string, ...a: any[]) { return make(name, ...a); }\n@Directive({selector: '[d]', inputs: outer('x', booleanAttribute)})\nexport class D { x: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
     }
   ]
 }

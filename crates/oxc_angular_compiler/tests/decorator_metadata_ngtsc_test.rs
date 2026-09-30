@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 254, "fixtures compared");
+    assert_eq!(compared, 274, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -392,6 +392,29 @@ fn transforms_using_the_parameters_of_a_called_function_are_reported() {
         (
             "function make() { return [{ name: 'x', transform: arguments[0] }]; }",
             "make(booleanAttribute)",
+        ),
+        // Scoped like JavaScript: only a nested non-arrow function has its own
+        // `arguments`, and a name declared in a block isn't in scope after it
+        // (the snapshot's `scope-shadowed*` probes are the names that are).
+        (
+            "function make(name: string) { return [{ name, transform: (v: string) => arguments.length }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name, transform: (v: string) => { { const name = v; } return name; } }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name, transform: (v: string) => ({ [name]: v }) }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name, transform: (v: string) => { switch (name) { case 'x': let name = v; return name; } return v; } }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name, transform: function (v: string) { return (() => name)(); } }]; }",
+            "make('x')",
         ),
     ];
     for (helper, inputs) in cases {
@@ -488,6 +511,14 @@ fn evaluation_is_bounded() {
         ),
         (format!("{header}class U {{ static a: any = U.a; }}\n{}", class("U.a")), Some(unreadable)),
         (format!("{header}enum E {{ A = E.A }}\n{}", class("[`${E.A}`]")), None),
+        // ... also where a spread argument's elements were written.
+        (
+            format!(
+                "{header}const A: any[] = [...A];\nfunction f(...a: any[]) {{ return a; }}\n{}",
+                class("f(...A)")
+            ),
+            None,
+        ),
         // Exponential growth.
         (
             format!(
@@ -498,6 +529,16 @@ fn evaluation_is_bounded() {
                 class("A63")
             ),
             Some(unreadable),
+        ),
+        (
+            format!(
+                "{header}const A0 = ['a'];\n{}function f(...a: any[]) {{ return a; }}\n{}",
+                (1..64)
+                    .map(|i| format!("const A{i} = [...A{0}, ...A{0}];\n", i - 1))
+                    .collect::<String>(),
+                class("f(...A63)")
+            ),
+            None,
         ),
         (
             format!(

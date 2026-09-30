@@ -13,17 +13,21 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 
 use oxc_ast::ast::{
-    Argument, ArrayExpression, ArrayExpressionElement, BinaryExpression, BindingPattern,
-    CallExpression, ChainElement, Class, ClassElement, ComputedMemberExpression,
-    ConditionalExpression, Declaration, ExportDefaultDeclarationKind, Expression, Function,
+    Argument, ArrayExpression, ArrayExpressionElement, ArrowFunctionBody, ArrowFunctionExpression,
+    BinaryExpression, BindingPattern, BlockStatement, CallExpression, CatchClause, ChainElement,
+    Class, ClassElement, ComputedMemberExpression, ConditionalExpression, Declaration,
+    ExportDefaultDeclarationKind, Expression, ForInStatement, ForOfStatement, ForStatement,
+    ForStatementInit, ForStatementLeft, FormalParameters, Function, FunctionBody,
     IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
     ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
-    Statement, StaticMemberExpression, Super, TSEnumDeclaration, TSEnumMemberName, TSLiteral,
-    TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator, TSTypeQueryExprName,
-    TemplateLiteral, ThisExpression, UnaryExpression,
+    Statement, StaticBlock, StaticMemberExpression, Super, SwitchStatement, TSEnumDeclaration,
+    TSEnumMemberName, TSLiteral, TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator,
+    TSTypeQueryExprName, TemplateLiteral, ThisExpression, UnaryExpression, VariableDeclaration,
+    VariableDeclarationKind,
 };
-use oxc_ast_visit::Visit;
+use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
+use oxc_syntax::scope::ScopeFlags;
 
 use crate::output::emitter::format_number_like_js;
 
@@ -518,6 +522,15 @@ struct Binding<'a> {
     /// For a parameter, the argument it was passed, when that can be written
     /// where the metadata is compiled (see [`Evaluator::origin`]).
     origin: Option<&'a Expression<'a>>,
+    /// For a rest parameter, where each of its elements was written, like
+    /// `origin` (see [`Evaluator::element_origins`]).
+    elements: Option<std::vec::Vec<Option<&'a Expression<'a>>>>,
+}
+
+impl<'a> Binding<'a> {
+    fn new(value: Value<'a>, origin: Option<&'a Expression<'a>>) -> Self {
+        Self { value, origin, elements: None }
+    }
 }
 
 /// A property key or index, as ngtsc's `accessHelper` receives it.
@@ -562,9 +575,92 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         {
             return binding.origin;
         }
-        let mut uses = UsesFrame { frame, found: false };
+        // `args[1]`, with `args` a parameter: the element's own origin.
+        if let Expression::ComputedMemberExpression(m) = expr
+            && let Expression::Identifier(id) = &m.object
+            && frame.bindings.contains_key(id.name.as_str())
+        {
+            return match self.eval(&m.expression, 0, frame) {
+                Value::Number(i) if i >= 0.0 && i.fract() == 0.0 => self
+                    .element_origins(&m.object, frame)
+                    .and_then(|elements| elements.get(i as usize).copied().flatten()),
+                _ => None,
+            };
+        }
+        let mut uses = UsesFrame::new(frame);
         uses.visit_expression(expr);
         (!uses.found).then_some(expr)
+    }
+
+    /// Where each element of the array `expr` (evaluated in `frame`) was
+    /// written, as [`Self::origin`] gives it, when that's known: for an array
+    /// literal, a top-level variable initialized with one, or a parameter
+    /// passed one (a rest parameter gets its arguments'). One entry per value
+    /// [`Self::spread`] gives for `expr`.
+    fn element_origins(
+        &self,
+        expr: &'a Expression<'a>,
+        frame: &Frame<'a>,
+    ) -> Option<std::vec::Vec<Option<&'a Expression<'a>>>> {
+        self.element_origins_at(expr, frame, 0)
+    }
+
+    fn element_origins_at(
+        &self,
+        expr: &'a Expression<'a>,
+        frame: &Frame<'a>,
+        depth: u16,
+    ) -> Option<std::vec::Vec<Option<&'a Expression<'a>>>> {
+        // Bounded like `eval`: cycles (`const A = [...A]`) and arrays that grow
+        // exponentially give up instead of overflowing or hanging.
+        if depth > MAX_DEPTH || !self.spend(1) {
+            return None;
+        }
+        let depth = depth + 1;
+        match expr {
+            Expression::ParenthesizedExpression(e) => {
+                self.element_origins_at(&e.expression, frame, depth)
+            }
+            Expression::TSAsExpression(e) => self.element_origins_at(&e.expression, frame, depth),
+            Expression::TSNonNullExpression(e) => {
+                self.element_origins_at(&e.expression, frame, depth)
+            }
+            Expression::ArrayExpression(arr) => {
+                let mut origins = std::vec::Vec::new();
+                for el in &arr.elements {
+                    match el {
+                        ArrayExpressionElement::SpreadElement(spread) => {
+                            let inner = self.element_origins_at(&spread.argument, frame, depth)?;
+                            if !self.spend(inner.len() as u32) {
+                                return None;
+                            }
+                            origins.extend(inner);
+                        }
+                        ArrayExpressionElement::Elision(_) => origins.push(None),
+                        _ => origins.push(self.origin(el.to_expression(), frame)),
+                    }
+                }
+                Some(origins)
+            }
+            Expression::Identifier(id) => {
+                let name = id.name.as_str();
+                if let Some(binding) = frame.bindings.get(name) {
+                    return match &binding.elements {
+                        Some(elements) => Some(elements.clone()),
+                        // An origin is written where the metadata is compiled.
+                        None => self.element_origins_at(binding.origin?, &Frame::default(), depth),
+                    };
+                }
+                match self.consts.scope().variables.get(name)? {
+                    // Top-level declarations don't see the caller's parameters.
+                    Variable::Init(init, path) if path.is_empty() => {
+                        self.element_origins_at(init, &Frame::default(), depth)
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Use up `amount` of the fuel; `false` once it has run out.
@@ -957,7 +1053,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             .filter_map(|m| name_of(&m.id))
             .map(|n| {
                 let value = Value::Reference { name: n.into(), kind: RefKind::Other };
-                (n, Binding { value, origin: None })
+                (n, Binding::new(value, None))
             })
             .collect();
         let frame = Frame { bindings, in_call: false };
@@ -1077,38 +1173,46 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         if !body.directives.is_empty() {
             return Value::Dynamic;
         }
-        let args = self.arguments(call, depth, frame);
-        // Where each argument was written, while they line up with the values
-        // (up to the first spread).
-        let origins: std::vec::Vec<_> = call
-            .arguments
-            .iter()
-            .map_while(Argument::as_expression)
-            .map(|arg| self.origin(arg, frame))
-            .collect();
+        // Each argument's value, and where it was written.
+        let mut args = std::vec::Vec::new();
+        let mut origins = std::vec::Vec::new();
+        for arg in &call.arguments {
+            if let Argument::SpreadElement(spread) = arg {
+                let values = self.spread(&spread.argument, depth, frame);
+                let known = self
+                    .element_origins(&spread.argument, frame)
+                    .filter(|known| known.len() == values.len());
+                origins.extend(known.unwrap_or_else(|| vec![None; values.len()]));
+                args.extend(values);
+            } else {
+                let expr = arg.to_expression();
+                args.push(self.eval(expr, depth, frame));
+                origins.push(self.origin(expr, frame));
+            }
+        }
         // ngtsc counts a `this` parameter as the first one.
         let offset = usize::from(function.this_param.is_some());
         let mut scope = Frame { bindings: HashMap::new(), in_call: true };
         for (i, param) in function.params.items.iter().enumerate() {
             let binding = match args.get(i + offset) {
                 None | Some(Value::Undefined) if param.initializer.is_some() => {
-                    param.initializer.as_ref().map(|init| Binding {
-                        value: self.eval(init, depth, &scope),
-                        origin: self.origin(init, &scope),
+                    param.initializer.as_ref().map(|init| {
+                        Binding::new(self.eval(init, depth, &scope), self.origin(init, &scope))
                     })
                 }
-                arg => arg.map(|value| Binding {
-                    value: value.clone(),
-                    origin: origins.get(i + offset).copied().flatten(),
+                arg => arg.map(|value| {
+                    Binding::new(value.clone(), origins.get(i + offset).copied().flatten())
                 }),
             };
-            let binding = binding.unwrap_or(Binding { value: Value::Undefined, origin: None });
+            let binding = binding.unwrap_or(Binding::new(Value::Undefined, None));
             bind(&mut scope, &param.pattern, binding);
         }
         if let Some(rest) = &function.params.rest {
             let start = function.params.items.len() + offset;
             let rest_args = args.get(start..).map_or_else(std::vec::Vec::new, <[_]>::to_vec);
-            let binding = Binding { value: Value::Array(rest_args), origin: None };
+            let elements = origins.get(start..).map_or_else(std::vec::Vec::new, <[_]>::to_vec);
+            let binding =
+                Binding { value: Value::Array(rest_args), origin: None, elements: Some(elements) };
             bind(&mut scope, &rest.rest.argument, binding);
         }
         ret.argument.as_ref().map_or(Value::Undefined, |e| self.eval(e, depth, &scope))
@@ -1268,31 +1372,256 @@ fn bind<'a>(frame: &mut Frame<'a>, pattern: &'a BindingPattern<'a>, binding: Bin
     let mut names = std::vec::Vec::new();
     collect_bindings(pattern, &mut std::vec::Vec::new(), &mut names);
     for (name, _) in names {
-        frame.bindings.insert(name, Binding { value: Value::Dynamic, origin: None });
+        frame.bindings.insert(name, Binding::new(Value::Dynamic, None));
     }
 }
 
 /// Whether an expression uses a name bound in a called function's frame, or
-/// that function's `this` or `arguments`. Nested functions aren't told apart,
-/// so a parameter of their own with the same name counts too.
+/// that function's `this` or `arguments`. Names are scoped like JavaScript
+/// does: a parameter, variable, function or class the expression declares
+/// itself (in a nested function, block, loop or `catch`) hides the frame's,
+/// and a nested non-arrow function has its own `this` and `arguments`.
 struct UsesFrame<'f, 'a> {
     frame: &'f Frame<'a>,
     found: bool,
+    /// The names each scope entered inside the expression declares, innermost last.
+    scopes: std::vec::Vec<std::vec::Vec<String>>,
+    /// How many functions entered inside the expression have their own
+    /// `arguments` (non-arrow functions) ...
+    own_arguments: usize,
+    /// ... and their own `this` (those, and class bodies).
+    own_this: usize,
+}
+
+impl<'f, 'a> UsesFrame<'f, 'a> {
+    fn new(frame: &'f Frame<'a>) -> Self {
+        Self { frame, found: false, scopes: std::vec::Vec::new(), own_arguments: 0, own_this: 0 }
+    }
+
+    fn declared(&self, name: &str) -> bool {
+        self.scopes.iter().any(|scope| scope.iter().any(|n| n == name))
+    }
+
+    /// Visits `f` with `names` in scope.
+    fn scoped(&mut self, names: std::vec::Vec<String>, f: impl FnOnce(&mut Self)) {
+        self.scopes.push(names);
+        f(self);
+        self.scopes.pop();
+    }
+}
+
+/// The names a binding pattern declares.
+fn bound_names(pattern: &BindingPattern<'_>, out: &mut std::vec::Vec<String>) {
+    match pattern {
+        BindingPattern::BindingIdentifier(id) => out.push(id.name.to_string()),
+        BindingPattern::AssignmentPattern(p) => bound_names(&p.left, out),
+        BindingPattern::ObjectPattern(p) => {
+            for prop in &p.properties {
+                bound_names(&prop.value, out);
+            }
+            if let Some(rest) = &p.rest {
+                bound_names(&rest.argument, out);
+            }
+        }
+        BindingPattern::ArrayPattern(p) => {
+            for element in p.elements.iter().flatten() {
+                bound_names(element, out);
+            }
+            if let Some(rest) = &p.rest {
+                bound_names(&rest.argument, out);
+            }
+        }
+    }
+}
+
+/// The names a function's parameters declare.
+fn parameter_names(params: &FormalParameters<'_>, out: &mut std::vec::Vec<String>) {
+    for param in &params.items {
+        bound_names(&param.pattern, out);
+    }
+    if let Some(rest) = &params.rest {
+        bound_names(&rest.rest.argument, out);
+    }
+}
+
+/// The names `let`, `const`, `class` and `function` declarations directly in
+/// a block declare, for the whole block.
+fn lexical_names(statements: &[Statement<'_>], out: &mut std::vec::Vec<String>) {
+    for statement in statements {
+        match statement {
+            Statement::VariableDeclaration(decl) if decl.kind != VariableDeclarationKind::Var => {
+                for d in &decl.declarations {
+                    bound_names(&d.id, out);
+                }
+            }
+            Statement::FunctionDeclaration(f) => {
+                out.extend(f.id.as_ref().map(|id| id.name.to_string()));
+            }
+            Statement::ClassDeclaration(c) => {
+                out.extend(c.id.as_ref().map(|id| id.name.to_string()));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The names `var` declarations in a function body declare (in nested blocks
+/// too, but not in nested functions or classes), for the whole function.
+struct VarNames<'n>(&'n mut std::vec::Vec<String>);
+
+impl<'a> Visit<'a> for VarNames<'_> {
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        if decl.kind == VariableDeclarationKind::Var {
+            for d in &decl.declarations {
+                bound_names(&d.id, self.0);
+            }
+        }
+    }
+
+    fn visit_function(&mut self, _: &Function<'a>, _: ScopeFlags) {}
+
+    fn visit_arrow_function_expression(&mut self, _: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_class(&mut self, _: &Class<'a>) {}
+}
+
+/// The names a function body declares: its `var`s and its lexical declarations.
+fn body_names(body: &FunctionBody<'_>, out: &mut std::vec::Vec<String>) {
+    let mut vars = VarNames(out);
+    for statement in &body.statements {
+        vars.visit_statement(statement);
+    }
+    lexical_names(&body.statements, out);
 }
 
 impl<'a> Visit<'a> for UsesFrame<'_, 'a> {
     fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
         let name = id.name.as_str();
-        self.found |= name == "arguments" || self.frame.bindings.contains_key(name);
+        self.found |= if name == "arguments" {
+            self.own_arguments == 0 && !self.declared(name)
+        } else {
+            self.frame.bindings.contains_key(name) && !self.declared(name)
+        };
     }
 
     fn visit_this_expression(&mut self, _: &ThisExpression) {
-        self.found = true;
+        self.found |= self.own_this == 0;
     }
 
     fn visit_super(&mut self, _: &Super) {
-        self.found = true;
+        self.found |= self.own_this == 0;
     }
+
+    fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
+        let mut names = std::vec::Vec::new();
+        // A function expression's own name is in scope in its body; a
+        // declaration's is declared in the enclosing block.
+        names.extend(f.id.as_ref().map(|id| id.name.to_string()));
+        parameter_names(&f.params, &mut names);
+        if let Some(body) = &f.body {
+            body_names(body, &mut names);
+        }
+        self.own_arguments += 1;
+        self.own_this += 1;
+        self.scoped(names, |v| walk::walk_function(v, f, flags));
+        self.own_arguments -= 1;
+        self.own_this -= 1;
+    }
+
+    fn visit_arrow_function_expression(&mut self, f: &ArrowFunctionExpression<'a>) {
+        let mut names = std::vec::Vec::new();
+        parameter_names(&f.params, &mut names);
+        if let ArrowFunctionBody::FunctionBody(body) = &f.body {
+            body_names(body, &mut names);
+        }
+        self.scoped(names, |v| walk::walk_arrow_function_expression(v, f));
+    }
+
+    fn visit_class(&mut self, class: &Class<'a>) {
+        // A class expression's own name is in scope in its body.
+        let names = class.id.iter().map(|id| id.name.to_string()).collect();
+        self.scoped(names, |v| {
+            if let Some(heritage) = &class.heritage {
+                v.visit_expression(&heritage.expression);
+            }
+            v.own_this += 1;
+            v.visit_class_body(&class.body);
+            v.own_this -= 1;
+        });
+    }
+
+    fn visit_static_block(&mut self, block: &StaticBlock<'a>) {
+        let mut names = std::vec::Vec::new();
+        let mut vars = VarNames(&mut names);
+        for statement in &block.body {
+            vars.visit_statement(statement);
+        }
+        lexical_names(&block.body, &mut names);
+        self.scoped(names, |v| walk::walk_static_block(v, block));
+    }
+
+    fn visit_block_statement(&mut self, block: &BlockStatement<'a>) {
+        let mut names = std::vec::Vec::new();
+        lexical_names(&block.body, &mut names);
+        self.scoped(names, |v| walk::walk_block_statement(v, block));
+    }
+
+    fn visit_for_statement(&mut self, stmt: &ForStatement<'a>) {
+        let mut names = std::vec::Vec::new();
+        if let Some(ForStatementInit::VariableDeclaration(decl)) = &stmt.init
+            && decl.kind != VariableDeclarationKind::Var
+        {
+            for d in &decl.declarations {
+                bound_names(&d.id, &mut names);
+            }
+        }
+        self.scoped(names, |v| walk::walk_for_statement(v, stmt));
+    }
+
+    fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
+        let names = loop_names(&stmt.left);
+        self.scoped(names, |v| walk::walk_for_in_statement(v, stmt));
+    }
+
+    fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'a>) {
+        let names = loop_names(&stmt.left);
+        self.scoped(names, |v| walk::walk_for_of_statement(v, stmt));
+    }
+
+    fn visit_switch_statement(&mut self, stmt: &SwitchStatement<'a>) {
+        // The discriminant is outside the cases' block.
+        self.visit_expression(&stmt.discriminant);
+        let mut names = std::vec::Vec::new();
+        for case in &stmt.cases {
+            lexical_names(&case.consequent, &mut names);
+        }
+        self.scoped(names, |v| {
+            for case in &stmt.cases {
+                v.visit_switch_case(case);
+            }
+        });
+    }
+
+    fn visit_catch_clause(&mut self, clause: &CatchClause<'a>) {
+        let mut names = std::vec::Vec::new();
+        if let Some(param) = &clause.param {
+            bound_names(&param.pattern, &mut names);
+        }
+        self.scoped(names, |v| walk::walk_catch_clause(v, clause));
+    }
+}
+
+/// The names a `for (let ... of/in ...)` head declares for the loop.
+fn loop_names(left: &ForStatementLeft<'_>) -> std::vec::Vec<String> {
+    let mut names = std::vec::Vec::new();
+    if let ForStatementLeft::VariableDeclaration(decl) = left
+        && decl.kind != VariableDeclarationKind::Var
+    {
+        for d in &decl.declarations {
+            bound_names(&d.id, &mut names);
+        }
+    }
+    names
 }
 
 /// ngtsc's `literal()`: an operand of a binary operator or a template literal
