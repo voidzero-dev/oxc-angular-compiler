@@ -11378,6 +11378,230 @@
       "diagnosticSpans": [[159, 160]],
       "classes": {},
       "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-queries-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\ndeclare const S: typeof NS.SEL;\n@Directive({selector: '[d]', queries: {q: new ContentChild(S)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-queries-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\n@Directive({selector: '[d]', queries: {q: new ContentChild(NS.SEL)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,NS.SEL,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-member-query-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\ndeclare const S: typeof NS.SEL;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @ContentChild(S) q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-class-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C {} }\ndeclare const K: typeof NS.C;\n@Directive({selector: '[d]', queries: {q: new ContentChild(K)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,K,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-class-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C {} }\n@Directive({selector: '[d]', queries: {q: new ContentChild(NS.C)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,NS.C,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-member-class-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C {} }\ndeclare const K: typeof NS.C;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @ViewChild(K) q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(K,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-sel-array-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SELS = ['a', 'b']; }\ndeclare const S: typeof NS.SELS;\n@Directive({selector: '[d]', queries: {q: new ContentChild(S)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"a\",\"b\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-read-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class R {} }\ndeclare const K: typeof NS.R;\n@Directive({selector: '[d]', queries: {q: new ContentChild('foo', {read: K})}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5,K);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-static-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const ST = true; }\ndeclare const S: typeof NS.ST;\n@Directive({selector: '[d]', queries: {q: new ViewChild('foo', {static: S})}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"foo\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-member-static-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const ST = true; }\ndeclare const S: typeof NS.ST;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @ViewChild('foo', {static: S}) q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"foo\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-queries-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\ndeclare const S: typeof NS.SEL;\n@Directive({selector: '[d]', queries: {q: new ContentChild(S, {descendants: true})}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-alias-sel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\nimport S = NS.SEL;\n@Directive({selector: '[d]', queries: {q: new ContentChild(S)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-member-alias-sel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const SEL = 'foo'; }\nimport S = NS.SEL;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @ContentChild(S) q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"foo\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-q495-alias-class",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export class C {} }\nimport K = NS.C;\n@Directive({selector: '[d]', queries: {q: new ContentChild(K)}})\nexport class Dir {\n  q: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,K,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"q\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
     }
   ]
 }
