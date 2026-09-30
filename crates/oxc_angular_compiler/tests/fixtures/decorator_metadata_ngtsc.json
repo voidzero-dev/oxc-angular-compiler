@@ -5501,7 +5501,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(value)=>value.trim()]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5517,7 +5518,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{constvalue=v.trim();returnvalue;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5533,7 +5535,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{functionvalue(s){returns;}returnvalue(v);}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5549,7 +5552,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{letr=v;for(constvalueof[v]){r+=value;}try{r+=v;}catch(value){r+=value;}returnr;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5565,7 +5569,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{varq=()=>{varvalue=2;returnvalue;};returnq()+v;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5581,7 +5586,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{classvalue{};returnnewvalue()+v;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5597,7 +5603,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",function(v){returnarguments.length?v:v+v;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5613,7 +5620,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",function(v){returnthis?v:(()=>arguments[0])();}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5629,7 +5637,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>{if(v){varvalue=v;}returnvalue;}]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5645,7 +5654,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>new(classvalue{m(){returnvalue;}})().m()&&v]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5661,7 +5671,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",({value})=>value]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:{value:string;};"
         }
       },
       "dtsImports": [],
@@ -5728,7 +5739,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",toBool]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5744,7 +5756,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",toBool]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5760,7 +5773,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",toBool]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5776,7 +5790,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",toBool]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -8165,6 +8180,23 @@
         }
       },
       "dtsImports": []
+    },
+    {
+      "name": "probe: dts-qualifiedNamespaceEnum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nexport namespace NS { export enum E { A = 'a', B = 'b' } }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: (v: NS.E) => 1}) x!: number;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:E;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
     },
     {
       "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constFalse",

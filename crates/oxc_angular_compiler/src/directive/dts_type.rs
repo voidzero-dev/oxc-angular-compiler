@@ -197,21 +197,26 @@ impl TypePrinter<'_, '_> {
     /// A qualified name whose head the file declares (`NS.T`, `C.T` for a
     /// class merged with a namespace, `A.B.T`) is written as its last part,
     /// `T`: ngtsc emits the declaration `T` resolves to by its own name. An enum
-    /// member (`E.A`) stays as written, since ngtsc can't emit one at all.
+    /// member (`E.A`, `NS.E.A`) stays as written, since ngtsc can't emit one at
+    /// all.
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
         if let TSTypeName::QualifiedName(q) = name {
+            // The qualifier's parts, head first (`NS`, `E` for `NS.E.A`).
+            let mut qualifier = vec![];
             let mut left = &q.left;
-            let mut depth = 1;
             while let TSTypeName::QualifiedName(inner) = left {
+                qualifier.push(inner.right.name.as_str());
                 left = &inner.left;
-                depth += 1;
             }
             if let TSTypeName::IdentifierReference(head) = left
                 && self.scope.import(head.name.as_str()).is_none()
                 && self.scope.declares(head.name.as_str())
-                && !(depth == 1 && self.scope.is_enum(head.name.as_str()))
             {
-                return Some(q.right.name.to_string());
+                qualifier.push(head.name.as_str());
+                qualifier.reverse();
+                if !self.scope.is_enum_path(&qualifier) {
+                    return Some(q.right.name.to_string());
+                }
             }
         }
         let (head, rest) = match name {
@@ -230,7 +235,14 @@ impl TypePrinter<'_, '_> {
             }
             TSTypeName::ThisExpression(_) => return None,
         };
-        Some(match self.scope.import(head) {
+        Some(self.value_name(head, &rest))
+    }
+
+    /// `head` followed by the `.member`s `rest`, with `head` resolved through
+    /// the file's imports: `i0` for `@angular/core`, `other_module` for any
+    /// other module, as written otherwise.
+    fn value_name(&mut self, head: &str, rest: &str) -> String {
+        match self.scope.import(head) {
             Some(import) if import.module == "@angular/core" => match import.imported {
                 Some(imported) => format!("i0.{imported}{rest}"),
                 None => format!("i0{rest}"),
@@ -240,7 +252,7 @@ impl TypePrinter<'_, '_> {
                 format!("{head}{rest}")
             }
             None => format!("{head}{rest}"),
-        })
+        }
     }
 
     /// A union's or intersection's constituents, joined by ` | ` / ` & `.
@@ -379,15 +391,24 @@ impl TypePrinter<'_, '_> {
         }
     }
 
-    /// A property name, re-quoted like any other string literal.
-    fn key(&self, key: &PropertyKey<'_>, computed: bool) -> Option<String> {
+    /// A property name, re-quoted like any other string literal. A computed
+    /// name (`[token]`, `[ns.token]`) follows the rules of a type name: an
+    /// `@angular/core` value becomes `i0.token`, another module's makes the
+    /// type `unknown`, and a local or global one stays as written (ngtsc copies
+    /// the expression, which doesn't resolve for an import).
+    fn key(&mut self, key: &PropertyKey<'_>, computed: bool) -> Option<String> {
         let text = match key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
             PropertyKey::StringLiteral(s) => quote(&s.value),
             PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
             PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
-            PropertyKey::Identifier(id) => id.name.to_string(),
-            PropertyKey::StaticMemberExpression(m) => member_chain(&m.object, &m.property.name)?,
+            PropertyKey::Identifier(id) => self.value_name(&id.name, ""),
+            PropertyKey::StaticMemberExpression(m) => {
+                let chain = member_chain(&m.object, &m.property.name)?;
+                let (head, rest) = chain.split_once('.').unwrap_or((&chain, ""));
+                let rest = if rest.is_empty() { String::new() } else { format!(".{rest}") };
+                self.value_name(head, &rest)
+            }
             _ => return None,
         };
         Some(if computed { format!("[{text}]") } else { text })

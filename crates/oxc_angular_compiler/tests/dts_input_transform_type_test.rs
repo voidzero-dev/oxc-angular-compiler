@@ -130,6 +130,59 @@ fn enum_member_type_is_kept_as_written() {
     check(&[("Color.Red", "Color.Red"), ("Color.Red | Color.Green", "Color.Red | Color.Green")]);
 }
 
+/// The same for a member of an enum declared in a namespace (`NS.E.A`, also
+/// through a class merged with the namespace, nested namespaces and
+/// `namespace A.B`): ngtsc 22.1.7 throws there too. A qualified name that
+/// isn't an enum member is still shortened like ngtsc does (`NS.E` is `E`,
+/// `A.B.T` is `T`).
+#[test]
+fn nested_enum_member_type_is_kept_as_written() {
+    let source = "import {Directive, Input} from '@angular/core';
+export namespace NS { export enum E { A = 'a' } export namespace M { export enum E { B = 'b' } } }
+export class C {}
+export namespace C { export enum E { A = 'a' } }
+export namespace A.B { export enum E { X = 'x' } export type T = string; }
+@Directive({selector: '[d]'})
+export class Dir {
+  @Input({transform: (v: NS.E.A | C.E.A | NS.M.E.B | A.B.E.X) => 1}) x!: number;
+  @Input({transform: (v: NS.E | NS.M.E | A.B.T) => 1}) y!: number;
+}
+";
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "t.ts",
+        source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    let decl = result.dts_declarations.iter().find(|d| d.class_name == "Dir").unwrap();
+    assert!(
+        decl.members.contains("static ngAcceptInputType_x: NS.E.A | C.E.A | NS.M.E.B | A.B.E.X;"),
+        "{}",
+        decl.members
+    );
+    assert!(decl.members.contains("static ngAcceptInputType_y: E | E | T;"), "{}", decl.members);
+}
+
+/// A computed property name follows the rules of a type name (see
+/// `dts_type.rs`): ngtsc 22.1.7 copies the expression as written, so an
+/// imported name (`{ [token]: 1; }`) doesn't resolve in its `.d.ts`. oxc
+/// writes `@angular/core` names through `i0` and makes a type naming another
+/// module `unknown`. Local and global names are written as is, like ngtsc
+/// (`{ [kc]: 1 }` and `[Symbol.iterator]` in [`MATCH`]).
+#[test]
+fn computed_names_from_imports_follow_type_name_rules() {
+    check(&[
+        ("{ [Other]: 1 }", "unknown"),
+        ("{ [oth.token]: 1 }", "unknown"),
+        ("{ [oth.a.token](): void }", "unknown"),
+        ("(x: { [Other]: 1 }) => void", "unknown"),
+        ("{ [booleanAttribute]: 1 }", "{ [i0.booleanAttribute]: 1; }"),
+        ("{ [ng.ɵSIGNAL]: 1 }", "{ [i0.ɵSIGNAL]: 1; }"),
+    ]);
+}
+
 /// An overloaded static method is typed from its first declaration, as an
 /// overloaded function is (ngtsc 22.1.7 writes `string` here). The snapshot
 /// can't hold this case: ngtsc compiles the transform to the bare method name

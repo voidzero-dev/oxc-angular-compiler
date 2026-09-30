@@ -59,8 +59,9 @@ pub(crate) struct FileScope<'a> {
     /// Interfaces, type aliases, classes and enums declared in the file, and
     /// whether the first declaration of each is itself marked `export`.
     types: HashMap<&'a str, bool>,
-    /// Namespaces (`namespace NS {}`, `declare namespace NS {}`, `module NS {}`).
-    namespaces: HashSet<&'a str>,
+    /// Namespaces (`namespace NS {}`, `declare namespace NS {}`, `module NS {}`),
+    /// with every declaration of each (TypeScript merges them).
+    namespaces: HashMap<&'a str, std::vec::Vec<&'a TSNamespaceDeclaration<'a>>>,
     /// Where each top-level function, class and variable is first declared, as
     /// ngtsc's diagnostics point at it: the whole statement (with `export`) for
     /// a function or class, the declarator (`x: T`) for a variable.
@@ -121,6 +122,38 @@ enum Qualified<'a> {
     Namespace(&'a str, usize),
     /// Nothing TypeScript can resolve: `X` isn't exported, or doesn't exist.
     Missing,
+}
+
+/// Whether the namespace `ns` declares the enum `path` (`["M", "E"]` for
+/// `M.E`, with `M` a namespace in `ns`).
+fn namespace_declares_enum(ns: &TSNamespaceDeclaration<'_>, path: &[&str]) -> bool {
+    let statements = match &ns.body {
+        // `namespace A.B {}`: `B` is the only member of `A`.
+        TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
+            return match path {
+                [name, rest @ ..] if !rest.is_empty() && inner.id.name == *name => {
+                    namespace_declares_enum(inner, rest)
+                }
+                _ => false,
+            };
+        }
+        TSNamespaceDeclarationBody::TSModuleBlock(block) => &block.body,
+    };
+    statements.iter().any(|statement| {
+        let decl = match statement {
+            Statement::ExportDeclaration(export) => Some(&export.declaration),
+            _ => statement.as_declaration(),
+        };
+        match (decl, path) {
+            (Some(Declaration::TSEnumDeclaration(e)), [name]) => e.id.name == *name,
+            (Some(Declaration::TSNamespaceDeclaration(inner)), [name, rest @ ..])
+                if !rest.is_empty() && inner.id.name == *name =>
+            {
+                namespace_declares_enum(inner.as_ref(), rest)
+            }
+            _ => false,
+        }
+    })
 }
 
 /// A top-level variable binding.
@@ -595,7 +628,7 @@ impl<'a> FileScope<'a> {
                 name(self, alias.id.name.as_str());
             }
             Declaration::TSNamespaceDeclaration(ns) => {
-                self.namespaces.insert(ns.id.name.as_str());
+                self.namespaces.entry(ns.id.name.as_str()).or_default().push(ns);
             }
             _ => {}
         }
@@ -604,7 +637,7 @@ impl<'a> FileScope<'a> {
     /// Whether the file declares `name` at its top level: a namespace, class,
     /// function, variable, enum, interface or type alias.
     pub(crate) fn declares(&self, name: &str) -> bool {
-        self.namespaces.contains(name)
+        self.namespaces.contains_key(name)
             || self.types.contains_key(name)
             || self.classes.contains_key(name)
             || self.enums.contains_key(name)
@@ -615,6 +648,20 @@ impl<'a> FileScope<'a> {
     /// Whether `name` is an enum declared in the file.
     pub(crate) fn is_enum(&self, name: &str) -> bool {
         self.enums.contains_key(name)
+    }
+
+    /// Whether the qualified name `path` (`["NS", "E"]` for `NS.E`) is an enum
+    /// the file declares: at its top level, or in a namespace it declares (a
+    /// class or function merged with one included).
+    pub(crate) fn is_enum_path(&self, path: &[&str]) -> bool {
+        match path {
+            [] => false,
+            [name] => self.is_enum(name),
+            [head, rest @ ..] => self
+                .namespaces
+                .get(head)
+                .is_some_and(|decls| decls.iter().any(|ns| namespace_declares_enum(ns, rest))),
+        }
     }
 
     /// Whether `function` is the top-level function declaration called `name`
