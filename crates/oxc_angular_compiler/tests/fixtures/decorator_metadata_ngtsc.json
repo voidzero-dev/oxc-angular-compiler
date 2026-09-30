@@ -13762,6 +13762,346 @@
       "dtsImports": []
     },
     {
+      "name": "probe: helperTransform-inputOpts",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction opts(o: {t: typeof booleanAttribute}) { return {transform: o.t}; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(opts({t: booleanAttribute})) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-metaMake",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction make(o: {t: any}) { return {name: 'x', transform: o.t}; }\n@Directive({selector: '[d]', inputs: [make({t: booleanAttribute})]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-inputOptsAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {booleanAttribute as ba} from '@angular/core';\nfunction opts(o: {t: typeof booleanAttribute}) { return {transform: o.t}; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(opts({t: ba})) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-inputOptsLocal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction opts(o: {t: typeof booleanAttribute}) { return {transform: o.t}; }\nfunction local(v: string) { return true; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(opts({t: local})) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",local]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-inputOptsSpread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction opts(o: {t: typeof booleanAttribute}) { return {transform: o.t}; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({...opts({t: booleanAttribute}), alias: 'a'}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"a\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-inputOptsConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction opts(o: {t: typeof booleanAttribute}) { return {transform: o.t}; }\nconst O = opts({t: booleanAttribute});\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(O) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: helperTransform-inputDirectMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst T = {t: booleanAttribute};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: T.t}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inOrLocal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(LOCAL || NAME) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"localAlias\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"localAlias\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inAndFalsy",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input((EMPTY_LOCAL && NAME) || 'z') x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"z\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"z\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inCondTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(true ? LOCAL : NAME) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"localAlias\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"localAlias\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inCondFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(false ? NAME : LOCAL) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"localAlias\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"localAlias\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inCoalesce",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(LOCAL ?? NAME) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[324, 345]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inObjAliasOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: LOCAL || NAME}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"localAlias\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"localAlias\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inObjRequiredOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: 'a', required: true || FLAG}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"a\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"a\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inObjRequiredCond",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: 'a', required: 1 ? true : FLAG}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"a\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"a\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inTransformOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: 0 || booleanAttribute}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inTransformOrLocalFirst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\nfunction local(v: string) { return 1; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: local || toBool}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",local]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-inTransformCondLocal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\nfunction local(v: string) { return 1; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: false ? toBool : local}) x: any;\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",local]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-outOr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(LOCAL || NAME) e = new EventEmitter();\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"localAlias\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"localAlias\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shortCircuit-outCond",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ContentChild, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {NAME, FLAG, TRUE_FLAG, Token, EMPTY, toBool} from './other';\nconst LOCAL: string = 'localAlias';\nconst EMPTY_LOCAL: string = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(true ? LOCAL : NAME) e = new EventEmitter();\n}\n",
+        "other.ts": "import {booleanAttribute} from '@angular/core';\nexport const NAME = 'y';\nexport const EMPTY = '';\nexport const FLAG = false;\nexport const TRUE_FLAG = true;\nexport class Token {}\nexport function toBool(v: string) { return !!v; }\nexport interface Other { a: string }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"localAlias\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"localAlias\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
       "name": "probe: scope-typeOnly-returnType",
       "origin": "probe",
       "files": {
