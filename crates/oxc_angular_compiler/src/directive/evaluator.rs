@@ -63,6 +63,9 @@ pub(crate) struct FileScope<'a> {
     /// ngtsc's diagnostics point at it: the whole statement (with `export`) for
     /// a function or class, the declarator (`x: T`) for a variable.
     declaration_spans: HashMap<&'a str, Span>,
+    /// Namespaces and `import x = ...` aliases: declared in the file, but not
+    /// read by the evaluator (their values are dynamic).
+    unread: HashSet<&'a str>,
     /// Import-equals aliases (`import A = NS.T`, `export import A = NS`,
     /// `import A = require('m')`): what each stands for.
     aliases: HashMap<&'a str, &'a TSModuleReference<'a>>,
@@ -210,8 +213,15 @@ impl<'a> FileScope<'a> {
                     None => continue,
                 },
             };
-            if let Declaration::TSNamespaceDeclaration(ns) = decl {
-                scope.namespace(ns, None, exported, false);
+            match decl {
+                Declaration::TSNamespaceDeclaration(ns) => {
+                    scope.unread.insert(ns.id.name.as_str());
+                    scope.namespace(ns, None, exported, false);
+                }
+                Declaration::TSImportEqualsDeclaration(alias) => {
+                    scope.unread.insert(alias.id.name.as_str());
+                }
+                _ => {}
             }
         }
         scope.mark_instantiated();
@@ -794,6 +804,13 @@ pub(crate) enum RefKind<'a> {
     /// An identifier with no declaration in this file that names a standard
     /// ECMAScript global (see [`ES_GLOBALS`]).
     Global,
+    /// Any other identifier this file doesn't declare or import: a global
+    /// declared outside it, in a lib such as the DOM's (`atob`, `window`) or in
+    /// a project `.d.ts`, which ngtsc resolves to that declaration, or a name
+    /// declared nowhere, which ngtsc can't resolve. oxc can't tell these apart,
+    /// so it's dynamic (see [`Value::is_dynamic`]), except that an input
+    /// transform assumes it's a function, as it does an imported one.
+    Ambient,
     /// A static getter or setter, or a static property without an
     /// initializer, declared at the span.
     StaticMember(Span),
@@ -873,6 +890,12 @@ impl<'a> Value<'a> {
         matches!(self, Value::Reference { kind: RefKind::Import { .. }, .. })
     }
 
+    /// Whether ngtsc's value is unknown: dynamic, or a global declared outside
+    /// the file, which is only kept as a name so a transform can refer to it.
+    pub(crate) fn is_dynamic(&self) -> bool {
+        matches!(self, Value::Dynamic | Value::Reference { kind: RefKind::Ambient, .. })
+    }
+
     /// ngtsc's `describeResolvedType`, one level deep like its diagnostics.
     pub(crate) fn describe(&self) -> String {
         self.describe_to(1)
@@ -910,6 +933,7 @@ impl<'a> Value<'a> {
                     .join(", ")
             ),
             Value::Module => "(module)".into(),
+            _ if self.is_dynamic() => "(not statically analyzable)".into(),
             Value::Reference { name, .. } | Value::Enum { name, .. } => name.clone(),
             Value::Builtin(_) => "Function".into(),
             Value::Dynamic | Value::Function(_) => "(not statically analyzable)".into(),
@@ -919,9 +943,8 @@ impl<'a> Value<'a> {
     /// The chained line ngtsc's `createValueHasWrongTypeError` adds after a message.
     pub(crate) fn wrong_type_suffix(&self) -> String {
         match self {
-            Value::Dynamic | Value::Function(_) => {
-                " Value could not be determined statically.".into()
-            }
+            Value::Function(_) => " Value could not be determined statically.".into(),
+            _ if self.is_dynamic() => " Value could not be determined statically.".into(),
             Value::Reference { name, .. } => format!(" Value is a reference to '{name}'."),
             _ => format!(" Value is of type '{}'.", self.describe()),
         }
@@ -964,10 +987,11 @@ fn quote_key(key: &str) -> String {
     }
 }
 
-/// The `declare var` / `declare function` globals of TypeScript's ES2022
-/// library (lib.es5.d.ts ... lib.es2022.*.d.ts). ngtsc resolves these to a
-/// reference to their declaration; any other undeclared name is unknown to it.
-/// DOM globals depend on the `lib` option and are treated as unknown.
+/// The `declare var` / `declare function` / `declare namespace` globals of
+/// TypeScript's ES2022 library (lib.es5.d.ts ... lib.es2022.*.d.ts), which
+/// ngtsc resolves to a reference to their declaration. Other globals (the
+/// DOM's, a project's `.d.ts`) depend on the program, and are
+/// [`RefKind::Ambient`].
 const ES_GLOBALS: &[&str] = &[
     "AggregateError",
     "Array",
@@ -995,6 +1019,7 @@ const ES_GLOBALS: &[&str] = &[
     "Int16Array",
     "Int32Array",
     "Int8Array",
+    "Intl",
     "isFinite",
     "isNaN",
     "JSON",
@@ -1009,6 +1034,7 @@ const ES_GLOBALS: &[&str] = &[
     "Proxy",
     "RangeError",
     "ReferenceError",
+    "Reflect",
     "RegExp",
     "Set",
     "SharedArrayBuffer",
@@ -1342,7 +1368,12 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                                 Some(binding) => binding.value.clone(),
                                 None => match self.slot(frame.block, name) {
                                     Some(slot) => self.stored(slot, depth),
-                                    None => self.eval(&p.value, depth, frame),
+                                    // ngtsc never resolves a shorthand to a global
+                                    // it can use as a transform.
+                                    None => match self.eval(&p.value, depth, frame) {
+                                        value if value.is_dynamic() => Value::Dynamic,
+                                        value => value,
+                                    },
                                 },
                             }
                         }
@@ -1398,7 +1429,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         frame: &Frame<'a>,
     ) -> Value<'a> {
         let object = self.eval(&m.object, depth, frame);
-        if matches!(object, Value::Dynamic) {
+        if object.is_dynamic() {
             return Value::Dynamic;
         }
         match self.eval(&m.expression, depth, frame) {
@@ -1417,7 +1448,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         frame: &Frame<'a>,
     ) -> Value<'a> {
         match self.eval(&c.test, depth, frame) {
-            Value::Dynamic => Value::Dynamic,
+            test if test.is_dynamic() => Value::Dynamic,
             test if test.is_import() => test,
             test if test.truthy() => self.eval(&c.consequent, depth, frame),
             _ => self.eval(&c.alternate, depth, frame),
@@ -1436,7 +1467,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             return Value::Dynamic;
         }
         match self.eval(&u.argument, depth, frame) {
-            Value::Dynamic => Value::Dynamic,
+            value if value.is_dynamic() => Value::Dynamic,
             value if value.is_import() => value,
             value => unary(u.operator, &value),
         }
@@ -1475,7 +1506,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let left = self.eval(&l.left, depth, frame);
         let right = self.eval(&l.right, depth, frame);
         match (left, right) {
-            (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
+            (left, right) if left.is_dynamic() || right.is_dynamic() => Value::Dynamic,
             (left, _) if left.is_import() => left,
             (left, right) => match (l.operator, left.truthy()) {
                 (LogicalOperator::And, true) | (LogicalOperator::Or, false) => right,
@@ -1556,8 +1587,11 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             _ if ES_GLOBALS.contains(&name) => {
                 Value::Reference { name: name.into(), kind: RefKind::Global }
             }
-            // ngtsc can't find a declaration for it.
-            _ => Value::Dynamic,
+            // TypeScript declares `globalThis` without a declaration ngtsc
+            // can find.
+            "globalThis" => Value::Dynamic,
+            _ if scope.unread.contains(name) => Value::Dynamic,
+            _ => Value::Reference { name: name.into(), kind: RefKind::Ambient },
         }
     }
 
@@ -2222,6 +2256,9 @@ pub(crate) fn transform_error<'a>(
         {
             return clash();
         }
+        // A global declared outside the file (`atob`) is assumed to be a
+        // function, like an imported one.
+        Value::Reference { kind: RefKind::Ambient, .. } => return clash(),
         Value::Reference { .. } | Value::Dynamic => {
             return Some((format!("Input transform must be a function{suffix}"), node()));
         }

@@ -6465,6 +6465,553 @@
       "diagnosticSpans": [[123, 124]]
     },
     {
+      "name": "probe: transform-global-atob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: atob}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-btoa",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: btoa}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",btoa]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-alert",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: alert}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",alert]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-globalThis",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: globalThis}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-undefined",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: undefined}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is of type 'undefined'."],
+      "diagnosticSpans": [[106, 128]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-inputsAtob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: atob}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",atob]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-projectFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: ambientFn}) x: any;\n}\n",
+        "globals.d.ts": "declare function ambientFn(v: string): number;\ndeclare var ambientVar: string;\ndeclare function ambientOverload(v: string): number;\ndeclare function ambientOverload(v: number): number;\ndeclare function ambientGeneric<T>(v: T): T;\ndeclare namespace AmbNs { function f(v: string): number; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ambientFn]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-projectNamespaceMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: AmbNs.f}) x: any;\n}\n",
+        "globals.d.ts": "declare function ambientFn(v: string): number;\ndeclare var ambientVar: string;\ndeclare function ambientOverload(v: string): number;\ndeclare function ambientOverload(v: number): number;\ndeclare function ambientGeneric<T>(v: T): T;\ndeclare namespace AmbNs { function f(v: string): number; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 125]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-declareGlobalFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare global { function gg(v: string): number; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: gg}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",gg]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-aliasWindow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: window as any}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-aliasUndeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: undeclaredName}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-Intl",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: Intl}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'Intl'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "ngtsc reports this at the transform's declaration in TypeScript's lib.es5.d.ts, a file oxc doesn't read (so this snapshot's generator, which keeps test.ts diagnostics, records none); oxc reports the same message on the expression"
+    },
+    {
+      "name": "probe: transform-global-Reflect",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: Reflect}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'Reflect'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "ngtsc reports this at the transform's declaration in TypeScript's lib.es2015.reflect.d.ts, a file oxc doesn't read (so this snapshot's generator, which keeps test.ts diagnostics, records none); oxc reports the same message on the expression"
+    },
+    {
+      "name": "probe: transform-global-clashAtob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  static ngAcceptInputType_x: string;\n  @Input({transform: atob}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Class cannot have both a transform function on Input x and a static member called ngAcceptInputType_x"
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "ngtsc reports this at the transform's declaration in TypeScript's lib.dom.d.ts, a file oxc doesn't read (so this snapshot's generator, which keeps test.ts diagnostics, records none); oxc reports the same message on the expression"
+    },
+    {
+      "name": "probe: transform-global-window",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: window}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'window'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-document",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: document}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'document'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-navigator",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: navigator}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'navigator'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-localStorage",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: localStorage}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'localStorage'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-console",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: console}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'console'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-self",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: self}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'self'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-CSS",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: CSS}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'CSS'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-WebAssembly",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: WebAssembly}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'WebAssembly'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-structuredClone",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: structuredClone}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform function cannot be generic Value is a reference to 'structuredClone'."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-queueMicrotask",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: queueMicrotask}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Unable to import type VoidFunction. The symbol is not exported from /Users/brooklyn/workspace/github/oxc-angular-compiler/node_modules/.pnpm/typescript@6.0.3/node_modules/typescript/lib/lib.dom.d.ts."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-setTimeout",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: setTimeout}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Unable to import type TimerHandler. The symbol is not exported from /Users/brooklyn/workspace/github/oxc-angular-compiler/node_modules/.pnpm/typescript@6.0.3/node_modules/typescript/lib/lib.dom.d.ts."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-fetch",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: fetch}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Unable to import type RequestInfo. The symbol is not exported from /Users/brooklyn/workspace/github/oxc-angular-compiler/node_modules/.pnpm/typescript@6.0.3/node_modules/typescript/lib/lib.dom.d.ts."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-projectVar",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: ambientVar}) x: any;\n}\n",
+        "globals.d.ts": "declare function ambientFn(v: string): number;\ndeclare var ambientVar: string;\ndeclare function ambientOverload(v: string): number;\ndeclare function ambientOverload(v: number): number;\ndeclare function ambientGeneric<T>(v: T): T;\ndeclare namespace AmbNs { function f(v: string): number; }\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'ambientVar'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (a project `.d.ts`), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-projectOverload",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: ambientOverload}) x: any;\n}\n",
+        "globals.d.ts": "declare function ambientFn(v: string): number;\ndeclare var ambientVar: string;\ndeclare function ambientOverload(v: string): number;\ndeclare function ambientOverload(v: number): number;\ndeclare function ambientGeneric<T>(v: T): T;\ndeclare namespace AmbNs { function f(v: string): number; }\n"
+      },
+      "diagnostics": [
+        "Input transform function cannot have multiple signatures Value is a reference to 'ambientOverload'."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (a project `.d.ts`), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-projectGeneric",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: ambientGeneric}) x: any;\n}\n",
+        "globals.d.ts": "declare function ambientFn(v: string): number;\ndeclare var ambientVar: string;\ndeclare function ambientOverload(v: string): number;\ndeclare function ambientOverload(v: number): number;\ndeclare function ambientGeneric<T>(v: T): T;\ndeclare namespace AmbNs { function f(v: string): number; }\n"
+      },
+      "diagnostics": [
+        "Input transform function cannot be generic Value is a reference to 'ambientGeneric'."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (a project `.d.ts`), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-inputsWindow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: window}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is a reference to 'window'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (TypeScript's DOM lib), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-declareGlobalVar",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare global { var gv: string; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: gv}) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is of type 'undefined'."],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a global declared outside this file (this file's `declare global`, whose names oxc doesn't track), which oxc doesn't read: oxc assumes it's a function and accepts it, as it does an imported transform (only the `ngAcceptInputType_` clash is checked), where ngtsc reads the declaration and reports this"
+    },
+    {
+      "name": "probe: transform-global-namespaceMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: U.f}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[177, 180]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-declareModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\ndeclare module M { }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: M}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[139, 140]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-undeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: undeclaredName}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a name declared nowhere, which TypeScript reports: oxc can't tell it from a global declared outside the file, so it assumes it's a function and accepts it, where ngtsc reports this"
+    },
+    {
+      "name": "probe: transform-global-inputsUndeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: undeclaredName}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "classes": {},
+      "dtsImports": [],
+      "skip": "a name declared nowhere, which TypeScript reports: oxc can't tell it from a global declared outside the file, so it assumes it's a function and accepts it, where ngtsc reports this"
+    },
+    {
+      "name": "probe: transform-global-member-window_atob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: window.atob}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-document_createElement",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: document.createElement}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 140]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-globalThis_atob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: globalThis.atob}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 133]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-self_atob",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: self.atob}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 127]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-console_log",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: console.log}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 129]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-undeclaredName_foo",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: undeclaredName.foo}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 136]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: transform-global-member-localStorage_getItem",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: localStorage.getItem}) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[118, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "probe: shortCircuit-metaOr",
       "origin": "probe",
       "files": {

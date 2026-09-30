@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 537, "fixtures compared");
+    assert_eq!(compared, 557, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -795,10 +795,10 @@ export class Dir { @Input({transform: core.booleanAttribute}) v: any; }
 }
 
 /// A transform declared in another file (an import, a namespace member or a
-/// global from TypeScript's lib): ngtsc 22.1.7 reports these at that
-/// declaration, which the snapshot can't record (the fixtures below are
-/// skipped for that reason, with the diagnostics ngtsc reported). oxc reports
-/// the same message on the expression.
+/// global from TypeScript's lib, like `Intl` or the DOM's `atob`): ngtsc
+/// 22.1.7 reports these at that declaration, which the snapshot can't record
+/// (the fixtures below are skipped for that reason, with the diagnostics ngtsc
+/// reported). oxc reports the same message on the expression.
 #[test]
 fn transform_declared_in_another_file_is_reported_on_the_expression() {
     let fixtures: Value = serde_json::from_str(FIXTURES).unwrap();
@@ -810,6 +810,9 @@ fn transform_declared_in_another_file_is_reported_on_the_expression() {
         ("probe: transform-globalNumberClash", "Number"),
         ("probe: transform-globalString", "String"),
         ("probe: transform-nsClash", "u.toNum"),
+        ("probe: transform-global-Intl", "Intl"),
+        ("probe: transform-global-Reflect", "Reflect"),
+        ("probe: transform-global-clashAtob", "atob"),
     ];
     for (name, expression) in cases {
         let fixture = fixtures["fixtures"]
@@ -827,6 +830,58 @@ fn transform_declared_in_another_file_is_reported_on_the_expression() {
             .collect();
         assert_eq!(errors(&transform(source), source), expected, "{name}");
     }
+}
+
+/// A name the file declares as a namespace or an `import x = ...` alias isn't
+/// a global declared elsewhere, so it isn't assumed to be a function the way
+/// `atob` is. ngtsc 22.1.7 rejects `transform: U` too, as "Value is a reference
+/// to 'U'" (oxc doesn't evaluate namespaces), and accepts `transform: f`
+/// (oxc doesn't follow the alias).
+#[test]
+fn file_namespaces_and_aliases_are_not_assumed_to_be_global_functions() {
+    let namespace = "namespace U { export function f(v: string) { return 1; } }\n";
+    for (pre, expr) in
+        [(namespace.to_string(), "U"), (format!("{namespace}import f = U.f;\n"), "f")]
+    {
+        let source = format!(
+            "import {{Directive, Input}} from '@angular/core';\n{pre}\
+             @Directive({{selector: '[d]'}})\n\
+             export class Dir {{\n  @Input({{transform: {expr}}}) x: any;\n}}\n"
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(
+                "Input transform must be a function Value could not be determined statically."
+                    .to_string(),
+                expr.to_string()
+            )],
+            "{expr}"
+        );
+    }
+}
+
+/// A shorthand `{ transform }` naming a global is looked up through
+/// TypeScript's shorthand symbol, which ngtsc 22.1.7 never accepts as a
+/// transform: "could not be determined statically" when nothing declares
+/// it, and an error about the declaration when a lib or `.d.ts` does (at
+/// that declaration). So unlike `transform: atob`, it isn't assumed to be a
+/// function.
+#[test]
+fn shorthand_transform_naming_a_global_is_rejected() {
+    let source = "import {Directive} from '@angular/core';
+@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})
+export class Dir {
+  x!: any;
+}
+";
+    assert_eq!(
+        errors(&transform(source), source),
+        vec![(
+            "Input transform must be a function Value could not be determined statically."
+                .to_string(),
+            "transform".to_string()
+        )]
+    );
 }
 
 /// ngtsc checks an overloaded static method's first declaration, not its
