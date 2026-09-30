@@ -16173,6 +16173,125 @@
         }
       },
       "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-member-input-alias-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const AL = 'why'; }\ndeclare const S: typeof NS.AL;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input(S) a: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"why\",\"a\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"why\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-output-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'changed'; }\ndeclare const S: typeof NS.AL;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(S) a = new EventEmitter();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{a:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"a\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-input-options-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'why'; export const REQ = true; }\ndeclare const S: typeof NS.AL;\ndeclare const R: typeof NS.REQ;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: S, required: R}) a: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"why\",\"a\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"why\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-input-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'why'; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NS.AL) a: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[163, 176]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-output-plain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'why'; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(NS.AL) a = new EventEmitter();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[163, 177]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-input-alias-import",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'why'; }\nimport S = NS.AL;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(S) a: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"why\",\"a\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"why\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-input-namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const AL = 'why'; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NS) a: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is a reference to 'NS'."
+      ],
+      "diagnosticSpans": [[163, 173]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-m504-input-options-object-typeof",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter} from '@angular/core';\nnamespace NS { export const OPTS = {alias: 'why'}; }\ndeclare const O: typeof NS.OPTS;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(O) a: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[0,\"why\",\"a\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"why\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
     }
   ]
 }

@@ -307,7 +307,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 1034, "fixtures compared");
+    assert_eq!(compared, 1042, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
