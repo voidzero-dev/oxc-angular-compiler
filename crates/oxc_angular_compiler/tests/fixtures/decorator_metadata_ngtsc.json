@@ -5150,7 +5150,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -5284,7 +5285,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -6962,7 +6964,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
@@ -7004,7 +7007,8 @@
       "classes": {
         "D": {
           "inputs": "{x:[2,\"x\",\"x\",(v)=>v.length]}",
-          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
         }
       },
       "dtsImports": [],
