@@ -14,7 +14,7 @@
 //! `packages/compiler-cli/src/ngtsc/transform/src/declaration.ts`
 
 use crate::component::{ComponentMetadata, HostDirectiveMetadata, R3DependencyMetadata};
-use crate::directive::{R3DirectiveMetadata, R3InputMetadata};
+use crate::directive::{R3DirectiveMetadata, R3InputMetadata, ts_string_literal};
 use crate::injectable::InjectableMetadata;
 use crate::ng_module::NgModuleMetadata;
 use crate::pipe::PipeMetadata;
@@ -574,17 +574,13 @@ fn generate_input_transform_fields(
         if !input.is_signal && input.transform_function.is_some() {
             let name = input.class_property_name.as_str();
             let field = format!("ngAcceptInputType_{name}");
-            let field = if is_identifier_name(&field) { field } else { format!("\"{field}\"") };
+            // ngtsc quotes the name only when Angular's `isUnsafeObjectKey`
+            // (`/[-.]/`) matches; any other name is printed as written.
+            let field = if field.contains(['-', '.']) { ts_string_literal(&field) } else { field };
             let ty = accept_types.get(name).map_or("unknown", String::as_str);
             members.push_str(&format!("\nstatic {field}: {ty};"));
         }
     }
-}
-
-fn is_identifier_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_' || c == '$')
-        && chars.all(|c| c.is_alphanumeric() || c == '_' || c == '$')
 }
 
 /// Generate the input map type for `ɵɵComponentDeclaration` / `ɵɵDirectiveDeclaration`.

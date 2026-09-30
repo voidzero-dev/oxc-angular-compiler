@@ -640,7 +640,7 @@ fn same_line_comments(text: &str) -> String {
 /// A string literal as TypeScript prints a synthesized one: double quotes,
 /// escapes for control characters and everything outside ASCII (as UTF-16
 /// code units).
-fn quote(s: &str) -> String {
+pub(crate) fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     let mut chars = s.chars().peekable();

@@ -38,6 +38,7 @@ pub(crate) use decorator::{
     merge_by_class_property, parse_decorator_io, resolve_member_transforms,
 };
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
+pub(crate) use dts_type::quote as ts_string_literal;
 pub use evaluator::input_transform_types;
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,

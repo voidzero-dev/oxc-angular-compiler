@@ -461,3 +461,75 @@ const OTHER_MODULE: &[(&str, &str)] = &[
     ("Other", "i1.Other"),
     ("{[K in TT]: Other}", "{ [K in TT]: i1.Other; }"),
 ];
+
+/// The member name for inputs whose class property is a string key. ngtsc
+/// quotes `ngAcceptInputType_<name>` only when the name has a `-` or `.`
+/// (Angular's `isUnsafeObjectKey`), escaped the way TypeScript prints a
+/// string literal; any other name is written as is, even when that doesn't
+/// parse. Every expected line is what ngtsc 22.1.7 wrote for this source.
+#[test]
+fn member_name_is_quoted_like_ngtsc() {
+    let source = r#"import {Directive, Input} from '@angular/core';
+function tr(v: string | number): string { return String(v); }
+@Directive({selector: '[m]'})
+export class M {
+  @Input({transform: tr}) 'a"b': any;
+  @Input({transform: tr}) 'c\\d': any;
+  @Input({transform: tr}) 'e\nf': any;
+  @Input({transform: tr}) "i'j": any;
+  @Input({transform: tr}) 'mé': any;
+  @Input({transform: tr}) 'k-l': any;
+  @Input({transform: tr}) 'a-"b': any;
+  @Input({transform: tr}) 'c.\\d': any;
+  @Input({transform: tr}) 'e-\nf': any;
+  @Input({transform: tr}) 'k-é': any;
+  @Input({transform: tr}) 'x-😀\u0001\u000b\0': any;
+  @Input({transform: tr}) 'a.b': any;
+  @Input({transform: tr}) "i-'j": any;
+  @Input({transform: tr}) norm: any;
+}
+@Directive({selector: '[a]', inputs: [{name: 'q-"r', transform: tr}, {name: 's"t', transform: tr}]})
+export class A { 'q-"r': any; 's"t': any; }
+"#;
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "m.ts",
+        source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    let members = |class: &str| {
+        let decl = result.dts_declarations.iter().find(|d| d.class_name == class).unwrap();
+        decl.members
+            .split("\nstatic ")
+            .filter(|m| {
+                m.starts_with("ngAcceptInputType_") || m.starts_with("\"ngAcceptInputType_")
+            })
+            .map(|m| format!("static {m}"))
+            .collect::<Vec<_>>()
+    };
+    let t = ": string | number;";
+    let expect =
+        |names: &[&str]| names.iter().map(|n| format!("static {n}{t}")).collect::<Vec<_>>();
+    assert_eq!(
+        members("M"),
+        expect(&[
+            "ngAcceptInputType_a\"b",
+            "ngAcceptInputType_c\\d",
+            "ngAcceptInputType_e\nf",
+            "ngAcceptInputType_i'j",
+            "ngAcceptInputType_mé",
+            "\"ngAcceptInputType_k-l\"",
+            "\"ngAcceptInputType_a-\\\"b\"",
+            "\"ngAcceptInputType_c.\\\\d\"",
+            "\"ngAcceptInputType_e-\\nf\"",
+            "\"ngAcceptInputType_k-\\u00E9\"",
+            "\"ngAcceptInputType_x-\\uD83D\\uDE00\\u0001\\v\\0\"",
+            "\"ngAcceptInputType_a.b\"",
+            "\"ngAcceptInputType_i-'j\"",
+            "ngAcceptInputType_norm",
+        ])
+    );
+    assert_eq!(members("A"), expect(&["\"ngAcceptInputType_q-\\\"r\"", "ngAcceptInputType_s\"t"]));
+}
