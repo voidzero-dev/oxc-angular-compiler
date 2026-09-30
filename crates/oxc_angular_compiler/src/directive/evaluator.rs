@@ -126,12 +126,15 @@ enum Qualified<'a> {
     Missing,
 }
 
-/// Whether an enum `e` declares the member `member`.
+/// Whether an enum `e` declares the member `member`, however its name is
+/// written (`A`, `'A'`, `['A']` or `` [`A`] ``).
 fn enum_declares_member(e: &TSEnumDeclaration<'_>, member: &str) -> bool {
     e.body.members.iter().any(|m| match &m.id {
         TSEnumMemberName::Identifier(id) => id.name == member,
         TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => s.value == member,
-        TSEnumMemberName::ComputedTemplateString(_) => false,
+        TSEnumMemberName::ComputedTemplateString(t) => {
+            t.single_quasi().is_some_and(|q| q == member)
+        }
     })
 }
 

@@ -12447,6 +12447,74 @@
         }
       },
       "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-arrow-plain-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace NS { export const INPUTS = [{name: 'a', transform: (v: string) => 1}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-ns-top-fn-inside",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nfunction top(v: string) { return 1; }\nnamespace NS { export const INPUTS = [{name: 'a', transform: top}]; }\ndeclare const X: typeof NS.INPUTS;\n@Directive({selector: '[d]', inputs: X})\nexport class Dir {\n  a: any;\n  b: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[2,\"a\",\"a\",top]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"a\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_a": "staticngAcceptInputType_a:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-transform-member",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\nimport f = U.f;\n@Directive({selector: '[d]', })\nexport class Dir {\n  @Input({transform: f}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: r6-alias-transform-meta",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, ContentChild, ViewChild} from '@angular/core';\nnamespace U { export function f(v: string) { return 1; } }\nimport f = U.f;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: f}]})\nexport class Dir {\n  x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
     }
   ]
 }

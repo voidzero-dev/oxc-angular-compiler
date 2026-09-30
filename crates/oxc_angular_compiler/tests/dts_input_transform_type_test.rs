@@ -165,6 +165,59 @@ export class Dir {
     assert!(decl.members.contains("static ngAcceptInputType_y: E | E | T;"), "{}", decl.members);
 }
 
+/// The same whatever the member's name is written as: `'B'`, `['C']` or a
+/// template literal (`` [`A`] ``, also with an escape), at the top level or in
+/// a namespace. ngtsc 22.1.7 throws on all of these.
+#[test]
+fn enum_members_named_by_literals_are_kept_as_written() {
+    let source = "import {Directive, Input} from '@angular/core';
+export enum E { [`A`] = 'a', 'B' = 'b', ['C'] = 'c', [`\\u0044`] = 'd' }
+export namespace NS { export enum F { [`A`] = 'a' } }
+@Directive({selector: '[d]'})
+export class Dir {
+  @Input({transform: (v: E.A | E.B | E.C | E.D) => 1}) x!: number;
+  @Input({transform: (v: NS.F.A) => 1}) y!: number;
+}
+";
+    assert_eq!(
+        accept_members(source),
+        vec![
+            "static ngAcceptInputType_x: E.A | E.B | E.C | E.D;".to_string(),
+            "static ngAcceptInputType_y: NS.F.A;".to_string(),
+        ]
+    );
+}
+
+/// A transform declared in a namespace (reached through `typeof NS.fn`, a
+/// static method of a class there, or `import H = NS.fn`) is typed from its
+/// declaration, like ngtsc 22.1.7 types this source. Its parameter's types
+/// are printed as written: ngtsc writes the namespace's `T` as `T` too, which
+/// doesn't resolve in the `.d.ts` (the snapshot skips these, since ngtsc also
+/// emits `fn` for `F`, which isn't in scope; oxc keeps `F`).
+#[test]
+fn transforms_declared_in_namespaces_are_typed_like_ngtsc() {
+    let source = "import {Directive, Input} from '@angular/core';
+export namespace NS {
+  export type T = string;
+  export function fn(v: string) { return 1; }
+  export function g(v: T) { return 1; }
+  export class C { static s(v: number) { return 1; } }
+}
+declare const F: typeof NS.fn;
+declare const G: typeof NS.g;
+declare const K: typeof NS.C;
+import H = NS.fn;
+@Directive({selector: '[d]'})
+export class Dir {
+  @Input({transform: F}) x0!: number;
+  @Input({transform: G}) x1!: number;
+  @Input({transform: K.s}) x2!: number;
+  @Input({transform: H}) x3!: number;
+}
+";
+    assert_eq!(accept_members(source), expect_members(&["string", "T", "number", "string"]));
+}
+
 /// The `ngAcceptInputType_*` members oxc writes for `source`, in order.
 fn accept_members(source: &str) -> Vec<String> {
     let allocator = Allocator::default();
