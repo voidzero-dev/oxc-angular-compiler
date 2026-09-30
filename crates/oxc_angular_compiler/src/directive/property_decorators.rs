@@ -19,6 +19,7 @@ use oxc_ast::ast::{
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
 
+use super::evaluator::{Evaluator, Value};
 use super::metadata::{QueryPredicate, R3InputMetadata, R3QueryMetadata};
 use crate::output::ast::OutputExpression;
 use crate::output::oxc_converter::convert_oxc_expression;
@@ -103,9 +104,40 @@ pub(crate) fn input_decorator_options<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
     consts: &super::StringConsts<'_>,
 ) -> Option<&'a Expression<'a>> {
-    match &find_decorator_by_name(decorators, "Input", Some(consts))?.expression {
+    decorator_argument(find_decorator_by_name(decorators, "Input", Some(consts))?)
+}
+
+/// The first argument of a decorator call (`NAME` in `@Input(NAME)`), if any.
+pub(crate) fn decorator_argument<'a>(decorator: &'a Decorator<'a>) -> Option<&'a Expression<'a>> {
+    match &decorator.expression {
         Expression::CallExpression(call) => call.arguments.first()?.as_expression(),
         _ => None,
+    }
+}
+
+/// One of Angular's member decorators (`name`: `Input`, `Output`, ...) in
+/// `decorators`, as the file `consts` was collected from imports it (see
+/// [`angular_member_decorator`]).
+pub(crate) fn member_decorator<'a>(
+    decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
+    name: &str,
+    consts: &super::StringConsts<'_>,
+) -> Option<&'a Decorator<'a>> {
+    find_decorator_by_name(decorators, name, Some(consts))
+}
+
+/// The name ngtsc gives a decorator in its messages (`Decorator.name`): the
+/// identifier it's called by, so `In` for `@In()` with
+/// `import { Input as In }`, and `Input` for `@core.Input()`.
+pub(crate) fn decorator_written_name<'a>(decorator: &'a Decorator<'a>) -> &'a str {
+    let callee = match &decorator.expression {
+        Expression::CallExpression(call) => &call.callee,
+        expr => expr,
+    };
+    match callee {
+        Expression::Identifier(id) => id.name.as_str(),
+        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
+        _ => "",
     }
 }
 
@@ -216,7 +248,50 @@ impl<'a> Default for InputConfig<'a> {
 /// - `@Input()` - no configuration
 /// - `@Input('alias')` - string alias
 /// - `@Input({ alias: 'name', required: true, transform: fn })` - full config
+///
+/// With the file (`file`), the argument is read through the evaluator, like
+/// ngtsc's `tryParseInputFieldMapping`: a string (`NAME`, `` `y` ``,
+/// `'a' + 'b'`) is the alias, and an object (`OPTS`, `{...OPTS, required: true}`)
+/// gives `alias` (when it's a string), `required` (when it's `true`) and
+/// `transform` (the expression ngtsc emits for it, see
+/// [`super::decorator::transform_expression`]). Anything else is `null` or an
+/// error [`super::decorator_io_errors`] reports, and gives no options. Without
+/// the file (the public `extract_*` functions), only literals are read.
 fn parse_input_config<'a>(
+    allocator: &'a Allocator,
+    decorator: &'a Decorator<'a>,
+    source_text: Option<&'a str>,
+    file: Option<(&Evaluator<'_, 'a>, &super::StringConsts<'a>)>,
+) -> InputConfig<'a> {
+    let literal = parse_literal_input_config(allocator, decorator, source_text);
+    let (Some((evaluator, consts)), Some(argument)) = (file, decorator_argument(decorator)) else {
+        return literal;
+    };
+    let alloc = |s: &str| Ident::from(allocator.alloc_str(s));
+    let options = evaluator.evaluate(argument);
+    match &options {
+        Value::String(alias) => InputConfig { alias: Some(alloc(alias)), ..Default::default() },
+        Value::Object(_) => InputConfig {
+            alias: options.prop("alias").and_then(|p| p.value.as_str()).map(alloc),
+            required: matches!(options.prop("required").map(|p| &p.value), Some(Value::Bool(true))),
+            transform: options
+                .prop("transform")
+                .and_then(|transform| {
+                    super::decorator::transform_expression(
+                        allocator,
+                        transform,
+                        source_text,
+                        consts,
+                    )
+                })
+                .or(literal.transform),
+        },
+        _ => InputConfig::default(),
+    }
+}
+
+/// [`parse_input_config`] for the literals written in the decorator.
+fn parse_literal_input_config<'a>(
     allocator: &'a Allocator,
     decorator: &'a Decorator<'a>,
     source_text: Option<&'a str>,
@@ -455,7 +530,9 @@ pub fn extract_input_metadata<'a>(
 /// `@angular/core` (see [`is_core_namespace`]). With `consts`, a signal member
 /// counts only when it calls Angular's `input()` / `model()`, as ngtsc's
 /// `tryParseInitializerApi` sees it (see [`super::decorator::initializer_api`]);
-/// without, any function with that name does.
+/// without, any function with that name does. With `consts`, an `@Input(...)`
+/// argument is also evaluated like ngtsc does (`@Input(NAME)`, `@Input(OPTS)`,
+/// see [`parse_input_config`]); without, only literals are read.
 pub fn extract_input_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -463,6 +540,8 @@ pub fn extract_input_metadata_in<'a>(
     consts: Option<&super::StringConsts<'a>>,
 ) -> Vec<'a, R3InputMetadata<'a>> {
     let mut inputs = Vec::new_in(&allocator);
+    let evaluator = consts.map(Evaluator::new);
+    let file = evaluator.as_ref().zip(consts);
 
     for element in &class.body.body {
         match element {
@@ -473,7 +552,7 @@ pub fn extract_input_metadata_in<'a>(
                         continue;
                     };
 
-                    let config = parse_input_config(allocator, decorator, source_text);
+                    let config = parse_input_config(allocator, decorator, source_text, file);
 
                     let binding_property_name =
                         config.alias.unwrap_or_else(|| class_property_name.clone());
@@ -515,7 +594,7 @@ pub fn extract_input_metadata_in<'a>(
                     continue;
                 };
 
-                let config = parse_input_config(allocator, decorator, source_text);
+                let config = parse_input_config(allocator, decorator, source_text, file);
 
                 let binding_property_name =
                     config.alias.unwrap_or_else(|| class_property_name.clone());
@@ -540,7 +619,7 @@ pub fn extract_input_metadata_in<'a>(
                     continue;
                 };
 
-                let config = parse_input_config(allocator, decorator, source_text);
+                let config = parse_input_config(allocator, decorator, source_text, file);
 
                 let binding_property_name =
                     config.alias.unwrap_or_else(|| class_property_name.clone());
@@ -582,20 +661,30 @@ impl<'a> Default for OutputConfig<'a> {
 /// Handles these variants:
 /// - `@Output()` - no configuration
 /// - `@Output('alias')` - string alias
-fn parse_output_config<'a>(decorator: &'a Decorator<'a>) -> OutputConfig<'a> {
-    let Expression::CallExpression(call) = &decorator.expression else {
+///
+/// With the file's `evaluator`, the argument is read through it, like ngtsc's
+/// `tryParseDecoratorOutput`: a string (`NAME`, `` `y` ``, `'a' + 'b'`) is the
+/// alias; anything else is an error [`super::decorator_io_errors`] reports.
+/// Without it (the public `extract_*` functions), only a string literal is read.
+fn parse_output_config<'a>(
+    allocator: &'a Allocator,
+    decorator: &'a Decorator<'a>,
+    evaluator: Option<&Evaluator<'_, 'a>>,
+) -> OutputConfig<'a> {
+    let Some(argument) = decorator_argument(decorator) else {
         return OutputConfig::default();
     };
-
-    let Some(first_arg) = call.arguments.first() else {
-        return OutputConfig::default();
+    let alias = match evaluator {
+        Some(evaluator) => match evaluator.evaluate(argument) {
+            Value::String(alias) => Some(Ident::from(allocator.alloc_str(&alias))),
+            _ => None,
+        },
+        None => match argument {
+            Expression::StringLiteral(lit) => Some(lit.value.clone().into()),
+            _ => None,
+        },
     };
-
-    match first_arg {
-        // @Output('alias')
-        Argument::StringLiteral(lit) => OutputConfig { alias: Some(lit.value.clone().into()) },
-        _ => OutputConfig::default(),
-    }
+    OutputConfig { alias }
 }
 
 /// Extract @Output metadata from all properties in a class.
@@ -623,13 +712,16 @@ pub fn extract_output_metadata<'a>(
 /// `@angular/core` (see [`is_core_namespace`]). With `consts`, a signal member
 /// counts only when it calls Angular's `output()` / `outputFromObservable()` /
 /// `model()` (see [`super::decorator::initializer_api`]); without, any
-/// function with that name does.
+/// function with that name does. With `consts`, an `@Output(...)` argument is
+/// also evaluated like ngtsc does (`@Output(NAME)`, see
+/// [`parse_output_config`]); without, only a string literal is read.
 pub fn extract_output_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     consts: Option<&super::StringConsts<'a>>,
 ) -> Vec<'a, (Ident<'a>, Ident<'a>)> {
     let mut outputs = Vec::new_in(&allocator);
+    let evaluator = consts.map(Evaluator::new);
 
     for element in &class.body.body {
         match element {
@@ -641,7 +733,7 @@ pub fn extract_output_metadata_in<'a>(
                         continue;
                     };
 
-                    let config = parse_output_config(decorator);
+                    let config = parse_output_config(allocator, decorator, evaluator.as_ref());
 
                     let binding_property_name =
                         config.alias.unwrap_or_else(|| class_property_name.clone());
@@ -677,7 +769,7 @@ pub fn extract_output_metadata_in<'a>(
                     continue;
                 };
 
-                let config = parse_output_config(decorator);
+                let config = parse_output_config(allocator, decorator, evaluator.as_ref());
 
                 let binding_property_name =
                     config.alias.unwrap_or_else(|| class_property_name.clone());

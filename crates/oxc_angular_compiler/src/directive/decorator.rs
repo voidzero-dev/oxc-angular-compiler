@@ -228,7 +228,6 @@ pub fn extract_directive_metadata<'a>(
         let fields = std::mem::replace(&mut metadata.outputs, Vec::new_in(&allocator));
         metadata.outputs = merge_by_class_property(io.outputs, fields, |o| o.0.as_str());
     }
-    resolve_member_transforms(allocator, class, source_text, consts, &mut metadata.inputs);
 
     // Merge host metadata from decorator into the existing host metadata
     if let Some(decorator_host) = host_from_decorator {
@@ -971,37 +970,6 @@ pub(crate) fn transform_expression<'a>(
     }
 }
 
-/// Give `@Input({ transform })` members the transform expression ngtsc emits
-/// (see [`transform_expression`]), in place of the one written.
-pub(crate) fn resolve_member_transforms<'a>(
-    allocator: &'a Allocator,
-    class: &'a Class<'a>,
-    source_text: Option<&'a str>,
-    consts: &StringConsts<'a>,
-    inputs: &mut [R3InputMetadata<'a>],
-) {
-    let evaluator = Evaluator::new(consts);
-    for element in &class.body.body {
-        let (key, decorators) = match element {
-            ClassElement::PropertyDefinition(p) => (&p.key, &p.decorators),
-            ClassElement::AccessorProperty(p) => (&p.key, &p.decorators),
-            ClassElement::MethodDefinition(m) => (&m.key, &m.decorators),
-            _ => continue,
-        };
-        let Some(name) = key.static_name() else { continue };
-        let options = super::property_decorators::input_decorator_options(decorators, consts);
-        let Some(options) = options else { continue };
-        let options = evaluator.evaluate(options);
-        let Some(transform) = options.prop("transform") else { continue };
-        let Some(input) = inputs.iter_mut().find(|i| i.class_property_name == name.as_ref()) else {
-            continue;
-        };
-        if let Some(expr) = transform_expression(allocator, transform, source_text, consts) {
-            input.transform_function = Some(expr);
-        }
-    }
-}
-
 /// ngtsc's `{...fromMeta, ...fromFields}` keyed by class property name: a member
 /// declaration replaces the metadata entry in place, new members are appended.
 /// The result is ordered like the keys of a JavaScript object: integer-like
@@ -1102,39 +1070,13 @@ pub fn decorator_io_errors<'a>(
                 _ => return None,
             };
             let name = key.static_name()?;
-            // `@Input({ transform })`
-            let options = super::property_decorators::input_decorator_options(decorators, consts);
-            if let Some(options) = options {
-                let span = options.span();
-                let options = evaluator.evaluate(options);
-                // ngtsc reads imported options (or an imported alias or
-                // `required`) from their file; oxc can't, and compiling the
-                // input without them would be a different binding.
-                let imported = std::iter::once(&options)
-                    .chain(
-                        ["alias", "required"].iter().filter_map(|k| Some(&options.prop(k)?.value)),
-                    )
-                    .find(|value| value.is_import());
-                if let Some(value) = imported {
-                    return Some((value_error("@Input", String::new, value), span));
-                }
-                if let Some(transform) = options.prop("transform") {
-                    let error =
-                        transform_error(transform, None, &name, class, consts.scope(), span)
-                            .or_else(|| match transform {
-                                Prop { expr: Some(written), .. }
-                                    if is_out_of_scope(transform, consts) =>
-                                {
-                                    let message =
-                                        scoped_transform_error("@Input", &name, written, consts);
-                                    Some((message, span))
-                                }
-                                _ => None,
-                            });
-                    if error.is_some() {
-                        return error;
-                    }
-                }
+            // `@Input(...)`, as ngtsc's `tryParseInputFieldMapping` reads it.
+            let decorator =
+                super::property_decorators::member_decorator(decorators, "Input", consts);
+            let error =
+                decorator.and_then(|d| input_decorator_error(d, &name, class, consts, &evaluator));
+            if error.is_some() {
+                return error;
             }
             // A signal input only collides with a metadata entry of the same name.
             let value = value.filter(|_| meta_inputs.contains(&name.as_ref()))?;
@@ -1149,6 +1091,19 @@ pub fn decorator_io_errors<'a>(
     };
     let output_members = || {
         class.body.body.iter().find_map(|element| {
+            // `@Output(...)`, as ngtsc's `tryParseDecoratorOutput` reads it, on
+            // the members an output is compiled from.
+            let decorators = match element {
+                ClassElement::PropertyDefinition(p) => Some(&p.decorators),
+                ClassElement::AccessorProperty(p) => Some(&p.decorators),
+                _ => None,
+            };
+            let decorator = decorators.and_then(|decorators| {
+                super::property_decorators::member_decorator(decorators, "Output", consts)
+            });
+            if let Some(error) = decorator.and_then(|d| output_decorator_error(d, &evaluator)) {
+                return Some(error);
+            }
             let ClassElement::PropertyDefinition(prop) = element else { return None };
             let (value, name) = (prop.value.as_ref()?, prop.key.static_name()?);
             if !meta_outputs.contains(&name.as_ref()) {
@@ -1194,6 +1149,90 @@ pub fn decorator_io_errors<'a>(
         .map(|(message, span)| OxcDiagnostic::error(message).with_label(span))
         .into_iter()
         .collect()
+}
+
+/// ngtsc's error for the `@Input(...)` decorator of the member `name`
+/// (`tryParseInputFieldMapping`): more than one argument, an argument that
+/// isn't `null`, a string or an object, or a `transform` it can't use. Options
+/// from another module are reported as such (see [`value_error`]).
+fn input_decorator_error<'a>(
+    decorator: &'a Decorator<'a>,
+    name: &str,
+    class: &'a Class<'a>,
+    consts: &StringConsts<'a>,
+    evaluator: &Evaluator<'_, 'a>,
+) -> Option<(String, Span)> {
+    // ngtsc names it as it's written: `@In` for `import { Input as In }`.
+    let subject = format!("@{}", super::property_decorators::decorator_written_name(decorator));
+    if let Some(error) = decorator_arity_error(decorator, &subject) {
+        return Some(error);
+    }
+    let options = super::property_decorators::decorator_argument(decorator)?;
+    let span = options.span();
+    let options = evaluator.evaluate(options);
+    // ngtsc reads imported options (or an imported alias or `required`) from
+    // their file; oxc can't, and compiling the input without them would be a
+    // different binding.
+    let imported = std::iter::once(&options)
+        .chain(["alias", "required"].iter().filter_map(|k| Some(&options.prop(k)?.value)))
+        .find(|value| value.is_import());
+    if let Some(value) = imported {
+        return Some((value_error(&subject, String::new, value), span));
+    }
+    if !matches!(options, Value::Null | Value::String(_) | Value::Object(_)) {
+        let message = format!(
+            "{subject} decorator argument must resolve to a string or an object literal{}",
+            options.wrong_type_suffix()
+        );
+        return Some((message, decorator.span));
+    }
+    let transform = options.prop("transform")?;
+    transform_error(transform, None, name, class, consts.scope(), span).or_else(
+        || match transform {
+            Prop { expr: Some(written), .. } if is_out_of_scope(transform, consts) => {
+                Some((scoped_transform_error("@Input", name, written, consts), span))
+            }
+            _ => None,
+        },
+    )
+}
+
+/// ngtsc's error for a member decorator called with more than one argument,
+/// named `subject` (`@Input`, or `@In` for `import { Input as In }`).
+fn decorator_arity_error(decorator: &Decorator<'_>, subject: &str) -> Option<(String, Span)> {
+    let Expression::CallExpression(call) = &decorator.expression else { return None };
+    let count = call.arguments.len();
+    (count > 1).then(|| {
+        let message = format!("{subject} can have at most one argument, got {count} argument(s)");
+        (message, decorator.span)
+    })
+}
+
+/// ngtsc's error for an `@Output(...)` decorator (`tryParseDecoratorOutput`):
+/// more than one argument, or an argument that isn't a string. An argument
+/// from another module is reported as such (see [`value_error`]).
+fn output_decorator_error<'a>(
+    decorator: &'a Decorator<'a>,
+    evaluator: &Evaluator<'_, 'a>,
+) -> Option<(String, Span)> {
+    // ngtsc names it `@Output` whatever it's imported as.
+    if let Some(error) = decorator_arity_error(decorator, "@Output") {
+        return Some(error);
+    }
+    let argument = super::property_decorators::decorator_argument(decorator)?;
+    match evaluator.evaluate(argument) {
+        Value::String(_) => None,
+        value if value.is_import() => {
+            Some((value_error("@Output", String::new, &value), argument.span()))
+        }
+        value => {
+            let message = format!(
+                "@Output decorator argument must resolve to a string{}",
+                value.wrong_type_suffix()
+            );
+            Some((message, decorator.span))
+        }
+    }
 }
 
 /// An initializer API: its function name and the module exporting it.

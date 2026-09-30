@@ -105,3 +105,42 @@ export class X {
     expect(component.queries ?? []).toEqual([])
   })
 })
+
+// Like ngtsc, an `@Input(...)` / `@Output(...)` argument is evaluated, so a
+// same-file const gives the alias, `required` flag and transform.
+describe('extractComponentMetadataSync member decorator arguments', () => {
+  it('reads aliases and options through same-file consts', () => {
+    const [component] = extractComponentMetadataSync(
+      `
+import { Component, EventEmitter, Input, Output, booleanAttribute } from '@angular/core';
+const NAME = 'y';
+const OPTS = { alias: \`z\`, required: true, transform: booleanAttribute };
+const t = booleanAttribute;
+
+@Component({ selector: 'app-x', template: '' })
+export class X {
+  @Input(NAME) a: any;
+  @Input(OPTS) b: any;
+  @Input({ ...OPTS, alias: 'w', transform: t }) c: any;
+  @Output('e' + NAME) d = new EventEmitter();
+}
+`,
+      'x.component.ts',
+    )
+    expect(
+      component.inputs?.map((i) => [
+        i.classPropertyName,
+        i.bindingPropertyName,
+        i.required,
+        i.transform ?? null,
+      ]),
+    ).toEqual([
+      ['a', 'y', false, null],
+      ['b', 'z', true, 'booleanAttribute'],
+      ['c', 'w', true, 'booleanAttribute'],
+    ])
+    expect(component.outputs?.map((o) => [o.classPropertyName, o.bindingPropertyName])).toEqual([
+      ['d', 'ey'],
+    ])
+  })
+})

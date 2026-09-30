@@ -10885,6 +10885,1310 @@
       "dtsImports": []
     },
     {
+      "name": "probe: memberArg-in-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-letString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nlet NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-varString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nvar NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-typedConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME: string = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-template",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(`y`) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-templateExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst P = 'p';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(`${P}y`) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"py\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"py\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-concat",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input('a' + 'b') x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"ab\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"ab\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y'};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constObjectRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y', required: true};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constObjectTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y', transform: booleanAttribute};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"y\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-spread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y'};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({...OPTS}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-spreadRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y'};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({...OPTS, required: true}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-spreadOverride",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y', required: true};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({...OPTS, alias: 'z'}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"z\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"z\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-parens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input((NAME)) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-asConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y' as const;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-asAny",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME as any) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-nonNull",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME!) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-nestedConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst A = 'y';\nconst B = A;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(B) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-objectMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst N = {x: 'y'};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(N.x) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-arrayElement",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst N = ['a', 'y'];\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(N[1]) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: NAME}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasTemplate",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: `y`}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-requiredConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst R = true;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({required: R}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-enumString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nenum E { A = 'y' }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(E.A) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[169, 180]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-enumNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nenum E { A }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(E.A) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[163, 174]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constEnumString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst enum E { A = 'y' }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(E.A) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'E'."
+      ],
+      "diagnosticSpans": [[175, 186]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-number",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(1 as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[150, 166]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-bool",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(true as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'boolean'."
+      ],
+      "diagnosticSpans": [[150, 169]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-null",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(null) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-undefined",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(undefined) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[150, 167]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-array",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(['y'] as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type '[string]'."
+      ],
+      "diagnosticSpans": [[150, 170]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst N = 1;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(N as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[163, 179]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-declared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\ndeclare const N: string;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(N) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is a reference to 'N'."
+      ],
+      "diagnosticSpans": [[175, 184]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-call",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nfunction f(): string { return 'y'; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(f()) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-twoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @Input('a', 'b') x: any;\n}\n"
+      },
+      "diagnostics": ["@Input can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[166, 182]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-twoArgsConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @Input(NAME, NAME) x: any;\n}\n"
+      },
+      "diagnostics": ["@Input can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[184, 202]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: 1 as any}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasConstNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 1};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS as any) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-requiredString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({required: 'yes' as any}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-setter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) set x(v: any) {}\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-setterObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y', required: true};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) set x(v: any) {}\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-accessor",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) accessor x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-component",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-componentObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y', required: true};\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "inputs": "{x:[0,\"y\",\"x\"]}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{\"x\":{\"alias\":\"y\";\"required\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-numberThenOutput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(1 as any) x: any;\n  @Output(2 as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[150, 166]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-badAndMetaInputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]', inputs: [1 as any]})\nexport class Dir {\n  @Input(1 as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[136, 146]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(NAME) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-letString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nlet NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(NAME) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-template",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(`y`) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-templateExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst P = 'p';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(`${P}y`) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"py\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"py\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-concat",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output('a' + 'b') e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"ab\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"ab\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-parens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output((NAME)) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-asConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y' as const;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(NAME) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-nestedConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst A = 'y';\nconst B = A;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(B) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-enumString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nenum E { A = 'y' }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(E.A) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": ["@Output decorator argument must resolve to a string Value is of type 'E'."],
+      "diagnosticSpans": [[169, 181]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-enumNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nenum E { A }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(E.A as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": ["@Output decorator argument must resolve to a string Value is of type 'E'."],
+      "diagnosticSpans": [[163, 182]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-number",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(1 as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[150, 167]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-null",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(null) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'null'."
+      ],
+      "diagnosticSpans": [[150, 163]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-undefined",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(undefined) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[150, 168]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-object",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output({alias: 'y'} as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type '{ alias: string }'."
+      ],
+      "diagnosticSpans": [[150, 178]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-constObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {alias: 'y'};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(OPTS as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type '{ alias: string }'."
+      ],
+      "diagnosticSpans": [[177, 197]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-declared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\ndeclare const N: string;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(N) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is a reference to 'N'."
+      ],
+      "diagnosticSpans": [[175, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-twoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @Output('a', 'b') e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": ["@Output can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[166, 183]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-noArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output() e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"e\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"e\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-component",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Component({selector: 'c', template: ''})\nexport class Cmp {\n  @Output(NAME) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-accessor",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(NAME) accessor e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{e:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"e\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-badAndMetaOutputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]', outputs: [1 as any]})\nexport class Dir {\n  @Output(1 as any) e = new EventEmitter<string>();\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve outputs at position 0 to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[137, 147]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasedTwoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input as In} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @In('a', 'b') x: any;\n}\n"
+      },
+      "diagnostics": ["@In can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[121, 134]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasedNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input as In} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @In(1 as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@In decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[105, 118]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-nsTwoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @core.Input('a', 'b') x: any;\n}\n"
+      },
+      "diagnostics": ["@Input can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[147, 168]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-nsNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as core from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @core.Input(1 as any) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[131, 152]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-aliasedNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, EventEmitter, Output as Out} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Out(1 as any) e = new EventEmitter();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[121, 135]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-aliasedTwoArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, EventEmitter, Output as Out} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @Out('a', 'b') e = new EventEmitter();\n}\n"
+      },
+      "diagnostics": ["@Output can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[137, 151]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-letUninit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nlet NAME;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[149, 161]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-aliasLetUninit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nlet NAME;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: NAME}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constArrowTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {transform: (v: string) => 1};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",(v)=>1]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constFnTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nexport function f(v: string) { return 1; }\nconst OPTS = {alias: 'y', transform: f};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"y\",\"x\",f]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constBadTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {transform: 1};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is of type 'number'."],
+      "diagnosticSpans": [[175, 179]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-twoArgsAndBadFirst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  // @ts-ignore\n  @Input(1, 2) x: any;\n}\n"
+      },
+      "diagnostics": ["@Input can have at most one argument, got 2 argument(s)"],
+      "diagnosticSpans": [[155, 167]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-emptyObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-emptyString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input('') x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-constEmpty",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-ternary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst C = false;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(C ? 'a' : 'b') x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"b\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"b\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-orDefault",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst N = '';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(N || 'z') x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[0,\"z\",\"x\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"z\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-transformOnlyConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst OPTS = {transform: booleanAttribute};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-transformConstAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias: NAME, transform: booleanAttribute}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"y\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"y\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-staticNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(1 as any) static x: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[139, 155]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-out-staticNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Output(1 as any) static e = new EventEmitter();\n}\n"
+      },
+      "diagnostics": [
+        "@Output decorator argument must resolve to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[139, 156]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: memberArg-in-twoInputsSecondBad",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, Output, EventEmitter, booleanAttribute} from '@angular/core';\nconst NAME = 'y';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(NAME) a: any;\n  @Input(1 as any) b: any;\n}\n"
+      },
+      "diagnostics": [
+        "@Input decorator argument must resolve to a string or an object literal Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[180, 196]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "probe: transform-global-atob",
       "origin": "probe",
       "files": {

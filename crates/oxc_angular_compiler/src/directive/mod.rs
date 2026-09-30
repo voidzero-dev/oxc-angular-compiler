@@ -38,9 +38,7 @@ pub use decorator::{
 pub(crate) use decorator::{
     angular_decorator_config, extract_string_value, resolve_template_literal,
 };
-pub(crate) use decorator::{
-    merge_by_class_property, parse_decorator_io, resolve_member_transforms,
-};
+pub(crate) use decorator::{merge_by_class_property, parse_decorator_io};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub(crate) use dts_type::quote as ts_string_literal;
 pub use evaluator::input_transform_types;

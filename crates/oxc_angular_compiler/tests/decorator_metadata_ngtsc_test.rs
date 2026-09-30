@@ -307,7 +307,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 878, "fixtures compared");
+    assert_eq!(compared, 967, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -458,6 +458,43 @@ export class Dir {
     let result = transform(source);
     assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
     assert!(strip(&result.code).contains(r#"inputs:{x:[2,"y","x",fn]}"#), "{}", result.code);
+}
+
+/// The same for an `@Output(...)` alias: ngtsc 22.1.7 reads it from `./shared`
+/// (with `export const NAME = 'y'`, it compiles the output as `y`). oxc can't,
+/// so it reports it instead of compiling the output under its property name.
+#[test]
+fn output_decorator_alias_imported_from_another_module_is_reported() {
+    let cases = [
+        ("@Output(NAME) e = new EventEmitter();", "NAME", "NAME"),
+        ("@Output((NAME)) e = new EventEmitter();", "NAME", "(NAME)"),
+        ("@Output(ns.NAME) e = new EventEmitter();", "NAME", "ns.NAME"),
+        ("@Output(LOCAL) e = new EventEmitter();", "NAME", "LOCAL"),
+        ("@Output(`${NAME}`) e = new EventEmitter();", "NAME", "`${NAME}`"),
+        ("@Output(NAME) accessor e = new EventEmitter();", "NAME", "NAME"),
+    ];
+    for (member, name, span) in cases {
+        let source = format!(
+            "import {{Directive, EventEmitter, Output}} from '@angular/core';
+import {{NAME}} from './shared';
+import * as ns from './shared';
+const LOCAL = NAME;
+@Directive({{selector: '[d]'}})
+export class Dir {{
+  {member}
+}}
+"
+        );
+        let message = format!(
+            "@Output depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(message, span.to_string())],
+            "{member}"
+        );
+    }
 }
 
 /// A transform returned by a function the metadata calls is emitted where the
