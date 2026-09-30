@@ -70,3 +70,38 @@ export class X {
     expect(component.host?.listeners ?? []).toEqual([])
   })
 })
+
+// Like ngtsc, a signal member counts only when it calls Angular's own `input()`,
+// `output()`, `model()`, `viewChild()`, ...: imported from `@angular/core` by
+// name (under any alias) or through a namespace import.
+describe('extractComponentMetadataSync signal members', () => {
+  it('reads only the ones that call Angular APIs', () => {
+    const [component] = extractComponentMetadataSync(
+      `
+import { Component, input as inp, output } from '@angular/core';
+import * as ng from '@angular/core';
+import { model, viewChild } from './other';
+function contentChild(x: string): any { return null; }
+
+@Component({ selector: 'app-x', template: '<div #ref></div>' })
+export class X {
+  a = inp(0);
+  b = ng.model.required<string>();
+  c = output();
+  d = model(0);
+  e = viewChild('ref');
+  f = contentChild('ref');
+  g = ng.viewChild('ref');
+}
+`,
+      'x.component.ts',
+    )
+    expect(component.inputs?.map((i) => [i.classPropertyName, i.isSignal])).toEqual([
+      ['a', true],
+      ['b', true],
+    ])
+    expect(component.outputs?.map((o) => o.classPropertyName)).toEqual(['b', 'c'])
+    expect(component.viewQueries?.map((q) => q.propertyName)).toEqual(['g'])
+    expect(component.queries ?? []).toEqual([])
+  })
+})

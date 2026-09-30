@@ -154,9 +154,9 @@ pub use class_debug_info::{R3ClassDebugInfo, compile_class_debug_info};
 // Re-export class metadata types
 pub use class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
-    build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
-    compile_component_class_metadata, compile_component_metadata_async_resolver,
-    compile_opaque_async_class_metadata,
+    build_decorator_metadata_array, build_prop_decorators_metadata,
+    build_prop_decorators_metadata_in, compile_class_metadata, compile_component_class_metadata,
+    compile_component_metadata_async_resolver, compile_opaque_async_class_metadata,
 };
 
 // Re-export dts types

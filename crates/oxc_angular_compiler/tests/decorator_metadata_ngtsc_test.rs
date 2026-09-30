@@ -307,7 +307,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 794, "fixtures compared");
+    assert_eq!(compared, 872, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -383,6 +383,27 @@ export class Dir {}
     let result = transform(source);
     assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
     assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",fn]}"#), "{}", result.code);
+
+    // A value computed from an import (a call, a member, a condition on one)
+    // isn't the import: it has no name in this file, so it's kept as written,
+    // never replaced by the import's name.
+    for (transform_expr, emitted) in
+        [("fn()", "fn()"), ("fn.f", "fn.f"), ("fn ? a : a", "fn?a:a"), ("SHARED || a", "SHARED||a")]
+    {
+        let source = format!(
+            "import {{Directive}} from '@angular/core';
+import {{fn, SHARED}} from './shared';
+export function a(v: string) {{ return 1; }}
+@Directive({{selector: '[d]', inputs: [{{name: 'x', transform: {transform_expr}}}]}})
+export class Dir {{}}
+"
+        );
+        let result = transform(&source);
+        let code = strip(&result.code);
+        let bare = format!(r#"inputs:{{x:[2,"x","x",{emitted}]}}"#);
+        let wrapped = format!(r#"inputs:{{x:[2,"x","x",({emitted})]}}"#);
+        assert!(code.contains(&bare) || code.contains(&wrapped), "{code}");
+    }
 }
 
 /// The same for an `@Input(...)` argument: ngtsc 22.1.7 reads these from
@@ -441,13 +462,13 @@ export class Dir {
 
 /// A transform returned by a function the metadata calls is emitted where the
 /// directive is compiled, outside that function. A parameter becomes the
-/// argument it was passed (the snapshot's `scope-*` probes); anything else that
-/// uses the function's parameters would mean something else there, or nothing.
-/// ngtsc 22.1.7 emits `(v) => v + name` as written (`name` is then
-/// `window.name`) and `booleanAttribute` for `o.t` (the name the argument was
-/// first given); oxc reports these instead. (`this` and `arguments` there
-/// aren't analyzable, so ngtsc rejects those itself: `scope-this`,
-/// `scope-arguments`.)
+/// argument it was passed (the snapshot's `scope-*` probes), and a reference
+/// read through one the name it was first given (`booleanAttribute` for `o.t`,
+/// `probe: shorthandRef-helperParamMember`); anything else that uses the
+/// function's parameters would mean something else there, or nothing. ngtsc
+/// 22.1.7 emits `(v) => v + name` as written (`name` is then `window.name`);
+/// oxc reports these instead. (`this` and `arguments` there aren't analyzable,
+/// so ngtsc rejects those itself: `scope-this`, `scope-arguments`.)
 #[test]
 fn transforms_using_the_parameters_of_a_called_function_are_reported() {
     let cases = [
@@ -456,12 +477,6 @@ fn transforms_using_the_parameters_of_a_called_function_are_reported() {
             "inputs: make('x')",
             "@Directive.inputs",
             "make('x')",
-        ),
-        (
-            "function make(o: any) { return [{ name: 'x', transform: o.t }]; }",
-            "inputs: make({ t: booleanAttribute })",
-            "@Directive.inputs",
-            "make({ t: booleanAttribute })",
         ),
         (
             "function opts(n: string) { return { transform: (v: string) => v + n }; }",
@@ -644,9 +659,8 @@ export class Dir { a: any; b: any; c: any; }
 /// an error, since `input` here isn't Angular's. The snapshot's
 /// `initializerApi-*` probes cover the ones ngtsc rejects, and the outputs.
 ///
-/// oxc still compiles such a member as a signal input (it recognises signal
-/// members by name), where ngtsc makes it a plain one: that's why these compare
-/// only the diagnostics.
+/// Such a member is a plain property, so `value` is the metadata's plain input
+/// (the snapshot's `signal-*Listed` probes compare the same with ngtsc).
 #[test]
 fn only_angular_initializer_apis_collide_with_metadata() {
     let cases = [
@@ -665,15 +679,16 @@ export class Dir {{ value = {initializer}; }}
         );
         let result = transform(&source);
         assert_eq!(errors(&result, &source), vec![], "{import} {initializer}");
+        let code = strip(&result.code);
+        assert!(code.contains(r#"inputs:{value:"value"}"#), "{import} {initializer}\n{code}");
     }
 }
 
 /// The same for a signal query also declared in `queries:`: ngtsc 22.1.7
 /// reports it only for Angular's `viewChild()`, `contentChild()`, ... (the
 /// snapshot's `initializerApi-viewChild*` probes), and compiles these, whose
-/// functions aren't Angular's. oxc still compiles such a member as a signal
-/// query too (it recognises them by name), so these compare only the
-/// diagnostics.
+/// functions aren't Angular's: the member is a plain property, and only the
+/// decorator's query is compiled.
 #[test]
 fn only_angular_signal_queries_collide_with_decorator_queries() {
     let cases = [
@@ -695,6 +710,11 @@ export class Dir {{ foo = {initializer}; }}
         );
         let result = transform(&source);
         assert_eq!(errors(&result, &source), vec![], "{declaration} {initializer}");
+        assert!(
+            !result.code.contains("QuerySignal"),
+            "{declaration} {initializer}\n{}",
+            result.code
+        );
     }
 }
 

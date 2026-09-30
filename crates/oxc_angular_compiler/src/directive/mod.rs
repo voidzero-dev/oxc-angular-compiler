@@ -27,6 +27,10 @@ pub use compiler::{
     create_inputs_literal, create_outputs_literal,
 };
 pub(crate) use decorator::find_directive_decorator;
+pub(crate) use decorator::{
+    INPUT_API, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS, initializer_api,
+    initializer_api_call,
+};
 pub use decorator::{
     StringConsts, collect_string_consts, decorator_io_errors, extract_directive_metadata,
     find_directive_decorator_span,

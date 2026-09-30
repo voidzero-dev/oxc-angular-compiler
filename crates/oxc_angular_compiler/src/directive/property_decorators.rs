@@ -110,14 +110,6 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
     }
 }
 
-/// Angular's signal query functions (ngtsc's `QUERY_INITIALIZER_FNS`).
-const QUERY_APIS: [super::decorator::InitializerApi; 4] = [
-    ("viewChild", "@angular/core"),
-    ("viewChildren", "@angular/core"),
-    ("contentChild", "@angular/core"),
-    ("contentChildren", "@angular/core"),
-];
-
 /// Try to unwrap a forwardRef call and extract the inner expression.
 ///
 /// Mirrors ngtsc's `tryUnwrapForwardRef`: `forwardRef(() => X)`,
@@ -268,78 +260,22 @@ pub(crate) struct ModelMapping<'a> {
 /// readonly aliased = model<string>(undefined, { alias: 'myAlias' }); // input alias 'myAlias', output 'myAliasChange'
 /// ```
 ///
+/// Like ngtsc, only Angular's `model` counts, when `consts` holds the file's
+/// imports (see [`super::decorator::initializer_api`]).
+///
 /// Based on Angular's `model_function.ts` in the compiler-cli.
 pub(crate) fn try_parse_signal_model<'a>(
     allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
+    consts: Option<&super::StringConsts<'_>>,
 ) -> Option<ModelMapping<'a>> {
-    // Check if the value is a call expression (unwrapping `as`/parenthesized).
-    let call_expr = match unwrap_initializer_api_expr(value) {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
+    let (_, is_required, call_expr) =
+        super::decorator::initializer_api_call(value, consts, &[super::decorator::MODEL_API])?;
 
-    // Determine if this is model() or model.required()
-    let is_required = match &call_expr.callee {
-        // model() - simple identifier call
-        Expression::Identifier(id) if id.name == "model" => false,
-        // model.required() - member expression call
-        Expression::StaticMemberExpression(member) => {
-            // Check for model.required / core.model.required
-            if member.property.name == "required" {
-                if is_initializer_fn_reference(&member.object, "model") {
-                    true
-                } else {
-                    return None;
-                }
-            } else if member.property.name == "model" {
-                // Handle namespaced calls like `core.model()`
-                if let Expression::Identifier(_) = &member.object {
-                    let output_binding = Ident::from(
-                        allocator.alloc_str(&format!("{}Change", property_name.as_str())),
-                    );
-                    return Some(ModelMapping {
-                        input: R3InputMetadata {
-                            class_property_name: property_name.clone(),
-                            binding_property_name: property_name.clone(),
-                            required: false,
-                            is_signal: true,
-                            transform_function: None,
-                        },
-                        output: (property_name, output_binding),
-                    });
-                }
-                return None;
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
-    };
-
-    // Parse options from arguments
-    // For model(): first arg is initial value, second arg is options
-    // For model.required(): first arg is options
+    // model(initialValue, options?) / model.required(options?)
     let options_arg_index = if is_required { 0 } else { 1 };
-
-    let mut alias: Option<Ident<'a>> = None;
-
-    if let Some(options_arg) = call_expr.arguments.get(options_arg_index) {
-        if let Argument::ObjectExpression(obj) = options_arg {
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    let Some(key_name) = get_property_key_name(&prop.key) else {
-                        continue;
-                    };
-
-                    if key_name.as_str() == "alias" {
-                        alias = extract_string_value(&prop.value);
-                    }
-                }
-            }
-        }
-    }
+    let alias = options_alias(call_expr.arguments.get(options_arg_index));
 
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
     // Output binding name is always `bindingPropertyName + "Change"`
@@ -358,6 +294,20 @@ pub(crate) fn try_parse_signal_model<'a>(
     })
 }
 
+/// The string `alias` of an initializer API's options object literal.
+fn options_alias<'a>(options: Option<&Argument<'a>>) -> Option<Ident<'a>> {
+    let Some(Argument::ObjectExpression(obj)) = options else { return None };
+    let mut alias = None;
+    for prop in &obj.properties {
+        if let ObjectPropertyKind::ObjectProperty(prop) = prop
+            && get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
+        {
+            alias = extract_string_value(&prop.value);
+        }
+    }
+    alias
+}
+
 /// Try to detect and parse a signal-based output from a property initializer.
 ///
 /// Signal-based outputs are created by calling `output()` or `output<T>()` from
@@ -368,56 +318,44 @@ pub(crate) fn try_parse_signal_model<'a>(
 /// For `outputFromObservable(observable, options?)` the options are the second argument;
 /// the observable expression is irrelevant for metadata extraction.
 ///
+/// Like ngtsc, only Angular's functions count, when `consts` holds the file's
+/// imports (see [`super::decorator::initializer_api`]).
+///
 /// Based on Angular's `output_function.ts` in the compiler-cli.
 pub(crate) fn try_parse_signal_output<'a>(
     value: &Expression<'a>,
     property_name: Ident<'a>,
+    consts: Option<&super::StringConsts<'_>>,
 ) -> Option<(Ident<'a>, Ident<'a>)> {
-    let call_expr = match unwrap_initializer_api_expr(value) {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-
-    // Detect which output initializer is called and whether options are at index 0 or 1.
-    let is_from_observable = match &call_expr.callee {
-        Expression::Identifier(id) => match id.name.as_str() {
-            "output" => false,
-            "outputFromObservable" => true,
-            _ => return None,
-        },
-        // Handle namespaced calls like `core.output()` or `rxjs.outputFromObservable()`
-        Expression::StaticMemberExpression(member) => {
-            if !matches!(&member.object, Expression::Identifier(_)) {
-                return None;
-            }
-            match member.property.name.as_str() {
-                "output" => false,
-                "outputFromObservable" => true,
-                _ => return None,
-            }
-        }
-        _ => return None,
-    };
+    use super::decorator::{OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API};
+    let (api, is_required, call_expr) = super::decorator::initializer_api_call(
+        value,
+        consts,
+        &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API],
+    )?;
+    // ngtsc rejects `output.required()`; it isn't an output.
+    if is_required {
+        return None;
+    }
 
     // output() → options at index 0; outputFromObservable(obs, options?) → options at index 1
-    let options_idx = if is_from_observable { 1 } else { 0 };
-    let mut alias: Option<Ident<'a>> = None;
-
-    if let Some(Argument::ObjectExpression(obj)) = call_expr.arguments.get(options_idx) {
-        for prop in &obj.properties {
-            if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                let Some(key_name) = get_property_key_name(&prop.key) else {
-                    continue;
-                };
-                if key_name.as_str() == "alias" {
-                    alias = extract_string_value(&prop.value);
-                }
-            }
-        }
-    }
+    let options_idx = if api == OUTPUT_FROM_OBSERVABLE_API { 1 } else { 0 };
+    let alias = options_alias(call_expr.arguments.get(options_idx));
 
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
     Some((property_name, binding_property_name))
+}
+
+/// Unwrap `as`/`satisfies`/parenthesized wrappers around an initializer-API call
+/// expression, matching ngc's `tryParseInitializerApi` which recurses through
+/// `isAsExpression` and `isParenthesizedExpression` (e.g. `x = input(0) as any`,
+/// `x = (input(0))`).
+pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
+    match expr {
+        Expression::TSAsExpression(e) => unwrap_initializer_api_expr(&e.expression),
+        Expression::ParenthesizedExpression(e) => unwrap_initializer_api_expr(&e.expression),
+        _ => expr,
+    }
 }
 
 /// Try to detect and parse a signal-based input from a property initializer.
@@ -433,101 +371,21 @@ pub(crate) fn try_parse_signal_output<'a>(
 /// readonly aliasedInput = input<string>({ alias: 'myAlias' });
 /// ```
 ///
+/// Like ngtsc, only Angular's `input` counts, when `consts` holds the file's
+/// imports (see [`super::decorator::initializer_api`]).
+///
 /// Based on Angular's `input_function.ts` in the compiler-cli.
-/// Unwrap `as`/`satisfies`/parenthesized wrappers around an initializer-API call
-/// expression, matching ngc's `tryParseInitializerApi` which recurses through
-/// `isAsExpression` and `isParenthesizedExpression` (e.g. `x = input(0) as any`,
-/// `x = (input(0))`).
-pub(crate) fn unwrap_initializer_api_expr<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    match expr {
-        Expression::TSAsExpression(e) => unwrap_initializer_api_expr(&e.expression),
-        Expression::ParenthesizedExpression(e) => unwrap_initializer_api_expr(&e.expression),
-        _ => expr,
-    }
-}
-
-/// Returns `true` when `object` is the `input`/`model`/etc. reference for a
-/// namespaced call, i.e. either a bare `<fn>` identifier or `<ns>.<fn>` member
-/// access. Used to recognize `<fn>.required()` and `core.<fn>.required()`.
-fn is_initializer_fn_reference(object: &Expression<'_>, function_name: &str) -> bool {
-    match object {
-        Expression::Identifier(id) => id.name == function_name,
-        Expression::StaticMemberExpression(member) => {
-            member.property.name == function_name
-                && matches!(&member.object, Expression::Identifier(_))
-        }
-        _ => false,
-    }
-}
-
 pub(crate) fn try_parse_signal_input<'a>(
-    _allocator: &'a Allocator,
     value: &Expression<'a>,
     property_name: Ident<'a>,
+    consts: Option<&super::StringConsts<'_>>,
 ) -> Option<R3InputMetadata<'a>> {
-    // Check if the value is a call expression (unwrapping `as`/parenthesized).
-    let call_expr = match unwrap_initializer_api_expr(value) {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
+    let (_, is_required, call_expr) =
+        super::decorator::initializer_api_call(value, consts, &[super::decorator::INPUT_API])?;
 
-    // Determine if this is input() or input.required()
-    let is_required = match &call_expr.callee {
-        // input() - simple identifier call
-        Expression::Identifier(id) if id.name == "input" => false,
-        // input.required() - member expression call
-        Expression::StaticMemberExpression(member) => {
-            // Check for input.required / core.input.required
-            if member.property.name == "required" {
-                if is_initializer_fn_reference(&member.object, "input") {
-                    true
-                } else {
-                    return None;
-                }
-            } else if member.property.name == "input" {
-                // Handle namespaced calls like `core.input()`
-                if let Expression::Identifier(_) = &member.object {
-                    return Some(R3InputMetadata {
-                        class_property_name: property_name.clone(),
-                        binding_property_name: property_name,
-                        required: false,
-                        is_signal: true,
-                        transform_function: None,
-                    });
-                }
-                return None;
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
-    };
-
-    // Parse options from arguments
-    // For input(): first arg is initial value, second arg is options
-    // For input.required(): first arg is options
+    // input(initialValue, options?) / input.required(options?)
     let options_arg_index = if is_required { 0 } else { 1 };
-
-    let mut alias: Option<Ident<'a>> = None;
-
-    if let Some(options_arg) = call_expr.arguments.get(options_arg_index) {
-        if let Argument::ObjectExpression(obj) = options_arg {
-            for prop in &obj.properties {
-                if let ObjectPropertyKind::ObjectProperty(prop) = prop {
-                    let Some(key_name) = get_property_key_name(&prop.key) else {
-                        continue;
-                    };
-
-                    if key_name.as_str() == "alias" {
-                        alias = extract_string_value(&prop.value);
-                    }
-                    // Note: Signal inputs don't support transform in the same way as decorator inputs.
-                    // The transform is captured in the signal initializer itself.
-                }
-            }
-        }
-    }
-
+    let alias = options_alias(call_expr.arguments.get(options_arg_index));
     let binding_property_name = alias.unwrap_or_else(|| property_name.clone());
 
     Some(R3InputMetadata {
@@ -535,7 +393,8 @@ pub(crate) fn try_parse_signal_input<'a>(
         binding_property_name,
         required: is_required,
         is_signal: true,
-        transform_function: None, // Signal inputs don't capture transform metadata
+        // Signal inputs capture their transform in the signal initializer itself.
+        transform_function: None,
     })
 }
 
@@ -562,7 +421,10 @@ pub fn extract_input_metadata<'a>(
 
 /// [`extract_input_metadata`] for a class in the file `consts` was collected
 /// from, which also recognises `@core.Input()` through a namespace import of
-/// `@angular/core` (see [`is_core_namespace`]).
+/// `@angular/core` (see [`is_core_namespace`]). With `consts`, a signal member
+/// counts only when it calls Angular's `input()` / `model()`, as ngtsc's
+/// `tryParseInitializerApi` sees it (see [`super::decorator::initializer_api`]);
+/// without, any function with that name does.
 pub fn extract_input_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -598,13 +460,13 @@ pub fn extract_input_metadata_in<'a>(
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         // Check for model() first since it also creates an input
                         if let Some(model_mapping) =
-                            try_parse_signal_model(allocator, value, property_name)
+                            try_parse_signal_model(allocator, value, property_name.clone(), consts)
                         {
                             inputs.push(model_mapping.input);
                         }
                         // Then check for input()
                         else if let Some(signal_input) =
-                            try_parse_signal_input(allocator, value, property_name)
+                            try_parse_signal_input(value, property_name, consts)
                         {
                             inputs.push(signal_input);
                         }
@@ -727,7 +589,10 @@ pub fn extract_output_metadata<'a>(
 
 /// [`extract_output_metadata`] for a class in the file `consts` was collected
 /// from, which also recognises `@core.Output()` through a namespace import of
-/// `@angular/core` (see [`is_core_namespace`]).
+/// `@angular/core` (see [`is_core_namespace`]). With `consts`, a signal member
+/// counts only when it calls Angular's `output()` / `outputFromObservable()` /
+/// `model()` (see [`super::decorator::initializer_api`]); without, any
+/// function with that name does.
 pub fn extract_output_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -757,13 +622,13 @@ pub fn extract_output_metadata_in<'a>(
                     if let Some(property_name) = get_property_key_name(&prop.key) {
                         // Check for output() signal first
                         if let Some(output_mapping) =
-                            try_parse_signal_output(value, property_name.clone())
+                            try_parse_signal_output(value, property_name.clone(), consts)
                         {
                             outputs.push(output_mapping);
                         }
                         // Then check for model() signal which also creates an output
                         else if let Some(model_mapping) =
-                            try_parse_signal_model(allocator, value, property_name)
+                            try_parse_signal_model(allocator, value, property_name, consts)
                         {
                             outputs.push(model_mapping.output);
                         }
@@ -800,10 +665,6 @@ pub fn extract_output_metadata_in<'a>(
 // @ViewChild/@ViewChildren/@ContentChild/@ContentChildren Decorator Parsing
 // and Signal-based Query Detection (viewChild(), viewChildren(), contentChild(), contentChildren())
 // ============================================================================
-
-/// Signal query function names.
-/// These are imported from @angular/core and used to create signal-based queries.
-const SIGNAL_QUERY_FNS: &[&str] = &["viewChild", "viewChildren", "contentChild", "contentChildren"];
 
 /// Parsed query decorator configuration.
 struct QueryConfig<'a> {
@@ -985,6 +846,9 @@ impl SignalQueryType {
 /// readonly requiredPanel = contentChild.required('panel');
 /// readonly tabs = contentChildren(TabComponent, { descendants: true });
 /// ```
+///
+/// Like ngtsc, only Angular's functions count, when `consts` holds the file's
+/// imports (see [`super::decorator::initializer_api`]).
 fn try_parse_signal_query<'a>(
     allocator: &'a Allocator,
     value: &'a Expression<'a>,
@@ -992,64 +856,13 @@ fn try_parse_signal_query<'a>(
     source_text: Option<&'a str>,
     consts: Option<&super::StringConsts<'a>>,
 ) -> Option<(SignalQueryType, R3QueryMetadata<'a>)> {
-    // Check if the value is a call expression (unwrapping `as`/parenthesized).
-    let call_expr = match unwrap_initializer_api_expr(value) {
-        Expression::CallExpression(call) => call,
-        _ => return None,
-    };
-
-    // Helper to get query type from function name
-    let get_query_type = |name: &str| -> Option<SignalQueryType> {
-        match name {
-            "viewChild" => Some(SignalQueryType::ViewChild),
-            "viewChildren" => Some(SignalQueryType::ViewChildren),
-            "contentChild" => Some(SignalQueryType::ContentChild),
-            "contentChildren" => Some(SignalQueryType::ContentChildren),
-            _ => None,
-        }
-    };
-
-    // Check if the callee is one of the signal query functions
-    // Handles three patterns:
-    // 1. Direct call: viewChild(), viewChildren(), contentChild(), contentChildren()
-    // 2. Required call: viewChild.required(), contentChild.required()
-    // 3. Namespaced call: core.viewChild(), core.viewChild.required()
-    let query_type = match &call_expr.callee {
-        // Pattern 1: Direct call - viewChild(), viewChildren(), etc.
-        Expression::Identifier(id) => get_query_type(id.name.as_str())?,
-        Expression::StaticMemberExpression(member) => {
-            // Pattern 2: Required call - viewChild.required(), contentChild.required()
-            if member.property.name == "required" {
-                match &member.object {
-                    // viewChild.required()
-                    Expression::Identifier(id) => get_query_type(id.name.as_str())?,
-                    // Pattern 3b: Namespaced required call - core.viewChild.required()
-                    // member.object is `core.viewChild` (a StaticMemberExpression)
-                    Expression::StaticMemberExpression(inner_member) => {
-                        // inner_member.object should be an identifier (namespace)
-                        // inner_member.property should be the query function name
-                        if let Expression::Identifier(_) = &inner_member.object {
-                            get_query_type(inner_member.property.name.as_str())?
-                        } else {
-                            return None;
-                        }
-                    }
-                    _ => return None,
-                }
-            }
-            // Pattern 3a: Namespaced call - core.viewChild()
-            else if SIGNAL_QUERY_FNS.contains(&member.property.name.as_str()) {
-                // Must be namespace.queryFn() pattern
-                if let Expression::Identifier(_) = &member.object {
-                    get_query_type(member.property.name.as_str())?
-                } else {
-                    return None;
-                }
-            } else {
-                return None;
-            }
-        }
-        _ => return None,
+    let ((function, _), _, call_expr) =
+        super::decorator::initializer_api_call(value, consts, &super::decorator::QUERY_APIS)?;
+    let query_type = match function {
+        "viewChild" => SignalQueryType::ViewChild,
+        "viewChildren" => SignalQueryType::ViewChildren,
+        "contentChild" => SignalQueryType::ContentChild,
+        _ => SignalQueryType::ContentChildren,
     };
 
     // Parse the predicate from the first argument
@@ -1138,7 +951,10 @@ pub fn extract_view_queries<'a>(
 }
 
 /// [`extract_view_queries`], resolving predicates that reference same-file
-/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does.
+/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does, and
+/// recognising only Angular's `viewChild()` / `viewChildren()` (see
+/// [`super::decorator::initializer_api`]); without `consts`, any function with
+/// that name.
 pub(crate) fn extract_view_queries_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -1320,7 +1136,10 @@ pub fn extract_content_queries<'a>(
 }
 
 /// [`extract_content_queries`], resolving predicates that reference same-file
-/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does.
+/// consts (`@ViewChild(SELECTOR)`) the way ngtsc's partial evaluator does, and
+/// recognising only Angular's `contentChild()` / `contentChildren()` (see
+/// [`super::decorator::initializer_api`]); without `consts`, any function with
+/// that name.
 pub(crate) fn extract_content_queries_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -1839,8 +1658,12 @@ pub(crate) fn parse_decorator_queries<'a>(
         .filter_map(|element| {
             let ClassElement::PropertyDefinition(prop) = element else { return None };
             let name = get_property_key_name(&prop.key)?;
-            super::decorator::is_initializer_api_call(prop.value.as_ref()?, consts, &QUERY_APIS)
-                .then_some(name)
+            super::decorator::is_initializer_api_call(
+                prop.value.as_ref()?,
+                consts,
+                &super::decorator::QUERY_APIS,
+            )
+            .then_some(name)
         })
         .collect();
     // ngtsc checks the content queries first, and reports the `new` expression.

@@ -224,3 +224,26 @@ fn explicit_view_child_decorator_blocks_query_synthesis() {
         "synthesis must skip when explicit query decorator coexists. Got:\n{out}"
     );
 }
+
+#[test]
+fn only_angular_initializer_apis_are_lowered() {
+    // ngtsc's JIT transform recognises the APIs by their `@angular/core` import
+    // (`tryParseInitializerApi`): an alias counts; a function from another
+    // module, a local one or an undeclared one doesn't.
+    let out = compile_jit(
+        "import { Component, input as inp } from '@angular/core';\n\
+         import * as ng from '@angular/core';\n\
+         import { output } from './other';\n\
+         function model(v?: any): any { return v; }\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C {\n  a = inp(0);\n  b = output();\n  c = model(0);\n  d = viewChild('x');\n  e = ng.contentChild.required('y');\n}\n",
+    );
+    let props = &out[out.find("propDecorators").expect("propDecorators missing")..];
+    let props: String = props.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        props.starts_with(
+            r#"propDecorators={a:[{type:i0.Input,args:[{isSignal:true,alias:"a",required:false,transform:undefined}]}],e:[{type:i0.ContentChild,args:["y",{isSignal:true}]}]};"#
+        ),
+        "Got:\n{out}"
+    );
+}

@@ -35,7 +35,7 @@ use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
     R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
-    build_decorator_metadata_array, build_prop_decorators_metadata, compile_class_metadata,
+    build_decorator_metadata_array, build_prop_decorators_metadata_in, compile_class_metadata,
     compile_component_class_metadata,
 };
 use crate::directive::collect_string_consts;
@@ -791,11 +791,12 @@ fn build_set_class_metadata_decls<'a>(
             import_map,
             Some(source),
         ),
-        prop_decorators: build_prop_decorators_metadata(
+        prop_decorators: build_prop_decorators_metadata_in(
             &allocator,
             class,
             Some(source),
             namespace_registry,
+            Some(string_consts),
         ),
     };
     let metadata_expr = match options.compilation_mode {
@@ -1218,6 +1219,7 @@ const ANGULAR_DECORATOR_NAMES: &[&str] = &[
 fn extract_all_jit_member_decorators(
     source: &str,
     class: &oxc_ast::ast::Class<'_>,
+    string_consts: &crate::directive::StringConsts<'_>,
 ) -> (std::vec::Vec<JitMemberDecorator>, std::vec::Vec<JitNonAngularMemberDecorator>) {
     use oxc_ast::ast::{ClassElement, MethodDefinitionKind, PropertyKey};
 
@@ -1307,6 +1309,7 @@ fn extract_all_jit_member_decorators(
                 init,
                 &member_name,
                 &explicit_field_decorators,
+                string_consts,
             );
             angular_decs.extend(synthesized);
         }
@@ -1361,58 +1364,40 @@ enum InitializerApiKind {
 
 /// Identify which initializer API a call expression represents.
 ///
-/// Handles three call shapes:
-/// - bare identifier: `input(...)`, `output(...)`
-/// - `.required` member: `input.required(...)`, `model.required(...)`
-/// - namespaced: `core.input(...)`, `core.viewChild.required(...)`
-fn classify_initializer_api(callee: &Expression<'_>) -> Option<InitializerApiKind> {
-    fn match_name(name: &str) -> Option<InitializerApiKind> {
-        match name {
-            "input" => Some(InitializerApiKind::Input),
-            "output" => Some(InitializerApiKind::Output),
-            "outputFromObservable" => Some(InitializerApiKind::OutputFromObservable),
-            "model" => Some(InitializerApiKind::Model),
-            "viewChild" => Some(InitializerApiKind::ViewChild),
-            "viewChildren" => Some(InitializerApiKind::ViewChildren),
-            "contentChild" => Some(InitializerApiKind::ContentChild),
-            "contentChildren" => Some(InitializerApiKind::ContentChildren),
-            _ => None,
-        }
-    }
-    fn required_variant(base: InitializerApiKind) -> Option<InitializerApiKind> {
-        match base {
-            InitializerApiKind::Input => Some(InitializerApiKind::InputRequired),
-            InitializerApiKind::Model => Some(InitializerApiKind::ModelRequired),
-            InitializerApiKind::ViewChild => Some(InitializerApiKind::ViewChildRequired),
-            InitializerApiKind::ContentChild => Some(InitializerApiKind::ContentChildRequired),
-            _ => None,
-        }
-    }
-
-    match callee {
-        Expression::Identifier(id) => match_name(id.name.as_str()),
-        Expression::StaticMemberExpression(member) => {
-            // `<base>.required` — find the underlying base API and promote it.
-            if member.property.name == "required" {
-                let base = match &member.object {
-                    Expression::Identifier(id) => match_name(id.name.as_str())?,
-                    Expression::StaticMemberExpression(inner) => {
-                        // Namespaced: `core.input.required`
-                        match_name(inner.property.name.as_str())?
-                    }
-                    _ => return None,
-                };
-                required_variant(base)
-            } else {
-                // Namespaced: `core.input(...)`. The outer property *is* the function name.
-                match &member.object {
-                    Expression::Identifier(_) => match_name(member.property.name.as_str()),
-                    _ => None,
-                }
-            }
-        }
-        _ => None,
-    }
+/// Like ngtsc's `tryParseInitializerApi`, only Angular's functions count:
+/// `input(...)` / `input.required(...)` with `input` imported by name from
+/// `@angular/core` (`outputFromObservable` from `@angular/core/rxjs-interop`),
+/// under any alias, or `core.input(...)` / `core.input.required(...)` through a
+/// namespace import (see [`crate::directive::initializer_api`]).
+fn classify_initializer_api(
+    callee: &Expression<'_>,
+    string_consts: &crate::directive::StringConsts<'_>,
+) -> Option<InitializerApiKind> {
+    use crate::directive::{
+        INPUT_API, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS,
+    };
+    let apis = [INPUT_API, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API]
+        .into_iter()
+        .chain(QUERY_APIS)
+        .collect::<std::vec::Vec<_>>();
+    let ((function, _), required) =
+        crate::directive::initializer_api(callee, Some(string_consts), &apis)?;
+    Some(match (function, required) {
+        ("input", false) => InitializerApiKind::Input,
+        ("input", true) => InitializerApiKind::InputRequired,
+        ("model", false) => InitializerApiKind::Model,
+        ("model", true) => InitializerApiKind::ModelRequired,
+        ("output", false) => InitializerApiKind::Output,
+        ("outputFromObservable", false) => InitializerApiKind::OutputFromObservable,
+        ("viewChild", false) => InitializerApiKind::ViewChild,
+        ("viewChild", true) => InitializerApiKind::ViewChildRequired,
+        ("viewChildren", false) => InitializerApiKind::ViewChildren,
+        ("contentChild", false) => InitializerApiKind::ContentChild,
+        ("contentChild", true) => InitializerApiKind::ContentChildRequired,
+        ("contentChildren", false) => InitializerApiKind::ContentChildren,
+        // `output.required()`, `viewChildren.required()`, ...
+        _ => return None,
+    })
 }
 
 /// Namespace alias under which `@angular/core` is imported when JIT synthesis needs
@@ -1440,10 +1425,13 @@ fn synthesize_signal_api_decorators(
     initializer: &Expression<'_>,
     field_name: &str,
     existing: &rustc_hash::FxHashSet<String>,
+    string_consts: &crate::directive::StringConsts<'_>,
 ) -> std::vec::Vec<JitParamDecorator> {
     let unwrapped = unwrap_jit_initializer(initializer);
     let Expression::CallExpression(call) = unwrapped else { return std::vec::Vec::new() };
-    let Some(kind) = classify_initializer_api(&call.callee) else { return std::vec::Vec::new() };
+    let Some(kind) = classify_initializer_api(&call.callee, string_consts) else {
+        return std::vec::Vec::new();
+    };
 
     match kind {
         InitializerApiKind::Input | InitializerApiKind::InputRequired => {
@@ -2150,7 +2138,7 @@ fn transform_angular_file_jit(
 
         // Extract Angular and non-Angular member decorators
         let (member_decorators, non_angular_member_decorators) =
-            extract_all_jit_member_decorators(source, class);
+            extract_all_jit_member_decorators(source, class, &string_consts);
 
         jit_classes.push(JitClassInfo {
             class_name,
@@ -2779,11 +2767,12 @@ pub fn transform_angular_file(
                                             &import_map,
                                             Some(source),
                                         ),
-                                        prop_decorators: build_prop_decorators_metadata(
+                                        prop_decorators: build_prop_decorators_metadata_in(
                                             &allocator,
                                             class,
                                             Some(source),
                                             &mut file_namespace_registry,
+                                            Some(&string_consts),
                                         ),
                                     };
 

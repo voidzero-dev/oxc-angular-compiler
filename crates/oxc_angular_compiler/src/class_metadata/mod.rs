@@ -16,6 +16,7 @@ mod metadata;
 
 pub use builders::{
     build_ctor_params_metadata, build_decorator_metadata_array, build_prop_decorators_metadata,
+    build_prop_decorators_metadata_in,
 };
 pub use compiler::{
     compile_class_metadata, compile_component_class_metadata,

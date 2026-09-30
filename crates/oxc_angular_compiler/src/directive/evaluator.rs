@@ -1144,6 +1144,10 @@ pub(crate) enum RefKind<'a> {
     /// another file.
     Import {
         namespace_member: bool,
+        /// For the binding itself, the local name it was first reached by in
+        /// this file (`ba` for `import { booleanAttribute as ba }`), which is
+        /// what ngtsc emits for it (the reference's identity in this file).
+        local: Option<&'a str>,
     },
     /// An identifier with no declaration in this file that names a standard
     /// ECMAScript global (see [`ES_GLOBALS`]).
@@ -1235,6 +1239,17 @@ impl<'a> Value<'a> {
     /// can't be evaluated without reading another file.
     pub(crate) fn is_import(&self) -> bool {
         matches!(self, Value::Reference { kind: RefKind::Import { .. }, .. })
+    }
+
+    /// A value computed from this one, when it's an import: it stands for
+    /// something in another file that has no name here.
+    fn computed(self) -> Self {
+        match self {
+            Value::Reference { name, kind: RefKind::Import { namespace_member, .. } } => {
+                Value::Reference { name, kind: RefKind::Import { namespace_member, local: None } }
+            }
+            value => value,
+        }
     }
 
     /// Whether ngtsc's value is unknown: dynamic, or a global declared outside
@@ -1674,7 +1689,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             if let Some(e) = tpl.expressions.get(i) {
                 match literal(self.eval(e, depth, frame)) {
                     Value::Dynamic => return Value::Dynamic,
-                    value if value.is_import() => return value,
+                    value if value.is_import() => return value.computed(),
                     value => out.push_str(&to_js_string(&value)),
                 }
             }
@@ -1721,6 +1736,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                                 Some(binding) => binding.value.clone(),
                                 None => match self.slot(frame.block, name) {
                                     Some(slot) => self.stored(slot, depth),
+                                    // An import has no value declaration for
+                                    // TypeScript's `getShorthandAssignmentValueSymbol`
+                                    // to find (it returns the alias), so ngtsc
+                                    // can't evaluate `{ transform }` naming one.
+                                    None if self.consts.scope().imports.contains_key(name) => {
+                                        Value::Dynamic
+                                    }
                                     // ngtsc never resolves a shorthand to a global
                                     // it can use as a transform.
                                     None => match self.eval(&p.value, depth, frame) {
@@ -1754,7 +1776,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         Value::Object(inner) if self.spend(inner.len() as u32) => {
                             props.extend(inner);
                         }
-                        value if value.is_import() => return value,
+                        value if value.is_import() => return value.computed(),
                         _ => return Value::Dynamic,
                     }
                 }
@@ -1788,7 +1810,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         match self.eval(&m.expression, depth, frame) {
             Value::String(key) => self.member(object, Key::Str(&key), depth),
             Value::Number(n) => self.member(object, Key::Num(n), depth),
-            key if key.is_import() => key,
+            key if key.is_import() => key.computed(),
             _ => Value::Dynamic,
         }
     }
@@ -1802,7 +1824,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     ) -> Value<'a> {
         match self.eval(&c.test, depth, frame) {
             test if test.is_dynamic() => Value::Dynamic,
-            test if test.is_import() => test,
+            test if test.is_import() => test.computed(),
             test if test.truthy() => self.eval(&c.consequent, depth, frame),
             _ => self.eval(&c.alternate, depth, frame),
         }
@@ -1821,7 +1843,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         }
         match self.eval(&u.argument, depth, frame) {
             value if value.is_dynamic() => Value::Dynamic,
-            value if value.is_import() => value,
+            value if value.is_import() => value.computed(),
             value => unary(u.operator, &value),
         }
     }
@@ -1836,7 +1858,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let right = literal(self.eval(&b.right, depth, frame));
         match (left, right) {
             (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
-            (value, _) | (_, value) if value.is_import() => value,
+            (value, _) | (_, value) if value.is_import() => value.computed(),
             (left, right) => binary(b.operator, &left, &right),
         }
     }
@@ -1860,7 +1882,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let right = self.eval(&l.right, depth, frame);
         match (left, right) {
             (left, right) if left.is_dynamic() || right.is_dynamic() => Value::Dynamic,
-            (left, _) if left.is_import() => left,
+            (left, _) if left.is_import() => left.computed(),
             (left, right) => match (l.operator, left.truthy()) {
                 (LogicalOperator::And, true) | (LogicalOperator::Or, false) => right,
                 _ => left,
@@ -1877,7 +1899,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
     ) -> std::vec::Vec<Value<'a>> {
         match self.eval(expr, depth, frame) {
             Value::Array(inner) if self.spend(inner.len() as u32) => inner,
-            value if value.is_import() => vec![value],
+            value if value.is_import() => vec![value.computed()],
             // ngtsc marks only this element as dynamic, not the whole array.
             _ => vec![Value::Dynamic],
         }
@@ -1926,10 +1948,10 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         if let Some(import) = scope.imports.get(name) {
             return match import.imported {
                 Some(imported) => {
-                    let name = if imported == "default" { name } else { imported };
+                    let declared = if imported == "default" { name } else { imported };
                     Value::Reference {
-                        name: name.into(),
-                        kind: RefKind::Import { namespace_member: false },
+                        name: declared.into(),
+                        kind: RefKind::Import { namespace_member: false, local: Some(name) },
                     }
                 }
                 None => Value::Module,
@@ -2246,7 +2268,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                     let imported = matches!(left, TSTypeName::IdentifierReference(id)
                         if self.consts.scope().imports.contains_key(id.name.as_str()));
                     let kind = if imported {
-                        RefKind::Import { namespace_member: false }
+                        RefKind::Import { namespace_member: false, local: None }
                     } else {
                         RefKind::Other
                     };
@@ -2305,7 +2327,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                 (function, overloads)
             }
             // An imported function runs in another file.
-            callee if callee.is_import() => return callee,
+            callee if callee.is_import() => return callee.computed(),
             _ => return Value::Dynamic,
         };
         // A body-less first declaration (an overload, `declare function`) can't be evaluated.
@@ -2426,7 +2448,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
                         | Value::Bool(_)
                         | Value::Number(_)
                         | Value::String(_) => s.push_str(&to_js_string(&arg)),
-                        arg if arg.is_import() => return arg,
+                        arg if arg.is_import() => return arg.computed(),
                         _ => return Value::Dynamic,
                     }
                 }
@@ -2471,13 +2493,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             }
             Value::Module => Value::Reference {
                 name: key_str(),
-                kind: RefKind::Import { namespace_member: true },
+                kind: RefKind::Import { namespace_member: true, local: None },
             },
             Value::Reference { kind: RefKind::Class(class), .. } => {
                 self.static_member(class, &key_str(), depth)
             }
             // The object is in another file, and so is its member.
-            object @ Value::Reference { kind: RefKind::Import { .. }, .. } => object,
+            object @ Value::Reference { kind: RefKind::Import { .. }, .. } => object.computed(),
             // Including a member of a global (`Math.round`): ngtsc only
             // resolves the global's own declaration.
             _ => Value::Dynamic,
@@ -2590,11 +2612,11 @@ pub(crate) fn transform_error<'a>(
         // An imported function can't be inspected from this file, so whether
         // it's generic or overloaded is unknown; the name clash is checked
         // after those.
-        Value::Reference { kind: RefKind::Import { namespace_member: false }, .. } => {
+        Value::Reference { kind: RefKind::Import { namespace_member: false, .. }, .. } => {
             return clash();
         }
         // ngtsc can't name `ns.f` in the compiled file.
-        Value::Reference { kind: RefKind::Import { namespace_member: true }, .. } => {
+        Value::Reference { kind: RefKind::Import { namespace_member: true, .. }, .. } => {
             return clash().or_else(|| {
                 Some((format!("Input transform function could not be referenced{suffix}"), node()))
             });

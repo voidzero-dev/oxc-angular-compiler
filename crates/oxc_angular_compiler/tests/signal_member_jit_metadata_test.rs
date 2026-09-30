@@ -418,3 +418,27 @@ fn namespaced_required_signal_model_detected() {
     assert!(md.contains("Output"), "core.model.required output not detected:\n{md}");
     assert!(md.contains("required:true"), "required flag missing for core.model.required:\n{md}");
 }
+
+/// Like ngtsc, only Angular's `input()`, `viewChild()`, ... get a synthetic
+/// decorator: imported from `@angular/core` by name (under any alias) or
+/// through a namespace import. ngtsc 22.1.7 emits exactly
+/// `{ a: [{ type: i0.Input, args: [{ isSignal: true, alias: "a", required: false }] }],
+/// d: [{ type: i0.ViewChild, args: ['x', { isSignal: true }] }] }` for this
+/// class: `output` comes from another module and `model` is a local function.
+#[test]
+fn only_angular_initializer_apis_get_synthetic_decorators() {
+    let md = metadata_region(&compile(
+        "import { Component, input as inp, viewChild } from '@angular/core';\n\
+         import { output } from './other';\n\
+         function model(v?: any): any { return v; }\n\
+         @Component({ selector: 'c', template: '<span>x</span>' })\n\
+         export class C {\n  a = inp(0);\n  b = output();\n  c = model(0);\n  d = viewChild('x');\n}\n",
+    ));
+    let md: String = md.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        md.contains(
+            r#"{a:[{type:i0.Input,args:[{isSignal:true,alias:"a",required:false}]}],d:[{type:i0.ViewChild,args:["x",{isSignal:true}]}]}"#
+        ),
+        "{md}"
+    );
+}

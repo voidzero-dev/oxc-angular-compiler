@@ -24,7 +24,7 @@ use oxc_angular_compiler::{
     ViewEncapsulation as RustViewEncapsulation,
     build_ctor_params_metadata as core_build_ctor_params_metadata,
     build_decorator_metadata_array as core_build_decorator_metadata_array,
-    build_prop_decorators_metadata as core_build_prop_decorators_metadata,
+    build_prop_decorators_metadata_in as core_build_prop_decorators_metadata,
     compile_template_for_hmr, compile_template_to_js_with_options,
     encapsulate_style as rust_encapsulate_style, generate_hmr_update_module_from_js,
     generate_style_update_module,
@@ -2076,12 +2076,16 @@ pub fn compile_class_metadata_sync(
         Some(&source),
     );
 
-    // Build property decorators metadata
+    // Build property decorators metadata. Signal members get a synthetic
+    // decorator only when they call Angular's `input()`, `viewChild()`, ...,
+    // which the file's imports tell.
+    let string_consts = oxc_angular_compiler::collect_string_consts(&allocator, program);
     let prop_decorators_expr = core_build_prop_decorators_metadata(
         &allocator,
         class,
         Some(&source),
         &mut namespace_registry,
+        Some(&string_consts),
     );
 
     // Create R3ClassMetadata

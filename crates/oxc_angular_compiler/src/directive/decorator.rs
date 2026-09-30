@@ -7,9 +7,9 @@ use std::collections::HashMap;
 
 use oxc_allocator::{Allocator, Box, Vec};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, BindingPattern, Class, ClassElement, Declaration, Decorator,
-    Expression, MethodDefinitionKind, ObjectExpression, ObjectPropertyKind, Program, PropertyKey,
-    Statement, TemplateLiteral, VariableDeclarationKind,
+    Argument, ArrayExpressionElement, BindingPattern, CallExpression, Class, ClassElement,
+    Declaration, Decorator, Expression, MethodDefinitionKind, ObjectExpression, ObjectPropertyKind,
+    Program, PropertyKey, Statement, TemplateLiteral, VariableDeclarationKind,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_span::{GetSpan, Span};
@@ -743,14 +743,27 @@ fn scoped_transform_error(
 /// it was given, because it uses the parameters of the function it's written
 /// in (see [`scoped_transform_error`]).
 fn is_out_of_scope(transform: &Prop<'_>, consts: &StringConsts<'_>) -> bool {
-    transform.expr.is_some() && transform.origin.is_none() && !is_named_function(transform, consts)
+    transform.expr.is_some()
+        && transform.origin.is_none()
+        && reference_identity(transform, consts).is_none()
 }
 
-/// Whether a transform is emitted as the name of the same-file function it
-/// resolves to (see [`transform_expression`]).
-fn is_named_function(transform: &Prop<'_>, consts: &StringConsts<'_>) -> bool {
-    matches!(&transform.value, Value::Reference { name, kind: RefKind::Function(function, _) }
-        if consts.scope().is_top_level_function(name, function))
+/// The identifier ngtsc emits for a transform that resolves to a reference
+/// (the reference's identity in this file, `getIdentityIn`), see
+/// [`transform_expression`]: a same-file function's name, or the name an
+/// imported function or a global was first reached by, through any variables
+/// (`booleanAttribute` for `const t = booleanAttribute` and `transform: t`).
+fn reference_identity<'p>(transform: &'p Prop<'_>, consts: &StringConsts<'_>) -> Option<&'p str> {
+    match &transform.value {
+        Value::Reference { name, kind: RefKind::Function(function, _) }
+            if consts.scope().is_top_level_function(name, function) =>
+        {
+            Some(name)
+        }
+        Value::Reference { kind: RefKind::Import { namespace_member: false, local }, .. } => *local,
+        Value::Reference { name, kind: RefKind::Global } => Some(name),
+        _ => None,
+    }
 }
 
 /// Parse `inputs:` / `outputs:` from a decorator metadata object.
@@ -938,7 +951,10 @@ fn parse_input_object<'a>(
 
 /// The expression ngtsc emits for a transform: a function written in place, or
 /// the identifier of the declaration it resolved to (`T.f` where
-/// `const T = { f }` becomes `f`). For a static method that identifier isn't in
+/// `const T = { f }` becomes `f`), or the name an imported function or a
+/// global was first reached by (`booleanAttribute` for
+/// `const transform = booleanAttribute` and `{ transform }`), see
+/// [`reference_identity`]. For a static method that identifier isn't in
 /// scope, so the written expression is kept there, as it can be written where
 /// the metadata is compiled (see [`Prop::origin`]): `None` when it can't.
 pub(crate) fn transform_expression<'a>(
@@ -947,11 +963,11 @@ pub(crate) fn transform_expression<'a>(
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
 ) -> Option<OutputExpression<'a>> {
-    match &transform.value {
-        Value::Reference { name, .. } if is_named_function(transform, consts) => {
+    match reference_identity(transform, consts) {
+        Some(name) => {
             Some(OutputAstBuilder::variable(allocator, Ident::from(allocator.alloc_str(name))))
         }
-        _ => convert_oxc_expression(allocator, transform.origin?, source_text),
+        None => convert_oxc_expression(allocator, transform.origin?, source_text),
     }
 }
 
@@ -1188,45 +1204,83 @@ pub(crate) const OUTPUT_API: InitializerApi = ("output", "@angular/core");
 pub(crate) const OUTPUT_FROM_OBSERVABLE_API: InitializerApi =
     ("outputFromObservable", "@angular/core/rxjs-interop");
 
-/// Whether `value` calls one of `apis`, as ngtsc's `tryParseInitializerApi`
-/// recognises them: `f()` or `f.required()` with `f` imported by name from the
-/// API's module (under any alias), or `ns.f()` or `ns.f.required()` with `ns`
-/// a namespace import of it, looking through `as` and parentheses. A function
-/// only named like an API (a local one, or one from another module) isn't one.
+/// Angular's signal query functions (ngtsc's `QUERY_INITIALIZER_FNS`).
+pub(crate) const QUERY_APIS: [InitializerApi; 4] = [
+    ("viewChild", "@angular/core"),
+    ("viewChildren", "@angular/core"),
+    ("contentChild", "@angular/core"),
+    ("contentChildren", "@angular/core"),
+];
+
+/// Whether `value` calls one of `apis` (see [`initializer_api_call`]).
 pub(crate) fn is_initializer_api_call(
     value: &Expression<'_>,
     consts: &StringConsts<'_>,
     apis: &[InitializerApi],
 ) -> bool {
+    initializer_api_call(value, Some(consts), apis).is_some()
+}
+
+/// The call to one of `apis` that `value` is, looking through `as` and
+/// parentheses: the API, whether it's the `.required` form, and the call.
+/// See [`initializer_api`] for the callees that count.
+pub(crate) fn initializer_api_call<'b, 'a>(
+    value: &'b Expression<'a>,
+    consts: Option<&StringConsts<'_>>,
+    apis: &[InitializerApi],
+) -> Option<(InitializerApi, bool, &'b CallExpression<'a>)> {
     let Expression::CallExpression(call) = super::unwrap_initializer_api_expr(value) else {
-        return false;
+        return None;
     };
-    let scope = consts.scope();
+    let (api, required) = initializer_api(&call.callee, consts, apis)?;
+    Some((api, required, call))
+}
+
+/// Which of `apis` `callee` is, and whether it's its `.required` form, as
+/// ngtsc's `tryParseInitializerApi` recognises them: `f` or `f.required` with
+/// `f` imported by name from the API's module (under any alias), or `ns.f` or
+/// `ns.f.required` with `ns` a namespace import of it. A function only named
+/// like an API (a local one, one from another module, or an undeclared one)
+/// isn't one.
+///
+/// Without the file's imports (`consts` is `None`, for the public extraction
+/// functions that aren't given them), `f` and `ns.f` are matched by name.
+pub(crate) fn initializer_api(
+    callee: &Expression<'_>,
+    consts: Option<&StringConsts<'_>>,
+    apis: &[InitializerApi],
+) -> Option<(InitializerApi, bool)> {
+    let scope = consts.map(StringConsts::scope);
     // `f`, imported by name.
     let named = |f: &Expression<'_>| {
-        let Expression::Identifier(id) = f else { return false };
-        scope.import(&id.name).is_some_and(|import| {
-            apis.iter()
-                .any(|&(name, module)| import.imported == Some(name) && import.module == module)
-        })
+        let Expression::Identifier(id) = f else { return None };
+        let Some(scope) = scope else {
+            return apis.iter().copied().find(|&(name, _)| id.name == name);
+        };
+        let import = scope.import(&id.name)?;
+        apis.iter()
+            .copied()
+            .find(|&(name, module)| import.imported == Some(name) && import.module == module)
     };
     // `ns.f`, through a namespace import.
     let namespaced = |f: &Expression<'_>| {
-        let Expression::StaticMemberExpression(member) = f else { return false };
-        let Expression::Identifier(ns) = &member.object else { return false };
-        scope.import(&ns.name).is_some_and(|import| {
-            import.imported.is_none()
-                && apis
-                    .iter()
-                    .any(|&(name, module)| member.property.name == name && import.module == module)
-        })
+        let Expression::StaticMemberExpression(member) = f else { return None };
+        let Expression::Identifier(ns) = &member.object else { return None };
+        let function = member.property.name.as_str();
+        let Some(scope) = scope else {
+            return apis.iter().copied().find(|&(name, _)| function == name);
+        };
+        let import = scope.import(&ns.name).filter(|import| import.imported.is_none())?;
+        apis.iter().copied().find(|&(name, module)| function == name && import.module == module)
     };
-    let callee = &call.callee;
-    named(callee)
-        || namespaced(callee)
-        || matches!(callee, Expression::StaticMemberExpression(required)
-            if required.property.name == "required"
-                && (named(&required.object) || namespaced(&required.object)))
+    if let Some(api) = named(callee).or_else(|| namespaced(callee)) {
+        return Some((api, false));
+    }
+    let Expression::StaticMemberExpression(required) = callee else { return None };
+    if required.property.name != "required" {
+        return None;
+    }
+    named(&required.object).or_else(|| namespaced(&required.object)).map(|api| (api, true))
 }
 
 /// Extract host metadata from a host object expression.

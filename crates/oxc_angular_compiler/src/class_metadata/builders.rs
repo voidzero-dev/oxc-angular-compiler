@@ -12,8 +12,8 @@ use oxc_str::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::directive::{
-    R3InputMetadata, StringConsts, resolve_template_literal, try_parse_signal_input,
-    try_parse_signal_model, try_parse_signal_output, unwrap_initializer_api_expr,
+    QUERY_APIS, R3InputMetadata, StringConsts, initializer_api_call, resolve_template_literal,
+    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
 };
 use crate::output::ast::{
     ArrowFunctionBody, ArrowFunctionExpr, LiteralArrayExpr, LiteralExpr, LiteralMapEntry,
@@ -407,11 +407,32 @@ pub fn build_ctor_params_metadata<'a>(
 ///
 /// Creates: `{ propName: [{ type: Input, args: [...] }], ... }`
 /// Returns `None` if no properties have Angular decorators.
+///
+/// Without the file's imports, a signal member is recognised by the name of
+/// the function it calls; [`build_prop_decorators_metadata_in`] recognises
+/// only Angular's, like ngtsc.
 pub fn build_prop_decorators_metadata<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+) -> Option<OutputExpression<'a>> {
+    build_prop_decorators_metadata_in(allocator, class, source_text, namespace_registry, None)
+}
+
+/// [`build_prop_decorators_metadata`] for a class in the file `consts` was
+/// collected from.
+///
+/// A signal member (`input()`, `viewChild()`, ...) gets a synthetic decorator
+/// only when it calls Angular's function, imported from `@angular/core` (or
+/// `@angular/core/rxjs-interop`) by name, under any alias, or through a
+/// namespace import.
+pub fn build_prop_decorators_metadata_in<'a>(
+    allocator: &'a Allocator,
+    class: &Class<'a>,
+    source_text: Option<&'a str>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+    consts: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
     const ANGULAR_PROP_DECORATORS: &[&str] = &[
         "Input",
@@ -480,6 +501,7 @@ pub fn build_prop_decorators_metadata<'a>(
                 &prop_name,
                 source_text,
                 namespace_registry,
+                consts,
             )
         {
             prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
@@ -505,13 +527,16 @@ fn build_initializer_api_prop_decorators<'a>(
     property_name: &Ident<'a>,
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    consts: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
     let mut decorators = AllocVec::new_in(&allocator);
 
-    if let Some(input) = try_parse_signal_input(allocator, value, property_name.clone()) {
+    if let Some(input) = try_parse_signal_input(value, property_name.clone(), consts) {
         // input() / input.required() → `Input({ isSignal, alias, required })`
         decorators.push(build_signal_input_decorator(allocator, namespace_registry, &input));
-    } else if let Some(model) = try_parse_signal_model(allocator, value, property_name.clone()) {
+    } else if let Some(model) =
+        try_parse_signal_model(allocator, value, property_name.clone(), consts)
+    {
         // model() → `Input({ isSignal, alias, required })` + `Output("<name>Change")`
         decorators.push(build_signal_input_decorator(allocator, namespace_registry, &model.input));
         decorators.push(build_core_decorator_with_string_arg(
@@ -520,7 +545,8 @@ fn build_initializer_api_prop_decorators<'a>(
             "Output",
             model.output.1.clone(),
         ));
-    } else if let Some((_, binding)) = try_parse_signal_output(value, property_name.clone()) {
+    } else if let Some((_, binding)) = try_parse_signal_output(value, property_name.clone(), consts)
+    {
         // output() / outputFromObservable() → `Output("<binding>")`
         decorators.push(build_core_decorator_with_string_arg(
             &allocator,
@@ -529,7 +555,7 @@ fn build_initializer_api_prop_decorators<'a>(
             binding,
         ));
     } else if let Some(query) =
-        build_signal_query_decorator(allocator, value, source_text, namespace_registry)
+        build_signal_query_decorator(allocator, value, source_text, namespace_registry, consts)
     {
         decorators.push(query);
     }
@@ -589,11 +615,15 @@ fn build_signal_query_decorator<'a>(
     value: &Expression<'a>,
     source_text: Option<&'a str>,
     namespace_registry: &mut NamespaceRegistry<'a>,
+    consts: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
-    let Expression::CallExpression(call) = unwrap_initializer_api_expr(value) else {
-        return None;
+    let ((function, _), _, call) = initializer_api_call(value, consts, &QUERY_APIS)?;
+    let decorator_name = match function {
+        "viewChild" => "ViewChild",
+        "viewChildren" => "ViewChildren",
+        "contentChild" => "ContentChild",
+        _ => "ContentChildren",
     };
-    let decorator_name = signal_query_decorator_name(&call.callee)?;
 
     // Predicate: the first positional argument (required), reused as-is. A query with
     // no locator is invalid (ngc errors); skip synthesis rather than emit a malformed
@@ -624,40 +654,6 @@ fn build_signal_query_decorator<'a>(
     )));
 
     Some(build_core_decorator(allocator, namespace_registry, decorator_name, args))
-}
-
-/// Map a signal-query initializer callee to its decorator name, handling the direct
-/// (`viewChild()`), required (`viewChild.required()`), and namespaced (`core.viewChild()`)
-/// forms.
-fn signal_query_decorator_name(callee: &Expression<'_>) -> Option<&'static str> {
-    fn name_of(function: &str) -> Option<&'static str> {
-        match function {
-            "viewChild" => Some("ViewChild"),
-            "viewChildren" => Some("ViewChildren"),
-            "contentChild" => Some("ContentChild"),
-            "contentChildren" => Some("ContentChildren"),
-            _ => None,
-        }
-    }
-
-    match callee {
-        Expression::Identifier(id) => name_of(id.name.as_str()),
-        Expression::StaticMemberExpression(member) => {
-            if member.property.name == "required" {
-                match &member.object {
-                    Expression::Identifier(id) => name_of(id.name.as_str()),
-                    Expression::StaticMemberExpression(inner) => {
-                        name_of(inner.property.name.as_str())
-                    }
-                    _ => None,
-                }
-            } else {
-                // Namespaced call: `core.viewChild(...)`.
-                name_of(member.property.name.as_str())
-            }
-        }
-        _ => None,
-    }
 }
 
 /// Build `{ type: i0.<name>, args: ["<arg>"] }` for a decorator taking a single string.

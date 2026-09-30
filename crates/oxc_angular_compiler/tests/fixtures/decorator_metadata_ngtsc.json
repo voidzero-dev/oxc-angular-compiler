@@ -8199,6 +8199,1283 @@
       "diagnosticSpans": []
     },
     {
+      "name": "probe: signal-named",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n  req = input.required<number>();\n  al = input(0, {alias: 'a'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],req:[1,\"req\"],al:[1,\"a\",\"al\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"req\":{\"alias\":\"req\";\"required\":true;\"isSignal\":true;};\"al\":{\"alias\":\"a\";\"required\":false;\"isSignal\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-aliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input as inp} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = inp(0);\n  req = inp.required<number>({alias: 'r'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],req:[1,\"r\",\"req\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"req\":{\"alias\":\"r\";\"required\":true;\"isSignal\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Directive({selector: '[d]'})\nexport class Dir {\n  value = ng.input(0);\n  req = ng.input.required<number>();\n  m = ng.model(0);\n  mr = ng.model.required<number>();\n  o = ng.output<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],req:[1,\"req\"],m:[1,\"m\"],mr:[1,\"mr\"]}",
+          "outputs": "{m:\"mChange\",mr:\"mrChange\",o:\"o\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"req\":{\"alias\":\"req\";\"required\":true;\"isSignal\":true;};\"m\":{\"alias\":\"m\";\"required\":false;\"isSignal\":true;};\"mr\":{\"alias\":\"mr\";\"required\":true;\"isSignal\":true;};},{\"m\":\"mChange\";\"mr\":\"mrChange\";\"o\":\"o\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-namespaceAndNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input} from '@angular/core';\nimport * as ng from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = ng.input(0);\n  other = input(1);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],other:[1,\"other\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"other\":{\"alias\":\"other\";\"required\":false;\"isSignal\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-modelAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, model as m} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = m(0);\n  req = m.required<number>({alias: 'r'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],req:[1,\"r\",\"req\"]}",
+          "outputs": "{value:\"valueChange\",req:\"rChange\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"req\":{\"alias\":\"r\";\"required\":true;\"isSignal\":true;};},{\"value\":\"valueChange\";\"req\":\"rChange\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-outputAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, output as out} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = out<string>();\n  al = out<string>({alias: 'a'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{changed:\"changed\",al:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"changed\":\"changed\";\"al\":\"a\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-queriesAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, viewChild as vc, contentChild as cc, viewChildren as vcs, contentChildren as ccs} from '@angular/core';\n@Component({selector: 'c', template: '<div #ref></div><ng-content></ng-content>'})\nexport class Dir {\n  a = vc('ref');\n  b = vc.required('ref');\n  c = cc('ref');\n  d = vcs('ref');\n  e = ccs('ref', {descendants: true});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuerySignal(dirIndex,ctx.c,[\"ref\"],5)(dirIndex,ctx.e,[\"ref\"],5);}if(rf&2){i0.ɵɵqueryAdvance(2);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.a,[\"ref\"],5)(ctx.b,[\"ref\"],5)(ctx.d,[\"ref\"],5);}if(rf&2){i0.ɵɵqueryAdvance(3);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"c\",never,{},{},[\"c\",\"e\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-queriesNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Component({selector: 'c', template: '<div #ref></div><ng-content></ng-content>'})\nexport class Dir {\n  a = ng.viewChild('ref');\n  b = ng.viewChild.required('ref');\n  c = ng.contentChildren('ref');\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuerySignal(dirIndex,ctx.c,[\"ref\"],4);}if(rf&2){i0.ɵɵqueryAdvance();}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuerySignal(ctx.a,[\"ref\"],5)(ctx.b,[\"ref\"],5);}if(rf&2){i0.ɵɵqueryAdvance(2);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"c\",never,{},{},[\"c\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-fromObservableNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {outputFromObservable} from '@angular/core/rxjs-interop';\nimport {Subject} from 'rxjs';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = outputFromObservable(new Subject<string>());\n  al = outputFromObservable(new Subject<string>(), {alias: 'a'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{changed:\"changed\",al:\"a\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"changed\":\"changed\";\"al\":\"a\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-fromObservableAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {outputFromObservable as ofo} from '@angular/core/rxjs-interop';\nimport {Subject} from 'rxjs';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = ofo(new Subject<string>());\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-fromObservableNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as rx from '@angular/core/rxjs-interop';\nimport {Subject} from 'rxjs';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = rx.outputFromObservable(new Subject<string>());\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-asAndParens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = (input(0)) as any;\n  req = (input.required<number>() as any);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"],req:[1,\"req\"]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};\"req\":{\"alias\":\"req\";\"required\":true;\"isSignal\":true;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-undeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n  req = input.required<number>();\n  changed = output<string>();\n  m = model(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-undeclaredListed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]', inputs: ['value']})\nexport class Dir {\n  value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-undeclaredOutputListed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]', outputs: ['changed']})\nexport class Dir {\n  changed = output<string>();\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "outputs": "{changed:\"changed\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{\"changed\":\"changed\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-undeclaredQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\n@Component({selector: 'c', template: '<div #ref></div><ng-content></ng-content>'})\nexport class Dir {\n  a = viewChild('ref');\n  b = contentChildren('ref');\n  c = viewChild.required('ref');\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-localFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction input(v?: any, o?: any): any { return v; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-localFunctionListed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction input(v?: any, o?: any): any { return v; }\n@Directive({selector: '[d]', inputs: ['value']})\nexport class Dir {\n  value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-localObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nconst local = { input: (v?: any, o?: any): any => v, output: (o?: any): any => null, model: (v?: any): any => v, viewChild: (p: any): any => null };\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = local.input(0);\n  changed = local.output();\n  m = local.model(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-localObjectListed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nconst local = { input: (v?: any, o?: any): any => v, output: (o?: any): any => null, model: (v?: any): any => v, viewChild: (p: any): any => null };\n@Directive({selector: '[d]', inputs: ['value']})\nexport class Dir {\n  value = local.input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-localObjectQuery",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nconst local = { input: (v?: any, o?: any): any => v, output: (o?: any): any => null, model: (v?: any): any => v, viewChild: (p: any): any => null };\n@Component({selector: 'c', template: '<div #ref></div><ng-content></ng-content>'})\nexport class Dir {\n  a = local.viewChild('ref');\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleOutputFromObservable",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {outputFromObservable} from './other';\nimport {Subject} from 'rxjs';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = outputFromObservable(new Subject<string>());\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-callParenthesized",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = (input)(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-elementAccess",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Directive({selector: '[d]'})\nexport class Dir {\n  value = ng['input'](0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-coreNamedWrongName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, model as input} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:[1,\"value\"]}",
+          "outputs": "{value:\"valueChange\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;\"isSignal\":true;};},{\"value\":\"valueChange\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {input, output, model} from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n  req = input.required();\n  changed = output();\n  m = model(0);\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleNamedListed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {input} from './other';\n@Directive({selector: '[d]', inputs: ['value']})\nexport class Dir {\n  value = input(0);\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{value:\"value\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"value\":{\"alias\":\"value\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as o from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = o.input(0);\n  req = o.input.required();\n  changed = o.output();\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {viewChild, contentChildren} from './other';\n@Component({selector: 'c', template: '<div #ref></div><ng-content></ng-content>'})\nexport class Dir {\n  a = viewChild('ref');\n  b = viewChild.required('ref');\n  c = contentChildren('ref');\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Dir,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-otherModuleFromObservableAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {outputFromObservable as ofo} from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  changed = ofo(null);\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-mixed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, input, output} from '@angular/core';\nimport * as o from './other';\n@Directive({selector: '[d]'})\nexport class Dir {\n  real = input(0);\n  fake = o.input(0);\n  realOut = output<string>();\n  fakeOut = o.output();\n}\n",
+        "other.ts": "export function input(v?: any, o?: any): any { return v; }\nexport namespace input { export function required(o?: any): any { return null; } }\nexport function output(o?: any): any { return null; }\nexport function model(v?: any, o?: any): any { return v; }\nexport namespace model { export function required(o?: any): any { return null; } }\nexport function viewChild(p: any, o?: any): any { return null; }\nexport namespace viewChild { export function required(p: any, o?: any): any { return null; } }\nexport function contentChildren(p: any, o?: any): any { return null; }\nexport function outputFromObservable(s: any, o?: any): any { return null; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{real:[1,\"real\"]}",
+          "outputs": "{realOut:\"realOut\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"real\":{\"alias\":\"real\";\"required\":false;\"isSignal\":true;};},{\"realOut\":\"realOut\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-defaultImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport input from './other-default';\n@Directive({selector: '[d]'})\nexport class Dir {\n  value = input(0);\n}\n",
+        "other-default.ts": "export default function input(v?: any): any { return v; }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedConstDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedConstNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst t = booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: t}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedConstNamedSame",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedLet",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nlet transform = numberAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",numberAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedExported",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nexport const transform = booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedTyped",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform: (v: unknown) => boolean = booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedDestructObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst {transform} = {transform: booleanAttribute};\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedDestructArr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst [transform] = [booleanAttribute];\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedAs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute as any;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedParens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = (booleanAttribute);\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-chain",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst t = booleanAttribute;\nconst transform = t;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-chainDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst t = booleanAttribute;\nconst transform = t;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction toNum(v: string) { return 1; }\nconst transform = toNum;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",toNum]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localFnDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction toNum(v: string) { return 1; }\nconst transform = toNum;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",toNum]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localExportedFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nexport function toNum(v: string) { return 1; }\nconst transform = toNum;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",toNum]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localFnDeclShorthand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction transform(v: string) { return 1; }\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",transform]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localFnDeclShorthandDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction transform(v: string) { return 1; }\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",transform]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-staticMethod",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nclass U { static c(v: string) { return 1; } }\nconst transform = U.c;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",c]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "ngtsc emits the static method's bare name (`c`), which isn't in scope where the metadata is compiled; oxc keeps `transform` (see `static_method_transform_is_not_confused_with_a_same_named_function`)"
+    },
+    {
+      "name": "probe: shorthandRef-localObjMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst ns = {fn: (v: string) => 1};\nconst transform = ns.fn;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[136, 141]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localObjFnMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction toNum(v: string) { return 1; }\nconst ns = {fn: toNum};\nconst transform = ns.fn;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",toNum]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-localConstArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst toNum = (v: string) => 1;\nconst transform = toNum;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[133, 138]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importedFromOtherNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {toNum} from './util';\nconst transform = toNum;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",toNum]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": [],
+      "skip": "needs declarations from another file; oxc compiles one file at a time (imported consts, types and transforms are opaque)"
+    },
+    {
+      "name": "probe: shorthandRef-importedShorthandDirect",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {toNum as transform} from './util';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[176, 185]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-nsImportMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport * as u from './util';\nconst transform = u.toNum;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\n"
+      },
+      "diagnostics": [
+        "Input transform function could not be referenced Value is a reference to 'toNum'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-nsImportMemberDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport * as u from './util';\nconst transform = u.toNum;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\n"
+      },
+      "diagnostics": [
+        "Input transform function could not be referenced Value is a reference to 'toNum'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-coreNsMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport * as core from '@angular/core';\nconst transform = core.booleanAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform function could not be referenced Value is a reference to 'booleanAttribute'."
+      ],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-ternary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = true ? booleanAttribute : numberAttribute;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = parseInt;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",parseInt]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:string;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-spreadObj",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute;\nconst o = {name: 'x', transform};\n@Directive({selector: '[d]', inputs: [o]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-decoOpts",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nconst transform = booleanAttribute;\nconst OPTS = {transform};\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input(OPTS) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-aliasedImportConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {booleanAttribute as ba} from '@angular/core';\nconst transform = ba;\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-aliasedImportNamed",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {booleanAttribute as ba} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform: ba}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-aliasedImportDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {booleanAttribute as ba} from '@angular/core';\nconst t = ba;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform: t}) x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-helperParamMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction make(o: any) { return [{ name: 'x', transform: o.t }]; }\n@Directive({selector: '[d]', inputs: make({ t: booleanAttribute })})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-helperParamMemberAliased",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {booleanAttribute as ba} from '@angular/core';\nfunction make(o: any) { return [{ name: 'x', transform: o.t }]; }\n@Directive({selector: '[d]', inputs: make({ t: ba })})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",ba]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-helperParam",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nfunction make(t: any) { return [{ name: 'x', transform: t }]; }\nconst b = booleanAttribute;\n@Directive({selector: '[d]', inputs: make(b)})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:[2,\"x\",\"x\",booleanAttribute]}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;",
+          "dts:ngAcceptInputType_x": "staticngAcceptInputType_x:unknown;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importCoreShorthand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {booleanAttribute as transform} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[194, 203]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importCoreShorthandDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, numberAttribute} from '@angular/core';\nimport {booleanAttribute as transform} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({transform}) x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[185, 194]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importNsShorthand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport * as transform from './util';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\nexport const NAME = 'x';\nexport const ALIAS = 'y';\nexport const REQ = true;\nexport class U { static fn(v: string) { return 1; } }\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[170, 179]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {NAME as name} from './util';\n@Directive({selector: '[d]', inputs: [{name}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\nexport const NAME = 'x';\nexport const ALIAS = 'y';\nexport const REQ = true;\nexport class U { static fn(v: string) { return 1; } }\n"
+      },
+      "diagnostics": [
+        "Value at position 0 of @Directive.inputs array must have a \"name\" property Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[157, 165]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {ALIAS as alias} from './util';\n@Directive({selector: '[d]', inputs: [{name: 'x', alias}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\nexport const NAME = 'x';\nexport const ALIAS = 'y';\nexport const REQ = true;\nexport class U { static fn(v: string) { return 1; } }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importRequired",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {REQ as required} from './util';\n@Directive({selector: '[d]', inputs: [{name: 'x', required}]})\nexport class Dir {\n  x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\nexport const NAME = 'x';\nexport const ALIAS = 'y';\nexport const REQ = true;\nexport class U { static fn(v: string) { return 1; } }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importAliasDeco",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\nimport {ALIAS as alias} from './util';\n@Directive({selector: '[d]'})\nexport class Dir {\n  @Input({alias}) x!: any;\n}\n",
+        "util.ts": "export function toNum(v: string) { return 1; }\nexport const NAME = 'x';\nexport const ALIAS = 'y';\nexport const REQ = true;\nexport class U { static fn(v: string) { return 1; } }\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{x:\"x\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-globalShorthandMissing",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input, booleanAttribute, numberAttribute} from '@angular/core';\n@Directive({selector: '[d]', inputs: [{name: 'x', transform}]})\nexport class Dir {\n  x!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Input transform must be a function Value could not be determined statically."
+      ],
+      "diagnosticSpans": [[133, 142]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: signal-namespaceAliasOptions",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Directive({selector: '[d]'})\nexport class Dir {\n  a = ng.input(0, {alias: 'aa'});\n  b = ng.model(0, {alias: 'bb'});\n  c = ng.output({alias: 'cc'});\n  d = ng.input.required({alias: 'dd'});\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "inputs": "{a:[1,\"aa\",\"a\"],b:[1,\"bb\",\"b\"],d:[1,\"dd\",\"d\"]}",
+          "outputs": "{b:\"bbChange\",c:\"cc\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{\"a\":{\"alias\":\"aa\";\"required\":false;\"isSignal\":true;};\"b\":{\"alias\":\"bb\";\"required\":false;\"isSignal\":true;};\"d\":{\"alias\":\"dd\";\"required\":true;\"isSignal\":true;};},{\"b\":\"bbChange\";\"c\":\"cc\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importQuery",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, ViewChild} from '@angular/core';\nimport {foo} from './util';\n@Directive({selector: '[d]', queries: {foo}})\nexport class Dir {\n  foo: any;\n}\n",
+        "util.ts": "import {ViewChild} from '@angular/core';\nexport const foo = new ViewChild('x');\nexport const x = 'x';\n"
+      },
+      "diagnostics": ["Decorator query metadata must be an instance of a query type"],
+      "diagnosticSpans": [[118, 123]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: shorthandRef-importQueriesSpread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, ViewChild} from '@angular/core';\nimport {foo} from './util';\nconst q = {foo};\n@Directive({selector: '[d]', queries: q})\nexport class Dir {\n  foo: any;\n}\n",
+        "util.ts": "import {ViewChild} from '@angular/core';\nexport const foo = new ViewChild('x');\nexport const x = 'x';\n"
+      },
+      "diagnostics": ["Decorator queries metadata must be an object literal"],
+      "diagnosticSpans": [[135, 136]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constFalse",
       "origin": "probe",
       "files": {
