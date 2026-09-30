@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 287, "fixtures compared");
+    assert_eq!(compared, 304, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -421,6 +421,34 @@ fn transforms_using_the_parameters_of_a_called_function_are_reported() {
         ),
         (
             "function make(name: string) { return [{ name, transform: function (v: string) { return (() => name)(); } }]; }",
+            "make('x')",
+        ),
+        // Types are erased (the snapshot's `scope-typeOnly-*` probes), but the
+        // runtime parts next to them aren't: the expression inside `x!`, `as`,
+        // `satisfies` and `<T>x`, a parameter's default and a call's arguments.
+        (
+            "function make(name: string) { return [{ name: 'x', transform: (v: string) => name! }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name: 'x', transform: (v: string) => name as typeof name }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name: 'x', transform: (v: string) => name satisfies string }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name: 'x', transform: (v: string) => <typeof name>name }]; }",
+            "make('x')",
+        ),
+        (
+            "function make(name: string) { return [{ name: 'x', transform: (v: string, d: typeof name = name) => v }]; }",
+            "make('x')",
+        ),
+        (
+            "function id<T>(v: T) { return v; }
+function make(name: string) { return [{ name: 'x', transform: (v: string) => id<typeof name>(name) }]; }",
             "make('x')",
         ),
     ];

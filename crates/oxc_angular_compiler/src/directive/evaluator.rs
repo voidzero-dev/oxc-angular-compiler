@@ -21,9 +21,10 @@ use oxc_ast::ast::{
     IdentifierReference, ImportDeclarationSpecifier, LogicalExpression, MethodDefinitionKind,
     ModuleExportName, ObjectExpression, ObjectPropertyKind, Program, PropertyKey, PropertyKind,
     Statement, StaticBlock, StaticMemberExpression, Super, SwitchStatement, TSEnumDeclaration,
-    TSEnumMemberName, TSLiteral, TSTupleElement, TSType, TSTypeName, TSTypeOperatorOperator,
-    TSTypeQueryExprName, TemplateLiteral, ThisExpression, UnaryExpression, VariableDeclaration,
-    VariableDeclarationKind,
+    TSEnumMemberName, TSInterfaceDeclaration, TSLiteral, TSTupleElement, TSType,
+    TSTypeAliasDeclaration, TSTypeName, TSTypeOperatorOperator, TSTypeParameterDeclaration,
+    TSTypeParameterInstantiation, TSTypeQueryExprName, TemplateLiteral, ThisExpression,
+    UnaryExpression, VariableDeclaration, VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_syntax::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
@@ -1515,6 +1516,21 @@ impl<'a> Visit<'a> for UsesFrame<'_, 'a> {
     fn visit_super(&mut self, _: &Super) {
         self.found |= self.own_this == 0;
     }
+
+    // Types are erased from the emitted code, so a name used only in one
+    // (`(v: string): typeof name => v`, `v as typeof name`, `id<typeof name>(v)`)
+    // doesn't need to be in scope where the transform is emitted. The runtime
+    // parts around them (a parameter's default, the expression inside `as`,
+    // `satisfies`, `<T>x` and `x!`) are still visited.
+    fn visit_ts_type(&mut self, _: &TSType<'a>) {}
+
+    fn visit_ts_type_parameter_declaration(&mut self, _: &TSTypeParameterDeclaration<'a>) {}
+
+    fn visit_ts_type_parameter_instantiation(&mut self, _: &TSTypeParameterInstantiation<'a>) {}
+
+    fn visit_ts_type_alias_declaration(&mut self, _: &TSTypeAliasDeclaration<'a>) {}
+
+    fn visit_ts_interface_declaration(&mut self, _: &TSInterfaceDeclaration<'a>) {}
 
     fn visit_function(&mut self, f: &Function<'a>, flags: ScopeFlags) {
         let mut names = std::vec::Vec::new();
