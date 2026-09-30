@@ -307,7 +307,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 872, "fixtures compared");
+    assert_eq!(compared, 878, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -1168,4 +1168,32 @@ export class Cmp {{
             "{decorator}"
         );
     }
+}
+
+/// Like ngtsc, a member decorator is Angular's only when it's imported from
+/// `@angular/core`, under any alias or through a namespace import. Only those
+/// are compiled (the snapshot's `memberDecorator-*` probes), removed from the
+/// class and listed in `setClassMetadata`. Another module's `@Input` is left on
+/// the class and its options aren't checked, as ngtsc 22.1.7 does.
+#[test]
+fn only_angular_member_decorators_are_compiled_and_removed() {
+    let source = "import {Directive, Input as In} from '@angular/core';
+import * as core from '@angular/core';
+import {Input, HostListener} from './other';
+@Directive({selector: '[d]'})
+export class Dir {
+  @In() a: any;
+  @core.Output() b: any;
+  @Input({transform: 5}) c: any;
+  @HostListener('click') d() {}
+}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    let code = strip(&result.code);
+    assert!(!code.contains("@In()") && !code.contains("@core.Output()"), "{}", result.code);
+    assert!(code.contains("@Input({transform:5})c:any;"), "{}", result.code);
+    assert!(code.contains("@HostListener('click')d(){}"), "{}", result.code);
+    assert!(code.contains(r#"inputs:{a:"a"},outputs:{b:"b"}}"#), "{}", result.code);
+    assert!(code.contains("{a:[{type:In}],b:[{type:core.Output}]}"), "{}", result.code);
 }

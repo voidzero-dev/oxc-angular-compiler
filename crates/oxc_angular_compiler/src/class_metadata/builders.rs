@@ -423,10 +423,11 @@ pub fn build_prop_decorators_metadata<'a>(
 /// [`build_prop_decorators_metadata`] for a class in the file `consts` was
 /// collected from.
 ///
-/// A signal member (`input()`, `viewChild()`, ...) gets a synthetic decorator
-/// only when it calls Angular's function, imported from `@angular/core` (or
-/// `@angular/core/rxjs-interop`) by name, under any alias, or through a
-/// namespace import.
+/// A member decorator (`@Input()`, ...) is listed only when it's Angular's,
+/// imported from `@angular/core` by name, under any alias, or through a
+/// namespace import. A signal member (`input()`, `viewChild()`, ...) gets a
+/// synthetic decorator only when it calls Angular's function, imported the
+/// same way (`outputFromObservable` from `@angular/core/rxjs-interop`).
 pub fn build_prop_decorators_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
@@ -465,12 +466,13 @@ pub fn build_prop_decorators_metadata_in<'a>(
             continue;
         };
 
-        // Filter to Angular property decorators
+        // Filter to Angular property decorators: with the file's imports, only
+        // `@angular/core`'s (see `angular_member_decorator`), like ngtsc.
         let angular_decorators: std::vec::Vec<_> = decorators
             .iter()
-            .filter(|d| {
-                let name = get_decorator_name(d);
-                name.is_some_and(|n| ANGULAR_PROP_DECORATORS.contains(&n))
+            .filter(|d| match consts {
+                Some(_) => crate::directive::angular_member_decorator(d, consts).is_some(),
+                None => get_decorator_name(d).is_some_and(|n| ANGULAR_PROP_DECORATORS.contains(&n)),
             })
             .collect();
 

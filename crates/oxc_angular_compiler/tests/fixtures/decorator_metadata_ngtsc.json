@@ -9476,6 +9476,105 @@
       "dtsImports": []
     },
     {
+      "name": "probe: memberDecorator-otherModuleTransform",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {Input} from './foreign';\n@Directive({selector: '[d]'})\nexport class D { @Input({transform: 5}) x: any; }\n",
+        "foreign.ts": "export function Input(o?: any): any { return () => {}; }\nexport function Output(o?: any): any { return () => {}; }\nexport function HostBinding(o?: any): any { return () => {}; }\nexport function HostListener(e?: any, a?: any): any { return () => {}; }\nexport function ViewChild(p?: any, o?: any): any { return () => {}; }\nexport function ContentChildren(p?: any, o?: any): any { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: memberDecorator-aliasedFromCore",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Input as In, Output as Out, HostBinding as HB, HostListener as HL, ViewChild as VC, ContentChildren as CC, EventEmitter} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class D {\n  @In() x: any;\n  @In({alias: 'yy', transform: (v: string) => v}) y: any;\n  @Out() changed = new EventEmitter<string>();\n  @HB('class.on') on = true;\n  @HL('click', ['$event']) onClick(e: any) {}\n  @VC('ref') ref: any;\n  @CC('item', {descendants: true}) items: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:\"x\",y:[2,\"yy\",\"y\",(v)=>v]}",
+          "outputs": "{changed:\"changed\"}",
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"item\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.items=_t);}}",
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"ref\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.ref=_t.first);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};\"y\":{\"alias\":\"yy\";\"required\":false;};},{\"changed\":\"changed\";},[\"items\"],never,true,never>;",
+          "dts:ngAcceptInputType_y": "staticngAcceptInputType_y:string;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: memberDecorator-otherModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {Input, Output, HostBinding, HostListener, ViewChild, ContentChildren} from './foreign';\n@Directive({selector: '[d]'})\nexport class D {\n  @Input() x: any;\n  @Output() changed: any;\n  @HostBinding('class.on') on = true;\n  @HostListener('click', ['$event']) onClick(e: any) {}\n  @ViewChild('ref') ref: any;\n  @ContentChildren('item') items: any;\n}\n",
+        "foreign.ts": "export function Input(o?: any): any { return () => {}; }\nexport function Output(o?: any): any { return () => {}; }\nexport function HostBinding(o?: any): any { return () => {}; }\nexport function HostListener(e?: any, a?: any): any { return () => {}; }\nexport function ViewChild(p?: any, o?: any): any { return () => {}; }\nexport function ContentChildren(p?: any, o?: any): any { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: memberDecorator-undeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive({selector: '[d]'})\nexport class D {\n  @Input() x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: memberDecorator-localFunction",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nfunction Input(o?: any): any { return () => {}; }\n@Directive({selector: '[d]'})\nexport class D {\n  @Input({transform: 5}) x: any;\n}\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{},{},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
+      "name": "probe: memberDecorator-coreNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Directive({selector: '[d]'})\nexport class D { @ng.Input() x: any; @ng.Output() y: any; }\n"
+      },
+      "diagnostics": [],
+      "classes": {
+        "D": {
+          "inputs": "{x:\"x\"}",
+          "outputs": "{y:\"y\"}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<D,\"[d]\",never,{\"x\":{\"alias\":\"x\";\"required\":false;};},{\"y\":\"y\";},never,never,true,never>;"
+        }
+      },
+      "dtsImports": [],
+      "diagnosticSpans": []
+    },
+    {
       "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constFalse",
       "origin": "probe",
       "files": {

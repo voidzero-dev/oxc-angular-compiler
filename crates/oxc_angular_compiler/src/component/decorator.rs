@@ -1111,10 +1111,18 @@ pub fn collect_constructor_decorator_spans(class: &Class<'_>, spans: &mut std::v
 /// Member decorators like `@Input()`, `@Output()`, `@HostBinding()`, `@HostListener()`,
 /// `@ViewChild()`, `@ViewChildren()`, `@ContentChild()`, and `@ContentChildren()` need
 /// to be removed from the output since their metadata is compiled into the definition.
+/// Like ngtsc, only Angular's own count (imported from `@angular/core`, under any
+/// alias or through a namespace import, see
+/// [`crate::directive::angular_member_decorator`]); a same-named decorator from
+/// another module is left in place.
 ///
 /// These spans are used by `transform.rs` to remove the decorators from the
 /// source text during transformation.
-pub fn collect_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+pub fn collect_member_decorator_spans(
+    class: &Class<'_>,
+    consts: &StringConsts<'_>,
+    spans: &mut std::vec::Vec<Span>,
+) {
     for element in &class.body.body {
         let decorators = match element {
             ClassElement::PropertyDefinition(prop) => &prop.decorators,
@@ -1130,15 +1138,8 @@ pub fn collect_member_decorator_spans(class: &Class<'_>, spans: &mut std::vec::V
         };
 
         for decorator in decorators {
-            if let Some(name) = get_decorator_name(&decorator.expression) {
-                // Only collect Angular-specific member decorators
-                match name.as_str() {
-                    "Input" | "Output" | "HostBinding" | "HostListener" | "ViewChild"
-                    | "ViewChildren" | "ContentChild" | "ContentChildren" => {
-                        spans.push(decorator.span);
-                    }
-                    _ => {}
-                }
+            if crate::directive::angular_member_decorator(decorator, Some(consts)).is_some() {
+                spans.push(decorator.span);
             }
         }
     }
@@ -2351,6 +2352,7 @@ mod tests {
     #[test]
     fn test_extract_host_binding_decorator() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2371,6 +2373,7 @@ mod tests {
     #[test]
     fn test_extract_host_binding_without_name() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2391,6 +2394,7 @@ mod tests {
     #[test]
     fn test_extract_host_listener_decorator() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2412,6 +2416,7 @@ mod tests {
     #[test]
     fn test_extract_host_listener_with_args() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2433,6 +2438,7 @@ mod tests {
     #[test]
     fn test_extract_host_listener_with_multiple_args() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2454,6 +2460,7 @@ mod tests {
     #[test]
     fn test_extract_multiple_host_decorators() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2476,6 +2483,7 @@ mod tests {
     fn test_merge_host_decorators_with_host_property() {
         // Test that @HostBinding/@HostListener are merged with @Component({ host: {} })
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2501,6 +2509,7 @@ mod tests {
     #[test]
     fn test_host_binding_on_getter() {
         let code = r#"
+            import {Component, HostBinding, HostListener} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3228,6 +3237,14 @@ mod tests {
         panic!("No class found in code");
     }
 
+    /// [`collect_member_decorator_spans`] for `class`, declared in `code`.
+    fn collect_member_decorators(code: &str, class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+        let allocator = Allocator::default();
+        let parser_ret = Parser::new(&allocator, code, SourceType::tsx()).parse();
+        let consts = crate::directive::collect_string_consts(&allocator, &parser_ret.program);
+        collect_member_decorator_spans(class, &consts, spans);
+    }
+
     #[test]
     fn test_collect_constructor_decorator_spans() {
         let code = r#"
@@ -3294,6 +3311,7 @@ mod tests {
     #[test]
     fn test_collect_member_decorator_spans() {
         let code = r#"
+            import {Component, Input, Output, HostBinding, HostListener, ViewChild, ViewChildren, ContentChild, ContentChildren} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3314,7 +3332,7 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_member_decorator_spans(class, &mut spans);
+            collect_member_decorators(code, class, &mut spans);
 
             // Should collect 9 member decorators (all @Input, @Output, @Host*, @*Child)
             assert_eq!(spans.len(), 9);
@@ -3324,6 +3342,7 @@ mod tests {
     #[test]
     fn test_collect_member_decorator_spans_ignores_non_angular() {
         let code = r#"
+            import {Component, Input} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3336,10 +3355,44 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_member_decorator_spans(class, &mut spans);
+            collect_member_decorators(code, class, &mut spans);
 
             // Should only collect @Input, ignoring custom decorators
             assert_eq!(spans.len(), 1);
+        });
+    }
+
+    /// Like ngtsc, only `@angular/core`'s decorators are compiled and removed:
+    /// under an alias or a namespace too, but not another module's, a local
+    /// or an undeclared one with the same name.
+    #[test]
+    fn test_collect_member_decorator_spans_by_import() {
+        let code = r#"
+            import {Component, Input as In, Output} from '@angular/core';
+            import * as core from '@angular/core';
+            import {HostBinding} from './other';
+            import * as other from './other';
+            function ViewChild(s: string): any { return () => {}; }
+            @Component({
+                selector: 'app-test',
+                template: ''
+            })
+            class TestComponent {
+                @In() aliased: string;
+                @core.Input() namespaced: string;
+                @Output() out: any;
+                @HostBinding('class.a') foreign = true;
+                @other.Input() foreignNamespace: string;
+                @ViewChild('ref') local: any;
+                @ContentChild('ref') undeclared: any;
+            }
+        "#;
+        with_first_class(code, |class| {
+            let mut spans = std::vec::Vec::new();
+            collect_member_decorators(code, class, &mut spans);
+            let texts: std::vec::Vec<&str> =
+                spans.iter().map(|s| &code[s.start as usize..s.end as usize]).collect();
+            assert_eq!(texts, ["@In()", "@core.Input()", "@Output()"]);
         });
     }
 
@@ -3357,7 +3410,7 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_member_decorator_spans(class, &mut spans);
+            collect_member_decorators(code, class, &mut spans);
 
             // No Angular member decorators
             assert_eq!(spans.len(), 0);

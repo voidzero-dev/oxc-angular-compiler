@@ -48,14 +48,14 @@ pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,
 };
+pub(crate) use property_decorators::{
+    angular_member_decorator, extract_host_bindings_in, extract_host_listeners_in,
+    parse_decorator_queries, try_parse_signal_input, try_parse_signal_model,
+    try_parse_signal_output, unwrap_initializer_api_expr,
+};
 pub use property_decorators::{
     extract_class_queries, extract_content_queries, extract_host_bindings, extract_host_listeners,
     extract_input_metadata, extract_input_metadata_in, extract_output_metadata,
     extract_output_metadata_in, extract_view_queries,
-};
-pub(crate) use property_decorators::{
-    extract_host_bindings_in, extract_host_listeners_in, parse_decorator_queries,
-    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
-    unwrap_initializer_api_expr,
 };
 pub use query::{create_content_queries_function, create_view_queries_function};

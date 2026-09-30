@@ -2050,6 +2050,7 @@ mod tests {
     #[test]
     fn test_extract_directive_with_inputs_from_class() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {
                 @Input() name: string;
@@ -2068,6 +2069,7 @@ mod tests {
     #[test]
     fn test_extract_directive_with_outputs_from_class() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {
                 @Output() clicked = new EventEmitter<void>();
@@ -2086,6 +2088,7 @@ mod tests {
     #[test]
     fn test_extract_directive_with_host_binding_decorator() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {
                 @HostBinding('class.active') isActive = false;
@@ -2101,6 +2104,7 @@ mod tests {
     #[test]
     fn test_extract_directive_with_host_listener_decorator() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {
                 @HostListener('click') onClick() {}
@@ -2116,6 +2120,7 @@ mod tests {
     #[test]
     fn test_extract_directive_merges_host_from_decorator_and_class() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -2227,6 +2232,7 @@ mod tests {
     #[test]
     fn test_full_directive_decorator() {
         let code = r#"
+            import {Directive, Input, Output, HostBinding, HostListener} from '@angular/core';
             @Directive({
                 selector: '[appComplete]',
                 standalone: true,

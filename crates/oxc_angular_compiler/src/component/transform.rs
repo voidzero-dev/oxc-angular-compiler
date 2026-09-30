@@ -1220,6 +1220,7 @@ fn extract_all_jit_member_decorators(
     source: &str,
     class: &oxc_ast::ast::Class<'_>,
     string_consts: &crate::directive::StringConsts<'_>,
+    core_namespace: &str,
 ) -> (std::vec::Vec<JitMemberDecorator>, std::vec::Vec<JitNonAngularMemberDecorator>) {
     use oxc_ast::ast::{ClassElement, MethodDefinitionKind, PropertyKey};
 
@@ -1264,13 +1265,8 @@ fn extract_all_jit_member_decorators(
             rustc_hash::FxHashSet::default();
 
         for decorator in decorators {
-            let (dec_name, call_args) = match &decorator.expression {
+            let (callee, call_args) = match &decorator.expression {
                 Expression::CallExpression(call) => {
-                    let name = match &call.callee {
-                        Expression::Identifier(id) => id.name.to_string(),
-                        Expression::StaticMemberExpression(m) => m.property.name.to_string(),
-                        _ => continue,
-                    };
                     let args = if call.arguments.is_empty() {
                         None
                     } else {
@@ -1278,18 +1274,30 @@ fn extract_all_jit_member_decorators(
                         let end = call.arguments.last().unwrap().span().end;
                         Some(source[start as usize..end as usize].to_string())
                     };
-                    (name, args)
+                    (&call.callee, args)
                 }
-                Expression::Identifier(id) => (id.name.to_string(), None),
+                expr => (expr, None),
+            };
+            let dec_name = match callee {
+                Expression::Identifier(id) => id.name.as_str(),
+                Expression::StaticMemberExpression(m) => m.property.name.as_str(),
                 _ => continue,
             };
 
-            if ANGULAR_FIELD_DECORATORS.contains(&dec_name.as_str()) {
-                // Angular field decorator → goes into propDecorators
-                explicit_field_decorators.insert(dec_name.clone());
-                angular_decs.push(JitParamDecorator { name: dec_name, args: call_args });
-            } else if !ANGULAR_DECORATOR_NAMES.contains(&dec_name.as_str()) {
-                // Non-Angular decorator → goes into __decorate() call
+            if let Some(field) =
+                crate::directive::angular_member_decorator(decorator, Some(string_consts))
+            {
+                // Angular field decorator (imported from `@angular/core`) → goes into
+                // propDecorators, referenced as written (`In`, `core.Input`), like ngtsc.
+                explicit_field_decorators.insert(field.to_string());
+                let name =
+                    source[callee.span().start as usize..callee.span().end as usize].to_string();
+                angular_decs.push(JitParamDecorator { name, args: call_args });
+            } else if ANGULAR_FIELD_DECORATORS.contains(&dec_name)
+                || !ANGULAR_DECORATOR_NAMES.contains(&dec_name)
+            {
+                // Non-Angular decorator (another module's `@Input` too) → goes into
+                // __decorate() call
                 let expr_start = decorator.expression.span().start;
                 let expr_end = decorator.expression.span().end;
                 non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());
@@ -1310,6 +1318,7 @@ fn extract_all_jit_member_decorators(
                 &member_name,
                 &explicit_field_decorators,
                 string_consts,
+                core_namespace,
             );
             angular_decs.extend(synthesized);
         }
@@ -1410,6 +1419,57 @@ fn classify_initializer_api(
 /// an undefined identifier and throw `ReferenceError` at module-evaluation time.
 pub(crate) const JIT_ANGULAR_CORE_NS: &str = "i0";
 
+/// Every identifier a file has, like TypeScript's `SourceFile.identifiers`.
+#[derive(Default)]
+struct FileIdentifiers(rustc_hash::FxHashSet<String>);
+
+impl<'a> oxc_ast_visit::Visit<'a> for FileIdentifiers {
+    fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
+        self.0.insert(it.name.to_string());
+    }
+    fn visit_binding_identifier(&mut self, it: &oxc_ast::ast::BindingIdentifier<'a>) {
+        self.0.insert(it.name.to_string());
+    }
+    fn visit_identifier_name(&mut self, it: &oxc_ast::ast::IdentifierName<'a>) {
+        self.0.insert(it.name.to_string());
+    }
+    fn visit_label_identifier(&mut self, it: &oxc_ast::ast::LabelIdentifier<'a>) {
+        self.0.insert(it.name.to_string());
+    }
+}
+
+/// The namespace JIT synthesis references `@angular/core` through, and whether
+/// the file already imports it, like ngc's `ImportManager`: the last
+/// `import * as x from '@angular/core'` that isn't type-only is reused;
+/// otherwise a new [`JIT_ANGULAR_CORE_NS`] import, renamed `i0_1`, `i0_2`, ...
+/// while the file uses that identifier anywhere (an `input as i0` import, a
+/// `const i0`, ...), so the added import can't redeclare it.
+fn jit_angular_core_namespace(program: &oxc_ast::ast::Program<'_>) -> (String, bool) {
+    for stmt in program.body.iter().rev() {
+        let Statement::ImportDeclaration(import) = stmt else { continue };
+        if import.source.value != "@angular/core" || import.import_kind.is_type() {
+            continue;
+        }
+        let namespace = import.specifiers.iter().flatten().find_map(|spec| match spec {
+            ImportDeclarationSpecifier::ImportNamespaceSpecifier(ns) => Some(ns.local.name),
+            _ => None,
+        });
+        if let Some(namespace) = namespace {
+            return (namespace.to_string(), true);
+        }
+    }
+
+    let mut identifiers = FileIdentifiers::default();
+    oxc_ast_visit::Visit::visit_program(&mut identifiers, program);
+    let mut name = JIT_ANGULAR_CORE_NS.to_string();
+    let mut counter = 1;
+    while identifiers.0.contains(&name) {
+        name = format!("{JIT_ANGULAR_CORE_NS}_{counter}");
+        counter += 1;
+    }
+    (name, false)
+}
+
 /// Inspect a property initializer; if it matches a recognized signal initializer API,
 /// return the synthesized `propDecorators` entries that JIT runtime needs.
 ///
@@ -1417,15 +1477,16 @@ pub(crate) const JIT_ANGULAR_CORE_NS: &str = "i0";
 /// property (e.g. `Input`, `Output`); we skip synthesis when the user-authored decorator
 /// already covers the binding (matches upstream behavior — explicit decorator wins).
 ///
-/// Synthesized decorator names are namespace-prefixed (e.g. `i0.Input`) — see
-/// [`JIT_ANGULAR_CORE_NS`]. The caller is responsible for emitting the matching
-/// `import * as i0 from "@angular/core"` when any synthesis occurred.
+/// Synthesized decorator names are prefixed with `core_namespace` (e.g. `i0.Input`,
+/// see [`jit_angular_core_namespace`]). The caller is responsible for emitting the
+/// matching `import * as i0 from "@angular/core"` when any synthesis occurred.
 fn synthesize_signal_api_decorators(
     source: &str,
     initializer: &Expression<'_>,
     field_name: &str,
     existing: &rustc_hash::FxHashSet<String>,
     string_consts: &crate::directive::StringConsts<'_>,
+    core_namespace: &str,
 ) -> std::vec::Vec<JitParamDecorator> {
     let unwrapped = unwrap_jit_initializer(initializer);
     let Expression::CallExpression(call) = unwrapped else { return std::vec::Vec::new() };
@@ -1449,7 +1510,7 @@ fn synthesize_signal_api_decorators(
                 required = required,
             );
             std::vec::Vec::from([JitParamDecorator {
-                name: format!("{JIT_ANGULAR_CORE_NS}.Input"),
+                name: format!("{core_namespace}.Input"),
                 args: Some(args),
             }])
         }
@@ -1464,7 +1525,7 @@ fn synthesize_signal_api_decorators(
                 .unwrap_or_else(|| field_name.to_string());
             let args = format!("\"{}\"", escape_js_string(&alias));
             std::vec::Vec::from([JitParamDecorator {
-                name: format!("{JIT_ANGULAR_CORE_NS}.Output"),
+                name: format!("{core_namespace}.Output"),
                 args: Some(args),
             }])
         }
@@ -1486,11 +1547,11 @@ fn synthesize_signal_api_decorators(
             let output_args = format!("\"{}Change\"", escape_js_string(&alias));
             std::vec::Vec::from([
                 JitParamDecorator {
-                    name: format!("{JIT_ANGULAR_CORE_NS}.Input"),
+                    name: format!("{core_namespace}.Input"),
                     args: Some(input_args),
                 },
                 JitParamDecorator {
-                    name: format!("{JIT_ANGULAR_CORE_NS}.Output"),
+                    name: format!("{core_namespace}.Output"),
                     args: Some(output_args),
                 },
             ])
@@ -1533,7 +1594,7 @@ fn synthesize_signal_api_decorators(
             };
             let args = format!("{locator_text}, {options_text}");
             std::vec::Vec::from([JitParamDecorator {
-                name: format!("{JIT_ANGULAR_CORE_NS}.{decorator_name}"),
+                name: format!("{core_namespace}.{decorator_name}"),
                 args: Some(args),
             }])
         }
@@ -1543,8 +1604,11 @@ fn synthesize_signal_api_decorators(
 /// Returns `true` when any field of any JIT class has a synthesized decorator
 /// (signal API lowering) that references the `@angular/core` namespace. Used to
 /// gate the emission of `import * as i0 from "@angular/core"`.
-fn jit_classes_need_angular_core_namespace(jit_classes: &[JitClassInfo]) -> bool {
-    let prefix = format!("{JIT_ANGULAR_CORE_NS}.");
+fn jit_classes_need_angular_core_namespace(
+    jit_classes: &[JitClassInfo],
+    core_namespace: &str,
+) -> bool {
+    let prefix = format!("{core_namespace}.");
     jit_classes.iter().any(|info| {
         info.member_decorators
             .iter()
@@ -2055,6 +2119,9 @@ fn transform_angular_file_jit(
     let import_map =
         build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
 
+    // How synthesized `propDecorators` reference `@angular/core` (`i0.Input`).
+    let (core_namespace, core_namespace_imported) = jit_angular_core_namespace(&parser_ret.program);
+
     // 3. Walk AST to find Angular-decorated classes
     let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
     let mut resource_counter: u32 = 0;
@@ -2138,7 +2205,7 @@ fn transform_angular_file_jit(
 
         // Extract Angular and non-Angular member decorators
         let (member_decorators, non_angular_member_decorators) =
-            extract_all_jit_member_decorators(source, class, &string_consts);
+            extract_all_jit_member_decorators(source, class, &string_consts, &core_namespace);
 
         jit_classes.push(JitClassInfo {
             class_name,
@@ -2179,9 +2246,11 @@ fn transform_angular_file_jit(
     // `i0.Input`/`i0.Output`/etc. at runtime).
     let mut additional_imports = String::new();
     additional_imports.push_str("import { __decorate } from \"tslib\";\n");
-    if jit_classes_need_angular_core_namespace(&jit_classes) {
+    if !core_namespace_imported
+        && jit_classes_need_angular_core_namespace(&jit_classes, &core_namespace)
+    {
         additional_imports
-            .push_str(&format!("import * as {JIT_ANGULAR_CORE_NS} from \"@angular/core\";\n"));
+            .push_str(&format!("import * as {core_namespace} from \"@angular/core\";\n"));
     }
     for (import_name, specifier) in &resource_imports {
         additional_imports.push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
@@ -2676,7 +2745,11 @@ pub fn transform_angular_file(
                                 &mut decorator_spans_to_remove,
                             );
                             // Collect member decorators (@Input, @Output, @HostBinding, etc.)
-                            collect_member_decorator_spans(class, &mut decorator_spans_to_remove);
+                            collect_member_decorator_spans(
+                                class,
+                                &string_consts,
+                                &mut decorator_spans_to_remove,
+                            );
 
                             // Store the ɵfac/ɵcmp definitions.
                             // Order: ɵfac BEFORE ɵcmp (Angular convention).
@@ -2924,7 +2997,11 @@ pub fn transform_angular_file(
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                     collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
                     // Collect member decorators (@Input, @Output, @HostBinding, etc.)
-                    collect_member_decorator_spans(class, &mut decorator_spans_to_remove);
+                    collect_member_decorator_spans(
+                        class,
+                        &string_consts,
+                        &mut decorator_spans_to_remove,
+                    );
 
                     // Resolve namespace imports for directive constructor deps.
                     // Directives can inject services from other modules (e.g., Store from @ngrx/store),

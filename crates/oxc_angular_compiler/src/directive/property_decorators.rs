@@ -39,32 +39,63 @@ fn is_core_namespace(consts: Option<&super::StringConsts<'_>>, name: &str) -> bo
         .is_some_and(|import| import.module == "@angular/core" && import.imported.is_none())
 }
 
-/// Find a decorator by name from a list of decorators.
-///
-/// Searches for decorators that are either:
-/// - Simple identifiers: `@Input`
-/// - Call expressions: `@Input()` or `@Input('alias')`
-/// - Either of those through a namespace import of `@angular/core` in the
-///   file `consts` was collected from (see [`is_core_namespace`]): `@core.Input()`
-///
-/// Returns the first matching decorator.
+/// Angular's member decorators, which are compiled into the definition.
+const MEMBER_DECORATORS: &[&str] = &[
+    "Input",
+    "Output",
+    "HostBinding",
+    "HostListener",
+    "ViewChild",
+    "ViewChildren",
+    "ContentChild",
+    "ContentChildren",
+];
+
+/// Which of Angular's member decorators ([`MEMBER_DECORATORS`]) `decorator`
+/// is: `@Input`, `@Input()`, ... With the file `consts` was collected from,
+/// only one imported from `@angular/core`, like ngtsc: by name under any alias
+/// (`@In()` for `import { Input as In }`) or through a namespace import
+/// (`@core.Input()`, see [`is_core_namespace`]); another module's or a local
+/// `Input` isn't Angular's. Without the file (the public `extract_*`
+/// functions), any decorator with that name.
+pub(crate) fn angular_member_decorator(
+    decorator: &Decorator<'_>,
+    consts: Option<&super::StringConsts<'_>>,
+) -> Option<&'static str> {
+    let callee = match &decorator.expression {
+        Expression::CallExpression(call) => &call.callee,
+        expr => expr,
+    };
+    let name = match callee {
+        Expression::Identifier(id) => match consts {
+            Some(consts) => {
+                let import = consts.scope().import(&id.name)?;
+                if import.module != "@angular/core" {
+                    return None;
+                }
+                import.imported?
+            }
+            None => id.name.as_str(),
+        },
+        Expression::StaticMemberExpression(m) => match &m.object {
+            Expression::Identifier(ns) if is_core_namespace(consts, &ns.name) => {
+                m.property.name.as_str()
+            }
+            _ => return None,
+        },
+        _ => return None,
+    };
+    MEMBER_DECORATORS.iter().copied().find(|n| *n == name)
+}
+
+/// Find one of Angular's member decorators (`name`) in a list of decorators
+/// (see [`angular_member_decorator`]). Returns the first match.
 fn find_decorator_by_name<'a>(
     decorators: &'a oxc_allocator::Vec<'a, Decorator<'a>>,
     name: &str,
     consts: Option<&super::StringConsts<'_>>,
 ) -> Option<&'a Decorator<'a>> {
-    let is_name = |expr: &Expression<'_>| match expr {
-        Expression::Identifier(id) => id.name == name,
-        Expression::StaticMemberExpression(m) => {
-            m.property.name == name
-                && matches!(&m.object, Expression::Identifier(ns) if is_core_namespace(consts, &ns.name))
-        }
-        _ => false,
-    };
-    decorators.iter().find(|d| match &d.expression {
-        Expression::CallExpression(call) => is_name(&call.callee),
-        expr => is_name(expr),
-    })
+    decorators.iter().find(|d| angular_member_decorator(d, consts) == Some(name))
 }
 
 /// The options argument of an `@Input(...)` decorator, if any.
