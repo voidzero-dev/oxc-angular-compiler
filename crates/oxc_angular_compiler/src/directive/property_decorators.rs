@@ -859,6 +859,28 @@ fn parse_query_config<'a>(
     source_text: Option<&'a str>,
     consts: Option<&super::StringConsts<'a>>,
 ) -> QueryConfig<'a> {
+    // With the file, read like ngtsc does (see [`member_query`]). A query it
+    // rejects isn't compiled; [`member_query_error`] reports it.
+    if let Some(consts) = consts {
+        return match member_query(
+            allocator,
+            decorator,
+            decorator_name,
+            Span::default(),
+            source_text,
+            consts,
+        ) {
+            Ok(query) => QueryConfig {
+                predicate: Some(query.predicate),
+                is_static: query.is_static,
+                read: query.read,
+                descendants: query.descendants,
+                emit_distinct_changes_only: query.emit_distinct_changes_only,
+            },
+            Err(_) => QueryConfig::default_for(decorator_name),
+        };
+    }
+
     let Expression::CallExpression(call) = &decorator.expression else {
         return QueryConfig::default_for(decorator_name);
     };
@@ -869,27 +891,16 @@ fn parse_query_config<'a>(
 
     let mut config = QueryConfig::default_for(decorator_name);
 
-    // The predicate: a string selector, a string array, or a type/token.
+    // The predicate: a string selector or a type/token.
     // forwardRef isn't included in compiled output.
-    let node = try_unwrap_forward_ref(first_arg, consts).unwrap_or(first_arg);
-    let selectors = match (consts, node) {
-        (Some(consts), _) => match super::evaluator::Evaluator::new(consts).evaluate(node) {
-            super::evaluator::Value::String(s) => Some(std::vec![s]),
-            super::evaluator::Value::Array(items) => {
-                items.iter().map(|i| i.as_str().map(str::to_string)).collect()
-            }
-            _ => None,
-        },
-        (None, Expression::StringLiteral(lit)) => Some(std::vec![lit.value.to_string()]),
-        _ => None,
-    };
-    config.predicate = match selectors {
-        Some(selectors) => {
+    let node = try_unwrap_forward_ref(first_arg, None).unwrap_or(first_arg);
+    config.predicate = match node {
+        Expression::StringLiteral(lit) => {
             let mut list = Vec::new_in(&allocator);
-            list.extend(selectors.iter().map(|s| Ident::from(allocator.alloc_str(s))));
+            list.push(lit.value.clone().into());
             Some(QueryPredicate::Selectors(list))
         }
-        None => convert_oxc_expression(allocator, node, source_text).map(QueryPredicate::Type),
+        _ => convert_oxc_expression(allocator, node, source_text).map(QueryPredicate::Type),
     };
 
     // Parse options from second argument if present
@@ -1798,8 +1809,9 @@ pub(crate) fn parse_decorator_queries<'a>(
             consts,
             &evaluator,
             type_name,
-            new_expr,
-            property_name,
+            &new_expr.arguments,
+            new_expr.span,
+            &property_name,
             source_text,
         ) {
             Ok(query) if type_name.starts_with("Content") => {
@@ -1849,21 +1861,71 @@ pub(crate) fn parse_decorator_queries<'a>(
     queries
 }
 
-/// One `new ViewChild(predicate, options?)` and friends. An error comes with
-/// the node ngtsc reports it on.
+/// A query member decorator (`@ViewChild('el', {static: true})` on the
+/// member at `span`), read like ngtsc's `extractDecoratorQueryMetadata` (see
+/// [`decorator_query`]): the options are evaluated, so a same-file `const`
+/// counts and a value of the wrong type is an error.
+fn member_query<'a>(
+    allocator: &'a Allocator,
+    decorator: &'a Decorator<'a>,
+    name: &str,
+    span: Span,
+    source_text: Option<&'a str>,
+    consts: &super::StringConsts<'a>,
+) -> Result<R3QueryMetadata<'a>, (String, Span)> {
+    // `@ViewChild` without a call has no arguments.
+    let args: &'a [Argument<'a>] = match &decorator.expression {
+        Expression::CallExpression(call) => &call.arguments,
+        _ => &[],
+    };
+    let evaluator = super::evaluator::Evaluator::new(consts);
+    decorator_query(allocator, consts, &evaluator, name, args, span, "", source_text)
+}
+
+/// The first error ngtsc raises for a class's query member decorators
+/// (`parseQueriesOfClassFields`), in member order: the one
+/// [`member_query`] reports, on the node ngtsc points at.
+pub(crate) fn member_query_error<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    source_text: Option<&'a str>,
+    consts: &super::StringConsts<'a>,
+) -> Option<(String, Span)> {
+    class.body.body.iter().find_map(|element| {
+        let (decorators, span) = match element {
+            ClassElement::PropertyDefinition(prop) => (&prop.decorators, prop.span),
+            ClassElement::MethodDefinition(method)
+                if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
+            {
+                (&method.decorators, method.span)
+            }
+            _ => return None,
+        };
+        let (decorator, name) = QUERY_TYPES.iter().find_map(|name| {
+            Some((find_decorator_by_name(decorators, name, Some(consts))?, *name))
+        })?;
+        member_query(allocator, decorator, name, span, source_text, consts).err()
+    })
+}
+
+/// ngtsc's `extractDecoratorQueryMetadata`: one `@ViewChild(predicate,
+/// options?)` member decorator, or `new ViewChild(...)` in `queries:`, and
+/// friends. `args` are its arguments and `span` the member or the `new`
+/// expression. An error comes with the node ngtsc reports it on.
+#[expect(clippy::too_many_arguments)]
 fn decorator_query<'a>(
     allocator: &'a Allocator,
     consts: &super::StringConsts<'a>,
     evaluator: &super::evaluator::Evaluator<'_, 'a>,
     name: &str,
-    new_expr: &'a oxc_ast::ast::NewExpression<'a>,
-    property_name: String,
+    args: &'a [Argument<'a>],
+    span: Span,
+    property_name: &str,
     source_text: Option<&'a str>,
 ) -> Result<R3QueryMetadata<'a>, (String, Span)> {
     use super::evaluator::Value;
-    let args = &new_expr.arguments;
     let Some(first) = args.first().and_then(Argument::as_expression) else {
-        return Err((format!("@{name} must have arguments"), new_expr.span));
+        return Err((format!("@{name} must have arguments"), span));
     };
     let node = try_unwrap_forward_ref(first, Some(consts)).unwrap_or(first);
     let at_node = |message: String| (message, node.span());
@@ -1940,7 +2002,7 @@ fn decorator_query<'a>(
     }
 
     Ok(R3QueryMetadata {
-        property_name: Ident::from(allocator.alloc_str(&property_name)),
+        property_name: Ident::from(allocator.alloc_str(property_name)),
         first: name == "ViewChild" || name == "ContentChild",
         predicate,
         descendants: config.descendants,

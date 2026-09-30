@@ -299,7 +299,7 @@ fn decorator_metadata_matches_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 637, "fixtures compared");
+    assert_eq!(compared, 730, "fixtures compared");
 }
 
 fn transform(source: &str) -> TransformResult {
@@ -1045,7 +1045,7 @@ export class Cmp {
     }
 }
 
-/// `queries:` values imported from another file: ngtsc 22.1.7 reads the file
+/// Query values imported from another file: ngtsc 22.1.7 reads the file
 /// and compiles all of these (`probe: queries-imported*`, with
 /// `export const FLAG = true; export const SELS = ['a', 'b']; export const SEL
 /// = 'b';` in `./flags`). oxc can't, and says so rather than reporting
@@ -1095,6 +1095,46 @@ export class Cmp {{
             errors(&transform(&source), &source),
             vec![(message, span.to_string())],
             "{query}"
+        );
+    }
+
+    // The same options on member decorators, read by the same code as ngtsc
+    // does (`probe: queries-member-*`; ngtsc 22.1.7 compiles these with
+    // `export const FLAG = false` in the other file).
+    let cases = [
+        (
+            "@ViewChildren('el', {emitDistinctChangesOnly: FLAG})",
+            "@ViewChildren options.emitDistinctChangesOnly",
+            "FLAG",
+        ),
+        (
+            "@ContentChildren('el', {descendants: flags.FLAG})",
+            "@ContentChildren options.descendants",
+            "flags.FLAG",
+        ),
+        ("@ViewChild('el', {static: FLAG})", "@ViewChild options.static", "'el'"),
+        ("@ContentChild(['a', SEL])", "@ContentChild predicate", "['a', SEL]"),
+    ];
+    for (decorator, subject, span) in cases {
+        let source = format!(
+            "import {{Component, ViewChild, ViewChildren, ContentChild, ContentChildren}} from '@angular/core';
+import {{FLAG, SEL}} from './flags';
+import * as flags from './flags';
+@Component({{selector: 'c', template: ''}})
+export class Cmp {{
+  {decorator} el: any;
+}}
+"
+        );
+        let name = if subject.ends_with("predicate") { "SEL" } else { "FLAG" };
+        let message = format!(
+            "{subject} depends on '{name}', which is imported from another module. \
+             OXC compiles one file at a time and cannot evaluate values from other files."
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(message, span.to_string())],
+            "{decorator}"
         );
     }
 }

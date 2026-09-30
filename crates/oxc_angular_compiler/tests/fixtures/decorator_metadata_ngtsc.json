@@ -7371,6 +7371,1316 @@
       "diagnosticSpans": [[142, 163]]
     },
     {
+      "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.emitDistinctChangesOnly must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[314, 319]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.emitDistinctChangesOnly must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[334, 338]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-emitDistinctChangesOnly-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-emitDistinctChangesOnly-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],0);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-emitDistinctChangesOnly-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-emitDistinctChangesOnly-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {emitDistinctChangesOnly: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChildren options.emitDistinctChangesOnly must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[317, 322]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-emitDistinctChangesOnly-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {emitDistinctChangesOnly: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChildren options.emitDistinctChangesOnly must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[337, 341]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-emitDistinctChangesOnly-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {emitDistinctChangesOnly: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-descendants-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-descendants-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-descendants-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {descendants: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChildren options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[305, 310]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-descendants-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChildren options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[325, 329]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChildren-descendants-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren('x', {descendants: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-descendants-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-descendants-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-descendants-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[302, 307]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-descendants-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[322, 326]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChildren-descendants-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-descendants-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-descendants-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-descendants-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChild options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[302, 307]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-descendants-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChild options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[322, 326]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-descendants-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChild-static-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChild-static-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChild-static-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChild-static-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[300, 303]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ViewChild-static-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-static-constFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-static-constTrue",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-static-string",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {static: 'yes'}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ContentChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[283, 286]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-static-constString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = 'yes';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {static: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ContentChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[303, 306]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-ContentChild-static-not",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {static: !0}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},[\"q\"],[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-number",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 1}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'number'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-null",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: null}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'null'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-undefined",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: undefined}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'undefined'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-unknownIdent",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\ndeclare const someGlobal: boolean;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: someGlobal}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options.static must be a boolean Value is a reference to 'someGlobal'."
+      ],
+      "diagnosticSpans": [[315, 318]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-desc-letUninit",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nlet FLAG;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: FLAG}) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.descendants must be a boolean Value is of type 'undefined'."
+      ],
+      "diagnosticSpans": [[312, 316]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-ternary",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst A = 1;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: A ? true : false}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-enum",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nenum E { A }\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: E.A}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'E'."],
+      "diagnosticSpans": [[293, 296]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-static-predTypeRef",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(ElementRef, {static: 'no'}) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[280, 290]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst OPTS = {static: true};\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', OPTS) q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "diagnosticSpans": [[314, 318]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsParens",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', ({static: true})) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsAs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: true} as any) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsSpread",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst OPTS = {static: true};\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {...OPTS}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsSpreadThen",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst OPTS = {static: true, descendants: true};\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {...OPTS, descendants: false}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', 'str') q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "diagnosticSpans": [[285, 290]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-readConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst R = ElementRef;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {read: R}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5,R);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-readNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {read: 1}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5,1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-quotedKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {'descendants': false, \"emitDistinctChangesOnly\": false}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],0);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-computedKey",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {['descendants']: false}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-shorthand",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst descendants = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants}) q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],4);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-multiErr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {descendants: 'a', emitDistinctChangesOnly: 'b'}) q!: any;\n  @ViewChild('x', {static: 'c'}) r!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChildren options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[302, 305]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-setter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren('x', {emitDistinctChangesOnly: FLAG}) set q(v: any) {}\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-options-ConstFalse",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = false;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {q: new ViewChildren('x', {emitDistinctChangesOnly: FLAG})}})\nexport class Cmp {\n  q!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.q=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-options-OptsConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst OPTS = {static: true};\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {q: new ViewChild('x', OPTS)}})\nexport class Cmp {\n  q!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "diagnosticSpans": [[308, 312]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-options-StaticString",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {q: new ViewChild('x', {static: 'c'})}})\nexport class Cmp {\n  q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[274, 277]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesFnExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(function Token() {})}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(functionToken(){},5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(() => ElementRef)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(()=>ElementRef,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction mk(): any { return ElementRef; }\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(mk())}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(mk(),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesCallArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\ndeclare function mk(v: any): any;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(mk(1))}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(mk(1),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesAs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(ElementRef as any)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(ElementRef,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst T = {ref: ElementRef};\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(T.ref)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(T.ref,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesGlobal",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(window)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(window,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesTemplate",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(`x`)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(1)}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild predicate cannot be interpreted Value is of type 'number'."],
+      "diagnosticSpans": [[277, 278]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesObject",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild({})}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild predicate cannot be interpreted Value is of type '{}'."],
+      "diagnosticSpans": [[277, 279]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-queriesNew",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {item: new ViewChild(new ElementRef(null))}})\nexport class Cmp {\n  item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(newElementRef(null),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-memberFnExpr",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(function Token() {}) item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(functionToken(){},5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-memberArrow",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(() => ElementRef) item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(()=>ElementRef,5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-memberCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nfunction mk(): any { return ElementRef; }\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(mk()) item: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery(mk(),5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.item=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-predicate-memberNumber",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(1 as any) item: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild predicate cannot be interpreted Value is of type 'number'."],
+      "diagnosticSpans": [[280, 288]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-noArgs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild() q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild must have arguments"],
+      "diagnosticSpans": [[269, 290]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-noCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild must have arguments"],
+      "diagnosticSpans": [[269, 288]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-tooMany",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {}, 1 as any) q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild has too many arguments"],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-noArgsSetter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChildren() set q(v: any) {}\n}\n"
+      },
+      "diagnostics": ["@ContentChildren must have arguments"],
+      "diagnosticSpans": [[269, 304]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-twoMembers",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) a!: any;\n  @ContentChild('x', {descendants: 'b'}) b!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-contentFirstInOrder",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ContentChild('x', {descendants: 'b'}) b!: any;\n  @ViewChild('x', {static: 'a'}) a!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ContentChild options.descendants must be a boolean Value is of type 'string'."
+      ],
+      "diagnosticSpans": [[302, 305]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-memberVsQueries",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', queries: {q: new ViewChild('x', {static: 'c'})}})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) a!: any;\n  q!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[329, 332]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-inputVsMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) a!: any;\n  @Input({transform: 1 as any}) i!: any;\n}\n"
+      },
+      "diagnostics": ["Input transform must be a function Value is of type 'number'."],
+      "diagnosticSpans": [[318, 339]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-outputsMetaVsMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>', outputs: 1 as any})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) a!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @Directive.outputs to a string array Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[256, 264]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-forwardRefStatic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {forwardRef} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild(forwardRef(() => ElementRef), {static: 'a'}) a!: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[339, 349]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-predicateArrayConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst SELS = ['a', 'b'];\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren(SELS, {emitDistinctChangesOnly: false}) a!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"a\",\"b\"],1);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-predicateBadArray",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChildren(['a', 1] as any) a!: any;\n}\n"
+      },
+      "diagnostics": [
+        "Failed to resolve @ViewChildren predicate at position 1 to a string Value is of type 'number'."
+      ],
+      "diagnosticSpans": [[283, 298]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsNull",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', null) a!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "diagnosticSpans": [[285, 289]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-optsUndefinedArg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', undefined) a!: any;\n}\n"
+      },
+      "diagnostics": [
+        "@ViewChild options must be an object literal. Find more at https://next.angular.dev/errors/NG1001"
+      ],
+      "diagnosticSpans": [[285, 294]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-readAndStatic",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {read: ElementRef, static: FLAG}) a!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7,ElementRef);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-dir",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Directive({selector: '[d]'})\nexport class Dir {\n  @ContentChildren('x', {descendants: FLAG, emitDistinctChangesOnly: FLAG}) a!: any;\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Dir": {
+          "contentQueries": "{if(rf&1){i0.ɵɵcontentQuery(dirIndex,[\"x\"],5);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t);}}",
+          "dts:ɵdir": "staticɵdir:i0.ɵɵDirectiveDeclaration<Dir,\"[d]\",never,{},{},[\"a\"],never,true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-signalPlusDecorator",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nimport {viewChild} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) a = viewChild('x');\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[321, 324]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-getter",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\nconst FLAG = true;\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: FLAG}) get a(): any { return null; }\n}\n"
+      },
+      "diagnostics": [],
+      "diagnosticSpans": [],
+      "classes": {
+        "Cmp": {
+          "viewQuery": "{if(rf&1){i0.ɵɵviewQuery([\"x\"],7);}if(rf&2){let_t;i0.ɵɵqueryRefresh(_t=i0.ɵɵloadQuery())&&(ctx.a=_t.first);}}",
+          "dts:ɵcmp": "staticɵcmp:i0.ɵɵComponentDeclaration<Cmp,\"c\",never,{},{},never,[\"*\"],true,never>;"
+        }
+      },
+      "dtsImports": []
+    },
+    {
+      "name": "probe: queries-member-staticMember",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive, Component, Input, Output, ViewChild, ViewChildren, ContentChild, ContentChildren, ElementRef, booleanAttribute, EventEmitter} from '@angular/core';\n@Component({selector: 'c', template: '<div #x></div><ng-content></ng-content>'})\nexport class Cmp {\n  @ViewChild('x', {static: 'a'}) static a: any;\n}\n"
+      },
+      "diagnostics": ["@ViewChild options.static must be a boolean Value is of type 'string'."],
+      "diagnosticSpans": [[280, 283]],
+      "classes": {},
+      "dtsImports": []
+    },
+    {
       "name": "probe: transform-global-atob",
       "origin": "probe",
       "files": {

@@ -1052,19 +1052,22 @@ pub(crate) fn angular_decorator_config<'a>(
 /// The first error ngtsc raises for the inputs, outputs and queries of a
 /// `@Component` / `@Directive` on `class`, in the order it checks them
 /// (`extractDirectiveMetadata`): `inputs:`, `@Input` members, `outputs:`,
-/// output members, then `queries:`. ngtsc stops at the first one.
+/// output members, query members (`@ViewChild`, ...), then `queries:`. ngtsc
+/// stops at the first one.
 ///
 /// Each error points where ngtsc's does: the `inputs:` / `outputs:` value, the
-/// member, or the part of `queries:` at fault.
+/// member, or the part of a query at fault. `source_text` is the file's, as
+/// when the class is compiled, so both read the same queries.
 pub fn decorator_io_errors<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
 ) -> std::vec::Vec<OxcDiagnostic> {
     let Some((config, decorator_name)) = angular_decorator_config(class) else {
         return std::vec::Vec::new();
     };
-    let io = config.map(|config| parse_decorator_io(allocator, config, class, None, consts));
+    let io = config.map(|config| parse_decorator_io(allocator, config, class, source_text, consts));
     let (meta_inputs, meta_outputs): (std::vec::Vec<&str>, std::vec::Vec<&str>) = match &io {
         Some(io) => (
             io.inputs.iter().map(|i| i.class_property_name.as_str()).collect(),
@@ -1148,9 +1151,21 @@ pub fn decorator_io_errors<'a>(
             })
         })
     };
+    let member_queries =
+        || super::property_decorators::member_query_error(allocator, class, source_text, consts);
+    // With the source text, like the compiled queries: a predicate is emitted
+    // as written, which some expressions (functions) need it for.
     let queries = || {
         let config = config?;
-        super::parse_decorator_queries(allocator, config, class, None, consts, decorator_name).error
+        let queries = super::parse_decorator_queries(
+            allocator,
+            config,
+            class,
+            source_text,
+            consts,
+            decorator_name,
+        );
+        queries.error
     };
 
     io.as_ref()
@@ -1158,6 +1173,7 @@ pub fn decorator_io_errors<'a>(
         .or_else(input_members)
         .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()))
         .or_else(output_members)
+        .or_else(member_queries)
         .or_else(queries)
         .map(|(message, span)| OxcDiagnostic::error(message).with_label(span))
         .into_iter()
