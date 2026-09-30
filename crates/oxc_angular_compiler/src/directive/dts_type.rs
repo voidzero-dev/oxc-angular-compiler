@@ -11,15 +11,15 @@
 //! this printer doesn't cover makes the whole type `unknown`.
 
 use oxc_ast::ast::{
-    BigIntLiteral, BindingPattern, Expression, FormalParameters, PropertyKey, TSLiteral,
-    TSMappedTypeModifierOperator, TSMethodSignatureKind, TSSignature, TSThisParameter,
+    BigIntLiteral, BindingPattern, Expression, FormalParameters, PropertyKey, StringLiteral,
+    TSLiteral, TSMappedTypeModifierOperator, TSMethodSignatureKind, TSSignature, TSThisParameter,
     TSTupleElement, TSType, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator, TSTypeParameter,
     TSTypeParameterDeclaration, TSTypeParameterInstantiation, TSTypePredicateName,
     TSTypeQueryExprName, UnaryOperator,
 };
 use oxc_span::GetSpan;
 
-use super::evaluator::FileScope;
+use super::evaluator::{AliasTarget, FileScope};
 use crate::output::emitter::format_number_like_js;
 
 pub(crate) struct TypePrinter<'s, 'a> {
@@ -109,7 +109,8 @@ impl TypePrinter<'_, '_> {
                     TSTypeQueryExprName::QualifiedName(name) => {
                         format!("typeof {}.{}", entity_name(&name.left)?, name.right.name)
                     }
-                    _ => return None,
+                    TSTypeQueryExprName::ThisExpression(_) => "typeof this".into(),
+                    TSTypeQueryExprName::TSImportType(_) => return None,
                 };
                 if let Some(args) = &q.type_arguments {
                     out.push_str(&self.type_args(args)?);
@@ -195,47 +196,48 @@ impl TypePrinter<'_, '_> {
     /// written; names from other modules set `other_module`.
     ///
     /// A qualified name whose head the file declares (`NS.T`, `C.T` for a
-    /// class merged with a namespace, `A.B.T`) is written as its last part,
-    /// `T`: ngtsc emits the declaration `T` resolves to by its own name. An enum
-    /// member (`E.A`, `NS.E.A`) stays as written, since ngtsc can't emit one at
-    /// all.
+    /// class merged with a namespace, `A.B.T`, `E.T` for an enum merged with
+    /// one) is written as its last part, `T`: ngtsc emits the declaration `T`
+    /// resolves to by its own name. An enum member (`E.A`, `NS.E.A`) stays as
+    /// written, since ngtsc can't emit one at all.
+    ///
+    /// An import-equals alias (`import A = NS`, `import C = NS.T`) stands for
+    /// its target, as ngtsc resolves it: `A.T` and `C` are written `T`. An
+    /// alias of another module (`import R = require('m')`, or of an import) is
+    /// that module's; ngtsc writes the bare name there, which doesn't resolve.
     fn type_name(&mut self, name: &TSTypeName<'_>) -> Option<String> {
-        if let TSTypeName::QualifiedName(q) = name {
-            // The qualifier's parts, head first (`NS`, `E` for `NS.E.A`).
-            let mut qualifier = vec![];
-            let mut left = &q.left;
-            while let TSTypeName::QualifiedName(inner) = left {
-                qualifier.push(inner.right.name.as_str());
-                left = &inner.left;
-            }
-            if let TSTypeName::IdentifierReference(head) = left
-                && self.scope.import(head.name.as_str()).is_none()
-                && self.scope.declares(head.name.as_str())
-            {
-                qualifier.push(head.name.as_str());
-                qualifier.reverse();
-                if !self.scope.is_enum_path(&qualifier) {
-                    return Some(q.right.name.to_string());
+        let mut parts = std::vec::Vec::new();
+        entity_parts(name, &mut parts)?;
+        // Aliases can name aliases; a cycle is a TypeScript error.
+        for _ in 0..16 {
+            match self.scope.alias(parts[0]) {
+                None => return Some(self.resolved_name(&parts)),
+                Some(AliasTarget::Module(_)) => {
+                    self.other_module = true;
+                    return Some(parts.join("."));
+                }
+                Some(AliasTarget::Entity(target)) => {
+                    parts.splice(0..1, target);
                 }
             }
         }
-        let (head, rest) = match name {
-            TSTypeName::IdentifierReference(id) => (id.name.as_str(), String::new()),
-            TSTypeName::QualifiedName(q) => {
-                let mut left = &q.left;
-                let mut rest = format!(".{}", q.right.name);
-                while let TSTypeName::QualifiedName(inner) = left {
-                    rest = format!(".{}{rest}", inner.right.name);
-                    left = &inner.left;
-                }
-                match left {
-                    TSTypeName::IdentifierReference(id) => (id.name.as_str(), rest),
-                    _ => return None,
-                }
-            }
-            TSTypeName::ThisExpression(_) => return None,
-        };
-        Some(self.value_name(head, &rest))
+        None
+    }
+
+    /// [`Self::type_name`] for a name whose head isn't an alias: `parts`, head
+    /// first.
+    fn resolved_name(&mut self, parts: &[&str]) -> String {
+        let (head, members) = (parts[0], &parts[1..]);
+        if let [qualifier @ .., last] = parts
+            && !members.is_empty()
+            && self.scope.import(head).is_none()
+            && self.scope.declares(head)
+            && !self.scope.is_enum_member(qualifier, last)
+        {
+            return (*last).to_string();
+        }
+        let rest: String = members.iter().map(|m| format!(".{m}")).collect();
+        self.value_name(head, &rest)
     }
 
     /// `head` followed by the `.member`s `rest`, with `head` resolved through
@@ -312,7 +314,7 @@ impl TypePrinter<'_, '_> {
             TSLiteral::BooleanLiteral(b) => b.value.to_string(),
             TSLiteral::NumericLiteral(n) => format_number_like_js(n.value),
             TSLiteral::BigIntLiteral(b) => self.bigint(b),
-            TSLiteral::StringLiteral(s) => quote(&s.value),
+            TSLiteral::StringLiteral(s) => quote_literal(s),
             TSLiteral::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
             TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => {
                 match &u.argument {
@@ -399,7 +401,7 @@ impl TypePrinter<'_, '_> {
     fn key(&mut self, key: &PropertyKey<'_>, computed: bool) -> Option<String> {
         let text = match key {
             PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => quote(&s.value),
+            PropertyKey::StringLiteral(s) => quote_literal(s),
             PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
             PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
             PropertyKey::Identifier(id) => self.value_name(&id.name, ""),
@@ -561,6 +563,20 @@ fn entity_name(name: &TSTypeName<'_>) -> Option<String> {
     }
 }
 
+/// A type name's parts, head first (`["A", "B", "T"]` for `A.B.T`). `None`
+/// for one starting with `this`.
+fn entity_parts<'n>(name: &'n TSTypeName<'_>, out: &mut Vec<&'n str>) -> Option<()> {
+    match name {
+        TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
+        TSTypeName::QualifiedName(q) => {
+            entity_parts(&q.left, out)?;
+            out.push(q.right.name.as_str());
+        }
+        TSTypeName::ThisExpression(_) => return None,
+    }
+    Some(())
+}
+
 fn member_chain(object: &Expression<'_>, property: &str) -> Option<String> {
     let object = match object {
         Expression::Identifier(id) => id.name.to_string(),
@@ -662,28 +678,54 @@ fn same_line_comments(text: &str) -> String {
 /// escapes for control characters and everything outside ASCII (as UTF-16
 /// code units).
 pub(crate) fn quote(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    let mut chars = s.chars().peekable();
+    quote_units(s.encode_utf16())
+}
+
+/// [`quote`] for a string literal from the source, whose value can hold lone
+/// surrogates (`'\uD800'`): the parser encodes each as `\u{FFFD}` and its
+/// code unit in hex (and a `\u{FFFD}` as `\u{FFFD}fffd`).
+fn quote_literal(literal: &StringLiteral<'_>) -> String {
+    if !literal.lone_surrogates {
+        return quote(&literal.value);
+    }
+    let mut units = Vec::new();
+    let mut chars = literal.value.chars();
     while let Some(c) = chars.next() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{b}' => out.push_str("\\v"),
-            '\u{c}' => out.push_str("\\f"),
-            '\u{8}' => out.push_str("\\b"),
-            // `\0` followed by a digit would read as an octal escape.
-            '\0' if chars.peek().is_some_and(char::is_ascii_digit) => out.push_str("\\x00"),
-            '\0' => out.push_str("\\0"),
-            c if (c as u32) < 0x20 || (c as u32) > 0x7f => {
-                for unit in c.encode_utf16(&mut [0; 2]) {
-                    let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{unit:04X}"));
-                }
+        if c == '\u{FFFD}' {
+            let hex: String = chars.by_ref().take(4).collect();
+            if let Ok(unit) = u16::from_str_radix(&hex, 16) {
+                units.push(unit);
+                continue;
             }
-            c => out.push(c),
+        }
+        units.extend(c.encode_utf16(&mut [0; 2]).iter());
+    }
+    quote_units(units)
+}
+
+fn quote_units(units: impl IntoIterator<Item = u16>) -> String {
+    let units: Vec<u16> = units.into_iter().collect();
+    let mut out = String::with_capacity(units.len() + 2);
+    out.push('"');
+    for (i, &unit) in units.iter().enumerate() {
+        match unit {
+            0x22 => out.push_str("\\\""),
+            0x5c => out.push_str("\\\\"),
+            0x0a => out.push_str("\\n"),
+            0x0d => out.push_str("\\r"),
+            0x09 => out.push_str("\\t"),
+            0x0b => out.push_str("\\v"),
+            0x0c => out.push_str("\\f"),
+            0x08 => out.push_str("\\b"),
+            // `\0` followed by a digit would read as an octal escape.
+            0 if units.get(i + 1).is_some_and(|u| (0x30..=0x39).contains(u)) => {
+                out.push_str("\\x00");
+            }
+            0 => out.push_str("\\0"),
+            unit if unit < 0x20 || unit > 0x7f => {
+                let _ = std::fmt::Write::write_fmt(&mut out, format_args!("\\u{unit:04X}"));
+            }
+            unit => out.push(char::from(unit as u8)),
         }
     }
     out.push('"');

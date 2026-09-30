@@ -62,6 +62,11 @@ pub(crate) struct FileScope<'a> {
     /// Namespaces (`namespace NS {}`, `declare namespace NS {}`, `module NS {}`),
     /// with every declaration of each (TypeScript merges them).
     namespaces: HashMap<&'a str, std::vec::Vec<&'a TSNamespaceDeclaration<'a>>>,
+    /// Every declaration of each enum (TypeScript merges them).
+    enum_declarations: HashMap<&'a str, std::vec::Vec<&'a TSEnumDeclaration<'a>>>,
+    /// Import-equals aliases (`import A = NS.T`, `export import A = NS`,
+    /// `import A = require('m')`): what each stands for.
+    aliases: HashMap<&'a str, &'a TSModuleReference<'a>>,
     /// Where each top-level function, class and variable is first declared, as
     /// ngtsc's diagnostics point at it: the whole statement (with `export`) for
     /// a function or class, the declarator (`x: T`) for a variable.
@@ -69,9 +74,6 @@ pub(crate) struct FileScope<'a> {
     /// Namespaces and `import x = ...` aliases: declared in the file, but not
     /// read by the evaluator (their values are dynamic).
     unread: HashSet<&'a str>,
-    /// Import-equals aliases (`import A = NS.T`, `export import A = NS`,
-    /// `import A = require('m')`): what each stands for.
-    aliases: HashMap<&'a str, &'a TSModuleReference<'a>>,
     /// The bodies of the file's namespaces (`namespace NS { ... }`, nested
     /// ones included), which ngtsc reads through `typeof NS.X`.
     blocks: std::vec::Vec<NamespaceBlock<'a>>,
@@ -124,15 +126,28 @@ enum Qualified<'a> {
     Missing,
 }
 
+/// Whether an enum `e` declares the member `member`.
+fn enum_declares_member(e: &TSEnumDeclaration<'_>, member: &str) -> bool {
+    e.body.members.iter().any(|m| match &m.id {
+        TSEnumMemberName::Identifier(id) => id.name == member,
+        TSEnumMemberName::String(s) | TSEnumMemberName::ComputedString(s) => s.value == member,
+        TSEnumMemberName::ComputedTemplateString(_) => false,
+    })
+}
+
 /// Whether the namespace `ns` declares the enum `path` (`["M", "E"]` for
-/// `M.E`, with `M` a namespace in `ns`).
-fn namespace_declares_enum(ns: &TSNamespaceDeclaration<'_>, path: &[&str]) -> bool {
+/// `M.E`, with `M` a namespace in `ns`) with the member `member`.
+fn namespace_declares_enum_member(
+    ns: &TSNamespaceDeclaration<'_>,
+    path: &[&str],
+    member: &str,
+) -> bool {
     let statements = match &ns.body {
         // `namespace A.B {}`: `B` is the only member of `A`.
         TSNamespaceDeclarationBody::TSNamespaceDeclaration(inner) => {
             return match path {
                 [name, rest @ ..] if !rest.is_empty() && inner.id.name == *name => {
-                    namespace_declares_enum(inner, rest)
+                    namespace_declares_enum_member(inner, rest, member)
                 }
                 _ => false,
             };
@@ -145,15 +160,25 @@ fn namespace_declares_enum(ns: &TSNamespaceDeclaration<'_>, path: &[&str]) -> bo
             _ => statement.as_declaration(),
         };
         match (decl, path) {
-            (Some(Declaration::TSEnumDeclaration(e)), [name]) => e.id.name == *name,
+            (Some(Declaration::TSEnumDeclaration(e)), [name]) => {
+                e.id.name == *name && enum_declares_member(e, member)
+            }
             (Some(Declaration::TSNamespaceDeclaration(inner)), [name, rest @ ..])
                 if !rest.is_empty() && inner.id.name == *name =>
             {
-                namespace_declares_enum(inner.as_ref(), rest)
+                namespace_declares_enum_member(inner.as_ref(), rest, member)
             }
             _ => false,
         }
     })
+}
+
+/// What an import-equals alias stands for (see [`FileScope::alias`]).
+pub(crate) enum AliasTarget<'a> {
+    /// `import A = require('m')`: the module `m`.
+    Module(&'a str),
+    /// `import A = NS.T`: the entity's parts, head first (`["NS", "T"]`).
+    Entity(std::vec::Vec<&'a str>),
 }
 
 /// A top-level variable binding.
@@ -612,6 +637,7 @@ impl<'a> FileScope<'a> {
             Declaration::TSEnumDeclaration(e) => {
                 let id = e.id.name.as_str();
                 self.enums.entry(id).or_insert(e);
+                self.enum_declarations.entry(id).or_default().push(e);
                 self.types.entry(id).or_insert(exported);
                 name(self, id);
             }
@@ -645,23 +671,49 @@ impl<'a> FileScope<'a> {
             || self.variables.contains_key(name)
     }
 
-    /// Whether `name` is an enum declared in the file.
-    pub(crate) fn is_enum(&self, name: &str) -> bool {
-        self.enums.contains_key(name)
-    }
-
-    /// Whether the qualified name `path` (`["NS", "E"]` for `NS.E`) is an enum
-    /// the file declares: at its top level, or in a namespace it declares (a
-    /// class or function merged with one included).
-    pub(crate) fn is_enum_path(&self, path: &[&str]) -> bool {
+    /// Whether `path.member` (`["NS", "E"]` and `A` for `NS.E.A`) is a member
+    /// of an enum the file declares: at its top level, or in a namespace it
+    /// declares (a class or function merged with one included).
+    pub(crate) fn is_enum_member(&self, path: &[&str], member: &str) -> bool {
         match path {
             [] => false,
-            [name] => self.is_enum(name),
-            [head, rest @ ..] => self
-                .namespaces
-                .get(head)
-                .is_some_and(|decls| decls.iter().any(|ns| namespace_declares_enum(ns, rest))),
+            [name] => self
+                .enum_declarations
+                .get(name)
+                .is_some_and(|decls| decls.iter().any(|e| enum_declares_member(e, member))),
+            [head, rest @ ..] => self.namespaces.get(head).is_some_and(|decls| {
+                decls.iter().any(|ns| namespace_declares_enum_member(ns, rest, member))
+            }),
         }
+    }
+
+    /// What `name` stands for when it's a top-level import-equals alias.
+    pub(crate) fn alias(&self, name: &str) -> Option<AliasTarget<'a>> {
+        fn parts<'a>(name: &'a TSTypeName<'a>, out: &mut std::vec::Vec<&'a str>) -> Option<()> {
+            match name {
+                TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
+                TSTypeName::QualifiedName(q) => {
+                    parts(&q.left, out)?;
+                    out.push(q.right.name.as_str());
+                }
+                TSTypeName::ThisExpression(_) => return None,
+            }
+            Some(())
+        }
+        Some(match self.aliases.get(name)? {
+            TSModuleReference::ExternalModuleReference(m) => {
+                AliasTarget::Module(m.expression.value.as_str())
+            }
+            TSModuleReference::IdentifierReference(id) => {
+                AliasTarget::Entity(std::vec![id.name.as_str()])
+            }
+            TSModuleReference::QualifiedName(q) => {
+                let mut out = std::vec::Vec::new();
+                parts(&q.left, &mut out)?;
+                out.push(q.right.name.as_str());
+                AliasTarget::Entity(out)
+            }
+        })
     }
 
     /// Whether `function` is the top-level function declaration called `name`

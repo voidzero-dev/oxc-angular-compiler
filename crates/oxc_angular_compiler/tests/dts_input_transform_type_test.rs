@@ -165,6 +165,158 @@ export class Dir {
     assert!(decl.members.contains("static ngAcceptInputType_y: E | E | T;"), "{}", decl.members);
 }
 
+/// The `ngAcceptInputType_*` members oxc writes for `source`, in order.
+fn accept_members(source: &str) -> Vec<String> {
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "t.ts",
+        source,
+        Some(&TransformOptions::default()),
+        None,
+    );
+    let decl = result.dts_declarations.iter().find(|d| d.class_name == "Dir").unwrap();
+    decl.members
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.starts_with("static ngAcceptInputType_"))
+        .map(str::to_string)
+        .collect()
+}
+
+/// `x0`, `x1`, ... typed with `types`, one member each.
+fn members_typed(types: &[&str]) -> String {
+    types
+        .iter()
+        .enumerate()
+        .map(|(i, t)| format!("  @Input({{transform: (v: {t}) => 1}}) x{i}!: number;\n"))
+        .collect()
+}
+
+fn expect_members(types: &[&str]) -> Vec<String> {
+    types.iter().enumerate().map(|(i, t)| format!("static ngAcceptInputType_x{i}: {t};")).collect()
+}
+
+/// An `import A = NS` / `import C = NS.T` alias (`export import` too) is
+/// written as the declaration it resolves to: ngtsc 22.1.7 wrote each
+/// expected type for this source. A `typeof` stays as written, like any other.
+#[test]
+fn import_equals_aliases_are_typed_like_their_target() {
+    let types = [
+        "A.T",
+        "B.U",
+        "C",
+        "Array<C>",
+        "D.T",
+        "E",
+        "A.In.U",
+        "F.U",
+        "G",
+        "typeof A.x",
+        "{ [k: string]: C }",
+    ];
+    let source = format!(
+        "import {{Directive, Input}} from '@angular/core';
+export namespace NS {{ export interface T {{ a: string }} export namespace In {{ export interface U {{ a: string }} }} export const x = 1; }}
+import A = NS;
+import B = NS.In;
+import C = NS.T;
+export import D = NS;
+export import E = NS.T;
+import F = A.In;
+import G = B.U;
+@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+        members_typed(&types)
+    );
+    assert_eq!(
+        accept_members(&source),
+        expect_members(&[
+            "T",
+            "U",
+            "T",
+            "Array<T>",
+            "T",
+            "T",
+            "U",
+            "U",
+            "U",
+            "typeof A.x",
+            "{ [k: string]: T; }"
+        ])
+    );
+}
+
+/// An alias of another module (`import R = require('./other')`, or of an
+/// import) follows the rule for other modules: `unknown`. ngtsc 22.1.7 writes
+/// the bare name there (`Other`, `T`), which doesn't resolve in its `.d.ts`.
+/// An alias of `@angular/core` becomes `i0.X` (ngtsc: the bare `Signal<number>`,
+/// equally unresolved), and one of a global is written as its target
+/// (`Intl.NumberFormat`, where ngtsc writes `NumberFormat`).
+#[test]
+fn import_equals_aliases_of_other_modules_and_globals() {
+    let cases: [(&str, &[&str], &[&str]); 4] = [
+        (
+            "import R = require('./other');\n",
+            &["R.Other", "R.Inner.T", "typeof R.FLAG", "R.Other | string"],
+            &["unknown", "unknown", "typeof R.FLAG", "unknown"],
+        ),
+        (
+            "import * as o from './other';\nimport {Inner} from './other';\nimport N = o.Inner;\nimport M = Inner;\nimport K = o;\n",
+            &["N.T", "M.T", "K.Other", "K.Inner.T"],
+            &["unknown", "unknown", "unknown", "unknown"],
+        ),
+        (
+            "import * as ng from '@angular/core';\nimport S = ng.Signal;\nimport Core = ng;\n",
+            &["S<number>", "Core.Signal<string>", "Core.ElementRef"],
+            &["i0.Signal<number>", "i0.Signal<string>", "i0.ElementRef"],
+        ),
+        (
+            "import NF = Intl.NumberFormat;\nimport I = Intl;\n",
+            &["NF", "I.NumberFormat"],
+            &["Intl.NumberFormat", "Intl.NumberFormat"],
+        ),
+    ];
+    for (imports, types, expected) in cases {
+        let source = format!(
+            "import {{Directive, Input}} from '@angular/core';
+{imports}@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+            members_typed(types)
+        );
+        assert_eq!(accept_members(&source), expect_members(expected), "{imports}");
+    }
+}
+
+/// A name in a namespace merged with an enum (`E.T`) is shortened like any
+/// other qualified local name, as ngtsc 22.1.7 does: only an actual enum
+/// member (`E.A`, also from a second declaration of the enum) is kept as
+/// written.
+#[test]
+fn names_in_a_namespace_merged_with_an_enum_are_shortened() {
+    let types = ["E.T", "E.U", "E.N.V", "NS.F.T", "E.T | E.U", "E.A", "E.B", "NS.F.X"];
+    let source = format!(
+        "import {{Directive, Input}} from '@angular/core';
+export enum E {{ A }}
+export enum E {{ B = 1 }}
+export namespace E {{ export interface T {{ a: string }} export type U = string; export namespace N {{ export interface V {{ a: 1 }} }} }}
+export namespace NS {{ export enum F {{ X }} export namespace F {{ export interface T {{ a: 1 }} }} }}
+@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+        members_typed(&types)
+    );
+    assert_eq!(
+        accept_members(&source),
+        expect_members(&["T", "U", "V", "T", "T | U", "E.A", "E.B", "NS.F.X"])
+    );
+}
+
 /// A computed property name follows the rules of a type name (see
 /// `dts_type.rs`): ngtsc 22.1.7 copies the expression as written, so an
 /// imported name (`{ [token]: 1; }`) doesn't resolve in its `.d.ts`. oxc
@@ -273,6 +425,10 @@ const MATCH: &[(&str, &str)] = &[
     ("(x?: Signal<number>) => void", "(x?: i0.Signal<number>) => void"),
     ("(x) => void", "(x) => void"),
     ("(...xs) => void", "(...xs) => void"),
+    ("typeof this", "typeof this"),
+    ("{ a: typeof this }", "{ a: typeof this; }"),
+    ("typeof this | string", "typeof this | string"),
+    ("Array<typeof this>", "Array<typeof this>"),
     ("'é'", "\"\\u00E9\""),
     ("'😀'", "\"\\uD83D\\uDE00\""),
     ("'\\0'", "\"\\0\""),
@@ -284,6 +440,17 @@ const MATCH: &[(&str, &str)] = &[
     ("'a\"b\\'c`d'", "\"a\\\"b'c`d\""),
     ("'\\r\\n'", "\"\\r\\n\""),
     ("'\\u{10FFFF}'", "\"\\uDBFF\\uDFFF\""),
+    ("'\\uD800'", "\"\\uD800\""),
+    ("'\\uDC00x'", "\"\\uDC00x\""),
+    ("'a\\uD800b\\uDFFF'", "\"a\\uD800b\\uDFFF\""),
+    ("'\\u{FFFD}'", "\"\\uFFFD\""),
+    ("'\\uFFFD\\uD800'", "\"\\uFFFD\\uD800\""),
+    ("{ '\\uD800': 1 }", "{ \"\\uD800\": 1; }"),
+    ("{ 'x\\uDBFF': 1; '\\uD800\\uDC00': 2 }", "{ \"x\\uDBFF\": 1; \"\\uD800\\uDC00\": 2; }"),
+    (
+        "({'\\uD800': a}: {'\\uD800': 1}) => void",
+        "({ \"\\uD800\": a }: { \"\\uD800\": 1; }) => void",
+    ),
     ("`é`", "`é`"),
     ("`é${string}`", "`é${string}`"),
     ("`aé${number}b`", "`aé${number}b`"),
