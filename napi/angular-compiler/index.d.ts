@@ -907,6 +907,11 @@ export interface TransformResult {
   templateUpdates: Map<string, string>
   /** Style updates for HMR (component_id → styles). */
   styleUpdates: Map<string, string[]>
+  /**
+   * For HMR: each compiled component's `@Component` decorator callee as
+   * written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+   */
+  componentDecorators: Record<string, string>
   /** Compilation errors. */
   errors: Array<OxcError>
   /** Compilation warnings. */

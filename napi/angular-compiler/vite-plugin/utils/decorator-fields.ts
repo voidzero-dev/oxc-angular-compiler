@@ -21,9 +21,12 @@
  *     distinguish `/` as a division operator from `/` as a regex-literal
  *     opener without a real JS lexer. Regex literals inside @Component
  *     args don't appear in real Angular code, so this is accepted.
- *   - **Aliased decorator imports**: `@core.Component(...)` or
- *     `import { Component as C }` followed by `@C({...})`. Only the
- *     literal `@Component` form is recognized.
+ *   - **Which decorators are Angular's**: this scan does not read imports.
+ *     It finds a decorator by the spelling the caller passes, which the
+ *     compiler reports for each component it compiled (`Component`, `Cmp`
+ *     for `import { Component as Cmp }`, `ng.Component`). A spelling with
+ *     whitespace or a comment between `@` and the name, or type arguments
+ *     before `(`, is not found, so its fields are never emptied.
  *   - **Parenthesized decorator expressions** like `@(Component as any)(...)`
  *     — uncommon and not supported.
  *   - **Computed property keys** (`{ ['styles']: [...] }`) can't be resolved
@@ -71,8 +74,8 @@ const ASCII_WORD_RE = /[A-Za-z0-9_$]/
 const IDENT_START_RE = /[\p{L}_$]/u
 const IDENT_CONT_RE = /[\p{L}\p{N}_$]/u
 
-/** The only decorator form recognized — see the module docstring. */
-const DECORATOR_NAME = 'Component'
+/** The decorator spelling looked for when the caller names none. */
+const DEFAULT_DECORATOR_NAMES: readonly string[] = ['Component']
 
 /** Opener chars accepted as the value of `styles:` — `string | string[]`. */
 const STYLES_OPENERS = '\'"`['
@@ -476,11 +479,14 @@ export interface ComponentDecorator {
   argsRange: [number, number]
   /** The class name declared after this decorator. */
   className: string
+  /** The decorator as spelled before its `(`: `Component`, `Cmp`, `ng.Component`. */
+  decorator: string
 }
 
 /**
  * Enumerate every `@Component(...)` decorator in `code`, pairing each with
- * the class declared immediately after it. Decorators that don't pair to a
+ * the class declared immediately after it. `decoratorNames` are the spellings
+ * to look for (`Cmp` finds `@Cmp(...)`); by default only `@Component(...)`. Decorators that don't pair to a
  * class (dangling, malformed, anonymous) are skipped — the caller sees only
  * well-formed component declarations.
  *
@@ -493,14 +499,18 @@ export interface ComponentDecorator {
  *
  * See the module-level docstring for a full list of known limitations.
  */
-export function locateComponentDecorators(code: string): ComponentDecorator[] {
+export function locateComponentDecorators(
+  code: string,
+  decoratorNames: Iterable<string> = DEFAULT_DECORATOR_NAMES,
+): ComponentDecorator[] {
+  const names = [...new Set(decoratorNames)].filter((name) => name.length > 0)
   // Pass 1: find every `@Component(...)` and bound its args list. The walk
   // skips comments and string/template literals, so a commented-out or
   // quoted `@Component(` is not mistaken for a real decorator. That matters
   // beyond ignoring it: a phantom occurrence between a real decorator and
   // its class would bound the real one's class-name scan in pass 2, leaving
   // the class paired with the phantom's metadata.
-  type Found = { decoratorStart: number; openParen: number; closeParen: number }
+  type Found = { decoratorStart: number; openParen: number; closeParen: number; decorator: string }
   const found: Found[] = []
   let i = 0
   while (i < code.length) {
@@ -515,16 +525,12 @@ export function locateComponentDecorators(code: string): ComponentDecorator[] {
       i = close === -1 ? code.length : close + 1
       continue
     }
-    if (ch === '@' && code.startsWith(DECORATOR_NAME, i + 1)) {
-      let j = i + 1 + DECORATOR_NAME.length
-      while (j < code.length && WS_RE.test(code[j])) j++
-      if (code[j] === '(') {
-        const closeParen = findClosingDelim(code, j)
-        if (closeParen !== -1) {
-          found.push({ decoratorStart: i, openParen: j, closeParen })
-          i = closeParen + 1
-          continue
-        }
+    if (ch === '@') {
+      const match = matchDecoratorCall(code, i + 1, names)
+      if (match) {
+        found.push({ decoratorStart: i, ...match })
+        i = match.closeParen + 1
+        continue
       }
     }
     i++
@@ -535,14 +541,36 @@ export function locateComponentDecorators(code: string): ComponentDecorator[] {
   // decorator's class-name scan from claiming a sibling's class.
   const out: ComponentDecorator[] = []
   for (let i = 0; i < found.length; i++) {
-    const { openParen, closeParen } = found[i]
+    const { openParen, closeParen, decorator } = found[i]
     const scanEnd = i + 1 < found.length ? found[i + 1].decoratorStart : code.length
     const className = findClassName(code, closeParen + 1, scanEnd)
     if (className !== null) {
-      out.push({ argsRange: [openParen, closeParen], className })
+      out.push({ argsRange: [openParen, closeParen], className, decorator })
     }
   }
   return out
+}
+
+/**
+ * If one of `names` followed by optional whitespace and a balanced `(...)`
+ * starts at `start` (just past an `@`), return which name and the `(` / `)`
+ * offsets. A name only matches whole: `Cmp` is not found in `@CmpX(` or
+ * `@Cmp.x(`, since what follows it must be `(`.
+ */
+function matchDecoratorCall(
+  code: string,
+  start: number,
+  names: readonly string[],
+): { decorator: string; openParen: number; closeParen: number } | null {
+  for (const name of names) {
+    if (!code.startsWith(name, start)) continue
+    let j = start + name.length
+    while (j < code.length && WS_RE.test(code[j])) j++
+    if (code[j] !== '(') continue
+    const closeParen = findClosingDelim(code, j)
+    if (closeParen !== -1) return { decorator: name, openParen: j, closeParen }
+  }
+  return null
 }
 
 /**

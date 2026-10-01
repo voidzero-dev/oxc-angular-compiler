@@ -355,6 +355,11 @@ pub struct TransformResult {
     #[napi(ts_type = "Map<string, string[]>")]
     pub style_updates: HashMap<String, Vec<String>>,
 
+    /// For HMR: each compiled component's `@Component` decorator callee as
+    /// written (component_id → `Component`, `Cmp`, `ng.Component`, ...).
+    #[napi(ts_type = "Record<string, string>")]
+    pub component_decorators: HashMap<String, String>,
+
     /// Compilation errors.
     pub errors: Vec<OxcError>,
 
@@ -1145,6 +1150,7 @@ impl Task for TransformAngularFileTask {
             dependencies: result.dependencies,
             template_updates: result.template_updates,
             style_updates: result.style_updates,
+            component_decorators: result.component_decorators,
             errors,
             warnings: vec![],
             dts_declarations: result

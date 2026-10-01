@@ -242,3 +242,16 @@ fn only_angular_class_decorators_hoist_their_references() {
     );
     assert!(!hoisted(&foreign.code), "{}", foreign.code);
 }
+
+/// With HMR on, each compiled component's `@Component` is reported as written,
+/// so a build tool can find the decorator the compiler took. Another library's
+/// `@Component` isn't compiled, so it isn't reported.
+#[test]
+fn hmr_reports_component_decorators_as_written() {
+    let source = "import * as ng from '@angular/core';\nimport {Component as Cmp} from '@angular/core';\nimport {Component} from './foreign';\n@Cmp({selector: 'a-c', template: ''})\nexport class A {}\n@ng . Component({selector: 'b-c', template: ''})\nexport class B {}\n@Component({selector: 'c-c', template: ''})\nexport class C {}\n";
+    let result = transform(source, &TransformOptions { hmr: true, ..TransformOptions::default() });
+    let mut reported: Vec<(&str, &str)> =
+        result.component_decorators.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    reported.sort_unstable();
+    assert_eq!(reported, [("test.ts@A", "Cmp"), ("test.ts@B", "ng . Component")]);
+}

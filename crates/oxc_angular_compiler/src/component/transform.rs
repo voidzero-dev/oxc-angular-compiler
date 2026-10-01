@@ -309,6 +309,13 @@ pub struct TransformResult {
     /// Maps component ID to list of styles.
     pub style_updates: HashMap<String, Vec<String>>,
 
+    /// For HMR: maps the ID of each compiled component (path@ClassName) to its
+    /// `@Component` decorator's callee as written in the source (`Component`,
+    /// `Cmp` for `import { Component as Cmp }`, `ng.Component` for a namespace
+    /// import). It lets a build tool find the decorator the compiler took
+    /// without deciding again which decorators are Angular's.
+    pub component_decorators: HashMap<String, String>,
+
     /// Compilation diagnostics (errors and warnings).
     pub diagnostics: Vec<OxcDiagnostic>,
 
@@ -2677,20 +2684,31 @@ pub fn transform_angular_file(
 
                             let component_id = format!("{}@{}", path, class_name);
 
+                            let component_decorator =
+                                find_component_decorator(&class.decorators, &string_consts);
+
                             // Store for HMR if enabled
                             if options.hmr {
                                 result.template_updates.insert(
                                     component_id.clone(),
                                     compilation_result.template_js.clone(),
                                 );
+                                if let Some(decorator) = component_decorator {
+                                    let callee = match &decorator.expression {
+                                        Expression::CallExpression(call) => call.callee.span(),
+                                        expression => expression.span(),
+                                    };
+                                    result.component_decorators.insert(
+                                        component_id.clone(),
+                                        source[callee.start as usize..callee.end as usize]
+                                            .to_string(),
+                                    );
+                                }
                             }
 
                             // Track the decorator span to remove
-                            if let Some(span) =
-                                find_component_decorator(&class.decorators, &string_consts)
-                                    .map(|d| d.span)
-                            {
-                                decorator_spans_to_remove.push(span);
+                            if let Some(decorator) = component_decorator {
+                                decorator_spans_to_remove.push(decorator.span);
                             }
                             // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                             collect_constructor_decorator_spans(

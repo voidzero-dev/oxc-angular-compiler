@@ -233,6 +233,32 @@ describe('decorator-fields utils', () => {
       const out = locateComponentDecorators(src)
       expect(out.map((d) => d.className)).toEqual(['A', 'B'])
     })
+
+    // The compiler reports how it found each component's decorator spelled;
+    // the scan looks for exactly those spellings, whole.
+    it('finds the decorator spellings it is given, and only those', () => {
+      const src = `
+        @Cmp({ template: 'a' })
+        class A {}
+        @ng.Component({ template: 'b' })
+        class B {}
+        @Component({ template: 'c' })
+        class C {}
+        @CmpX({ template: 'd' })
+        class D {}
+        @Cmp.x({ template: 'e' })
+        class E {}
+        @ng . Component ({ template: 'f' })
+        class F {}
+      `
+      const out = locateComponentDecorators(src, ['Cmp', 'ng.Component', 'ng . Component'])
+      expect(out.map((d) => [d.className, d.decorator])).toEqual([
+        ['A', 'Cmp'],
+        ['B', 'ng.Component'],
+        ['F', 'ng . Component'],
+      ])
+      expect(locateComponentDecorators(src).map((d) => d.className)).toEqual(['C'])
+    })
   })
 
   describe('locateStylesInArgs', () => {
