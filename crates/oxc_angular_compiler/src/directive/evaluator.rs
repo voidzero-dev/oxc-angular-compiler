@@ -2611,8 +2611,13 @@ pub(crate) fn transform_error<'a>(
         }
         // An imported function can't be inspected from this file, so whether
         // it's generic or overloaded is unknown; the name clash is checked
-        // after those.
-        Value::Reference { kind: RefKind::Import { namespace_member: false, .. }, .. } => {
+        // after those. Only the import itself is assumed to be a function, not
+        // a value computed from it (`!FLAG`, `make()`), which the caller
+        // reports as imported.
+        Value::Reference {
+            kind: RefKind::Import { namespace_member: false, local: Some(_) },
+            ..
+        } => {
             return clash();
         }
         // ngtsc can't name `ns.f` in the compiled file.

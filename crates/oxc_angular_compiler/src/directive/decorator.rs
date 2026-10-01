@@ -743,6 +743,22 @@ fn scoped_transform_error(
     }
 }
 
+/// oxc's error for a transform computed from an import (`!FLAG`, `make()`,
+/// `FLAG && fn`, `Helpers.fn`): ngtsc evaluates it with the import's file, oxc
+/// can't (see [`value_error`]). An imported function named directly
+/// (`transform: fn`) needs no evaluating: it's assumed to be a function.
+fn imported_transform_error(
+    subject: &str,
+    transform: &Prop<'_>,
+    span: Span,
+) -> Option<(String, Span)> {
+    let computed = matches!(
+        transform.value,
+        Value::Reference { kind: RefKind::Import { namespace_member: false, local: None }, .. }
+    );
+    computed.then(|| (value_error(subject, String::new, &transform.value), span))
+}
+
 /// Whether [`transform_expression`] has no expression to emit for a transform
 /// it was given, because it uses the parameters of the function it's written
 /// in (see [`scoped_transform_error`]).
@@ -927,16 +943,18 @@ fn parse_input_object<'a>(
     let (transform_function, error) = match item.prop("transform") {
         Some(transform) => {
             let expr = transform_expression(allocator, transform, source_text, consts);
-            let error =
-                transform_error(transform, Some(position), name, class, consts.scope(), span)
-                    .or_else(|| match transform {
-                        Prop { expr: Some(written), .. } if is_out_of_scope(transform, consts) => {
-                            let message =
-                                scoped_transform_error("@Directive.inputs", name, written, consts);
-                            Some((message, span))
-                        }
-                        _ => None,
-                    });
+            let error = imported_transform_error("@Directive.inputs", transform, span)
+                .or_else(|| {
+                    transform_error(transform, Some(position), name, class, consts.scope(), span)
+                })
+                .or_else(|| match transform {
+                    Prop { expr: Some(written), .. } if is_out_of_scope(transform, consts) => {
+                        let message =
+                            scoped_transform_error("@Directive.inputs", name, written, consts);
+                        Some((message, span))
+                    }
+                    _ => None,
+                });
             (expr, error)
         }
         None => (None, None),
@@ -1226,6 +1244,9 @@ fn input_decorator_error<'a>(
         return Some((message, decorator.span));
     }
     let transform = options.prop("transform")?;
+    if let Some(error) = imported_transform_error(&subject, transform, span) {
+        return Some(error);
+    }
     transform_error(transform, None, name, class, consts.scope(), span).or_else(
         || match transform {
             Prop { expr: Some(written), .. } if is_out_of_scope(transform, consts) => {

@@ -384,25 +384,68 @@ export class Dir {}
     assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
     assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",fn]}"#), "{}", result.code);
 
-    // A value computed from an import (a call, a member, a condition on one)
-    // isn't the import: it has no name in this file, so it's kept as written,
-    // never replaced by the import's name.
-    for (transform_expr, emitted) in
-        [("fn()", "fn()"), ("fn.f", "fn.f"), ("fn ? a : a", "fn?a:a"), ("SHARED || a", "SHARED||a")]
-    {
+    // A value computed from an import (`!FLAG`, a call, a member, a condition
+    // or a deciding `&&` / `||`) isn't the import: ngtsc evaluates it with
+    // the other file (`!FLAG` is a boolean, ngtsc 22.1.7: "must be a
+    // function"; `fn || a` is `fn`), oxc can't, so it's reported, in
+    // `inputs:` and in `@Input`. An import the expression only passes through
+    // (`0 || fn`) is that import, as above.
+    let cases = [
+        ("!FLAG", "FLAG"),
+        ("fn()", "fn"),
+        ("fn.f", "fn"),
+        ("FLAG ? a : a", "FLAG"),
+        ("fn || a", "fn"),
+        ("FLAG && a", "FLAG"),
+    ];
+    for (transform_expr, name) in cases {
+        for (meta, member, subject, span) in [
+            (
+                format!("inputs: [{{name: 'x', transform: {transform_expr}}}]"),
+                "x: any;".to_string(),
+                "@Directive.inputs",
+                format!("[{{name: 'x', transform: {transform_expr}}}]"),
+            ),
+            (
+                String::new(),
+                format!("@Input({{transform: {transform_expr}}}) x: any;"),
+                "@Input",
+                format!("{{transform: {transform_expr}}}"),
+            ),
+        ] {
+            let source = format!(
+                "import {{Directive, Input}} from '@angular/core';
+import {{fn, FLAG}} from './shared';
+export function a(v: string) {{ return 1; }}
+@Directive({{selector: '[d]', {meta}}})
+export class Dir {{
+  {member}
+}}
+"
+            );
+            let message = format!(
+                "{subject} depends on '{name}', which is imported from another module. \
+                 OXC compiles one file at a time and cannot evaluate values from other files."
+            );
+            assert_eq!(errors(&transform(&source), &source), vec![(message, span)], "{source}");
+        }
+    }
+    for transform_expr in ["0 || fn", "a && fn", "1 ? fn : a"] {
         let source = format!(
-            "import {{Directive}} from '@angular/core';
-import {{fn, SHARED}} from './shared';
+            "import {{Directive, Input}} from '@angular/core';
+import {{fn}} from './shared';
 export function a(v: string) {{ return 1; }}
 @Directive({{selector: '[d]', inputs: [{{name: 'x', transform: {transform_expr}}}]}})
-export class Dir {{}}
+export class Dir {{
+  x: any;
+  @Input({{transform: {transform_expr}}}) y: any;
+}}
 "
         );
         let result = transform(&source);
+        assert!(errors(&result, &source).is_empty(), "{:?}", errors(&result, &source));
         let code = strip(&result.code);
-        let bare = format!(r#"inputs:{{x:[2,"x","x",{emitted}]}}"#);
-        let wrapped = format!(r#"inputs:{{x:[2,"x","x",({emitted})]}}"#);
-        assert!(code.contains(&bare) || code.contains(&wrapped), "{code}");
+        assert!(code.contains(r#"inputs:{x:[2,"x","x",fn],y:[2,"y","y",fn]}"#), "{code}");
     }
 }
 
