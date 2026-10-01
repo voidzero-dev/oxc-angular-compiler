@@ -47,10 +47,10 @@ pub use metadata::{
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,
 };
 pub(crate) use property_decorators::{
-    angular_class_decorator, angular_member_decorator, angular_param_decorator,
-    extract_host_bindings_in, extract_host_listeners_in, parse_decorator_queries,
-    try_parse_signal_input, try_parse_signal_model, try_parse_signal_output,
-    unwrap_initializer_api_expr,
+    angular_class_decorator, angular_core_decorator, angular_member_decorator,
+    angular_param_decorator, extract_host_bindings_in, extract_host_listeners_in,
+    parse_decorator_queries, try_parse_signal_input, try_parse_signal_model,
+    try_parse_signal_output, unwrap_initializer_api_expr,
 };
 pub use property_decorators::{
     extract_class_queries, extract_content_queries, extract_host_bindings, extract_host_listeners,

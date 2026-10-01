@@ -295,3 +295,42 @@ fn member_decorators_are_lowered_only_when_imported_from_angular_core() {
     );
     assert!(compact.contains(r#"__decorate([Input()],C.prototype,"c",void0);"#), "Got:\n{out}");
 }
+
+#[test]
+fn member_decorators_named_like_angular_ones_count_only_from_angular_core() {
+    // Like ngtsc's JIT transform, where a member decorator comes from decides,
+    // not its name: another module's `@Inject` / `@Component` / `@ns.Optional`
+    // stay decorators applied with `__decorate` (they used to be dropped).
+    let out = compile_jit(
+        "import { Component } from '@angular/core';\n\
+         import { Inject, Component as Cmp } from './di';\n\
+         import * as di from './di';\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C {\n  @Inject(X) a: any;\n  @Cmp({}) b: any;\n  @di.Optional() c: any;\n}\n",
+    );
+    let compact: String = out.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(compact.contains(r#"__decorate([Inject(X)],C.prototype,"a",void0);"#), "Got:\n{out}");
+    assert!(compact.contains(r#"__decorate([Cmp({})],C.prototype,"b",void0);"#), "Got:\n{out}");
+    assert!(
+        compact.contains(r#"__decorate([di.Optional()],C.prototype,"c",void0);"#),
+        "Got:\n{out}"
+    );
+
+    // `@angular/core`'s `Inject` under an alias is treated like `@Inject`.
+    let aliased = compile_jit(
+        "import { Component, Inject as Inj } from '@angular/core';\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C {\n  @Inj(X) a: any;\n}\n",
+    );
+    let plain = compile_jit(
+        "import { Component, Inject } from '@angular/core';\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C {\n  @Inject(X) a: any;\n}\n",
+    );
+    assert!(!aliased.contains("Inj(X)"), "Got:\n{aliased}");
+    assert_eq!(
+        aliased.replace("Inject as Inj", "Inject"),
+        plain,
+        "aliased:\n{aliased}\nplain:\n{plain}"
+    );
+}

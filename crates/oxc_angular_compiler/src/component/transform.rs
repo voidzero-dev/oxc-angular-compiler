@@ -1131,23 +1131,12 @@ fn extract_jit_ctor_params(
     (params, other_decorators)
 }
 
-/// Angular field decorators that go into `static propDecorators`.
-/// Matches Angular's official `FIELD_DECORATORS` constant from `@angular/compiler-cli`.
-const ANGULAR_FIELD_DECORATORS: &[&str] = &[
-    "Input",
-    "Output",
-    "HostBinding",
-    "HostListener",
-    "ViewChild",
-    "ViewChildren",
-    "ContentChild",
-    "ContentChildren",
-];
-
-/// All Angular decorator names from `@angular/core`.
-/// Any decorator with one of these names is treated as Angular and excluded from
-/// non-Angular `__decorate()` lowering. Angular identifies decorators by import source;
-/// we use names since they're unique to `@angular/core`.
+/// Angular's decorators. On a member, one imported from `@angular/core` (see
+/// [`crate::directive::angular_core_decorator`]) goes to `propDecorators` if it's
+/// a field decorator and is dropped otherwise (ngtsc lists those in
+/// `propDecorators` too). Like ngtsc's JIT transform, where a decorator comes
+/// from decides, not its name: another module's `@Inject` stays a `__decorate()`
+/// call.
 const ANGULAR_DECORATOR_NAMES: &[&str] = &[
     // Field decorators (→ propDecorators)
     "Input",
@@ -1241,11 +1230,10 @@ fn extract_all_jit_member_decorators(
                 }
                 expr => (expr, None),
             };
-            let dec_name = match callee {
-                Expression::Identifier(id) => id.name.as_str(),
-                Expression::StaticMemberExpression(m) => m.property.name.as_str(),
-                _ => continue,
-            };
+            if !matches!(callee, Expression::Identifier(_) | Expression::StaticMemberExpression(_))
+            {
+                continue;
+            }
 
             if let Some(field) =
                 crate::directive::angular_member_decorator(decorator, Some(string_consts))
@@ -1256,11 +1244,15 @@ fn extract_all_jit_member_decorators(
                 let name =
                     source[callee.span().start as usize..callee.span().end as usize].to_string();
                 angular_decs.push(JitParamDecorator { name, args: call_args });
-            } else if ANGULAR_FIELD_DECORATORS.contains(&dec_name)
-                || !ANGULAR_DECORATOR_NAMES.contains(&dec_name)
+            } else if crate::directive::angular_core_decorator(
+                decorator,
+                Some(string_consts),
+                ANGULAR_DECORATOR_NAMES,
+            )
+            .is_none()
             {
-                // Non-Angular decorator (another module's `@Input` too) → goes into
-                // __decorate() call
+                // Non-Angular decorator (another module's `@Input` or `@Inject`
+                // too) → goes into __decorate() call
                 let expr_start = decorator.expression.span().start;
                 let expr_end = decorator.expression.span().end;
                 non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());

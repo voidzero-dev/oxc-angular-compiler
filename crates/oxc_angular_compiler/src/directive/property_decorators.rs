@@ -63,7 +63,7 @@ const CLASS_DECORATORS: &[&str] = &["Component", "Directive", "Pipe", "Injectabl
 /// (`@core.Input()`, see [`is_core_namespace`]); another module's (even one
 /// re-exporting Angular's), a local or an undeclared `X` isn't Angular's.
 /// Without the file, any decorator with that name.
-fn angular_core_decorator(
+pub(crate) fn angular_core_decorator(
     decorator: &Decorator<'_>,
     consts: Option<&super::StringConsts<'_>>,
     names: &[&'static str],

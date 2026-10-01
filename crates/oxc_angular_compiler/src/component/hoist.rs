@@ -892,10 +892,11 @@ fn class_of<'a, 'src>(stmt: &'src Statement<'a>) -> Option<(&'src Class<'a>, u32
 /// Whether this class carries an Angular decorator that warrants hoisting its
 /// referenced declarations: one the compiler compiles the class for, imported
 /// from `@angular/core` (see [`crate::directive::angular_class_decorator`]),
-/// or an `@Service` that resolves to `@angular/core`. A same-named decorator
-/// from another library (`Service` is a common name in non-Angular code)
-/// leaves the class alone, and hoisting its referenced declarations would
-/// reorder statements and change that class's runtime evaluation semantics.
+/// or an `@Service` that resolves to `@angular/core` (under any alias, or
+/// through a namespace import). A same-named decorator from another library
+/// (`Service` is a common name in non-Angular code) leaves the class alone, and
+/// hoisting its referenced declarations would reorder statements and change
+/// that class's runtime evaluation semantics.
 fn has_hoistable_angular_decorator<'a>(
     class: &Class<'a>,
     import_map: &ImportMap<'a>,
@@ -910,9 +911,10 @@ fn has_hoistable_angular_decorator<'a>(
             expr => expr,
         };
         match callee {
-            Expression::Identifier(id) => {
-                id.name == "Service" && is_angular_core_export(import_map, &id.name, "Service")
-            }
+            // `@Service()`, or `@NgService()` for `import { Service as NgService }`:
+            // like the compile path (`find_angular_decorator`), the import's
+            // exported name decides, not the local one.
+            Expression::Identifier(id) => is_angular_core_export(import_map, &id.name, "Service"),
             // `@ns.Service()` — accept only when `ns` is a namespace import
             // from `@angular/core`.
             Expression::StaticMemberExpression(member) => {

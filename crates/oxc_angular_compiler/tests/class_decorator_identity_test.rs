@@ -243,6 +243,36 @@ fn only_angular_class_decorators_hoist_their_references() {
     assert!(!hoisted(&foreign.code), "{}", foreign.code);
 }
 
+/// `@Service` is Angular's under any alias too (`@NgService()` for
+/// `import {Service as NgService}`), like ngtsc's `findAngularDecorator`: the
+/// declaration its metadata references after the class is hoisted above it,
+/// as for `@Service`, so the compiled class doesn't read it in its TDZ.
+/// Another library's `Service` under the same alias isn't compiled, so the
+/// file's statements keep their order.
+#[test]
+fn aliased_service_hoists_its_references() {
+    let source = |import: &str| {
+        format!(
+            "{import}\n@NgService({{factory: FACTORY}})\nexport class A {{}}\nconst FACTORY = () => new A();\n"
+        )
+    };
+    let hoisted = |code: &str| code.find("const FACTORY").unwrap() < code.find("class A").unwrap();
+
+    let aliased = transform(
+        &source("import {Service as NgService} from '@angular/core';"),
+        &TransformOptions::default(),
+    );
+    assert!(aliased.code.contains("static ɵprov"), "{}", aliased.code);
+    assert!(hoisted(&aliased.code), "{}", aliased.code);
+
+    let foreign = transform(
+        &source("import {Service as NgService} from './di';"),
+        &TransformOptions::default(),
+    );
+    assert!(!foreign.code.contains("static ɵprov"), "{}", foreign.code);
+    assert!(!hoisted(&foreign.code), "{}", foreign.code);
+}
+
 /// With HMR on, each compiled component's `@Component` is reported as written,
 /// so a build tool can find the decorator the compiler took. Another library's
 /// `@Component` isn't compiled, so it isn't reported.
