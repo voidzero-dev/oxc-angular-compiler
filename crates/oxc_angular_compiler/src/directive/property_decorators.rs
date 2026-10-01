@@ -104,6 +104,24 @@ pub(crate) fn angular_member_decorator(
     angular_core_decorator(decorator, consts, MEMBER_DECORATORS)
 }
 
+/// Angular's constructor parameter decorators, which are compiled into the
+/// factory (`ɵfac`), `ctorParameters` and `setClassMetadata`.
+const PARAM_DECORATORS: &[&str] = &["Inject", "Optional", "Self", "SkipSelf", "Host", "Attribute"];
+
+/// Which of Angular's constructor parameter decorators ([`PARAM_DECORATORS`])
+/// `decorator` is (see [`angular_core_decorator`]), like ngtsc's
+/// `isAngularCore` in `getConstructorDependencies` and the JIT
+/// `ctorParameters` transform: `@Inj(TOKEN)` for `import { Inject as Inj }`
+/// and `@core.Optional()` count, another module's or a local `@Inject` doesn't.
+/// Without the file (the public `extract_*` functions), any decorator with
+/// that name.
+pub(crate) fn angular_param_decorator(
+    decorator: &Decorator<'_>,
+    consts: Option<&super::StringConsts<'_>>,
+) -> Option<&'static str> {
+    angular_core_decorator(decorator, consts, PARAM_DECORATORS)
+}
+
 /// Which of Angular's class decorators ([`CLASS_DECORATORS`]) `decorator` is,
 /// in the file `consts` was collected from: one imported from `@angular/core`
 /// (see [`angular_core_decorator`]), like ngtsc's `findAngularDecorator`.

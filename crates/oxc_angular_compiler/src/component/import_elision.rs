@@ -71,7 +71,9 @@ impl<'a> ImportElisionAnalyzer<'a> {
 
         // First, collect all symbols that are used ONLY in constructor parameter decorators.
         // These should be elided because Angular removes these decorators during compilation.
-        let ctor_param_decorator_only = Self::collect_ctor_param_decorator_only_imports(program);
+        let consts = crate::directive::StringConsts::declarations_of(program);
+        let ctor_param_decorator_only =
+            Self::collect_ctor_param_decorator_only_imports(program, &consts);
 
         // Analyze each import declaration
         for stmt in &program.body {
@@ -326,7 +328,10 @@ impl<'a> ImportElisionAnalyzer<'a> {
     ///    TypeScript, so their decorator arguments have no runtime value references
     ///
     /// Reference: packages/compiler-cli/src/ngtsc/transform/jit/src/downlevel_decorators_transform.ts
-    fn collect_ctor_param_decorator_only_imports(program: &'a Program<'a>) -> FxHashSet<&'a str> {
+    fn collect_ctor_param_decorator_only_imports(
+        program: &'a Program<'a>,
+        consts: &crate::directive::StringConsts<'a>,
+    ) -> FxHashSet<&'a str> {
         let mut result = FxHashSet::default();
 
         // Track:
@@ -342,6 +347,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
         for stmt in &program.body {
             Self::collect_uses_from_statement(
                 stmt,
+                consts,
                 &mut ctor_param_decorator_uses,
                 &mut inject_arg_uses,
                 &mut declare_prop_decorator_uses,
@@ -373,6 +379,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Recursively collect uses from a statement.
     fn collect_uses_from_statement(
         stmt: &'a Statement<'a>,
+        consts: &crate::directive::StringConsts<'a>,
         ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
         inject_arg_uses: &mut FxHashSet<&'a str>,
         declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
@@ -382,6 +389,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
             Statement::ClassDeclaration(class) => {
                 Self::collect_uses_from_class(
                     class,
+                    consts,
                     ctor_param_decorator_uses,
                     inject_arg_uses,
                     declare_prop_decorator_uses,
@@ -394,6 +402,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 {
                     Self::collect_uses_from_class(
                         class,
+                        consts,
                         ctor_param_decorator_uses,
                         inject_arg_uses,
                         declare_prop_decorator_uses,
@@ -405,6 +414,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration {
                     Self::collect_uses_from_class(
                         class,
+                        consts,
                         ctor_param_decorator_uses,
                         inject_arg_uses,
                         declare_prop_decorator_uses,
@@ -431,6 +441,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// Collect uses from a class declaration.
     fn collect_uses_from_class(
         class: &'a oxc_ast::ast::Class<'a>,
+        consts: &crate::directive::StringConsts<'a>,
         ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
         inject_arg_uses: &mut FxHashSet<&'a str>,
         declare_prop_decorator_uses: &mut FxHashSet<&'a str>,
@@ -454,6 +465,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
                         // This is the constructor - process parameter decorators specially
                         Self::collect_uses_from_constructor_params(
                             &method.value.params,
+                            consts,
                             ctor_param_decorator_uses,
                             inject_arg_uses,
                         );
@@ -499,6 +511,7 @@ impl<'a> ImportElisionAnalyzer<'a> {
     /// This is the key function that identifies parameter decorators and their arguments.
     fn collect_uses_from_constructor_params(
         params: &'a oxc_ast::ast::FormalParameters<'a>,
+        consts: &crate::directive::StringConsts<'a>,
         ctor_param_decorator_uses: &mut FxHashSet<&'a str>,
         inject_arg_uses: &mut FxHashSet<&'a str>,
     ) {
@@ -520,8 +533,13 @@ impl<'a> ImportElisionAnalyzer<'a> {
                 };
 
                 if let Some(name) = decorator_name {
-                    // Check if this is a known parameter decorator
-                    if PARAM_DECORATORS.contains(&name) {
+                    // Check if this is one of Angular's parameter decorators,
+                    // which compilation removes. Another module's `@Inject`
+                    // stays in the output (like ngtsc), so its import must too.
+                    if PARAM_DECORATORS.contains(&name)
+                        && crate::directive::angular_param_decorator(decorator, Some(consts))
+                            .is_some()
+                    {
                         ctor_param_decorator_uses.insert(name);
 
                         // If this is @Inject(TOKEN), collect the TOKEN argument

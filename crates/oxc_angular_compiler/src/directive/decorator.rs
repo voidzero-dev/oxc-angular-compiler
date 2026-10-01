@@ -203,7 +203,8 @@ pub fn extract_directive_metadata<'a>(
     // Extract constructor dependencies for factory generation
     // This enables proper DI for directive constructors
     // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts
-    let constructor_deps = extract_constructor_deps(allocator, class, has_superclass, source_text);
+    let constructor_deps =
+        extract_constructor_deps(allocator, class, has_superclass, source_text, consts);
     if let Some(deps) = constructor_deps {
         builder = builder.deps(deps);
     }
@@ -298,6 +299,7 @@ fn extract_constructor_deps<'a>(
     class: &'a Class<'a>,
     has_superclass: bool,
     source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
     let constructor = class.body.body.iter().find_map(|element| {
@@ -316,7 +318,7 @@ fn extract_constructor_deps<'a>(
             let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
             for param in &params.items {
-                let dep = extract_param_dependency(allocator, param, source_text);
+                let dep = extract_param_dependency(allocator, param, source_text, consts);
                 deps.push(dep);
             }
 
@@ -332,11 +334,14 @@ fn extract_constructor_deps<'a>(
     }
 }
 
-/// Extract dependency metadata from a single constructor parameter.
+/// Extract dependency metadata from a single constructor parameter. Only
+/// Angular's parameter decorators count, imported from `@angular/core` (see
+/// [`super::angular_param_decorator`]).
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
     source_text: Option<&'a str>,
+    consts: &StringConsts<'a>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
     let mut optional = false;
@@ -347,8 +352,8 @@ fn extract_param_dependency<'a>(
     let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
-        if let Some(name) = get_decorator_name_from_expr(&decorator.expression) {
-            match name.as_str() {
+        if let Some(name) = super::angular_param_decorator(decorator, Some(consts)) {
+            match name {
                 "Inject" => {
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
@@ -407,23 +412,6 @@ fn extract_param_dependency<'a>(
         self_,
         skip_self,
         type_only_invalid: false,
-    }
-}
-
-/// Get the name of a decorator from its expression.
-fn get_decorator_name_from_expr<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
-    match expr {
-        // @Optional
-        Expression::Identifier(id) => Some(id.name.clone().into()),
-        // @Optional()
-        Expression::CallExpression(call) => {
-            if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone().into())
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }
 
@@ -512,6 +500,17 @@ impl<'a> StringConsts<'a> {
     /// The folded string value of a same-file `const`.
     pub fn get(&self, name: &str) -> Option<&Ident<'a>> {
         self.strings.get(name)
+    }
+
+    /// `program`'s declarations without its folded strings: enough to tell
+    /// where a name is imported from (see
+    /// [`super::angular_param_decorator`]).
+    pub(crate) fn declarations_of(program: &'a Program<'a>) -> Self {
+        Self {
+            strings: HashMap::default(),
+            program: Some(program),
+            scope: std::cell::OnceCell::new(),
+        }
     }
 
     /// The file's top-level declarations, for the partial evaluator.
@@ -2424,7 +2423,7 @@ mod tests {
         // Regression test for issue #285:
         // `@Optional() svc: MyService | null` must resolve the token to `MyService`.
         let code = r#"
-            import {Directive} from '@angular/core';
+            import {Directive, Optional} from '@angular/core';
             @Directive({ selector: '[myDir]' })
             class MyDirective {
                 constructor(@Optional() private svc: MyService | null) {}

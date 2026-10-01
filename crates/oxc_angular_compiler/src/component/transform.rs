@@ -34,7 +34,7 @@ use super::namespace_registry::NamespaceRegistry;
 use crate::ast::expression::{BindingType, ParsedEventType};
 use crate::ast::r3::{R3BoundAttribute, R3BoundEvent, SecurityContext};
 use crate::class_metadata::{
-    R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata,
+    R3ClassMetadata, R3DeferPerComponentDependency, build_ctor_params_metadata_in,
     build_decorator_metadata_array, build_prop_decorators_metadata_in, compile_class_metadata,
     compile_component_class_metadata,
 };
@@ -788,13 +788,14 @@ fn build_set_class_metadata_decls<'a>(
             None,
             Some(string_consts),
         ),
-        ctor_parameters: build_ctor_params_metadata(
+        ctor_parameters: build_ctor_params_metadata_in(
             &allocator,
             class,
             None,
             namespace_registry,
             import_map,
             Some(source),
+            Some(string_consts),
         ),
         prop_decorators: build_prop_decorators_metadata_in(
             &allocator,
@@ -853,6 +854,10 @@ struct JitClassInfo {
     member_decorators: std::vec::Vec<JitMemberDecorator>,
     /// All class-level decorator expression texts for __decorate call, in source order.
     all_class_decorator_texts: std::vec::Vec<String>,
+    /// Constructor parameter decorators that aren't Angular's, as
+    /// `__param(index, decorator)` texts for the class's __decorate call, after
+    /// the class decorators (TypeScript's order).
+    param_decorator_texts: std::vec::Vec<String>,
     /// Non-Angular member decorators that need __decorate() calls.
     non_angular_member_decorators: std::vec::Vec<JitNonAngularMemberDecorator>,
 }
@@ -1055,10 +1060,19 @@ fn find_angular_decorator<'a>(
 }
 
 /// Extract constructor parameter info for JIT ctorParameters generation.
+///
+/// Like Angular's JIT transform (`downlevel_decorators_transform.ts`), a
+/// parameter decorator goes into `ctorParameters` only when it's Angular's,
+/// imported from `@angular/core` (see
+/// [`crate::directive::angular_param_decorator`]), listed as written
+/// (`{ type: Inj }`, `{ type: ng.Optional }`). Any other one stays a decorator
+/// of the class, lowered as `__param(index, decorator)`; those are returned
+/// second, in source order.
 fn extract_jit_ctor_params(
     source: &str,
     class: &oxc_ast::ast::Class<'_>,
-) -> std::vec::Vec<JitCtorParam> {
+    consts: &crate::directive::StringConsts<'_>,
+) -> (std::vec::Vec<JitCtorParam>, std::vec::Vec<String>) {
     use oxc_ast::ast::{ClassElement, MethodDefinitionKind};
 
     let constructor = class.body.body.iter().find_map(|element| {
@@ -1071,56 +1085,50 @@ fn extract_jit_ctor_params(
     });
 
     let Some(ctor) = constructor else {
-        return std::vec::Vec::new();
+        return (std::vec::Vec::new(), std::vec::Vec::new());
     };
 
     let mut params = std::vec::Vec::new();
-    for param in &ctor.value.params.items {
+    let mut other_decorators = std::vec::Vec::new();
+    for (index, param) in ctor.value.params.items.iter().enumerate() {
         // Extract type name from type annotation (directly on FormalParameter)
         let type_name = param
             .type_annotation
             .as_ref()
             .and_then(|ann| extract_type_name_from_annotation(&ann.type_annotation));
 
-        // Extract Angular decorators
+        // Angular's decorators go into ctorParameters, by their written name.
         let mut decorators = std::vec::Vec::new();
         for decorator in &param.decorators {
-            if let Expression::CallExpression(call) = &decorator.expression {
-                let dec_name = match &call.callee {
-                    Expression::Identifier(id) => Some(id.name.to_string()),
-                    _ => None,
-                };
-                if let Some(name) = dec_name {
-                    match name.as_str() {
-                        "Inject" | "Optional" | "SkipSelf" | "Self" | "Host" | "Attribute" => {
-                            let args = if call.arguments.is_empty() {
-                                None
-                            } else {
-                                // Extract args from source
-                                let args_start = call.arguments.first().unwrap().span().start;
-                                let args_end = call.arguments.last().unwrap().span().end;
-                                Some(source[args_start as usize..args_end as usize].to_string())
-                            };
-                            decorators.push(JitParamDecorator { name, args });
-                        }
-                        _ => {}
-                    }
-                }
-            } else if let Expression::Identifier(id) = &decorator.expression {
-                let name = id.name.to_string();
-                match name.as_str() {
-                    "Optional" | "SkipSelf" | "Self" | "Host" => {
-                        decorators.push(JitParamDecorator { name, args: None });
-                    }
-                    _ => {}
-                }
+            if crate::directive::angular_param_decorator(decorator, Some(consts)).is_none() {
+                let expr = decorator.expression.span();
+                other_decorators.push(format!(
+                    "__param({index}, {})",
+                    &source[expr.start as usize..expr.end as usize]
+                ));
+                continue;
             }
+            let (callee, args) = match &decorator.expression {
+                Expression::CallExpression(call) => {
+                    let args = match (call.arguments.first(), call.arguments.last()) {
+                        (Some(first), Some(last)) => Some(
+                            source[first.span().start as usize..last.span().end as usize]
+                                .to_string(),
+                        ),
+                        _ => None,
+                    };
+                    (call.callee.span(), args)
+                }
+                expr => (expr.span(), None),
+            };
+            let name = source[callee.start as usize..callee.end as usize].to_string();
+            decorators.push(JitParamDecorator { name, args });
         }
 
         params.push(JitCtorParam { type_name, decorators });
     }
 
-    params
+    (params, other_decorators)
 }
 
 /// Angular field decorators that go into `static propDecorators`.
@@ -2156,8 +2164,10 @@ fn transform_angular_file_jit(
             }
         }
 
-        // Extract constructor parameters for ctorParameters
-        let ctor_params = extract_jit_ctor_params(source, class);
+        // Extract constructor parameters for ctorParameters, and the other
+        // parameter decorators for the class's `__decorate`.
+        let (ctor_params, param_decorator_texts) =
+            extract_jit_ctor_params(source, class, &string_consts);
 
         // Extract Angular and non-Angular member decorators
         let (member_decorators, non_angular_member_decorators) =
@@ -2175,6 +2185,7 @@ fn transform_angular_file_jit(
             ctor_params,
             member_decorators,
             all_class_decorator_texts,
+            param_decorator_texts,
             non_angular_member_decorators,
         });
 
@@ -2201,7 +2212,12 @@ fn transform_angular_file_jit(
     // when signal-API lowering synthesized decorators that need to resolve to
     // `i0.Input`/`i0.Output`/etc. at runtime).
     let mut additional_imports = String::new();
-    additional_imports.push_str("import { __decorate } from \"tslib\";\n");
+    // `__param` lowers a parameter decorator that isn't Angular's.
+    if jit_classes.iter().any(|c| !c.param_decorator_texts.is_empty()) {
+        additional_imports.push_str("import { __decorate, __param } from \"tslib\";\n");
+    } else {
+        additional_imports.push_str("import { __decorate } from \"tslib\";\n");
+    }
     if !core_namespace_imported
         && jit_classes_need_angular_core_namespace(&jit_classes, &core_namespace)
     {
@@ -2282,7 +2298,7 @@ fn transform_angular_file_jit(
         // 4b. Remove ALL member decorators and constructor param decorators
         {
             let mut decorator_spans: std::vec::Vec<Span> = std::vec::Vec::new();
-            super::decorator::collect_constructor_decorator_spans(class, &mut decorator_spans);
+            super::decorator::collect_all_constructor_decorator_spans(class, &mut decorator_spans);
             super::decorator::collect_all_member_decorator_spans(class, &mut decorator_spans);
             for span in &decorator_spans {
                 let mut end = span.end as usize;
@@ -2368,7 +2384,13 @@ fn transform_angular_file_jit(
         }
 
         // Emit class-level __decorate() with ALL class decorators
-        let all_decorator_text = jit_info.all_class_decorator_texts.join(",\n    ");
+        let all_decorator_text = jit_info
+            .all_class_decorator_texts
+            .iter()
+            .chain(&jit_info.param_decorator_texts)
+            .map(String::as_str)
+            .collect::<std::vec::Vec<_>>()
+            .join(",\n    ");
         after_class.push_str(&format!(
             "{} = __decorate([\n    {}\n], {});\n",
             jit_info.class_name, all_decorator_text, jit_info.class_name
@@ -2713,6 +2735,7 @@ pub fn transform_angular_file(
                             // Collect constructor parameter decorators (@Optional, @Inject, etc.)
                             collect_constructor_decorator_spans(
                                 class,
+                                &string_consts,
                                 &mut decorator_spans_to_remove,
                             );
                             // Collect member decorators (@Input, @Output, @HostBinding, etc.)
@@ -2813,13 +2836,14 @@ pub fn transform_angular_file(
                                             Some(metadata.styles.as_slice()),
                                             Some(&string_consts),
                                         ),
-                                        ctor_parameters: build_ctor_params_metadata(
+                                        ctor_parameters: build_ctor_params_metadata_in(
                                             &allocator,
                                             class,
                                             ctor_deps_slice,
                                             &mut file_namespace_registry,
                                             &import_map,
                                             Some(source),
+                                            Some(&string_consts),
                                         ),
                                         prop_decorators: build_prop_decorators_metadata_in(
                                             &allocator,
@@ -2979,7 +3003,11 @@ pub fn transform_angular_file(
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
-                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+                    collect_constructor_decorator_spans(
+                        class,
+                        &string_consts,
+                        &mut decorator_spans_to_remove,
+                    );
                     // Collect member decorators (@Input, @Output, @HostBinding, etc.)
                     collect_member_decorator_spans(
                         class,
@@ -3121,7 +3149,11 @@ pub fn transform_angular_file(
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
-                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+                    collect_constructor_decorator_spans(
+                        class,
+                        &string_consts,
+                        &mut decorator_spans_to_remove,
+                    );
 
                     // Resolve namespace imports for pipe constructor deps
                     if let Some(ref mut deps) = pipe_metadata.deps {
@@ -3235,7 +3267,11 @@ pub fn transform_angular_file(
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
-                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+                    collect_constructor_decorator_spans(
+                        class,
+                        &string_consts,
+                        &mut decorator_spans_to_remove,
+                    );
 
                     // Resolve namespace imports for NgModule constructor deps
                     if let Some(ref mut deps) = ng_module_metadata.deps {
@@ -3391,7 +3427,11 @@ pub fn transform_angular_file(
                         // user's constructor may still carry @Inject/@Optional/etc.
                         // decorators that need to be stripped from the output (the
                         // class metadata IIFE will pick them up).
-                        collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+                        collect_constructor_decorator_spans(
+                            class,
+                            &string_consts,
+                            &mut decorator_spans_to_remove,
+                        );
 
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
@@ -3456,7 +3496,11 @@ pub fn transform_angular_file(
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
-                    collect_constructor_decorator_spans(class, &mut decorator_spans_to_remove);
+                    collect_constructor_decorator_spans(
+                        class,
+                        &string_consts,
+                        &mut decorator_spans_to_remove,
+                    );
 
                     // Resolve namespace imports for constructor deps.
                     if let Some(ref mut deps) = injectable_metadata.deps {

@@ -254,7 +254,7 @@ pub fn extract_component_metadata<'a>(
     // Extract constructor dependencies for factory generation
     // This enables proper DI for component constructors
     metadata.constructor_deps =
-        extract_constructor_deps(allocator, class, import_map, has_superclass);
+        extract_constructor_deps(allocator, class, import_map, has_superclass, consts);
 
     // Inputs/outputs from the `inputs:`/`outputs:` metadata, overridden by
     // @Input/@Output/signal members ({...fromMeta, ...fromFields} in ngtsc).
@@ -866,6 +866,7 @@ fn extract_constructor_deps<'a>(
     class: &'a Class<'a>,
     import_map: &ImportMap<'a>,
     has_superclass: bool,
+    consts: &StringConsts<'a>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
     let constructor = class.body.body.iter().find_map(|element| {
@@ -884,7 +885,7 @@ fn extract_constructor_deps<'a>(
             let params = &ctor.value.params;
 
             for param in &params.items {
-                let dep = extract_param_dependency(param, import_map);
+                let dep = extract_param_dependency(param, import_map, consts);
                 deps.push(dep);
             }
 
@@ -904,9 +905,12 @@ fn extract_constructor_deps<'a>(
 ///
 /// The `import_map` is used to look up the source module of the token,
 /// enabling proper tracking of import origins for constructor dependencies.
+/// Only Angular's parameter decorators count, imported from `@angular/core`
+/// (see [`crate::directive::angular_param_decorator`]).
 fn extract_param_dependency<'a>(
     param: &'a oxc_ast::ast::FormalParameter<'a>,
     import_map: &ImportMap<'a>,
+    consts: &StringConsts<'a>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
     let mut optional = false;
@@ -917,8 +921,8 @@ fn extract_param_dependency<'a>(
     let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
-        if let Some(name) = get_decorator_name(&decorator.expression) {
-            match name.as_str() {
+        if let Some(name) = crate::directive::angular_param_decorator(decorator, Some(consts)) {
+            match name {
                 "Inject" => {
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
@@ -992,23 +996,6 @@ fn extract_param_dependency<'a>(
     dep
 }
 
-/// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
-    match expr {
-        // @Optional
-        Expression::Identifier(id) => Some(id.name.clone().into()),
-        // @Optional()
-        Expression::CallExpression(call) => {
-            if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone().into())
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
 /// Extract the injection token from an @Inject decorator argument.
 fn extract_inject_token<'a>(arg: &'a Argument<'a>) -> Option<Ident<'a>> {
     match arg {
@@ -1053,30 +1040,52 @@ fn extract_param_token<'a>(param: &'a oxc_ast::ast::FormalParameter<'a>) -> Opti
 // Decorator Span Collection for Removal
 // =============================================================================
 
-/// Collect all decorator spans from constructor parameters.
+/// Collect the spans of Angular's constructor parameter decorators.
 ///
 /// Parameter decorators like `@Optional()`, `@Inject()`, `@Host()`, `@Self()`,
 /// `@SkipSelf()`, and `@Attribute()` need to be removed from the output since
 /// their metadata is extracted into the factory function's inject flags.
+/// Like ngtsc, only Angular's own count (imported from `@angular/core`, under
+/// any alias or through a namespace import, see
+/// [`crate::directive::angular_param_decorator`]); another module's is left
+/// in place.
 ///
 /// These spans are used by `transform.rs` to remove the decorators from the
 /// source text during transformation.
-pub fn collect_constructor_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
-    // Find the constructor method
-    for element in &class.body.body {
-        if let ClassElement::MethodDefinition(method) = element {
-            if method.kind == MethodDefinitionKind::Constructor {
-                // Iterate over constructor parameters
-                for param in &method.value.params.items {
-                    // Collect all decorator spans from this parameter
-                    for decorator in &param.decorators {
-                        spans.push(decorator.span);
-                    }
-                }
-                // Only one constructor per class
-                break;
-            }
+pub fn collect_constructor_decorator_spans(
+    class: &Class<'_>,
+    consts: &StringConsts<'_>,
+    spans: &mut std::vec::Vec<Span>,
+) {
+    for_each_constructor_param_decorator(class, |decorator| {
+        if crate::directive::angular_param_decorator(decorator, Some(consts)).is_some() {
+            spans.push(decorator.span);
         }
+    });
+}
+
+/// Collect the spans of every constructor parameter decorator, Angular's or
+/// not. JIT output removes them all: Angular's go into `ctorParameters`, the
+/// rest into the class's `__decorate` call as `__param(...)`.
+pub fn collect_all_constructor_decorator_spans(class: &Class<'_>, spans: &mut std::vec::Vec<Span>) {
+    for_each_constructor_param_decorator(class, |decorator| spans.push(decorator.span));
+}
+
+/// Call `f` with each decorator on the constructor's parameters, in order.
+fn for_each_constructor_param_decorator<'a>(
+    class: &'a Class<'a>,
+    mut f: impl FnMut(&'a Decorator<'a>),
+) {
+    let constructor = class.body.body.iter().find_map(|element| match element {
+        ClassElement::MethodDefinition(method)
+            if method.kind == MethodDefinitionKind::Constructor =>
+        {
+            Some(method)
+        }
+        _ => None,
+    });
+    for param in constructor.into_iter().flat_map(|ctor| &ctor.value.params.items) {
+        param.decorators.iter().for_each(&mut f);
     }
 }
 
@@ -2661,7 +2670,7 @@ mod tests {
     #[test]
     fn test_component_with_inject_decorator() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Inject} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2692,7 +2701,7 @@ mod tests {
     #[test]
     fn test_component_with_optional_decorator() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Optional} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2722,7 +2731,7 @@ mod tests {
         // Angular's reference compiler filters out `null` literal type nodes from
         // the union; when exactly one type remains it becomes the token.
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Optional} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2850,7 +2859,7 @@ mod tests {
     #[test]
     fn test_component_with_skip_self_decorator() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Optional, SkipSelf} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2875,7 +2884,7 @@ mod tests {
     #[test]
     fn test_component_with_self_and_host_decorators() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Self, Host} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2904,7 +2913,7 @@ mod tests {
     #[test]
     fn test_component_with_combined_decorators() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Optional, Inject} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2928,7 +2937,7 @@ mod tests {
     #[test]
     fn test_component_with_attribute_decorator() {
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Attribute} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3157,7 +3166,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_with_inject_decorator() {
         // Test that @Inject token source module is tracked from import
         let code = r#"
-            import {Component} from '@angular/core';
+            import {Component, Inject} from '@angular/core';
             import { WINDOW } from "@bitwarden/common";
 
             @Component({
@@ -3303,9 +3312,22 @@ mod tests {
         collect_member_decorator_spans(class, &consts, spans);
     }
 
+    /// [`collect_constructor_decorator_spans`] for `class`, declared in `code`.
+    fn collect_constructor_decorators(
+        code: &str,
+        class: &Class<'_>,
+        spans: &mut std::vec::Vec<Span>,
+    ) {
+        let allocator = Allocator::default();
+        let parser_ret = Parser::new(&allocator, code, SourceType::tsx()).parse();
+        let consts = crate::directive::collect_string_consts(&allocator, &parser_ret.program);
+        collect_constructor_decorator_spans(class, &consts, spans);
+    }
+
     #[test]
     fn test_collect_constructor_decorator_spans() {
         let code = r#"
+            import { Component, Optional, Inject, Host, Self } from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3321,10 +3343,40 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_constructor_decorator_spans(class, &mut spans);
+            collect_constructor_decorators(code, class, &mut spans);
 
             // Should collect 4 decorators: @Optional, @Inject, @Host, @Self
             assert_eq!(spans.len(), 4);
+        });
+    }
+
+    /// Like ngtsc, only Angular's parameter decorators are removed: aliased or
+    /// namespaced ones are, another module's (even named `Inject`) and a
+    /// local one aren't.
+    #[test]
+    fn test_collect_constructor_decorator_spans_by_import() {
+        let code = r#"
+            import * as ng from '@angular/core';
+            import { Component, Inject as Inj } from '@angular/core';
+            import { Inject, Optional } from './other';
+            function Self(): ParameterDecorator { return () => {}; }
+            @Component({ selector: 'app-test', template: '' })
+            class TestComponent {
+                constructor(
+                    @Inj(TOKEN) a: A,
+                    @ng.Optional() b: B,
+                    @Inject(TOKEN) c: C,
+                    @Optional() d: D,
+                    @Self() e: E,
+                ) {}
+            }
+        "#;
+        with_first_class(code, |class| {
+            let mut spans = std::vec::Vec::new();
+            collect_constructor_decorators(code, class, &mut spans);
+            let removed: std::vec::Vec<&str> =
+                spans.iter().map(|span| &code[span.start as usize..span.end as usize]).collect();
+            assert_eq!(removed, ["@Inj(TOKEN)", "@ng.Optional()"]);
         });
     }
 
@@ -3341,7 +3393,7 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_constructor_decorator_spans(class, &mut spans);
+            collect_constructor_decorators(code, class, &mut spans);
 
             // No parameter decorators
             assert_eq!(spans.len(), 0);
@@ -3359,7 +3411,7 @@ mod tests {
         "#;
         with_first_class(code, |class| {
             let mut spans = std::vec::Vec::new();
-            collect_constructor_decorator_spans(class, &mut spans);
+            collect_constructor_decorators(code, class, &mut spans);
 
             // No constructor
             assert_eq!(spans.len(), 0);

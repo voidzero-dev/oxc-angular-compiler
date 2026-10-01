@@ -107,7 +107,8 @@ impl<'a> PipeMetadata<'a> {
 /// export class MyPipe implements PipeTransform {}
 /// ```
 ///
-/// Without the file's imports, any decorator named `Pipe` counts:
+/// Without the file's imports, any decorator named `Pipe` counts, and so does
+/// any constructor parameter decorator named `Inject`, `Optional`, ...:
 /// [`extract_pipe_metadata_in`] takes the file's [`StringConsts`] and only
 /// counts Angular's (imported from `@angular/core`), like the compiler.
 pub fn extract_pipe_metadata<'a>(
@@ -181,7 +182,7 @@ pub fn extract_pipe_metadata_in<'a>(
     }
 
     // Extract constructor dependencies for factory generation
-    metadata.deps = extract_constructor_deps(allocator, class);
+    metadata.deps = extract_constructor_deps(allocator, class, consts);
 
     Some(metadata)
 }
@@ -260,6 +261,7 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
     let constructor = class.body.body.iter().find_map(|element| {
@@ -276,17 +278,20 @@ fn extract_constructor_deps<'a>(
     let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
-        let dep = extract_param_dependency(allocator, param);
+        let dep = extract_param_dependency(allocator, param, consts);
         deps.push(dep);
     }
 
     Some(deps)
 }
 
-/// Extract dependency metadata from a single constructor parameter.
+/// Extract dependency metadata from a single constructor parameter. With the
+/// file's `consts`, only Angular's parameter decorators count, imported from
+/// `@angular/core` (see [`crate::directive::angular_param_decorator`]).
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
+    consts: Option<&StringConsts<'_>>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
     let mut optional = false;
@@ -297,8 +302,8 @@ fn extract_param_dependency<'a>(
     let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
-        if let Some(name) = get_decorator_name(&decorator.expression) {
-            match name.as_str() {
+        if let Some(name) = crate::directive::angular_param_decorator(decorator, consts) {
+            match name {
                 "Inject" => {
                     // @Inject(TOKEN) - extract the token
                     if let Expression::CallExpression(call) = &decorator.expression {
@@ -356,23 +361,6 @@ fn extract_param_dependency<'a>(
         self_,
         skip_self,
         type_only_invalid: false,
-    }
-}
-
-/// Get the name of a decorator from its expression.
-fn get_decorator_name<'a>(expr: &'a Expression<'a>) -> Option<Ident<'a>> {
-    match expr {
-        // @Optional
-        Expression::Identifier(id) => Some(id.name.clone().into()),
-        // @Optional()
-        Expression::CallExpression(call) => {
-            if let Expression::Identifier(id) = &call.callee {
-                Some(id.name.clone().into())
-            } else {
-                None
-            }
-        }
-        _ => None,
     }
 }
 

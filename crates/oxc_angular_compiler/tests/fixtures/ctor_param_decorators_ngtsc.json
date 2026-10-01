@@ -1,0 +1,681 @@
+{
+  "compilerCli": "22.1.7",
+  "fixtures": [
+    {
+      "name": "ctor-cmp-named",
+      "files": {
+        "test.ts": "import {Component, Inject, Optional, Self, SkipSelf, Host, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-cmp-alias",
+      "files": {
+        "test.ts": "import {Component as Dcl, Inject as InX, Optional as OpX, Self as Slf, SkipSelf as SkS, Host as HoX, Attribute as AtX} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Dcl({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@InX(TOKEN) a: Dep, @OpX() b: Dep, @Slf() c: Dep, @SkS() d: Dep, @HoX() e: Dep, @AtX('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:OpX}]},{type:i1.Dep,decorators:[{type:Slf}]},{type:i1.Dep,decorators:[{type:SkS}]},{type:i1.Dep,decorators:[{type:HoX}]},{type:i1.Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-cmp-ns",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@ng.Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@ng.Inject(TOKEN) a: Dep, @ng.Optional() b: Dep, @ng.Self() c: Dep, @ng.SkipSelf() d: Dep, @ng.Host() e: Dep, @ng.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-cmp-foreign",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {Inject, Optional, Self, SkipSelf, Host, Attribute} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-cmp-local",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\nfunction Inject(t: any): ParameterDecorator { return () => {}; }\nfunction Optional(): ParameterDecorator { return () => {}; }\nfunction Self(): ParameterDecorator { return () => {}; }\nfunction SkipSelf(): ParameterDecorator { return () => {}; }\nfunction Host(): ParameterDecorator { return () => {}; }\nfunction Attribute(n: string): ParameterDecorator { return () => {}; }\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-cmp-fns",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport * as f from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@f.Inject(TOKEN) a: Dep, @f.Optional() b: Dep, @f.Self() c: Dep, @f.SkipSelf() d: Dep, @f.Host() e: Dep, @f.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-dir-named",
+      "files": {
+        "test.ts": "import {Directive, Inject, Optional, Self, SkipSelf, Host, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Directive({selector: '[a]'})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-dir-alias",
+      "files": {
+        "test.ts": "import {Directive as Dcl, Inject as InX, Optional as OpX, Self as Slf, SkipSelf as SkS, Host as HoX, Attribute as AtX} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Dcl({selector: '[a]'})\nexport class A {\n  constructor(@InX(TOKEN) a: Dep, @OpX() b: Dep, @Slf() c: Dep, @SkS() d: Dep, @HoX() e: Dep, @AtX('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:OpX}]},{type:i1.Dep,decorators:[{type:Slf}]},{type:i1.Dep,decorators:[{type:SkS}]},{type:i1.Dep,decorators:[{type:HoX}]},{type:i1.Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-dir-ns",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@ng.Directive({selector: '[a]'})\nexport class A {\n  constructor(@ng.Inject(TOKEN) a: Dep, @ng.Optional() b: Dep, @ng.Self() c: Dep, @ng.SkipSelf() d: Dep, @ng.Host() e: Dep, @ng.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-dir-foreign",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {Inject, Optional, Self, SkipSelf, Host, Attribute} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Directive({selector: '[a]'})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-dir-local",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\nfunction Inject(t: any): ParameterDecorator { return () => {}; }\nfunction Optional(): ParameterDecorator { return () => {}; }\nfunction Self(): ParameterDecorator { return () => {}; }\nfunction SkipSelf(): ParameterDecorator { return () => {}; }\nfunction Host(): ParameterDecorator { return () => {}; }\nfunction Attribute(n: string): ParameterDecorator { return () => {}; }\n@Directive({selector: '[a]'})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-dir-fns",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport * as f from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Directive({selector: '[a]'})\nexport class A {\n  constructor(@f.Inject(TOKEN) a: Dep, @f.Optional() b: Dep, @f.Self() c: Dep, @f.SkipSelf() d: Dep, @f.Host() e: Dep, @f.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-inj-named",
+      "files": {
+        "test.ts": "import {Injectable, Inject, Optional, Self, SkipSelf, Host, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Injectable()\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(TOKEN),i0.ɵɵinject(i1.Dep,8),i0.ɵɵinject(i1.Dep,2),i0.ɵɵinject(i1.Dep,4),i0.ɵɵinject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-inj-alias",
+      "files": {
+        "test.ts": "import {Injectable as Dcl, Inject as InX, Optional as OpX, Self as Slf, SkipSelf as SkS, Host as HoX, Attribute as AtX} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Dcl()\nexport class A {\n  constructor(@InX(TOKEN) a: Dep, @OpX() b: Dep, @Slf() c: Dep, @SkS() d: Dep, @HoX() e: Dep, @AtX('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": null,
+      "ctorParameters": null,
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "jitParamDecorators": [],
+      "skip": "ngtsc gives an aliased `@Injectable` no factory (`needsFactory` reads the decorator's written name), so it has no `ɵfac` to compare; oxc emits one (see `class_decorator_identity_test`)"
+    },
+    {
+      "name": "ctor-inj-ns",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@ng.Injectable()\nexport class A {\n  constructor(@ng.Inject(TOKEN) a: Dep, @ng.Optional() b: Dep, @ng.Self() c: Dep, @ng.SkipSelf() d: Dep, @ng.Host() e: Dep, @ng.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(TOKEN),i0.ɵɵinject(i1.Dep,8),i0.ɵɵinject(i1.Dep,2),i0.ɵɵinject(i1.Dep,4),i0.ɵɵinject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-inj-foreign",
+      "files": {
+        "test.ts": "import {Injectable} from '@angular/core';\nimport {Inject, Optional, Self, SkipSelf, Host, Attribute} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Injectable()\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-inj-local",
+      "files": {
+        "test.ts": "import {Injectable} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\nfunction Inject(t: any): ParameterDecorator { return () => {}; }\nfunction Optional(): ParameterDecorator { return () => {}; }\nfunction Self(): ParameterDecorator { return () => {}; }\nfunction SkipSelf(): ParameterDecorator { return () => {}; }\nfunction Host(): ParameterDecorator { return () => {}; }\nfunction Attribute(n: string): ParameterDecorator { return () => {}; }\n@Injectable()\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-inj-fns",
+      "files": {
+        "test.ts": "import {Injectable} from '@angular/core';\nimport * as f from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Injectable()\nexport class A {\n  constructor(@f.Inject(TOKEN) a: Dep, @f.Optional() b: Dep, @f.Self() c: Dep, @f.SkipSelf() d: Dep, @f.Host() e: Dep, @f.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-pipe-named",
+      "files": {
+        "test.ts": "import {Pipe, Inject, Optional, Self, SkipSelf, Host, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN,16),i0.ɵɵdirectiveInject(i1.Dep,24),i0.ɵɵdirectiveInject(i1.Dep,18),i0.ɵɵdirectiveInject(i1.Dep,20),i0.ɵɵdirectiveInject(i1.Dep,17),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-pipe-alias",
+      "files": {
+        "test.ts": "import {Pipe as Dcl, Inject as InX, Optional as OpX, Self as Slf, SkipSelf as SkS, Host as HoX, Attribute as AtX} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Dcl({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@InX(TOKEN) a: Dep, @OpX() b: Dep, @Slf() c: Dep, @SkS() d: Dep, @HoX() e: Dep, @AtX('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN,16),i0.ɵɵdirectiveInject(i1.Dep,24),i0.ɵɵdirectiveInject(i1.Dep,18),i0.ɵɵdirectiveInject(i1.Dep,20),i0.ɵɵdirectiveInject(i1.Dep,17),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:OpX}]},{type:i1.Dep,decorators:[{type:Slf}]},{type:i1.Dep,decorators:[{type:SkS}]},{type:i1.Dep,decorators:[{type:HoX}]},{type:i1.Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-pipe-ns",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@ng.Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@ng.Inject(TOKEN) a: Dep, @ng.Optional() b: Dep, @ng.Self() c: Dep, @ng.SkipSelf() d: Dep, @ng.Host() e: Dep, @ng.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN,16),i0.ɵɵdirectiveInject(i1.Dep,24),i0.ɵɵdirectiveInject(i1.Dep,18),i0.ɵɵdirectiveInject(i1.Dep,20),i0.ɵɵdirectiveInject(i1.Dep,17),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-pipe-foreign",
+      "files": {
+        "test.ts": "import {Pipe} from '@angular/core';\nimport {Inject, Optional, Self, SkipSelf, Host, Attribute} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-pipe-local",
+      "files": {
+        "test.ts": "import {Pipe} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\nfunction Inject(t: any): ParameterDecorator { return () => {}; }\nfunction Optional(): ParameterDecorator { return () => {}; }\nfunction Self(): ParameterDecorator { return () => {}; }\nfunction SkipSelf(): ParameterDecorator { return () => {}; }\nfunction Host(): ParameterDecorator { return () => {}; }\nfunction Attribute(n: string): ParameterDecorator { return () => {}; }\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-pipe-fns",
+      "files": {
+        "test.ts": "import {Pipe} from '@angular/core';\nimport * as f from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; }\n  constructor(@f.Inject(TOKEN) a: Dep, @f.Optional() b: Dep, @f.Self() c: Dep, @f.SkipSelf() d: Dep, @f.Host() e: Dep, @f.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16),i0.ɵɵdirectiveInject(i1.Dep,16))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-mod-named",
+      "files": {
+        "test.ts": "import {NgModule, Inject, Optional, Self, SkipSelf, Host, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@NgModule({})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(TOKEN),i0.ɵɵinject(i1.Dep,8),i0.ɵɵinject(i1.Dep,2),i0.ɵɵinject(i1.Dep,4),i0.ɵɵinject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": [],
+      "skip": "pre-existing: oxc's `@NgModule` factory ignores `@Inject(TOKEN)` and injects the parameter's type, whatever the decorator is called"
+    },
+    {
+      "name": "ctor-mod-alias",
+      "files": {
+        "test.ts": "import {NgModule as Dcl, Inject as InX, Optional as OpX, Self as Slf, SkipSelf as SkS, Host as HoX, Attribute as AtX} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Dcl({})\nexport class A {\n  constructor(@InX(TOKEN) a: Dep, @OpX() b: Dep, @Slf() c: Dep, @SkS() d: Dep, @HoX() e: Dep, @AtX('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(TOKEN),i0.ɵɵinject(i1.Dep,8),i0.ɵɵinject(i1.Dep,2),i0.ɵɵinject(i1.Dep,4),i0.ɵɵinject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:OpX}]},{type:i1.Dep,decorators:[{type:Slf}]},{type:i1.Dep,decorators:[{type:SkS}]},{type:i1.Dep,decorators:[{type:HoX}]},{type:i1.Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
+      "jitParamDecorators": [],
+      "skip": "pre-existing: see `ctor-mod-named`"
+    },
+    {
+      "name": "ctor-mod-ns",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@ng.NgModule({})\nexport class A {\n  constructor(@ng.Inject(TOKEN) a: Dep, @ng.Optional() b: Dep, @ng.Self() c: Dep, @ng.SkipSelf() d: Dep, @ng.Host() e: Dep, @ng.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(TOKEN),i0.ɵɵinject(i1.Dep,8),i0.ɵɵinject(i1.Dep,2),i0.ɵɵinject(i1.Dep,4),i0.ɵɵinject(i1.Dep,1),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": [],
+      "skip": "pre-existing: see `ctor-mod-named`"
+    },
+    {
+      "name": "ctor-mod-foreign",
+      "files": {
+        "test.ts": "import {NgModule} from '@angular/core';\nimport {Inject, Optional, Self, SkipSelf, Host, Attribute} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@NgModule({})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-mod-local",
+      "files": {
+        "test.ts": "import {NgModule} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\nfunction Inject(t: any): ParameterDecorator { return () => {}; }\nfunction Optional(): ParameterDecorator { return () => {}; }\nfunction Self(): ParameterDecorator { return () => {}; }\nfunction SkipSelf(): ParameterDecorator { return () => {}; }\nfunction Host(): ParameterDecorator { return () => {}; }\nfunction Attribute(n: string): ParameterDecorator { return () => {}; }\n@NgModule({})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,Inject(TOKEN))",
+        "__param(1,Optional())",
+        "__param(2,Self())",
+        "__param(3,SkipSelf())",
+        "__param(4,Host())",
+        "__param(5,Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-mod-fns",
+      "files": {
+        "test.ts": "import {NgModule} from '@angular/core';\nimport * as f from './foreign';\nimport {Dep, TOKEN} from './dep';\n@NgModule({})\nexport class A {\n  constructor(@f.Inject(TOKEN) a: Dep, @f.Optional() b: Dep, @f.Self() c: Dep, @f.SkipSelf() d: Dep, @f.Host() e: Dep, @f.Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep),i0.ɵɵinject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[]}]",
+      "paramDecoratorsLeft": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ],
+      "jitCtorParameters": "[{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep},{type:Dep}]",
+      "jitParamDecorators": [
+        "__param(0,f.Inject(TOKEN))",
+        "__param(1,f.Optional())",
+        "__param(2,f.Self())",
+        "__param(3,f.SkipSelf())",
+        "__param(4,f.Host())",
+        "__param(5,f.Attribute(\"x\"))"
+      ]
+    },
+    {
+      "name": "ctor-cmp-mixed",
+      "files": {
+        "test.ts": "import {Component, Inject as Inj, Optional, Attribute} from '@angular/core';\nimport {Self} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Inj(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @Optional() d: Dep, @Self() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inj,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": ["__param(2,Self())", "__param(4,Self())"],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inj,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep},{type:Dep,decorators:[{type:Optional}]},{type:Dep},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": ["__param(2,Self())", "__param(4,Self())"]
+    },
+    {
+      "name": "ctor-cmp-swapped",
+      "files": {
+        "test.ts": "import {Component, Optional as Self, Self as Optional, Inject, SkipSelf as Host, Host as SkipSelf, Attribute} from '@angular/core';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Inject(TOKEN) a: Dep, @Optional() b: Dep, @Self() c: Dep, @SkipSelf() d: Dep, @Host() e: Dep, @Attribute('x') f: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep,2),i0.ɵɵdirectiveInject(i1.Dep,8),i0.ɵɵdirectiveInject(i1.Dep,1),i0.ɵɵdirectiveInject(i1.Dep,4),i0.ɵɵinjectAttribute(\"x\"))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "paramDecoratorsLeft": [],
+      "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
+      "jitParamDecorators": []
+    },
+    {
+      "name": "ctor-cmp-other",
+      "files": {
+        "test.ts": "import {Component, Inject} from '@angular/core';\nimport {Foo} from './foreign';\nimport {Dep, TOKEN} from './dep';\n@Component({selector: 'a-c', template: ''})\nexport class A {\n  constructor(@Foo() a: Dep, @Foo() @Inject(TOKEN) b: Dep, c: Dep) {}\n}\n",
+        "dep.ts": "export class Dep {}\nexport const TOKEN = 'tok';\n",
+        "foreign.ts": "export function Inject(t: any): ParameterDecorator { return () => {}; }\nexport function Optional(): ParameterDecorator { return () => {}; }\nexport function Self(): ParameterDecorator { return () => {}; }\nexport function SkipSelf(): ParameterDecorator { return () => {}; }\nexport function Host(): ParameterDecorator { return () => {}; }\nexport function Attribute(n: string): ParameterDecorator { return () => {}; }\nexport function Foo(): ParameterDecorator { return () => {}; }\n"
+      },
+      "diagnostics": [],
+      "factory": "(i0.ɵɵdirectiveInject(i1.Dep),i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵdirectiveInject(i1.Dep))",
+      "ctorParameters": "[{type:i1.Dep,decorators:[]},{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep}]",
+      "paramDecoratorsLeft": ["__param(0,Foo())", "__param(1,Foo())"],
+      "jitCtorParameters": "[{type:Dep},{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep}]",
+      "jitParamDecorators": ["__param(0,Foo())", "__param(1,Foo())"]
+    }
+  ]
+}

@@ -317,6 +317,9 @@ fn build_template_entry<'a>(allocator: &'a Allocator, content: &'a str) -> Liter
 /// using the constructor dependency metadata and namespace registry. This matches
 /// Angular's behavior where type-only imports need namespace imports because
 /// TypeScript types are erased at runtime.
+///
+/// Without the file's imports, a parameter decorator is Angular's by its name;
+/// [`build_ctor_params_metadata_in`] recognises only Angular's, like ngtsc.
 pub fn build_ctor_params_metadata<'a>(
     allocator: &'a Allocator,
     class: &Class<'a>,
@@ -324,6 +327,34 @@ pub fn build_ctor_params_metadata<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
     source_text: Option<&'a str>,
+) -> Option<OutputExpression<'a>> {
+    build_ctor_params_metadata_in(
+        allocator,
+        class,
+        constructor_deps,
+        namespace_registry,
+        import_map,
+        source_text,
+        None,
+    )
+}
+
+/// [`build_ctor_params_metadata`] for a class in the file `consts` was
+/// collected from.
+///
+/// A parameter decorator (`@Inject()`, `@Optional()`, ...) is listed only when
+/// it's Angular's, imported from `@angular/core` by name, under any alias, or
+/// through a namespace import (see [`crate::directive::angular_param_decorator`]).
+/// Like ngtsc, a parameter that has decorators, none of them Angular's, gets
+/// `decorators: []`.
+pub fn build_ctor_params_metadata_in<'a>(
+    allocator: &'a Allocator,
+    class: &Class<'a>,
+    constructor_deps: Option<&[R3DependencyMetadata<'a>]>,
+    namespace_registry: &mut NamespaceRegistry<'a>,
+    import_map: &ImportMap<'a>,
+    source_text: Option<&'a str>,
+    consts: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
@@ -358,9 +389,11 @@ pub fn build_ctor_params_metadata<'a>(
 
         map_entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
-        // Extract decorators from the parameter
-        let param_decorators = extract_angular_decorators_from_param(param);
-        if !param_decorators.is_empty() {
+        // Extract decorators from the parameter. ngtsc lists the Angular ones
+        // whenever the parameter has decorators at all (`decorators: []` when
+        // none of them is Angular's).
+        let param_decorators = extract_angular_decorators_from_param(param, consts);
+        if !param.decorators.is_empty() {
             let decorators_array = build_decorator_metadata_array(
                 &allocator,
                 &param_decorators,
@@ -894,20 +927,16 @@ fn extract_param_type_expression<'a>(
     }
 }
 
-/// Extract Angular decorators from a constructor parameter.
+/// Extract Angular's decorators from a constructor parameter (see
+/// [`crate::directive::angular_param_decorator`]).
 fn extract_angular_decorators_from_param<'a, 'b>(
     param: &'b FormalParameter<'a>,
+    consts: Option<&StringConsts<'a>>,
 ) -> std::vec::Vec<&'b Decorator<'a>> {
-    const ANGULAR_PARAM_DECORATORS: &[&str] =
-        &["Inject", "Optional", "Self", "SkipSelf", "Host", "Attribute"];
-
     param
         .decorators
         .iter()
-        .filter(|d| {
-            let name = get_decorator_name(d);
-            name.is_some_and(|n| ANGULAR_PARAM_DECORATORS.contains(&n))
-        })
+        .filter(|d| crate::directive::angular_param_decorator(d, consts).is_some())
         .collect()
 }
 

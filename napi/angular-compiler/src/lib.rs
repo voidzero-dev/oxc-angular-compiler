@@ -22,7 +22,7 @@ use oxc_angular_compiler::{
     AngularVersion as RustAngularVersion, ChangeDetectionStrategy as RustChangeDetectionStrategy,
     HostMetadataInput as RustHostMetadataInput, TransformOptions as RustTransformOptions,
     ViewEncapsulation as RustViewEncapsulation,
-    build_ctor_params_metadata as core_build_ctor_params_metadata,
+    build_ctor_params_metadata_in as core_build_ctor_params_metadata,
     build_decorator_metadata_array as core_build_decorator_metadata_array,
     build_prop_decorators_metadata_in as core_build_prop_decorators_metadata,
     compile_template_for_hmr, compile_template_to_js_with_options,
@@ -2098,6 +2098,7 @@ pub fn compile_class_metadata_sync(
         &mut namespace_registry,
         &empty_import_map,
         Some(&source),
+        Some(&string_consts),
     );
 
     // Build property decorators metadata.
