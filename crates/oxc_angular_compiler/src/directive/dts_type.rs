@@ -228,8 +228,11 @@ impl<'a> TypePrinter<'_, 'a> {
         'a: 'p,
     {
         let mut aliased = false;
-        // Aliases can name aliases; a cycle is a TypeScript error.
-        for _ in 0..16 {
+        // Aliases can name aliases, through any number of them. Meeting one
+        // again is a cycle (`import A = B; import B = A;`, `import A = A.B;`),
+        // which TypeScript reports.
+        let mut seen: std::vec::Vec<std::vec::Vec<&'p str>> = std::vec::Vec::new();
+        loop {
             let (len, target) = match self.scope.alias(parts[0]) {
                 Some(target) => (1, target),
                 None => match self.scope.namespace_alias(&parts) {
@@ -237,6 +240,10 @@ impl<'a> TypePrinter<'_, 'a> {
                     None => return Some(Resolved::Name(parts, aliased)),
                 },
             };
+            if seen.iter().any(|alias| alias[..] == parts[..len]) {
+                return None;
+            }
+            seen.push(parts[..len].to_vec());
             aliased = true;
             match target {
                 // `import Core = require('@angular/core')`: `Core.X` is
@@ -252,7 +259,6 @@ impl<'a> TypePrinter<'_, 'a> {
                 }
             }
         }
-        None
     }
 
     /// [`Self::type_name`] for a name whose head isn't an alias: `parts`, head
@@ -703,7 +709,11 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
         let before = &source[..end];
         let trimmed = before.trim_end();
         if before[trimmed.len()..].contains(is_line_break) {
-            let line_start = trimmed.rfind(is_line_break).map_or(0, |i| i + 1);
+            // After the line break, which can be more than one byte (U+2028).
+            let line_start = trimmed
+                .char_indices()
+                .rfind(|&(_, c)| is_line_break(c))
+                .map_or(0, |(i, c)| i + c.len_utf8());
             if trimmed[line_start..].contains("//") {
                 return None;
             }

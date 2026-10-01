@@ -83,6 +83,18 @@ const COMMENTS_NOT_KEPT: &[(&str, &str, &str)] = &[
     ("(x: string /** y */) => void", "(x: string /** y */) => void", "(x: string) => void"),
     ("Array<string /** y */>", "Array<string /** y */>", "Array<string>"),
     ("string |\n /** j */ number", "string | \n    /** j */ number", "string | number"),
+    // TypeScript reads past a U+2028 / U+2029 for the comments after `<` (it
+    // only stops at `\n` and `\r`), and prints this one twice.
+    (
+        "Array<\u{2028}/* c */\nstring | number>",
+        "Array</* c */ /* c */ string | number>",
+        "Array<string | number>",
+    ),
+    (
+        "Array<\u{2029}/* c */\nstring | number>",
+        "Array</* c */ /* c */ string | number>",
+        "Array<string | number>",
+    ),
 ];
 
 #[test]
@@ -300,6 +312,31 @@ export class Dir {{
             "{ [k: string]: T; }"
         ])
     );
+}
+
+/// A chain of aliases is followed to its end however long it is: ngtsc 22.1.7
+/// writes `T` for `A17.T` through 18 aliases, and `T | number` through 40. A
+/// cycle (a TypeScript error, on which ngtsc throws) gives `unknown`.
+#[test]
+fn import_equals_alias_chains_are_followed_to_the_end() {
+    let chain =
+        |n: usize| -> String { (1..n).map(|i| format!("import A{i} = A{};\n", i - 1)).collect() };
+    let types = ["A17.T", "A39.T | number", "X.T", "S.T"];
+    let source = format!(
+        "import {{Directive, Input}} from '@angular/core';
+namespace NS {{ export type T = string; }}
+import A0 = NS;
+{}import X = Y;
+import Y = X;
+import S = S.B;
+@Directive({{selector: '[d]'}})
+export class Dir {{
+{}}}
+",
+        chain(40),
+        members_typed(&types)
+    );
+    assert_eq!(accept_members(&source), expect_members(&["T", "T | number", "unknown", "unknown"]));
 }
 
 /// An alias of another module (`import R = require('./other')`, or of an
@@ -739,6 +776,10 @@ const MATCH: &[(&str, &str)] = &[
     ("'\\x00'", "\"\\0\""),
     ("'\\0' | '\\u00001'", "\"\\0\" | \"\\x001\""),
     ("'\u{2028}\u{2029}\\u0085'", "\"\\u2028\\u2029\\u0085\""),
+    // A U+2028 / U+2029 (a line break, but three bytes long) on the line
+    // before a union.
+    ("{ a: 1;\u{2028} b:\n string | number }", "{ a: 1; b: string | number; }"),
+    ("{ a: 1;\u{2029} b:\n string | number }", "{ a: 1; b: string | number; }"),
     ("'\\v\\f\\b'", "\"\\v\\f\\b\""),
     ("'\\x7f'", "\"\u{7f}\""),
     ("'a\"b\\'c`d'", "\"a\\\"b'c`d\""),
