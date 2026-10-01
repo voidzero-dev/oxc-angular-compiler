@@ -144,3 +144,28 @@ export class X {
     ])
   })
 })
+
+// Like the compiler (and ngtsc), only Angular's `@Component` counts: imported
+// from `@angular/core` under any name or through a namespace import.
+describe('extractComponentMetadataSync class decorators', () => {
+  it("lists the classes Angular's @Component decorates, not another library's", () => {
+    const components = extractComponentMetadataSync(
+      `
+import { Component as Cmp } from '@angular/core';
+import * as ng from '@angular/core';
+import { Component } from './widgets';
+
+@Cmp({ selector: 'app-a', template: '' })
+export class A {}
+
+@ng.Component({ selector: 'app-b', template: '' })
+export class B {}
+
+@Component({ selector: 'x-widget', template: '' })
+export class Widget {}
+`,
+      'x.component.ts',
+    )
+    expect(components.map((c) => c.className)).toEqual(['A', 'B'])
+  })
+})

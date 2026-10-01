@@ -794,7 +794,8 @@ export function angular(options: PluginOptions = {}): Plugin[] {
                   const cachedStripped = componentMetadataCache.get(resolvedId)
                   return (
                     cachedStripped !== undefined &&
-                    cachedStripped === stripComponentMetadata(source)
+                    cachedStripped ===
+                      stripComponentMetadata(source, componentsByFile.get(resolvedId))
                   )
                 }
                 const styles: string[] | null =
@@ -875,14 +876,19 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           }
 
           // Quick check for Angular decorators - avoids parsing files without them
-          // OXC handles @Component, @Directive, @NgModule, @Injectable, @Pipe, @Service
+          // OXC handles @Component, @Directive, @NgModule, @Injectable, @Pipe, @Service.
+          // The compiler also takes one imported from `@angular/core` under another
+          // name (`@Cmp(...)`, `@ng.Component(...)`); such a file still names
+          // `@angular/core` and the decorator.
           const hasAngularDecorator =
             code.includes('@Component') ||
             code.includes('@Directive') ||
             code.includes('@NgModule') ||
             code.includes('@Injectable') ||
             code.includes('@Pipe') ||
-            code.includes('@Service')
+            code.includes('@Service') ||
+            (code.includes('@angular/core') &&
+              /\b(?:Component|Directive|NgModule|Injectable|Pipe|Service)\b/.test(code))
           if (!hasAngularDecorator) {
             return
           }
@@ -1049,7 +1055,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 
             // Cache the metadata-stripped (whole-file) source for cheaply
             // diffing whether anything besides template/styles changed.
-            componentMetadataCache.set(actualId, stripComponentMetadata(code))
+            componentMetadataCache.set(actualId, stripComponentMetadata(code, classNamesInFile))
           }
 
           return {
@@ -1296,7 +1302,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             } catch {
               newContent = ''
             }
-            const newStripped = stripComponentMetadata(newContent)
+            const newStripped = stripComponentMetadata(newContent, fileClassNames)
             if (newStripped === cachedStripped) {
               debugHmr('inline template/styles-only change, dispatching HMR for %s', ctx.file)
               componentMetadataCache.set(ctx.file, newStripped)
@@ -1455,14 +1461,19 @@ export function angular(options: PluginOptions = {}): Plugin[] {
 }
 
 /**
- * Empty the `template:` and `styles:` field values of *every* `@Component(...)`
- * in the source, returning the result. Used to detect "only template/styles
- * changed somewhere in the file" — if the stripped form of the old and new
- * source is byte-identical, the diff is contained within those fields and we
- * can dispatch HMR (one event per component in the file) instead of a full
- * reload.
+ * Empty the `template:` and `styles:` field values of every `@Component(...)`
+ * in the source that decorates one of `componentClassNames` (the classes the
+ * compiler compiled as components), returning the result. Used to detect "only
+ * template/styles changed somewhere in the file" — if the stripped form of the
+ * old and new source is byte-identical, the diff is contained within those
+ * fields and we can dispatch HMR (one event per component in the file) instead
+ * of a full reload. A `@Component` the compiler didn't take (another library's)
+ * is left whole, so a change to it reloads the page.
  */
-function stripComponentMetadata(code: string): string {
+function stripComponentMetadata(
+  code: string,
+  componentClassNames: ReadonlySet<string> | undefined,
+): string {
   // Enumerate decorators ONCE (O(N) walk of source) and look up each one's
   // template + styles range directly from its argsRange. Calling the
   // className-based locators per decorator would re-enumerate inside each,
@@ -1473,6 +1484,7 @@ function stripComponentMetadata(code: string): string {
   const decorators = locateComponentDecorators(code)
   const ranges: Array<[number, number]> = []
   for (const d of decorators) {
+    if (!componentClassNames?.has(d.className)) continue
     const tpl = locateTemplateInArgs(code, d.argsRange)
     if (tpl) ranges.push(tpl)
     const styles = locateStylesInArgs(code, d.argsRange)

@@ -569,6 +569,45 @@ describe('pendingHmrUpdates race condition', () => {
     expect(fullReload, 'expected a full-reload event').toBeDefined()
   })
 
+  it("triggers full reload when only another library's @Component template changes", async () => {
+    const plugin = getAngularPlugin()
+    const mockServer = await setupPluginWithServer(plugin)
+
+    // `Widget`'s `@Component` comes from another library, so it isn't
+    // compiled: its template isn't one HMR can replace.
+    const mixedPath = join(appDir, 'mixed.component.ts')
+    const source = `
+      import * as ng from '@angular/core';
+      import { Component } from './widgets';
+      @ng.Component({ selector: 'app-first', template: '<div>First</div>' })
+      export class FirstComponent {}
+      @Component({ selector: 'x-widget', template: '<div>Widget</div>' })
+      export class Widget {}
+    `
+    writeFileSync(mixedPath, source)
+
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    await plugin.transform.handler.call(
+      { error() {}, warn() {}, addWatchFile() {} } as any,
+      source,
+      mixedPath,
+    )
+
+    writeFileSync(mixedPath, source.replace('<div>Widget</div>', '<div>Widget Edited</div>'))
+
+    const ctx = createMockHmrContext(mixedPath, [{ id: mixedPath }], mockServer)
+    await callHandleHotUpdate(plugin, ctx)
+
+    const componentUpdates = mockServer._wsMessages.filter(
+      (m: any) => m.event === 'angular:component-update',
+    )
+    expect(componentUpdates).toHaveLength(0)
+    const fullReload = mockServer._wsMessages.find((m: any) => m.type === 'full-reload')
+    expect(fullReload, 'expected a full-reload event').toBeDefined()
+  })
+
   it('consumes pending entry and dispatches angular:invalidate on compile error', async () => {
     const plugin = getAngularPlugin()
     const mockServer = await setupPluginWithServer(plugin)

@@ -44,6 +44,7 @@ use oxc_semantic::Semantic;
 use oxc_span::GetSpan;
 use oxc_syntax::symbol::SymbolId;
 
+use crate::directive::StringConsts;
 use crate::optimizer::Edit;
 
 use super::transform::{ImportMap, is_angular_core_export, is_angular_core_namespace};
@@ -98,6 +99,7 @@ pub fn collect_hoist_edits<'a>(
     source: &str,
     semantic: &Semantic<'a>,
     import_map: &ImportMap<'a>,
+    consts: &StringConsts<'_>,
 ) -> Vec<Edit> {
     // Step 1: index top-level bindings (keyed by SymbolId).
     //   - `symbol_to_stmt`: binding SymbolId → containing statement's `start`.
@@ -162,7 +164,7 @@ pub fn collect_hoist_edits<'a>(
     let mut classes: Vec<(&Class<'a>, u32, HashSet<SymbolId>, HashSet<SymbolId>)> = Vec::new();
     for stmt in &program.body {
         let Some((class, stmt_start_pos)) = class_of(stmt) else { continue };
-        if !has_hoistable_angular_decorator(class, import_map) {
+        if !has_hoistable_angular_decorator(class, import_map, consts) {
             continue;
         }
         let mut direct: HashSet<SymbolId> = HashSet::new();
@@ -887,64 +889,36 @@ fn class_of<'a, 'src>(stmt: &'src Statement<'a>) -> Option<(&'src Class<'a>, u32
     }
 }
 
-/// Does this class carry any decorator that Angular's compiler emits eager
-/// definitions for? We don't try to be precise here — any of the well-known
-/// Angular decorators makes the class a candidate.
-///
-/// Name-only and import-agnostic: used by the cheap pre-check
-/// [`program_has_angular_decorated_class`], where a false positive only costs
-/// a wasted scan. The actual hoist filter uses the import-aware
-/// [`has_hoistable_angular_decorator`].
-fn has_angular_decorator(class: &Class<'_>) -> bool {
-    class.decorators.iter().any(|d| {
-        let callee = match &d.expression {
-            Expression::CallExpression(call) => &call.callee,
-            expr => expr,
-        };
-        let name = match callee {
-            Expression::Identifier(id) => id.name.as_str(),
-            Expression::StaticMemberExpression(member) => member.property.name.as_str(),
-            _ => return false,
-        };
-        matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable" | "Service")
-    })
-}
-
 /// Whether this class carries an Angular decorator that warrants hoisting its
-/// referenced declarations.
-///
-/// Like [`has_angular_decorator`], but verifies `@Service` resolves to
-/// `@angular/core` before treating it as Angular. `Service` is a common name
-/// in non-Angular code, and hoisting a third-party `@Service` class's
-/// referenced declarations would reorder statements and change that class's
-/// runtime evaluation semantics. The other decorator names predate this check
-/// and stay name-only — over-triggering there is the long-standing behavior and
-/// only ever hoists a TDZ-safe declaration earlier.
-fn has_hoistable_angular_decorator<'a>(class: &Class<'a>, import_map: &ImportMap<'a>) -> bool {
+/// referenced declarations: one the compiler compiles the class for, imported
+/// from `@angular/core` (see [`crate::directive::angular_class_decorator`]),
+/// or an `@Service` that resolves to `@angular/core`. A same-named decorator
+/// from another library (`Service` is a common name in non-Angular code)
+/// leaves the class alone, and hoisting its referenced declarations would
+/// reorder statements and change that class's runtime evaluation semantics.
+fn has_hoistable_angular_decorator<'a>(
+    class: &Class<'a>,
+    import_map: &ImportMap<'a>,
+    consts: &StringConsts<'_>,
+) -> bool {
     class.decorators.iter().any(|d| {
+        if crate::directive::angular_class_decorator(d, consts).is_some() {
+            return true;
+        }
         let callee = match &d.expression {
             Expression::CallExpression(call) => &call.callee,
             expr => expr,
         };
         match callee {
             Expression::Identifier(id) => {
-                let name = id.name.as_str();
-                if name == "Service" {
-                    is_angular_core_export(import_map, name, "Service")
-                } else {
-                    matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable")
-                }
+                id.name == "Service" && is_angular_core_export(import_map, &id.name, "Service")
             }
+            // `@ns.Service()` — accept only when `ns` is a namespace import
+            // from `@angular/core`.
             Expression::StaticMemberExpression(member) => {
-                let name = member.property.name.as_str();
-                if name == "Service" {
-                    // `@ns.Service()` — accept only when `ns` is a namespace
-                    // import from `@angular/core`.
-                    matches!(&member.object, Expression::Identifier(ns)
+                member.property.name == "Service"
+                    && matches!(&member.object, Expression::Identifier(ns)
                         if is_angular_core_namespace(import_map, ns.name.as_str()))
-                } else {
-                    matches!(name, "Component" | "Directive" | "Pipe" | "NgModule" | "Injectable")
-                }
             }
             _ => false,
         }
@@ -952,16 +926,21 @@ fn has_hoistable_angular_decorator<'a>(class: &Class<'a>, import_map: &ImportMap
 }
 
 /// Cheap pre-check: does `program` contain any top-level class statement
-/// carrying one of the Angular decorators recognized by [`has_angular_decorator`]?
+/// carrying one of the Angular decorators recognized by
+/// [`has_hoistable_angular_decorator`]?
 ///
 /// Used by the AOT transform pipeline to skip the `Semantic` build and the
 /// full hoist scan for files with no decorated classes (plain TS helpers,
 /// type-only modules, classes with no Angular decorator, …). This walks
 /// `program.body` only and never descends into class bodies or expressions,
 /// so it's O(top-level statements) with a tiny per-statement cost.
-pub(crate) fn program_has_angular_decorated_class(program: &Program<'_>) -> bool {
+pub(crate) fn program_has_angular_decorated_class<'a>(
+    program: &Program<'a>,
+    import_map: &ImportMap<'a>,
+    consts: &StringConsts<'_>,
+) -> bool {
     program.body.iter().any(|stmt| match class_of(stmt) {
-        Some((class, _)) => has_angular_decorator(class),
+        Some((class, _)) => has_hoistable_angular_decorator(class, import_map, consts),
         None => false,
     })
 }

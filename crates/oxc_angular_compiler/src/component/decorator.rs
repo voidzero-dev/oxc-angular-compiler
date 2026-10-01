@@ -59,19 +59,14 @@ pub fn extract_component_metadata<'a>(
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
-    // Find the @Component decorator
-    let component_decorator = find_component_decorator(&class.decorators)?;
+    // Find Angular's @Component decorator
+    let component_decorator = find_component_decorator(&class.decorators, consts)?;
 
     // Get the decorator call arguments
     let call_expr = match &component_decorator.expression {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
-
-    // Verify it's calling 'Component'
-    if !is_component_call(&call_expr.callee) {
-        return None;
-    }
 
     // Get the first argument (the config object)
     let config_arg = call_expr.arguments.first()?;
@@ -339,33 +334,14 @@ fn populate_declarations_from_imports<'a>(
     }
 }
 
-/// Find the @Component decorator in a list of decorators.
-pub fn find_component_decorator<'a>(decorators: &'a [Decorator<'a>]) -> Option<&'a Decorator<'a>> {
-    decorators.iter().find(|d| match &d.expression {
-        Expression::CallExpression(call) => is_component_call(&call.callee),
-        Expression::Identifier(id) => id.name == "Component",
-        _ => false,
-    })
-}
-
-/// Find the span of the @Component decorator on a class.
-///
-/// Returns the span including any leading whitespace/newlines that should be removed
-/// along with the decorator.
-pub fn find_component_decorator_span(class: &Class<'_>) -> Option<Span> {
-    find_component_decorator(&class.decorators).map(|d| d.span)
-}
-
-/// Check if a callee expression is a call to 'Component'.
-fn is_component_call(callee: &Expression<'_>) -> bool {
-    match callee {
-        Expression::Identifier(id) => id.name == "Component",
-        // Handle namespaced imports like ng.Component or core.Component
-        Expression::StaticMemberExpression(member) => {
-            matches!(&member.property.name.as_str(), &"Component")
-        }
-        _ => false,
-    }
+/// Find Angular's @Component decorator (imported from `@angular/core`, in the
+/// file `consts` was collected from) in a list of decorators: see
+/// [`crate::directive::find_angular_class_decorator`].
+pub fn find_component_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+    consts: &StringConsts<'_>,
+) -> Option<&'a Decorator<'a>> {
+    crate::directive::find_angular_class_decorator(decorators, "Component", consts)
 }
 
 /// Get the name of a property key as a string.
@@ -1253,6 +1229,7 @@ mod tests {
     #[test]
     fn test_extract_selector() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: 'app-test' })
             class TestComponent {}
         "#;
@@ -1264,6 +1241,7 @@ mod tests {
     #[test]
     fn test_extract_selector_with_attribute() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: '[appDirective]' })
             class TestDirective {}
         "#;
@@ -1275,6 +1253,7 @@ mod tests {
     #[test]
     fn test_extract_class_name() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: 'my-component' })
             class MyAwesomeComponent {}
         "#;
@@ -1290,6 +1269,7 @@ mod tests {
     #[test]
     fn test_extract_inline_template() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '<h1>Hello World</h1>'
@@ -1305,6 +1285,7 @@ mod tests {
     #[test]
     fn test_extract_template_url() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 templateUrl: './test.component.html'
@@ -1320,6 +1301,7 @@ mod tests {
     #[test]
     fn test_extract_template_with_backticks() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: `
@@ -1344,6 +1326,7 @@ mod tests {
     #[test]
     fn test_extract_standalone_true() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1359,6 +1342,7 @@ mod tests {
     #[test]
     fn test_extract_standalone_false() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1375,6 +1359,7 @@ mod tests {
     fn test_standalone_defaults_to_implicit_value_true() {
         // When standalone is not specified, it should use the implicit value
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -1392,6 +1377,7 @@ mod tests {
     fn test_standalone_defaults_to_implicit_value_false() {
         // When standalone is not specified, it should use the implicit value
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -1412,6 +1398,7 @@ mod tests {
     #[test]
     fn test_extract_encapsulation_none() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1427,6 +1414,7 @@ mod tests {
     #[test]
     fn test_extract_encapsulation_shadow_dom() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1442,6 +1430,7 @@ mod tests {
     #[test]
     fn test_extract_encapsulation_emulated() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1458,6 +1447,7 @@ mod tests {
     fn test_extract_encapsulation_numeric_none() {
         // Angular uses numeric values: Emulated=0, None=2, ShadowDom=3
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1473,6 +1463,7 @@ mod tests {
     #[test]
     fn test_extract_encapsulation_numeric_shadow_dom() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1488,6 +1479,7 @@ mod tests {
     #[test]
     fn test_encapsulation_defaults_to_emulated() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -1506,6 +1498,7 @@ mod tests {
     #[test]
     fn test_extract_change_detection_on_push() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1523,6 +1516,7 @@ mod tests {
         // `Default` (value 1) is the pre-v22 spelling of `Eager`. It is kept as
         // a distinct variant so partial emit can preserve the author's member.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1539,6 +1533,7 @@ mod tests {
     fn test_extract_change_detection_numeric_eager() {
         // Angular v22 numeric values: OnPush = 0, Eager = 1.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1557,6 +1552,7 @@ mod tests {
         // `None` so the emitter applies the target version's default (OnPush in
         // v22+, Default/Eager before).
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -1575,6 +1571,7 @@ mod tests {
     #[test]
     fn test_extract_styles_array() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1593,6 +1590,7 @@ mod tests {
     fn test_extract_styles_single_string() {
         // Legacy support: styles can be a single string
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1609,6 +1607,7 @@ mod tests {
     #[test]
     fn test_extract_style_urls() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1627,6 +1626,7 @@ mod tests {
     fn test_extract_style_url_single() {
         // styleUrl (singular) support
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1647,6 +1647,7 @@ mod tests {
     #[test]
     fn test_extract_host_properties() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1666,6 +1667,7 @@ mod tests {
     #[test]
     fn test_extract_host_listeners() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1685,6 +1687,7 @@ mod tests {
     #[test]
     fn test_extract_host_static_attributes() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1704,6 +1707,7 @@ mod tests {
     #[test]
     fn test_extract_host_class_attr() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1722,6 +1726,7 @@ mod tests {
     #[test]
     fn test_extract_host_style_attr() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1744,6 +1749,7 @@ mod tests {
     #[test]
     fn test_extract_imports() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1766,6 +1772,7 @@ mod tests {
     #[test]
     fn test_extract_export_as() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1782,6 +1789,7 @@ mod tests {
     #[test]
     fn test_extract_export_as_multiple() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1800,6 +1808,7 @@ mod tests {
     #[test]
     fn test_extract_preserve_whitespaces_true() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1815,6 +1824,7 @@ mod tests {
     #[test]
     fn test_extract_preserve_whitespaces_false() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1830,6 +1840,7 @@ mod tests {
     #[test]
     fn test_preserve_whitespaces_defaults_to_false() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -1844,6 +1855,7 @@ mod tests {
     #[test]
     fn test_extract_schemas() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1883,6 +1895,7 @@ mod tests {
     #[test]
     fn test_empty_component_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({})
             class TestComponent {}
         "#;
@@ -1896,6 +1909,7 @@ mod tests {
     #[test]
     fn test_exported_class() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: 'app-test', template: '' })
             export class TestComponent {}
         "#;
@@ -1907,6 +1921,7 @@ mod tests {
     #[test]
     fn test_export_default_class() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: 'app-test', template: '' })
             export default class TestComponent {}
         "#;
@@ -1919,6 +1934,7 @@ mod tests {
     fn test_namespaced_component_decorator() {
         // Handle ng.Component or core.Component
         let code = r#"
+            import * as ng from '@angular/core';
             @ng.Component({ selector: 'app-test', template: '' })
             class TestComponent {}
         "#;
@@ -1930,6 +1946,7 @@ mod tests {
     #[test]
     fn test_full_component_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-complete',
                 template: '<div>{{title}}</div>',
@@ -1976,6 +1993,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_simple() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -1995,6 +2013,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_multiple() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2013,6 +2032,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_object_form() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2031,6 +2051,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_with_input_mappings() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2056,6 +2077,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_with_output_mappings() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2079,6 +2101,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_with_input_output_mappings() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2102,6 +2125,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_same_name_mapping() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2126,6 +2150,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_tuple_array_mapping() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2150,6 +2175,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_forward_ref() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2167,6 +2193,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_forward_ref_in_object() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2190,6 +2217,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_empty() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2205,6 +2233,7 @@ mod tests {
     #[test]
     fn test_extract_host_directives_mixed() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2236,6 +2265,7 @@ mod tests {
     fn test_extract_host_directives_source_module_from_import() {
         // Test that host directive source_module is populated from imports
         let code = r#"
+            import {Component} from '@angular/core';
             import { AriaDisableDirective } from "../a11y/aria-disable.directive";
             import { FocusDirective, HighlightDirective } from "@angular/cdk/a11y";
 
@@ -2269,6 +2299,7 @@ mod tests {
     fn test_extract_host_directives_source_module_object_form() {
         // Test that source_module is populated in object form
         let code = r#"
+            import {Component} from '@angular/core';
             import { ColorDirective } from "./directives/color";
 
             @Component({
@@ -2294,6 +2325,7 @@ mod tests {
     fn test_extract_host_directives_no_source_module_for_local() {
         // Test that local directives (not imported) have no source_module
         let code = r#"
+            import {Component, Directive} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2316,6 +2348,7 @@ mod tests {
     fn test_extract_host_directives_mixed_imported_and_local() {
         // Test mixed imported and local directives
         let code = r#"
+            import {Component} from '@angular/core';
             import { ImportedDirective } from "@angular/library";
 
             @Component({
@@ -2528,6 +2561,7 @@ mod tests {
     #[test]
     fn test_no_host_decorators() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2553,6 +2587,7 @@ mod tests {
         // -> should use simple factory (Some with empty deps)
         // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2574,6 +2609,7 @@ mod tests {
         // -> should use inherited factory (None)
         // See: packages/compiler-cli/src/ngtsc/annotations/common/src/di.ts:47-52
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2590,6 +2626,7 @@ mod tests {
     #[test]
     fn test_component_with_simple_constructor_deps() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-root',
                 template: '<div></div>'
@@ -2624,6 +2661,7 @@ mod tests {
     #[test]
     fn test_component_with_inject_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2654,6 +2692,7 @@ mod tests {
     #[test]
     fn test_component_with_optional_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2683,6 +2722,7 @@ mod tests {
         // Angular's reference compiler filters out `null` literal type nodes from
         // the union; when exactly one type remains it becomes the token.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2712,6 +2752,7 @@ mod tests {
         // token resolved to `MyService`. Token resolution is independent of
         // optionality — `@Optional()` only controls the inject flag.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2738,6 +2779,7 @@ mod tests {
     fn test_component_nullable_type_null_first() {
         // `null` can appear in either position of the union — both must be filtered.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2762,6 +2804,7 @@ mod tests {
         // unwrap it before checking for unions, or the dependency falls through
         // to `ɵɵinvalidFactoryDep` (issue #285 follow-up).
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2786,6 +2829,7 @@ mod tests {
     fn test_component_paren_around_inner_type_in_union() {
         // Parens around just the non-null side: `(MyService) | null`.
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2806,6 +2850,7 @@ mod tests {
     #[test]
     fn test_component_with_skip_self_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2830,6 +2875,7 @@ mod tests {
     #[test]
     fn test_component_with_self_and_host_decorators() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2858,6 +2904,7 @@ mod tests {
     #[test]
     fn test_component_with_combined_decorators() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2881,6 +2928,7 @@ mod tests {
     #[test]
     fn test_component_with_attribute_decorator() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2909,6 +2957,7 @@ mod tests {
         use super::super::metadata::DeclarationListEmitMode;
 
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2928,6 +2977,7 @@ mod tests {
         use super::super::metadata::DeclarationListEmitMode;
 
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: '',
@@ -2948,6 +2998,7 @@ mod tests {
 
         // When implicit_standalone=false (Angular v18 and earlier behavior)
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2968,6 +3019,7 @@ mod tests {
 
         // When implicit_standalone=true (Angular v19+ behavior)
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -2987,6 +3039,7 @@ mod tests {
         use super::super::metadata::DeclarationListEmitMode;
 
         let code = r#"
+            import {Component} from '@angular/core';
             import { AsyncPipe, DatePipe } from '@angular/common';
 
             @Component({
@@ -3011,6 +3064,7 @@ mod tests {
         use super::super::metadata::DeclarationListEmitMode;
 
         let code = r#"
+            import {Component} from '@angular/core';
             const MY_IMPORTS = [AsyncPipe, DatePipe];
 
             @Component({
@@ -3038,6 +3092,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_from_named_import() {
         // Test that token_source_module is populated from named imports
         let code = r#"
+            import {Component} from '@angular/core';
             import { AuthService } from "@bitwarden/common/auth/abstractions/auth.service";
 
             @Component({
@@ -3064,6 +3119,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_multiple_imports() {
         // Test that multiple imports from the same module are tracked correctly
         let code = r#"
+            import {Component} from '@angular/core';
             import { ServiceA, ServiceB } from "./services";
             import { Router } from "@angular/router";
 
@@ -3101,6 +3157,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_with_inject_decorator() {
         // Test that @Inject token source module is tracked from import
         let code = r#"
+            import {Component} from '@angular/core';
             import { WINDOW } from "@bitwarden/common";
 
             @Component({
@@ -3126,6 +3183,7 @@ mod tests {
     fn test_constructor_dep_no_source_module_for_local_class() {
         // Test that local classes (not imported) have no token_source_module
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3150,6 +3208,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_with_alias() {
         // Test that aliased imports use the local name as key
         let code = r#"
+            import {Component} from '@angular/core';
             import { AuthService as Auth } from "@bitwarden/common/auth";
 
             @Component({
@@ -3178,6 +3237,7 @@ mod tests {
     fn test_constructor_dep_token_source_module_default_import() {
         // Test that default imports are tracked
         let code = r#"
+            import {Component} from '@angular/core';
             import DefaultService from "@bitwarden/common/default";
 
             @Component({
@@ -3422,6 +3482,7 @@ mod tests {
     #[test]
     fn test_lifecycle_ng_on_changes_detected() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3443,6 +3504,7 @@ mod tests {
     #[test]
     fn test_lifecycle_ng_on_changes_not_detected_without_method() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3464,6 +3526,7 @@ mod tests {
     #[test]
     fn test_lifecycle_ng_on_changes_not_detected_for_static_method() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''
@@ -3485,6 +3548,7 @@ mod tests {
     #[test]
     fn test_lifecycle_ng_on_changes_async_method() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({
                 selector: 'app-test',
                 template: ''

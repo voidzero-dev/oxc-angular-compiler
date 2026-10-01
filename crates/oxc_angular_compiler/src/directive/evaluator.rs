@@ -3393,7 +3393,7 @@ pub fn input_transform_types<'a>(
             None => transforms.push((name, transform)),
         }
     };
-    if let Some((Some(config), _)) = super::angular_decorator_config(class)
+    if let Some((Some(config), _)) = super::angular_decorator_config(class, consts)
         && let Some(inputs) = super::decorator::config_property(config, "inputs", consts)
         && let Value::Array(items) = evaluator.evaluate(inputs)
     {

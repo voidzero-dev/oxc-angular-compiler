@@ -24,10 +24,17 @@ use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
 
-/// Find the @Directive decorator in a list of decorators.
+/// Find the @Directive decorator in a list of decorators. With the file's
+/// `consts`, only Angular's (imported from `@angular/core`, see
+/// [`super::find_angular_class_decorator`]); without them (the public
+/// [`find_directive_decorator_span`]), any named `Directive`.
 pub(crate) fn find_directive_decorator<'a>(
     decorators: &'a [Decorator<'a>],
+    consts: Option<&StringConsts<'_>>,
 ) -> Option<&'a Decorator<'a>> {
+    if let Some(consts) = consts {
+        return super::find_angular_class_decorator(decorators, "Directive", consts);
+    }
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_directive_call(&call.callee),
         Expression::Identifier(id) => id.name == "Directive",
@@ -43,8 +50,11 @@ pub(crate) fn find_directive_decorator<'a>(
 /// This is necessary because Angular's JIT runtime will process any remaining
 /// decorators and create conflicting property definitions (like `ɵfac` getters)
 /// that interfere with the AOT-compiled assignments.
+///
+/// Without the file's imports, this matches any decorator named `Directive`;
+/// the compiler only takes one imported from `@angular/core`.
 pub fn find_directive_decorator_span(class: &Class<'_>) -> Option<Span> {
-    find_directive_decorator(&class.decorators).map(|d| d.span)
+    find_directive_decorator(&class.decorators, None).map(|d| d.span)
 }
 
 /// Check if a callee expression is a call to 'Directive'.
@@ -92,19 +102,14 @@ pub fn extract_directive_metadata<'a>(
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
 
-    // Find the @Directive decorator
-    let directive_decorator = find_directive_decorator(&class.decorators)?;
+    // Find Angular's @Directive decorator
+    let directive_decorator = find_directive_decorator(&class.decorators, Some(consts))?;
 
     // Get the decorator call arguments
     let call_expr = match &directive_decorator.expression {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
-
-    // Verify it's calling 'Directive'
-    if !is_directive_call(&call_expr.callee) {
-        return None;
-    }
 
     // Create builder with defaults
     let mut builder = R3DirectiveMetadataBuilder::new(allocator)
@@ -1016,14 +1021,18 @@ fn upsert_input<'a>(inputs: &mut Vec<'a, R3InputMetadata<'a>>, input: R3InputMet
     upsert_meta(inputs, input, |i| i.class_property_name.as_str());
 }
 
-/// The `@Component` / `@Directive` decorator on `class`, its metadata object
-/// (if any) and its name.
+/// Angular's `@Component` / `@Directive` decorator on `class` (imported from
+/// `@angular/core`, in the file `consts` was collected from), its metadata
+/// object (if any) and its name.
 pub(crate) fn angular_decorator_config<'a>(
     class: &'a Class<'a>,
+    consts: &StringConsts<'_>,
 ) -> Option<(Option<&'a ObjectExpression<'a>>, &'static str)> {
-    let (decorator, name) = crate::component::find_component_decorator(&class.decorators)
+    let (decorator, name) = crate::component::find_component_decorator(&class.decorators, consts)
         .map(|d| (d, "Component"))
-        .or_else(|| find_directive_decorator(&class.decorators).map(|d| (d, "Directive")))?;
+        .or_else(|| {
+            find_directive_decorator(&class.decorators, Some(consts)).map(|d| (d, "Directive"))
+        })?;
     let config = match &decorator.expression {
         Expression::CallExpression(call) => match call.arguments.first() {
             Some(Argument::ObjectExpression(config)) => Some(&**config),
@@ -1049,7 +1058,7 @@ pub fn decorator_io_errors<'a>(
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
 ) -> std::vec::Vec<OxcDiagnostic> {
-    let Some((config, decorator_name)) = angular_decorator_config(class) else {
+    let Some((config, decorator_name)) = angular_decorator_config(class, consts) else {
         return std::vec::Vec::new();
     };
     let io = config.map(|config| parse_decorator_io(allocator, config, class, source_text, consts));
@@ -1819,6 +1828,7 @@ mod tests {
     #[test]
     fn test_extract_directive_selector() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appHighlight]' })
             class HighlightDirective {}
         "#;
@@ -1831,6 +1841,7 @@ mod tests {
     #[test]
     fn test_extract_directive_standalone_true() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 standalone: true
@@ -1845,6 +1856,7 @@ mod tests {
     #[test]
     fn test_extract_directive_standalone_false() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 standalone: false
@@ -1859,6 +1871,7 @@ mod tests {
     #[test]
     fn test_extract_directive_standalone_defaults_to_implicit() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {}
         "#;
@@ -1875,6 +1888,7 @@ mod tests {
     #[test]
     fn test_extract_directive_export_as() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 exportAs: 'testDir'
@@ -1890,6 +1904,7 @@ mod tests {
     #[test]
     fn test_extract_directive_export_as_multiple() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 exportAs: 'foo, bar, baz'
@@ -1907,6 +1922,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_property_bindings() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -1924,6 +1940,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_listeners() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -1941,6 +1958,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_static_attributes() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -1961,6 +1979,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_computed_key_identifier() {
         let code = r#"
+            import {Directive} from '@angular/core';
             const ATTR = 'data-foo';
             @Directive({ selector: '[d]', host: { [ATTR]: '' } })
             class D {}
@@ -1974,6 +1993,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_value_identifier() {
         let code = r#"
+            import {Directive} from '@angular/core';
             const VAL = 'submit';
             @Directive({ selector: '[d]', host: { type: VAL } })
             class D {}
@@ -1987,6 +2007,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_template_literal_const() {
         let code = r#"
+            import {Directive} from '@angular/core';
             const ATTR = `data-foo`;
             @Directive({ selector: '[d]', host: { [ATTR]: '' } })
             class D {}
@@ -2001,6 +2022,7 @@ mod tests {
     fn test_extract_directive_host_unknown_identifier_dropped() {
         // Unresolved identifier (no matching const) is still dropped — current behavior.
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[d]', host: { [UNKNOWN]: '' } })
             class D {}
         "#;
@@ -2013,6 +2035,7 @@ mod tests {
     fn test_extract_directive_host_exported_const_identifier() {
         // `export const` (not just `const`) in the same file must also be resolved.
         let code = r#"
+            import {Directive} from '@angular/core';
             export const MARKER_ATTR = 'data-marker';
             @Directive({
                 selector: '[marker]',
@@ -2029,6 +2052,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_class_attr() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -2045,6 +2069,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_style_attr() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 host: {
@@ -2064,6 +2089,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_directives_simple() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 hostDirectives: [TooltipDirective]
@@ -2079,6 +2105,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_directives_with_mappings() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 hostDirectives: [
@@ -2104,6 +2131,7 @@ mod tests {
     #[test]
     fn test_extract_directive_host_directives_forward_ref() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({
                 selector: '[appTest]',
                 hostDirectives: [forwardRef(() => MyDirective)]
@@ -2221,6 +2249,7 @@ mod tests {
     #[test]
     fn test_extract_directive_component_decorator_does_not_match() {
         let code = r#"
+            import {Component} from '@angular/core';
             @Component({ selector: 'app-test', template: '' })
             class TestComponent {}
         "#;
@@ -2242,6 +2271,7 @@ mod tests {
     fn test_empty_directive_decorator() {
         // @Directive({}) - explicit empty config object
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({})
             class TestDirective {}
         "#;
@@ -2256,6 +2286,7 @@ mod tests {
         // @Directive() - no config argument at all
         // This is common for abstract base directive classes
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive()
             class TestDirective {}
         "#;
@@ -2268,6 +2299,7 @@ mod tests {
     #[test]
     fn test_exported_directive() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             export class TestDirective {}
         "#;
@@ -2279,6 +2311,7 @@ mod tests {
     #[test]
     fn test_export_default_directive() {
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             export default class TestDirective {}
         "#;
@@ -2290,6 +2323,7 @@ mod tests {
     #[test]
     fn test_namespaced_directive_decorator() {
         let code = r#"
+            import * as ng from '@angular/core';
             @ng.Directive({ selector: '[appTest]' })
             class TestDirective {}
         "#;
@@ -2341,6 +2375,7 @@ mod tests {
         // A directive that does NOT extend any base class
         // should have uses_inheritance = false
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appTest]' })
             class TestDirective {}
         "#;
@@ -2354,6 +2389,7 @@ mod tests {
         // A directive that extends a base class
         // should have uses_inheritance = true
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[appChild]' })
             class ChildDirective extends BaseDirective {}
         "#;
@@ -2367,6 +2403,7 @@ mod tests {
         // Regression test for issue #285:
         // `@Optional() svc: MyService | null` must resolve the token to `MyService`.
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[myDir]' })
             class MyDirective {
                 constructor(@Optional() private svc: MyService | null) {}
@@ -2397,6 +2434,7 @@ mod tests {
         // The fix: Changed extract_param_token to return ReadVar(TypeName)
         // matching the pattern used by injectable, pipe, and ng_module extractors.
         let code = r#"
+            import {Directive} from '@angular/core';
             @Directive({ selector: '[myDir]' })
             class MyDirective {
                 constructor(private store: Store, private svc: SomeService) {}

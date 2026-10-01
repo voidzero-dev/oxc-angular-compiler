@@ -1251,7 +1251,7 @@ pub fn extract_pipe_metadata_sync(
     pipe_name: String,
     implicit_standalone: Option<bool>,
 ) -> Option<ExtractedPipeMetadata> {
-    use oxc_angular_compiler::extract_pipe_metadata;
+    use oxc_angular_compiler::{collect_string_consts, extract_pipe_metadata_in};
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
     use oxc_span::SourceType;
@@ -1262,6 +1262,8 @@ pub fn extract_pipe_metadata_sync(
 
     let parser_ret = Parser::new(&allocator, &source, source_type).parse();
     let program = &parser_ret.program;
+    // Only Angular's `@Pipe` (imported from `@angular/core`) counts, as when compiling.
+    let string_consts = collect_string_consts(&allocator, program);
 
     // Find the pipe class by name
     for stmt in &program.body {
@@ -1288,9 +1290,13 @@ pub fn extract_pipe_metadata_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) =
-                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
-            {
+            if let Some(metadata) = extract_pipe_metadata_in(
+                &allocator,
+                class,
+                implicit_standalone,
+                Some(&source),
+                Some(&string_consts),
+            ) {
                 return Some(ExtractedPipeMetadata {
                     class_name: metadata.class_name.to_string(),
                     span_start: metadata.class_span.start,
@@ -1328,7 +1334,9 @@ pub fn compile_pipe_sync(
     implicit_standalone: Option<bool>,
 ) -> PipeCompileResult {
     use oxc_angular_compiler::output::emitter::JsEmitter;
-    use oxc_angular_compiler::{R3PipeMetadataBuilder, compile_pipe, extract_pipe_metadata};
+    use oxc_angular_compiler::{
+        R3PipeMetadataBuilder, collect_string_consts, compile_pipe, extract_pipe_metadata_in,
+    };
     use oxc_ast::ast::{Declaration, ExportDefaultDeclarationKind, Statement};
     use oxc_parser::Parser;
     use oxc_span::SourceType;
@@ -1340,6 +1348,8 @@ pub fn compile_pipe_sync(
 
     let parser_ret = Parser::new(&allocator, &source, source_type).parse();
     let program = &parser_ret.program;
+    // Only Angular's `@Pipe` (imported from `@angular/core`) counts, as when compiling.
+    let string_consts = collect_string_consts(&allocator, program);
 
     // Find the pipe class by name
     for stmt in &program.body {
@@ -1366,9 +1376,13 @@ pub fn compile_pipe_sync(
             }
 
             // Extract metadata from @Pipe decorator
-            if let Some(metadata) =
-                extract_pipe_metadata(&allocator, class, implicit_standalone, Some(&source))
-            {
+            if let Some(metadata) = extract_pipe_metadata_in(
+                &allocator,
+                class,
+                implicit_standalone,
+                Some(&source),
+                Some(&string_consts),
+            ) {
                 // Create type expression for the pipe class
                 use oxc_allocator::Box;
                 use oxc_angular_compiler::output::ast::{OutputExpression, ReadVarExpr};
@@ -2032,8 +2046,12 @@ pub fn compile_class_metadata_sync(
         };
     };
 
-    // Find the target decorator on the class
-    let target_decorator = find_angular_decorator(&class.decorators, &decorator_type);
+    // Find the target decorator on the class. Like the compiler, only Angular's
+    // counts (imported from `@angular/core`), and signal members get a synthetic
+    // decorator only when they call Angular's `input()`, `viewChild()`, ...
+    let string_consts = oxc_angular_compiler::collect_string_consts(&allocator, program);
+    let target_decorator =
+        find_angular_decorator(&class.decorators, &decorator_type, &string_consts);
 
     let Some(decorator) = target_decorator else {
         return ClassMetadataNapiCompileResult {
@@ -2076,10 +2094,7 @@ pub fn compile_class_metadata_sync(
         Some(&source),
     );
 
-    // Build property decorators metadata. Signal members get a synthetic
-    // decorator only when they call Angular's `input()`, `viewChild()`, ...,
-    // which the file's imports tell.
-    let string_consts = oxc_angular_compiler::collect_string_consts(&allocator, program);
+    // Build property decorators metadata.
     let prop_decorators_expr = core_build_prop_decorators_metadata(
         &allocator,
         class,
@@ -2147,23 +2162,34 @@ pub fn compile_class_metadata(
     AsyncTask::new(CompileClassMetadataTask { source, file_path, class_name, decorator_type })
 }
 
-/// Find an Angular decorator by name on a class.
+/// Find the Angular decorator `decorator_name` on a class. `Component`,
+/// `Directive`, `Pipe`, `Injectable` and `NgModule` count only when imported from
+/// `@angular/core` (under any alias, or through a namespace import), like the
+/// compiler; any other name (`Service`) is matched by name.
 fn find_angular_decorator<'a>(
     decorators: &'a [oxc_ast::ast::Decorator<'a>],
     decorator_name: &str,
+    string_consts: &oxc_angular_compiler::StringConsts<'_>,
 ) -> Option<&'a oxc_ast::ast::Decorator<'a>> {
+    if matches!(decorator_name, "Component" | "Directive" | "Pipe" | "Injectable" | "NgModule") {
+        return oxc_angular_compiler::find_angular_class_decorator(
+            decorators,
+            decorator_name,
+            string_consts,
+        );
+    }
     decorators.iter().find(|d| {
         match &d.expression {
             oxc_ast::ast::Expression::CallExpression(call) => match &call.callee {
-                // Direct call: @Component()
+                // Direct call: @Service()
                 oxc_ast::ast::Expression::Identifier(id) => id.name == decorator_name,
-                // Namespaced: @ng.Component() or @core.Component()
+                // Namespaced: @ng.Service() or @core.Service()
                 oxc_ast::ast::Expression::StaticMemberExpression(member) => {
                     member.property.name == decorator_name
                 }
                 _ => false,
             },
-            // Decorator without call: @Component (rare, usually invalid)
+            // Decorator without call: @Service (rare, usually invalid)
             oxc_ast::ast::Expression::Identifier(id) => id.name == decorator_name,
             _ => false,
         }

@@ -1,0 +1,520 @@
+{
+  "compilerCli": "22.1.7",
+  "fixtures": [
+    {
+      "name": "named",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "alias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component as Cmp} from '@angular/core';\n@Cmp({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Cmp"]
+    },
+    {
+      "name": "namespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["ng.Component"]
+    },
+    {
+      "name": "importType",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import type {Component} from '@angular/core';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "typeSpecifier",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {type Component} from '@angular/core';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "foreignPkg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from 'foreign-lib';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "node_modules/foreign-lib/package.json": "{\"name\":\"foreign-lib\",\"types\":\"index.d.ts\",\"main\":\"index.js\"}",
+        "node_modules/foreign-lib/index.d.ts": "export declare function Component(o?: any): ClassDecorator;\nexport declare function Injectable(o?: any): ClassDecorator;\n",
+        "node_modules/foreign-lib/index.js": "export function Component(){return c=>c}\nexport function Injectable(){return c=>c}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "foreignRel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './foreign';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "barrel",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './shared';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "shared.ts": "export {Component, Directive, Injectable} from '@angular/core';\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "localFn",
+      "origin": "probe",
+      "files": {
+        "test.ts": "function Component(o: any): ClassDecorator { return (c: any) => c; }\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "localConst",
+      "origin": "probe",
+      "files": {
+        "test.ts": "const Component = (o: any) => (c: any) => c;\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "undeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "defaultImport",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import Component from './foreign';\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "foreignNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as other from './foreign';\n@other.Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["other.Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "undeclaredNamespace",
+      "origin": "probe",
+      "files": {
+        "test.ts": "@ng.Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["ng.Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "ngPlusForeignFoo",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {Foo} from './foreign';\n@Foo()\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": ["Foo"],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "ngCmpForeignDir",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {Directive} from './foreign';\n@Directive({selector: '[x]'})\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": ["Directive"],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "foreignCmpNgDir",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\nimport {Component} from './foreign';\n@Component({selector: 'a-c', template: ''})\n@Directive({selector: '[x]'})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵdir", "ɵfac"],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": ["Directive"]
+    },
+    {
+      "name": "abstractDir",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from '@angular/core';\n@Directive()\nexport abstract class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵdir", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Directive"]
+    },
+    {
+      "name": "dirAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive as D, Input} from '@angular/core';\n@D({selector: '[d]'})\nexport class A { @Input() x: any; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵdir", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["D"]
+    },
+    {
+      "name": "injectable",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Injectable} from '@angular/core';\n@Injectable({providedIn: 'root'})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵprov"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Injectable"]
+    },
+    {
+      "name": "injectableAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Injectable as Inj} from '@angular/core';\n@Inj({providedIn: 'root'})\nexport class A {}\n"
+      },
+      "skip": "ngtsc only gives an aliased `@Injectable` a factory when its local name is `Injectable` (`needsFactory` reads `decorator.name`), so `ɵprov` references a missing `A.ɵfac`; oxc emits the factory",
+      "diagnostics": [],
+      "definitions": ["ɵprov"],
+      "decoratorsLeft": [],
+      "classMetadata": null
+    },
+    {
+      "name": "injectableNs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import * as ng from '@angular/core';\n@ng.Injectable({providedIn: 'root'})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵprov"],
+      "decoratorsLeft": [],
+      "classMetadata": ["ng.Injectable"]
+    },
+    {
+      "name": "injectableForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Injectable} from 'foreign-lib';\n@Injectable({providedIn: 'root'})\nexport class A {}\n",
+        "node_modules/foreign-lib/package.json": "{\"name\":\"foreign-lib\",\"types\":\"index.d.ts\",\"main\":\"index.js\"}",
+        "node_modules/foreign-lib/index.d.ts": "export declare function Component(o?: any): ClassDecorator;\nexport declare function Injectable(o?: any): ClassDecorator;\n",
+        "node_modules/foreign-lib/index.js": "export function Component(){return c=>c}\nexport function Injectable(){return c=>c}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Injectable"],
+      "classMetadata": null
+    },
+    {
+      "name": "injectableUndeclared",
+      "origin": "probe",
+      "files": {
+        "test.ts": "@Injectable({providedIn: 'root'})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Injectable"],
+      "classMetadata": null
+    },
+    {
+      "name": "ngModule",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {NgModule} from '@angular/core';\n@NgModule({})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵinj", "ɵmod"],
+      "decoratorsLeft": [],
+      "classMetadata": ["NgModule"]
+    },
+    {
+      "name": "ngModuleAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {NgModule as M} from '@angular/core';\n@M({})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵinj", "ɵmod"],
+      "decoratorsLeft": [],
+      "classMetadata": ["M"]
+    },
+    {
+      "name": "ngModuleForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {NgModule} from './foreign';\n@NgModule({})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["NgModule"],
+      "classMetadata": null
+    },
+    {
+      "name": "pipe",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Pipe} from '@angular/core';\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; } }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵpipe"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Pipe"]
+    },
+    {
+      "name": "pipeAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Pipe as P} from '@angular/core';\n@P({name: 'p'})\nexport class A { transform(v: any) { return v; } }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵfac", "ɵpipe"],
+      "decoratorsLeft": [],
+      "classMetadata": ["P"]
+    },
+    {
+      "name": "pipeForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Pipe} from './foreign';\n@Pipe({name: 'p'})\nexport class A { transform(v: any) { return v; } }\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Pipe"],
+      "classMetadata": null
+    },
+    {
+      "name": "dirForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Directive} from './foreign';\n@Directive({selector: '[d]'})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Directive"],
+      "classMetadata": null
+    },
+    {
+      "name": "cmpNgInjForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\nimport {Injectable} from './foreign';\n@Injectable()\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": ["Injectable"],
+      "classMetadata": ["Component"]
+    },
+    {
+      "name": "cmpNgInjNg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component, Injectable} from '@angular/core';\n@Injectable()\n@Component({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac", "ɵprov"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Injectable", "Component"]
+    },
+    {
+      "name": "foreignBadInputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './foreign';\n@Component({selector: 'a-c', template: '', inputs: [5 as any]})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "ngBadInputs",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\n@Component({selector: 'a-c', template: '', inputs: [5 as any]})\nexport class A {}\n"
+      },
+      "diagnostics": [
+        "@Directive.inputs array can only contain strings or object literals Value is of type 'number'."
+      ],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "foreignCmpNgInput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Input} from '@angular/core';\nimport {Component} from './foreign';\n@Component({selector: 'a-c', template: ''})\nexport class A { @Input() x: any; }\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component", "Input"],
+      "classMetadata": null
+    },
+    {
+      "name": "foreignCmpSignalInput",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {input} from '@angular/core';\nimport {Component} from './foreign';\n@Component({selector: 'a-c', template: ''})\nexport class A { x = input(0); }\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "skip": "pre-existing: oxc doesn't implement ngtsc's check for `input()` outside a @Component / @Directive class",
+      "diagnostics": [
+        "Unsupported call to the input function. This function can only be used as the initializer of a property on a @Component or @Directive class."
+      ],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "foreignCmpBadTemplate",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './foreign';\n@Component({selector: 'a-c', template: '<div [x]=\"\"></div>{{ }}'})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "bothImportsNsNg",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './foreign';\nimport * as ng from '@angular/core';\n@ng.Component({selector: 'a-c', template: ''})\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["ng.Component"]
+    },
+    {
+      "name": "defaultExportAlias",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component as Cmp} from '@angular/core';\n@Cmp({selector: 'a-c', template: ''})\nexport default class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Cmp"]
+    },
+    {
+      "name": "aliasNotDecoratorName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Injectable as Component} from '@angular/core';\n@Component({providedIn: 'root'})\nexport class A {}\n"
+      },
+      "skip": "like `injectableAlias`: ngtsc gives `@Component` (`Injectable` imported under that name) no factory; oxc compiles it as an `@Injectable` with one",
+      "diagnostics": [],
+      "definitions": ["ɵprov"],
+      "decoratorsLeft": [],
+      "classMetadata": null
+    },
+    {
+      "name": "stringImportName",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {'Component' as Cmp} from '@angular/core';\n@Cmp({selector: 'a-c', template: ''})\nexport class A {}\n"
+      },
+      "diagnostics": [],
+      "definitions": ["ɵcmp", "ɵfac"],
+      "decoratorsLeft": [],
+      "classMetadata": ["Cmp"]
+    },
+    {
+      "name": "noCall",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from '@angular/core';\n@Component\nexport class A {}\n"
+      },
+      "skip": "pre-existing: oxc doesn't report ngtsc's \"@Component is missing a template\" for a bare `@Component`",
+      "diagnostics": ["@Component is missing a template. Add either a `template` or `templateUrl`"],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    },
+    {
+      "name": "noCallForeign",
+      "origin": "probe",
+      "files": {
+        "test.ts": "import {Component} from './foreign';\n@Component\nexport class A {}\n",
+        "foreign.ts": "export function Component(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Directive(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Pipe(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Injectable(o?: any): ClassDecorator { return (c: any) => c; }\nexport function NgModule(o?: any): ClassDecorator { return (c: any) => c; }\nexport function Foo(o?: any): ClassDecorator { return (c: any) => c; }\nexport default function Dflt(o?: any): ClassDecorator { return (c: any) => c; }\n"
+      },
+      "diagnostics": [],
+      "definitions": [],
+      "decoratorsLeft": ["Component"],
+      "classMetadata": null
+    }
+  ]
+}

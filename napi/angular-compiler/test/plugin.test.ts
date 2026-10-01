@@ -198,3 +198,45 @@ describe('@oxc-angular/vite auto component style minification', () => {
     expect(code).toContain('.container[_ngcontent-%COMP%] { color: red; background: transparent; }')
   })
 })
+
+describe('@oxc-angular/vite decorator pre-check', () => {
+  // The compiler takes a class decorator imported from `@angular/core` under
+  // any name, so the quick text check that skips files without Angular
+  // decorators must not skip `@Cmp(...)` or `@ng.Component(...)`.
+  async function transform(source: string): Promise<string | undefined> {
+    const plugin = getAngularPlugin()
+    if (!plugin.transform || typeof plugin.transform === 'function') {
+      throw new Error('Expected plugin transform handler')
+    }
+    const result = await plugin.transform.handler.call(
+      {
+        error(message: string) {
+          throw new Error(message)
+        },
+        warn() {},
+      } as any,
+      source,
+      'app.component.ts',
+    )
+    return result && typeof result === 'object' && 'code' in result
+      ? (result.code as string)
+      : undefined
+  }
+
+  it.each([
+    [
+      'an aliased import',
+      `import { Component as Cmp } from '@angular/core';
+@Cmp({ selector: 'app-root', template: '' })
+export class AppComponent {}`,
+    ],
+    [
+      'a namespace import',
+      `import * as ng from '@angular/core';
+@ng.Component({ selector: 'app-root', template: '' })
+export class AppComponent {}`,
+    ],
+  ])('compiles a component decorated through %s', async (_, source) => {
+    expect(await transform(source)).toContain('ɵɵdefineComponent')
+  })
+})

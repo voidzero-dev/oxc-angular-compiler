@@ -881,3 +881,38 @@ export class StyledComponent {}
         "Error should carry the code and the resource. Got: {rendered}"
     );
 }
+
+/// An aliased `@Component` (`import { Component as Cmp }`) is compiled, but
+/// like ngtsc (`transformDecoratorResources` checks `dec.name`, the name it's
+/// written with) its `setClassMetadata` keeps `templateUrl` / `styleUrls`. A
+/// namespaced `@ng.Component` is named `Component`, so its resources are
+/// inlined. Checked against `@angular/compiler-cli` 22.1.7.
+#[test]
+fn only_a_decorator_written_as_component_gets_its_resources_inlined() {
+    let resources = || ResolvedResources {
+        templates: HashMap::from([("a.html".to_string(), "<b>hi</b>".to_string())]),
+        styles: HashMap::from([("a.css".to_string(), vec!["b{color:red}".to_string()])]),
+    };
+    let source = |import: &str, decorator: &str| {
+        format!(
+            "{import}\n@{decorator}({{selector: 'a-c', templateUrl: 'a.html', styleUrls: ['a.css']}})\nexport class A {{}}\n"
+        )
+    };
+
+    let aliased = extract_metadata_args(&run_with_resources(
+        &source("import { Component as Cmp } from '@angular/core';", "Cmp"),
+        resources(),
+    ));
+    assert!(aliased.contains("type:Cmp"), "{aliased}");
+    assert!(aliased.contains("templateUrl:\"a.html\""), "{aliased}");
+    assert!(aliased.contains("styleUrls:[\"a.css\"]"), "{aliased}");
+
+    let namespaced = extract_metadata_args(&run_with_resources(
+        &source("import * as ng from '@angular/core';", "ng.Component"),
+        resources(),
+    ));
+    assert!(namespaced.contains("type:ng.Component"), "{namespaced}");
+    assert!(namespaced.contains("template:\"<b>hi</b>\""), "{namespaced}");
+    assert!(namespaced.contains("styles:[\"b{color:red}\"]"), "{namespaced}");
+    assert!(!namespaced.contains("templateUrl"), "{namespaced}");
+}

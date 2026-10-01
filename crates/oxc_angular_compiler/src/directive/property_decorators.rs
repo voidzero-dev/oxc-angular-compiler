@@ -52,16 +52,21 @@ const MEMBER_DECORATORS: &[&str] = &[
     "ContentChildren",
 ];
 
-/// Which of Angular's member decorators ([`MEMBER_DECORATORS`]) `decorator`
-/// is: `@Input`, `@Input()`, ... With the file `consts` was collected from,
-/// only one imported from `@angular/core`, like ngtsc: by name under any alias
+/// Angular's class decorators, which make a class compiled. (`@Service` is
+/// matched on its own, see `find_angular_service_decorator`.)
+const CLASS_DECORATORS: &[&str] = &["Component", "Directive", "Pipe", "Injectable", "NgModule"];
+
+/// Which of Angular's decorators `names` `decorator` is: `@X`, `@X()`, ...
+/// With the file `consts` was collected from, only one imported from
+/// `@angular/core`, like ngtsc's `isAngularDecorator`: by name under any alias
 /// (`@In()` for `import { Input as In }`) or through a namespace import
-/// (`@core.Input()`, see [`is_core_namespace`]); another module's or a local
-/// `Input` isn't Angular's. Without the file (the public `extract_*`
-/// functions), any decorator with that name.
-pub(crate) fn angular_member_decorator(
+/// (`@core.Input()`, see [`is_core_namespace`]); another module's (even one
+/// re-exporting Angular's), a local or an undeclared `X` isn't Angular's.
+/// Without the file, any decorator with that name.
+fn angular_core_decorator(
     decorator: &Decorator<'_>,
     consts: Option<&super::StringConsts<'_>>,
+    names: &[&'static str],
 ) -> Option<&'static str> {
     let callee = match &decorator.expression {
         Expression::CallExpression(call) => &call.callee,
@@ -86,7 +91,41 @@ pub(crate) fn angular_member_decorator(
         },
         _ => return None,
     };
-    MEMBER_DECORATORS.iter().copied().find(|n| *n == name)
+    names.iter().copied().find(|n| *n == name)
+}
+
+/// Which of Angular's member decorators ([`MEMBER_DECORATORS`]) `decorator`
+/// is (see [`angular_core_decorator`]). Without the file (the public
+/// `extract_*` functions), any decorator with that name.
+pub(crate) fn angular_member_decorator(
+    decorator: &Decorator<'_>,
+    consts: Option<&super::StringConsts<'_>>,
+) -> Option<&'static str> {
+    angular_core_decorator(decorator, consts, MEMBER_DECORATORS)
+}
+
+/// Which of Angular's class decorators ([`CLASS_DECORATORS`]) `decorator` is,
+/// in the file `consts` was collected from: one imported from `@angular/core`
+/// (see [`angular_core_decorator`]), like ngtsc's `findAngularDecorator`.
+pub(crate) fn angular_class_decorator(
+    decorator: &Decorator<'_>,
+    consts: &super::StringConsts<'_>,
+) -> Option<&'static str> {
+    angular_core_decorator(decorator, Some(consts), CLASS_DECORATORS)
+}
+
+/// Angular's class decorator `name` (`Component`, `Directive`, `Pipe`,
+/// `Injectable` or `NgModule`) among `decorators`, in the file `consts` was
+/// collected from. Like ngtsc's `findAngularDecorator`, only one imported from
+/// `@angular/core` counts: by name under any alias (`@Cmp()` for
+/// `import { Component as Cmp }`) or through a namespace import
+/// (`@ng.Component()`). Returns the first match.
+pub fn find_angular_class_decorator<'a>(
+    decorators: &'a [Decorator<'a>],
+    name: &str,
+    consts: &super::StringConsts<'_>,
+) -> Option<&'a Decorator<'a>> {
+    decorators.iter().find(|d| angular_class_decorator(d, consts) == Some(name))
 }
 
 /// Find one of Angular's member decorators (`name`) in a list of decorators
@@ -1626,7 +1665,7 @@ pub fn extract_class_queries<'a>(
 ) -> (Vec<'a, R3QueryMetadata<'a>>, Vec<'a, R3QueryMetadata<'a>>) {
     let mut view = extract_view_queries_in(allocator, class, source_text, Some(consts));
     let mut content = extract_content_queries_in(allocator, class, source_text, Some(consts));
-    if let Some((Some(config), name)) = super::angular_decorator_config(class) {
+    if let Some((Some(config), name)) = super::angular_decorator_config(class, consts) {
         let queries = parse_decorator_queries(allocator, config, class, source_text, consts, name);
         view.extend(queries.view);
         content.extend(queries.content);

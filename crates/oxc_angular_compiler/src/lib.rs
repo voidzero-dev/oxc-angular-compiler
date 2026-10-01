@@ -87,7 +87,8 @@ pub use styles::{encapsulate_style, shim_css_text};
 // Re-export pipe types
 pub use pipe::{
     PipeCompileResult, PipeMetadata, R3DependencyMetadata, R3PipeMetadata, R3PipeMetadataBuilder,
-    compile_pipe, compile_pipe_from_metadata, extract_pipe_metadata, find_pipe_decorator_span,
+    compile_pipe, compile_pipe_from_metadata, extract_pipe_metadata, extract_pipe_metadata_in,
+    find_pipe_decorator_span,
 };
 
 // Re-export factory types
@@ -114,8 +115,8 @@ pub use directive::{
     compile_directive_from_metadata, extract_class_queries, extract_content_queries,
     extract_directive_metadata, extract_host_bindings, extract_host_listeners,
     extract_input_metadata, extract_input_metadata_in, extract_output_metadata,
-    extract_output_metadata_in, extract_view_queries, find_directive_decorator_span,
-    generate_directive_definitions,
+    extract_output_metadata_in, extract_view_queries, find_angular_class_decorator,
+    find_directive_decorator_span, generate_directive_definitions,
 };
 
 // Re-export injectable types

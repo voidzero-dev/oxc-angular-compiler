@@ -24,7 +24,7 @@ use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};
 use super::cross_file_elision::CrossFileAnalyzer;
 use super::decorator::{
     collect_constructor_decorator_spans, collect_member_decorator_spans,
-    extract_component_metadata, find_component_decorator, find_component_decorator_span,
+    extract_component_metadata, find_component_decorator,
 };
 use super::definition::{const_value_to_expression, generate_component_definitions};
 use super::hoist::{collect_hoist_edits, program_has_angular_decorated_class};
@@ -42,16 +42,15 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     decorator_io_errors, extract_class_queries, extract_directive_metadata,
-    find_directive_decorator, find_directive_decorator_span, generate_directive_definitions,
+    find_directive_decorator, generate_directive_definitions,
 };
 use crate::dts;
 use crate::injectable::{
-    extract_injectable_metadata, find_injectable_decorator, find_injectable_decorator_span,
+    extract_injectable_metadata_in, find_injectable_decorator,
     generate_injectable_definition_from_decorator,
 };
 use crate::ng_module::{
-    extract_ng_module_metadata, find_ng_module_decorator, find_ng_module_decorator_span,
-    generate_full_ng_module_definition,
+    extract_ng_module_metadata_in, find_ng_module_decorator, generate_full_ng_module_definition,
 };
 use crate::output::ast::{
     DeclareFunctionStmt, FunctionExpr, OutputExpression, OutputStatement, ReadPropExpr,
@@ -62,8 +61,7 @@ use crate::parser::ParseTemplateOptions;
 use crate::parser::expression::BindingParser;
 use crate::parser::html::{HtmlParser, remove_whitespaces};
 use crate::pipe::{
-    extract_pipe_metadata, find_pipe_decorator, find_pipe_decorator_span,
-    generate_full_pipe_definition_from_decorator,
+    extract_pipe_metadata_in, find_pipe_decorator, generate_full_pipe_definition_from_decorator,
 };
 use crate::pipeline::compilation::{DeferBlockDepsEmitMode, TemplateCompilationMode};
 use crate::pipeline::emit::{
@@ -988,88 +986,41 @@ pub(crate) fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: 
 /// Return the name of the first non-`Service` `@angular/core` decorator on
 /// the class, if any. Used to enforce upstream's collision rule (see
 /// `service.ts:101-116`): `@Service` cannot coexist with another Angular
-/// decorator on the same class.
-fn find_conflicting_angular_decorator<'a>(
-    class: &'a oxc_ast::ast::Class<'a>,
-    import_map: &ImportMap<'a>,
-) -> Option<&'a str> {
-    const ANGULAR_DECORATORS: &[&str] =
-        &["Component", "Directive", "Pipe", "Injectable", "NgModule"];
-
-    for decorator in &class.decorators {
-        let name = match &decorator.expression {
-            Expression::CallExpression(call) => match &call.callee {
-                Expression::Identifier(id) => id.name.as_str(),
-                Expression::StaticMemberExpression(member) => member.property.name.as_str(),
-                _ => continue,
-            },
-            _ => continue,
-        };
-        if !ANGULAR_DECORATORS.contains(&name) {
-            continue;
-        }
-        // Verify the import resolves to @angular/core for both identifier
-        // and namespace callees. Without the namespace lookup, an unrelated
-        // `@thirdParty.Component()` on an @Service class would falsely
-        // trigger the collision preflight and block valid services.
-        let is_angular = if let Expression::CallExpression(call) = &decorator.expression {
-            match &call.callee {
-                Expression::Identifier(id) => import_map
-                    .get(&Ident::from(id.name.as_str()))
-                    .map(|info| info.source_module.as_str() == "@angular/core")
-                    .unwrap_or(false),
-                Expression::StaticMemberExpression(member) => match &member.object {
-                    Expression::Identifier(ns) => {
-                        is_angular_core_namespace(import_map, ns.name.as_str())
-                    }
-                    _ => false,
-                },
-                _ => false,
-            }
-        } else {
-            false
-        };
-        if is_angular {
-            return Some(name);
-        }
-    }
-    None
+/// decorator on the same class. Only Angular's count (imported from
+/// `@angular/core`, see [`crate::directive::angular_class_decorator`]): an
+/// unrelated `@thirdParty.Component()` on an @Service class doesn't block it.
+fn find_conflicting_angular_decorator(
+    class: &oxc_ast::ast::Class<'_>,
+    string_consts: &crate::directive::StringConsts<'_>,
+) -> Option<&'static str> {
+    class
+        .decorators
+        .iter()
+        .filter(|d| matches!(d.expression, Expression::CallExpression(_)))
+        .find_map(|d| crate::directive::angular_class_decorator(d, string_consts))
 }
 
 /// Find any Angular decorator on a class and return its kind and the decorator reference.
 ///
-/// For the `Service` identifier specifically, the import map is consulted so a
-/// bare `@Service()` from a non-Angular library doesn't shadow a real Angular
-/// decorator that follows it on the same class. `Service` is common enough as a
-/// library export name (DI containers, web frameworks) that name-only matching
-/// would cause the JIT pipeline to either misclassify the class or, on
-/// pre-v22 targets, emit a misleading diagnostic and skip the sibling
-/// `@Component`/`@Injectable`/etc. Other Angular decorator names are unique
-/// enough in practice that the same check isn't applied to them — and doing so
-/// would regress namespace-style usage like `@core.Component()` where the
-/// identifier isn't directly in the import map.
+/// Like ngtsc, a decorator is Angular's only when it's imported from
+/// `@angular/core`, by name under any alias or through a namespace import (see
+/// [`crate::directive::angular_class_decorator`]); a same-named decorator from
+/// another library, a local or an undeclared one is left alone. `@Service` is
+/// matched against the import map the same way.
 fn find_angular_decorator<'a>(
     class: &'a oxc_ast::ast::Class<'a>,
     import_map: &ImportMap<'a>,
+    string_consts: &crate::directive::StringConsts<'_>,
 ) -> Option<(AngularDecoratorKind, &'a oxc_ast::ast::Decorator<'a>)> {
     for decorator in &class.decorators {
-        if let Expression::CallExpression(call) = &decorator.expression {
-            let name = match &call.callee {
-                Expression::Identifier(id) => Some(id.name.as_str()),
-                Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
-                _ => None,
-            };
-            let kind = match name {
-                Some("Component") => Some(AngularDecoratorKind::Component),
-                Some("Directive") => Some(AngularDecoratorKind::Directive),
-                Some("Pipe") => Some(AngularDecoratorKind::Pipe),
-                Some("Injectable") => Some(AngularDecoratorKind::Injectable),
-                Some("Service") => Some(AngularDecoratorKind::Service),
-                Some("NgModule") => Some(AngularDecoratorKind::NgModule),
-                _ => None,
-            };
-
-            if matches!(kind, Some(AngularDecoratorKind::Service)) {
+        let Expression::CallExpression(call) = &decorator.expression else { continue };
+        let kind = match crate::directive::angular_class_decorator(decorator, string_consts) {
+            Some("Component") => AngularDecoratorKind::Component,
+            Some("Directive") => AngularDecoratorKind::Directive,
+            Some("Pipe") => AngularDecoratorKind::Pipe,
+            Some("Injectable") => AngularDecoratorKind::Injectable,
+            Some("NgModule") => AngularDecoratorKind::NgModule,
+            _ => {
                 let from_angular_core = match &call.callee {
                     Expression::Identifier(id) => {
                         is_angular_core_export(import_map, id.name.as_str(), "Service")
@@ -1078,23 +1029,20 @@ fn find_angular_decorator<'a>(
                     // namespace import from `@angular/core`. Without this,
                     // any `@third.Service()` from a third-party namespace
                     // import would classify as the v22 decorator.
-                    Expression::StaticMemberExpression(member) => match &member.object {
-                        Expression::Identifier(ns) => {
-                            is_angular_core_namespace(import_map, ns.name.as_str())
-                        }
-                        _ => false,
-                    },
+                    Expression::StaticMemberExpression(member) => {
+                        member.property.name == "Service"
+                            && matches!(&member.object, Expression::Identifier(ns)
+                                if is_angular_core_namespace(import_map, ns.name.as_str()))
+                    }
                     _ => false,
                 };
                 if !from_angular_core {
                     continue;
                 }
+                AngularDecoratorKind::Service
             }
-
-            if let Some(k) = kind {
-                return Some((k, decorator));
-            }
-        }
+        };
+        return Some((kind, decorator));
     }
     None
 }
@@ -2152,7 +2100,8 @@ fn transform_angular_file_jit(
             continue;
         };
 
-        let Some((decorator_kind, angular_decorator)) = find_angular_decorator(class, &import_map)
+        let Some((decorator_kind, angular_decorator)) =
+            find_angular_decorator(class, &import_map, &string_consts)
         else {
             continue;
         };
@@ -2619,7 +2568,8 @@ pub fn transform_angular_file(
             // (leaving the @Service decorator removed inconsistently) instead
             // of producing the intended diagnostic.
             if find_angular_service_decorator(class, &import_map).is_some() {
-                if let Some(conflict_name) = find_conflicting_angular_decorator(class, &import_map)
+                if let Some(conflict_name) =
+                    find_conflicting_angular_decorator(class, &string_consts)
                 {
                     let class_name_for_diag =
                         class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
@@ -2736,7 +2686,10 @@ pub fn transform_angular_file(
                             }
 
                             // Track the decorator span to remove
-                            if let Some(span) = find_component_decorator_span(class) {
+                            if let Some(span) =
+                                find_component_decorator(&class.decorators, &string_consts)
+                                    .map(|d| d.span)
+                            {
                                 decorator_spans_to_remove.push(span);
                             }
                             // Collect constructor parameter decorators (@Optional, @Inject, etc.)
@@ -2763,10 +2716,19 @@ pub fn transform_angular_file(
 
                             // Check if the class also has an @Injectable decorator.
                             // @Injectable is SHARED precedence and can coexist with @Component.
-                            let has_injectable =
-                                extract_injectable_metadata(allocator, class, Some(source));
+                            let has_injectable = extract_injectable_metadata_in(
+                                allocator,
+                                class,
+                                Some(source),
+                                Some(&string_consts),
+                            );
                             if let Some(injectable_metadata) = &has_injectable {
-                                if let Some(span) = find_injectable_decorator_span(class) {
+                                if let Some(span) = find_injectable_decorator(
+                                    &class.decorators,
+                                    Some(&string_consts),
+                                )
+                                .map(|d| d.span)
+                                {
                                     decorator_spans_to_remove.push(span);
                                 }
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
@@ -2801,7 +2763,8 @@ pub fn transform_angular_file(
                             // Add class metadata for TestBed support (after debug info, before HMR)
                             // Only emit when enabled and not in advanced optimizations mode
                             if options.emit_class_metadata && !options.advanced_optimizations {
-                                if let Some(decorator) = find_component_decorator(&class.decorators)
+                                if let Some(decorator) =
+                                    find_component_decorator(&class.decorators, &string_consts)
                                 {
                                     let emitter = JsEmitter::new();
 
@@ -2991,7 +2954,10 @@ pub fn transform_angular_file(
                     &string_consts,
                 ) {
                     // Track decorator span for removal
-                    if let Some(span) = find_directive_decorator_span(class) {
+                    if let Some(span) =
+                        find_directive_decorator(&class.decorators, Some(&string_consts))
+                            .map(|d| d.span)
+                    {
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
@@ -3052,10 +3018,17 @@ pub fn transform_angular_file(
 
                     // Check if the class also has an @Injectable decorator.
                     // @Injectable is SHARED precedence and can coexist with @Directive.
-                    let has_injectable =
-                        extract_injectable_metadata(allocator, class, Some(source));
+                    let has_injectable = extract_injectable_metadata_in(
+                        allocator,
+                        class,
+                        Some(source),
+                        Some(&string_consts),
+                    );
                     if let Some(injectable_metadata) = &has_injectable {
-                        if let Some(span) = find_injectable_decorator_span(class) {
+                        if let Some(span) =
+                            find_injectable_decorator(&class.decorators, Some(&string_consts))
+                                .map(|d| d.span)
+                        {
                             decorator_spans_to_remove.push(span);
                         }
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
@@ -3085,21 +3058,22 @@ pub fn transform_angular_file(
 
                     // Emit setClassMetadata for TestBed support (overrideDirective +
                     // signal members), mirroring the @Component path.
-                    let decls_after_class = find_directive_decorator(&class.decorators)
-                        .map(|decorator| {
-                            build_set_class_metadata_decls(
-                                &allocator,
-                                class,
-                                &class_name,
-                                decorator,
-                                options,
-                                source,
-                                &string_consts,
-                                &import_map,
-                                &mut file_namespace_registry,
-                            )
-                        })
-                        .unwrap_or_default();
+                    let decls_after_class =
+                        find_directive_decorator(&class.decorators, Some(&string_consts))
+                            .map(|decorator| {
+                                build_set_class_metadata_decls(
+                                    &allocator,
+                                    class,
+                                    &class_name,
+                                    decorator,
+                                    options,
+                                    source,
+                                    &string_consts,
+                                    &import_map,
+                                    &mut file_namespace_registry,
+                                )
+                            })
+                            .unwrap_or_default();
 
                     class_positions.push((
                         class_name.clone(),
@@ -3110,16 +3084,22 @@ pub fn transform_angular_file(
                         class_name,
                         (property_assignments, String::new(), decls_after_class),
                     );
-                } else if let Some(mut pipe_metadata) =
-                    extract_pipe_metadata(allocator, class, implicit_standalone, Some(source))
-                {
+                } else if let Some(mut pipe_metadata) = extract_pipe_metadata_in(
+                    allocator,
+                    class,
+                    implicit_standalone,
+                    Some(source),
+                    Some(&string_consts),
+                ) {
                     // Not a @Component or @Directive - check if it's a @Pipe (PRIMARY)
                     // We need to compile @Pipe classes to generate ɵpipe and ɵfac definitions.
                     // - ɵpipe: Pipe definition for Angular's pipe system
                     // - ɵfac: Factory function for dependency injection (when pipe has constructor deps)
 
                     // Track decorator span for removal
-                    if let Some(span) = find_pipe_decorator_span(class) {
+                    if let Some(span) =
+                        find_pipe_decorator(&class.decorators, Some(&string_consts)).map(|d| d.span)
+                    {
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
@@ -3154,10 +3134,17 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator (issue #65).
                         // @Injectable is SHARED precedence and can coexist with @Pipe.
-                        let has_injectable =
-                            extract_injectable_metadata(allocator, class, Some(source));
+                        let has_injectable = extract_injectable_metadata_in(
+                            allocator,
+                            class,
+                            Some(source),
+                            Some(&string_consts),
+                        );
                         if let Some(injectable_metadata) = &has_injectable {
-                            if let Some(span) = find_injectable_decorator_span(class) {
+                            if let Some(span) =
+                                find_injectable_decorator(&class.decorators, Some(&string_consts))
+                                    .map(|d| d.span)
+                            {
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
@@ -3183,21 +3170,22 @@ pub fn transform_angular_file(
                         ));
 
                         // Emit setClassMetadata for TestBed support (overridePipe).
-                        let decls_after_class = find_pipe_decorator(&class.decorators)
-                            .map(|decorator| {
-                                build_set_class_metadata_decls(
-                                    &allocator,
-                                    class,
-                                    &class_name,
-                                    decorator,
-                                    options,
-                                    source,
-                                    &string_consts,
-                                    &import_map,
-                                    &mut file_namespace_registry,
-                                )
-                            })
-                            .unwrap_or_default();
+                        let decls_after_class =
+                            find_pipe_decorator(&class.decorators, Some(&string_consts))
+                                .map(|decorator| {
+                                    build_set_class_metadata_decls(
+                                        &allocator,
+                                        class,
+                                        &class_name,
+                                        decorator,
+                                        options,
+                                        source,
+                                        &string_consts,
+                                        &import_map,
+                                        &mut file_namespace_registry,
+                                    )
+                                })
+                                .unwrap_or_default();
 
                         class_positions.push((
                             class_name.clone(),
@@ -3209,9 +3197,12 @@ pub fn transform_angular_file(
                             (property_assignments, String::new(), decls_after_class),
                         );
                     }
-                } else if let Some(mut ng_module_metadata) =
-                    extract_ng_module_metadata(allocator, class, Some(source))
-                {
+                } else if let Some(mut ng_module_metadata) = extract_ng_module_metadata_in(
+                    allocator,
+                    class,
+                    Some(source),
+                    Some(&string_consts),
+                ) {
                     // Not a @Component, @Directive, @Injectable, or @Pipe - check if it's an @NgModule
                     // We need to compile @NgModule classes to generate ɵmod, ɵfac, and ɵinj definitions.
                     // - ɵmod: NgModule definition
@@ -3219,7 +3210,10 @@ pub fn transform_angular_file(
                     // - ɵinj: Injector definition with providers and imports
 
                     // Track decorator span for removal
-                    if let Some(span) = find_ng_module_decorator_span(class) {
+                    if let Some(span) =
+                        find_ng_module_decorator(&class.decorators, Some(&string_consts))
+                            .map(|d| d.span)
+                    {
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
@@ -3256,10 +3250,17 @@ pub fn transform_angular_file(
 
                         // Check if the class also has an @Injectable decorator.
                         // @Injectable is SHARED precedence and can coexist with @NgModule.
-                        let has_injectable =
-                            extract_injectable_metadata(allocator, class, Some(source));
+                        let has_injectable = extract_injectable_metadata_in(
+                            allocator,
+                            class,
+                            Some(source),
+                            Some(&string_consts),
+                        );
                         if let Some(injectable_metadata) = &has_injectable {
-                            if let Some(span) = find_injectable_decorator_span(class) {
+                            if let Some(span) =
+                                find_injectable_decorator(&class.decorators, Some(&string_consts))
+                                    .map(|d| d.span)
+                            {
                                 decorator_spans_to_remove.push(span);
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
@@ -3295,7 +3296,9 @@ pub fn transform_angular_file(
 
                         // Emit setClassMetadata for TestBed support (overrideModule),
                         // appended after the NgModule's external declarations.
-                        if let Some(decorator) = find_ng_module_decorator(&class.decorators) {
+                        if let Some(decorator) =
+                            find_ng_module_decorator(&class.decorators, Some(&string_consts))
+                        {
                             let metadata = build_set_class_metadata_decls(
                                 &allocator,
                                 class,
@@ -3416,16 +3419,22 @@ pub fn transform_angular_file(
                             (property_assignments, String::new(), decls_after_class),
                         );
                     }
-                } else if let Some(mut injectable_metadata) =
-                    extract_injectable_metadata(allocator, class, Some(source))
-                {
+                } else if let Some(mut injectable_metadata) = extract_injectable_metadata_in(
+                    allocator,
+                    class,
+                    Some(source),
+                    Some(&string_consts),
+                ) {
                     // Standalone @Injectable (no PRIMARY decorator on the class)
                     // We need to compile @Injectable classes to generate ɵprov and ɵfac definitions.
                     // - ɵprov: Provider metadata for Angular's DI system
                     // - ɵfac: Factory function to instantiate the class
 
                     // Track decorator span for removal
-                    if let Some(span) = find_injectable_decorator_span(class) {
+                    if let Some(span) =
+                        find_injectable_decorator(&class.decorators, Some(&string_consts))
+                            .map(|d| d.span)
+                    {
                         decorator_spans_to_remove.push(span);
                     }
                     // Collect constructor parameter decorators (@Optional, @Inject, etc.)
@@ -3466,21 +3475,22 @@ pub fn transform_angular_file(
                         ));
 
                         // Emit setClassMetadata for TestBed support.
-                        let decls_after_class = find_injectable_decorator(&class.decorators)
-                            .map(|decorator| {
-                                build_set_class_metadata_decls(
-                                    &allocator,
-                                    class,
-                                    &class_name,
-                                    decorator,
-                                    options,
-                                    source,
-                                    &string_consts,
-                                    &import_map,
-                                    &mut file_namespace_registry,
-                                )
-                            })
-                            .unwrap_or_default();
+                        let decls_after_class =
+                            find_injectable_decorator(&class.decorators, Some(&string_consts))
+                                .map(|decorator| {
+                                    build_set_class_metadata_decls(
+                                        &allocator,
+                                        class,
+                                        &class_name,
+                                        decorator,
+                                        options,
+                                        source,
+                                        &string_consts,
+                                        &import_map,
+                                        &mut file_namespace_registry,
+                                    )
+                                })
+                                .unwrap_or_default();
 
                         class_positions.push((
                             class_name.clone(),
@@ -3605,7 +3615,7 @@ pub fn transform_angular_file(
     // services without `@Injectable` that we route through this function. For
     // those, building a full symbol table just to discover there's nothing to
     // hoist is pure overhead.
-    if program_has_angular_decorated_class(&parser_ret.program) {
+    if program_has_angular_decorated_class(&parser_ret.program, &import_map, &string_consts) {
         // Semantic builder errors (redeclarations, etc.) are intentionally
         // dropped: the parser already captured syntax errors into
         // `result.diagnostics` upstream, and Semantic-level diagnostics here
@@ -3619,6 +3629,7 @@ pub fn transform_angular_file(
             source,
             &hoist_semantic,
             &import_map,
+            &string_consts,
         ));
     }
 

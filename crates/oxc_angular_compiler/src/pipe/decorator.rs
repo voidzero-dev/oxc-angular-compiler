@@ -12,6 +12,7 @@ use oxc_span::Span;
 use oxc_str::Ident;
 
 use super::metadata::R3PipeMetadata;
+use crate::directive::StringConsts;
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
@@ -105,29 +106,41 @@ impl<'a> PipeMetadata<'a> {
 /// })
 /// export class MyPipe implements PipeTransform {}
 /// ```
+///
+/// Without the file's imports, any decorator named `Pipe` counts:
+/// [`extract_pipe_metadata_in`] takes the file's [`StringConsts`] and only
+/// counts Angular's (imported from `@angular/core`), like the compiler.
 pub fn extract_pipe_metadata<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
+    source_text: Option<&'a str>,
+) -> Option<PipeMetadata<'a>> {
+    extract_pipe_metadata_in(allocator, class, implicit_standalone, source_text, None)
+}
+
+/// [`extract_pipe_metadata`] for a class in the file `consts` was collected
+/// from: only Angular's `@Pipe` (imported from `@angular/core`, see
+/// [`crate::directive::find_angular_class_decorator`]) counts.
+pub fn extract_pipe_metadata_in<'a>(
+    allocator: &'a Allocator,
+    class: &'a Class<'a>,
+    implicit_standalone: bool,
     _source_text: Option<&'a str>,
+    consts: Option<&StringConsts<'_>>,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
     let class_name: Ident<'a> = class.id.as_ref()?.name.clone().into();
     let class_span = class.span;
 
     // Find the @Pipe decorator
-    let pipe_decorator = find_pipe_decorator(&class.decorators)?;
+    let pipe_decorator = find_pipe_decorator(&class.decorators, consts)?;
 
     // Get the decorator call arguments
     let call_expr = match &pipe_decorator.expression {
         Expression::CallExpression(call) => call,
         _ => return None,
     };
-
-    // Verify it's calling 'Pipe'
-    if !is_pipe_call(&call_expr.callee) {
-        return None;
-    }
 
     // Get the first argument (the config object)
     let config_arg = call_expr.arguments.first()?;
@@ -173,10 +186,16 @@ pub fn extract_pipe_metadata<'a>(
     Some(metadata)
 }
 
-/// Find the @Pipe decorator in a list of decorators.
+/// Find the @Pipe decorator in a list of decorators. With the file's
+/// `consts`, only Angular's (imported from `@angular/core`); without them, any
+/// named `Pipe`.
 pub(crate) fn find_pipe_decorator<'a>(
     decorators: &'a [Decorator<'a>],
+    consts: Option<&StringConsts<'_>>,
 ) -> Option<&'a Decorator<'a>> {
+    if let Some(consts) = consts {
+        return crate::directive::find_angular_class_decorator(decorators, "Pipe", consts);
+    }
     decorators.iter().find(|d| match &d.expression {
         Expression::CallExpression(call) => is_pipe_call(&call.callee),
         Expression::Identifier(id) => id.name == "Pipe",
@@ -187,9 +206,11 @@ pub(crate) fn find_pipe_decorator<'a>(
 /// Find the span of the @Pipe decorator on a class.
 ///
 /// Returns the span including any leading whitespace/newlines that should be removed
-/// along with the decorator.
+/// along with the decorator. Without the file's imports, this matches any
+/// decorator named `Pipe`; the compiler only takes one imported from
+/// `@angular/core`.
 pub fn find_pipe_decorator_span(class: &Class<'_>) -> Option<Span> {
-    find_pipe_decorator(&class.decorators).map(|d| d.span)
+    find_pipe_decorator(&class.decorators, None).map(|d| d.span)
 }
 
 /// Check if a callee expression is a call to 'Pipe'.
