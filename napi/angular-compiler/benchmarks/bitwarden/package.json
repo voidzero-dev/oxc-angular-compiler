@@ -21,7 +21,7 @@
     "@angular/forms": "22.2.1",
     "@angular/platform-browser": "22.2.1",
     "@angular/platform-browser-dynamic": "22.2.1",
-    "@angular/router": "22.1.7",
+    "@angular/router": "22.2.0",
     "core-js": "^3.48.0",
     "rxjs": "catalog:",
     "tslib": "catalog:",
