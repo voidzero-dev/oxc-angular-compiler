@@ -5,12 +5,12 @@ expression: js
 function TestComponent_Template(rf,ctx) {
   if ((rf & 1)) {
     i0.ɵɵelementStart(0,"input",0);
+    i0.ɵɵcontrolCreate();
     i0.ɵɵtwoWayListener("ngModelChange",function TestComponent_Template_input_ngModelChange_0_listener($event) {
       (i0.ɵɵtwoWayBindingSet(ctx.name,$event) || (ctx.name = $event));
       return $event;
     });
     i0.ɵɵelementEnd();
-    i0.ɵɵcontrolCreate();
   }
   if ((rf & 2)) {
     i0.ɵɵtwoWayProperty("ngModel",ctx.name);

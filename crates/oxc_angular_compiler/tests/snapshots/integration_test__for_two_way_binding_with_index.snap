@@ -7,6 +7,7 @@ function TestComponent_For_1_Template(rf,ctx) {
     const _r1 = i0.ɵɵgetCurrentView();
     i0.ɵɵtext(0," ");
     i0.ɵɵelementStart(1,"input",0);
+    i0.ɵɵcontrolCreate();
     i0.ɵɵtwoWayListener("ngModelChange",function TestComponent_For_1_Template_input_ngModelChange_1_listener($event) {
       const $index_r2 = i0.ɵɵrestoreView(_r1).$index;
       const ctx_r2 = i0.ɵɵnextContext();
@@ -14,7 +15,6 @@ function TestComponent_For_1_Template(rf,ctx) {
       return i0.ɵɵresetView($event);
     });
     i0.ɵɵelementEnd();
-    i0.ɵɵcontrolCreate();
     i0.ɵɵtext(2," ");
   }
   if ((rf & 2)) {

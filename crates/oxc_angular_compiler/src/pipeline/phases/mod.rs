@@ -68,6 +68,7 @@ mod resolve_i18n_expression_placeholders;
 mod resolve_names;
 mod resolve_sanitizers;
 mod save_restore_view;
+mod specialize_control_properties;
 mod store_let_optimization;
 mod strip_nonrequired_parentheses;
 mod style_binding_specialization;
@@ -173,6 +174,13 @@ pub static PHASES: &[Phase] = &[
         run: binding_specialization::specialize_bindings,
         run_host: Some(binding_specialization::specialize_bindings_for_host),
         name: "specializeBindings",
+    },
+    // Phase 9b: specializeControlProperties (Template only)
+    Phase {
+        kind: CompilationJobKind::Template,
+        run: specialize_control_properties::specialize_control_properties,
+        run_host: None,
+        name: "specializeControlProperties",
     },
     // Phase 10: convertAnimations (Both)
     Phase {

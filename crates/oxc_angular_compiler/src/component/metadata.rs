@@ -85,6 +85,16 @@ impl AngularVersion {
         self.major >= 22
     }
 
+    /// Check if this version emits control instructions at all (v21.2.0+).
+    ///
+    /// Angular's `specializeControlProperties` phase and the
+    /// `ɵɵcontrolCreate()`/`ɵɵcontrol()` instructions were introduced in
+    /// v21.2.0 for the `formField` control directive. Earlier versions never
+    /// emit them.
+    pub fn supports_control_instructions(&self) -> bool {
+        self.major > 21 || (self.major == 21 && self.minor >= 2)
+    }
+
     /// Check if this version emits control instructions for the extended set of
     /// control properties (v22.0.0+).
     ///
@@ -95,6 +105,20 @@ impl AngularVersion {
     /// so emitting the extra instructions against a < v22 runtime would diverge.
     pub fn supports_extended_control_properties(&self) -> bool {
         self.major >= 22
+    }
+
+    /// Check if this version anchors `ɵɵcontrolCreate()` at the element's first
+    /// create instruction (v22.2.0+).
+    ///
+    /// Through v22.1.x, `findCreateInstruction` kept the *last* matching create
+    /// op, so `ɵɵcontrolCreate()` landed after `ElementEnd`/`ContainerEnd` (and
+    /// `Template` was a valid anchor). v22.2.0 switched to the *first* matching
+    /// op and narrowed the anchor kinds to `Element`, `ElementStart`,
+    /// `Container`, and `ContainerStart`, so the instruction sits right after
+    /// the element start (before listeners) and `ng-template` no longer gets
+    /// control instructions.
+    pub fn uses_first_control_anchor(&self) -> bool {
+        self.major > 22 || (self.major == 22 && self.minor >= 2)
     }
 
     /// Check if this version uses modern optional-chaining semantics (v22.0.0+).
