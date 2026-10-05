@@ -87,19 +87,19 @@ multiple_crate_versions = "allow"
 
 [workspace.dependencies]
 # External oxc crates from crates.io
-oxc_allocator = "0.152"
-oxc_ast = "0.152"
-oxc_ast_visit = "0.152"
-oxc_diagnostics = "0.152"
-oxc_napi = "0.152"
-oxc_parser = "0.152"
-oxc_semantic = "0.152"
-oxc_span = "0.152"
-oxc_syntax = "0.152"
+oxc_allocator = "0.153"
+oxc_ast = "0.153"
+oxc_ast_visit = "0.153"
+oxc_diagnostics = "0.153"
+oxc_napi = "0.153"
+oxc_parser = "0.153"
+oxc_semantic = "0.153"
+oxc_span = "0.153"
+oxc_syntax = "0.153"
 oxc_sourcemap = "9.0.0"
-oxc_str = "0.152"
-oxc_transformer = "0.152"
-oxc_codegen = "0.152"
+oxc_str = "0.153"
+oxc_transformer = "0.153"
+oxc_codegen = "0.153"
 
 # Internal
 oxc_angular_compiler = { path = "crates/oxc_angular_compiler" }
