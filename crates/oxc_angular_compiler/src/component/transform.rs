@@ -1077,12 +1077,11 @@ fn find_angular_decorator<'a>(
 }
 
 /// Whether `decorator`'s options object opts out of AOT compilation via
-/// `jit: true`.
+/// `jit`.
 ///
 /// Mirrors ngtsc's `extractDirectiveMetadata` / `NgModuleDecoratorHandler.analyze`
-/// (`shared.ts:176`, `ng_module/handler.ts:352`): presence of the `jit`
-/// property forces JIT — the interface only allows `true`, so any value that
-/// isn't statically `false` is treated as opt-out.
+/// (`shared.ts:176`, `ng_module/handler.ts:352`): mere presence of the `jit`
+/// property forces JIT — `directive.has('jit')` — regardless of the value.
 fn decorator_forces_jit(decorator: &oxc_ast::ast::Decorator<'_>) -> bool {
     let Expression::CallExpression(call) = &decorator.expression else { return false };
     let Some(Argument::ObjectExpression(config)) = call.arguments.first() else {
@@ -1099,7 +1098,7 @@ fn decorator_forces_jit(decorator: &oxc_ast::ast::Decorator<'_>) -> bool {
             _ => false,
         };
         if is_jit {
-            return !matches!(&prop.value, Expression::BooleanLiteral(b) if !b.value);
+            return true;
         }
     }
     false
@@ -1754,6 +1753,12 @@ fn build_ctor_parameters_text(params: &[JitCtorParam]) -> Option<String> {
 
     let mut entries = std::vec::Vec::new();
     for param in params {
+        // ngtsc emits bare `null` for a param with neither type nor
+        // decorators (downlevel_decorators_transform.ts).
+        if param.type_name.is_none() && param.decorators.is_empty() {
+            entries.push("null".to_string());
+            continue;
+        }
         let mut parts = std::vec::Vec::new();
 
         // type

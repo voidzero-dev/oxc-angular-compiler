@@ -9352,11 +9352,12 @@ export class TestComponent {
         result.code
     );
 
-    // The foreign @Inject is not Angular's: no ctorParameters decorators for
-    // param 3, and it's lowered as __param.
+    // The foreign @Inject is not Angular's: upstream emits `null` for a param
+    // with no type and no (Angular) decorators, and it's lowered as __param.
     assert!(
-        compact.contains("{type:undefined}]"),
-        "foreign-decorated param should have no decorators entry. Got:\n{}",
+        compact.contains("type:Injectable}]},\nnull]")
+            || compact.contains("type:Injectable}]},null]"),
+        "foreign-decorated param should be emitted as null. Got:\n{}",
         result.code
     );
     assert!(
@@ -16035,7 +16036,9 @@ export class C {}
 }
 
 #[test]
-fn test_jit_false_still_compiles_aot() {
+fn test_jit_false_still_forces_jit() {
+    // Upstream checks `directive.has('jit')` — presence, not value — so
+    // `jit: false` (type-invalid input) still opts out of AOT.
     let allocator = Allocator::default();
     let source = r"
 import { Component } from '@angular/core';
@@ -16045,8 +16048,9 @@ export class C {}
 ";
     let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
     assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
-    assert_eq!(result.component_count, 1);
-    assert!(result.code.contains("static ɵcmp"), "Got:\n{}", result.code);
+    assert_eq!(result.component_count, 0);
+    assert!(!result.code.contains("static ɵcmp"), "Got:\n{}", result.code);
+    assert!(result.code.contains("__decorate"), "Got:\n{}", result.code);
 }
 
 #[test]
@@ -16134,19 +16138,32 @@ fn test_static_input_member_is_diagnostic() {
 }
 
 #[test]
-fn test_static_input_on_component_and_pipe_is_diagnostic() {
-    // extractDirectiveMetadata runs for @Component and @Pipe too.
-    for decorator in ["@Component({ selector: 'c', template: '' })", "@Pipe({ name: 'p' })"] {
-        let source = format!(
-            "import {{ Component, Directive, Input, Pipe }} from '@angular/core';\n\
-             {decorator}\n\
-             export class C {{\n    @Input() static x = 0;\n}}"
-        );
-        let diagnostics = expect_diagnostics(&source);
-        let expected = "Input \"x\" is incorrectly declared as static member of \"C\".";
+fn test_static_input_on_component_is_diagnostic_and_pipe_is_silent() {
+    // extractDirectiveMetadata runs for @Component, but upstream's
+    // PipeDecoratorHandler never calls it: io/query checks don't apply to
+    // pipes, so a static input or a `queries:` field on a pipe is ignored.
+    let source = "import { Component, Input } from '@angular/core';\n\
+                  @Component({ selector: 'c', template: '' })\n\
+                  export class C {\n    @Input() static x = 0;\n}";
+    let diagnostics = expect_diagnostics(source);
+    let expected = "Input \"x\" is incorrectly declared as static member of \"C\".";
+    assert!(
+        diagnostics.iter().any(|d| d.contains(expected)),
+        "@Component should report {expected:?}. Got: {diagnostics:?}"
+    );
+
+    for source in [
+        "import { Input, Pipe } from '@angular/core';\n\
+         @Pipe({ name: 'p' })\n\
+         export class P {\n    @Input() static x = 0;\n}",
+        "import { Pipe, ViewChild } from '@angular/core';\n\
+         @Pipe({ name: 'p', queries: { q: new ViewChild(42) } })\n\
+         export class P {}",
+    ] {
+        let diagnostics = expect_diagnostics(source);
         assert!(
-            diagnostics.iter().any(|d| d.contains(expected)),
-            "{decorator} should report {expected:?}. Got: {diagnostics:?}"
+            diagnostics.is_empty(),
+            "@Pipe members and metadata should not get io/query diagnostics. Got: {diagnostics:?}"
         );
     }
 }
@@ -16175,6 +16192,58 @@ fn test_static_output_member_is_diagnostic() {
         assert!(
             diagnostics.iter().any(|d| d.contains(expected)),
             "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_query_decorator_on_method_reports_property_type_member() {
+    // `isPropertyTypeMember` (shared.ts) runs before the static check, so a
+    // query decorator on a method — static or not — is DECORATOR_UNEXPECTED,
+    // while a query on an accessor counts as a property member upstream.
+    for member in [
+        "@ViewChild('a') m() {}",
+        "@ViewChild('a') static m() {}",
+        "@ViewChild('a') constructor() {}",
+    ] {
+        let source = format!(
+            "import {{ Directive, ViewChild }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.contains("Query decorator must go on a property-type member")),
+            "`{member}` should report the property-type error. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_query_on_accessor_member_compiles() {
+    // A TS `accessor` field reflects upstream as a property member
+    // (`isPropertyTypeMember`): decorator and signal queries on it compile.
+    let allocator = Allocator::default();
+    for (member, instr) in [
+        ("@ViewChild('el') accessor z: any;", "ɵɵviewQuery"),
+        ("accessor z = viewChild('el');", "ɵɵviewQuerySignal"),
+        ("@ContentChild('el') accessor c: any;", "ɵɵcontentQuery"),
+        ("accessor c = contentChild('el');", "ɵɵcontentQuerySignal"),
+    ] {
+        let source = format!(
+            "import {{ Component, ViewChild, ContentChild, viewChild, contentChild }} \
+             from '@angular/core';\n\
+             @Component({{ selector: 'c', template: '' }})\n\
+             export class C {{\n    {member}\n}}"
+        );
+        let result = transform_angular_file(&allocator, "test.ts", &source, None, None);
+        assert!(!result.has_errors(), "`{member}` should not error: {:?}", result.diagnostics);
+        assert!(
+            result.code.contains(instr),
+            "`{member}` should emit `{instr}(...)`. Got:\n{}",
+            result.code
         );
     }
 }

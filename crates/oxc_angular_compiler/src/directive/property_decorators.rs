@@ -1202,77 +1202,78 @@ pub(crate) fn extract_view_queries_in<'a>(
     let mut view_children_queries = Vec::new_in(&allocator);
 
     for element in &class.body.body {
-        match element {
+        // Property-type members: fields and auto-accessors both reflect as
+        // `Property` upstream (`reflectClassMember`), so an `accessor` member
+        // is a query member too.
+        let prop_like = match element {
             ClassElement::PropertyDefinition(prop) => {
-                // Check for signal-based view queries first (viewChild(), viewChildren())
-                if let Some(value) = &prop.value {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        if let Some((query_type, metadata)) = try_parse_signal_query(
-                            allocator,
-                            value,
-                            property_name,
-                            source_text,
-                            consts,
-                        ) {
-                            if query_type.is_view_query() {
-                                signal_queries.push(metadata);
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                // Check for decorator-based queries (@ViewChild, @ViewChildren)
-                if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ViewChild", consts)
-                {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config = parse_query_config(
-                            allocator,
-                            decorator,
-                            "ViewChild",
-                            source_text,
-                            consts,
-                        );
-                        if let Some(predicate) = config.predicate {
-                            view_child_queries.push(R3QueryMetadata {
-                                property_name,
-                                first: true,
-                                predicate,
-                                descendants: config.descendants,
-                                emit_distinct_changes_only: config.emit_distinct_changes_only,
-                                read: config.read,
-                                is_static: config.is_static,
-                                is_signal: false,
-                            });
-                        }
-                    }
-                } else if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ViewChildren", consts)
-                {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config = parse_query_config(
-                            allocator,
-                            decorator,
-                            "ViewChildren",
-                            source_text,
-                            consts,
-                        );
-                        if let Some(predicate) = config.predicate {
-                            view_children_queries.push(R3QueryMetadata {
-                                property_name,
-                                first: false,
-                                predicate,
-                                descendants: config.descendants,
-                                emit_distinct_changes_only: config.emit_distinct_changes_only,
-                                read: config.read,
-                                is_static: config.is_static,
-                                is_signal: false,
-                            });
+                Some((&prop.decorators, &prop.key, prop.value.as_ref()))
+            }
+            ClassElement::AccessorProperty(prop) => {
+                Some((&prop.decorators, &prop.key, prop.value.as_ref()))
+            }
+            _ => None,
+        };
+        if let Some((decorators, key, value)) = prop_like {
+            // Check for signal-based view queries first (viewChild(), viewChildren())
+            if let Some(value) = value {
+                if let Some(property_name) = get_property_key_name(key) {
+                    if let Some((query_type, metadata)) =
+                        try_parse_signal_query(allocator, value, property_name, source_text, consts)
+                    {
+                        if query_type.is_view_query() {
+                            signal_queries.push(metadata);
+                            continue;
                         }
                     }
                 }
             }
+
+            // Check for decorator-based queries (@ViewChild, @ViewChildren)
+            if let Some(decorator) = find_decorator_by_name(decorators, "ViewChild", consts) {
+                if let Some(property_name) = get_property_key_name(key) {
+                    let config =
+                        parse_query_config(allocator, decorator, "ViewChild", source_text, consts);
+                    if let Some(predicate) = config.predicate {
+                        view_child_queries.push(R3QueryMetadata {
+                            property_name,
+                            first: true,
+                            predicate,
+                            descendants: config.descendants,
+                            emit_distinct_changes_only: config.emit_distinct_changes_only,
+                            read: config.read,
+                            is_static: config.is_static,
+                            is_signal: false,
+                        });
+                    }
+                }
+            } else if let Some(decorator) =
+                find_decorator_by_name(decorators, "ViewChildren", consts)
+            {
+                if let Some(property_name) = get_property_key_name(key) {
+                    let config = parse_query_config(
+                        allocator,
+                        decorator,
+                        "ViewChildren",
+                        source_text,
+                        consts,
+                    );
+                    if let Some(predicate) = config.predicate {
+                        view_children_queries.push(R3QueryMetadata {
+                            property_name,
+                            first: false,
+                            predicate,
+                            descendants: config.descendants,
+                            emit_distinct_changes_only: config.emit_distinct_changes_only,
+                            read: config.read,
+                            is_static: config.is_static,
+                            is_signal: false,
+                        });
+                    }
+                }
+            }
+        }
+        match element {
             ClassElement::MethodDefinition(method)
                 if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
             {
@@ -1387,77 +1388,80 @@ pub(crate) fn extract_content_queries_in<'a>(
     let mut content_children_queries = Vec::new_in(&allocator);
 
     for element in &class.body.body {
-        match element {
+        let prop_like = match element {
             ClassElement::PropertyDefinition(prop) => {
-                // Check for signal-based content queries first (contentChild(), contentChildren())
-                if let Some(value) = &prop.value {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        if let Some((query_type, metadata)) = try_parse_signal_query(
-                            allocator,
-                            value,
-                            property_name,
-                            source_text,
-                            consts,
-                        ) {
-                            if !query_type.is_view_query() {
-                                signal_queries.push(metadata);
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                // Check for decorator-based queries (@ContentChild, @ContentChildren)
-                if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ContentChild", consts)
-                {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config = parse_query_config(
-                            allocator,
-                            decorator,
-                            "ContentChild",
-                            source_text,
-                            consts,
-                        );
-                        if let Some(predicate) = config.predicate {
-                            content_child_queries.push(R3QueryMetadata {
-                                property_name,
-                                first: true,
-                                predicate,
-                                descendants: config.descendants,
-                                emit_distinct_changes_only: config.emit_distinct_changes_only,
-                                read: config.read,
-                                is_static: config.is_static,
-                                is_signal: false,
-                            });
-                        }
-                    }
-                } else if let Some(decorator) =
-                    find_decorator_by_name(&prop.decorators, "ContentChildren", consts)
-                {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
-                        let config = parse_query_config(
-                            &allocator,
-                            decorator,
-                            "ContentChildren",
-                            source_text,
-                            consts,
-                        );
-                        if let Some(predicate) = config.predicate {
-                            content_children_queries.push(R3QueryMetadata {
-                                property_name,
-                                first: false,
-                                predicate,
-                                descendants: config.descendants,
-                                emit_distinct_changes_only: config.emit_distinct_changes_only,
-                                read: config.read,
-                                is_static: config.is_static,
-                                is_signal: false,
-                            });
+                Some((&prop.decorators, &prop.key, prop.value.as_ref()))
+            }
+            ClassElement::AccessorProperty(prop) => {
+                Some((&prop.decorators, &prop.key, prop.value.as_ref()))
+            }
+            _ => None,
+        };
+        if let Some((decorators, key, value)) = prop_like {
+            // Check for signal-based content queries first (contentChild(), contentChildren())
+            if let Some(value) = value {
+                if let Some(property_name) = get_property_key_name(key) {
+                    if let Some((query_type, metadata)) =
+                        try_parse_signal_query(allocator, value, property_name, source_text, consts)
+                    {
+                        if !query_type.is_view_query() {
+                            signal_queries.push(metadata);
+                            continue;
                         }
                     }
                 }
             }
+
+            // Check for decorator-based queries (@ContentChild, @ContentChildren)
+            if let Some(decorator) = find_decorator_by_name(decorators, "ContentChild", consts) {
+                if let Some(property_name) = get_property_key_name(key) {
+                    let config = parse_query_config(
+                        allocator,
+                        decorator,
+                        "ContentChild",
+                        source_text,
+                        consts,
+                    );
+                    if let Some(predicate) = config.predicate {
+                        content_child_queries.push(R3QueryMetadata {
+                            property_name,
+                            first: true,
+                            predicate,
+                            descendants: config.descendants,
+                            emit_distinct_changes_only: config.emit_distinct_changes_only,
+                            read: config.read,
+                            is_static: config.is_static,
+                            is_signal: false,
+                        });
+                    }
+                }
+            } else if let Some(decorator) =
+                find_decorator_by_name(decorators, "ContentChildren", consts)
+            {
+                if let Some(property_name) = get_property_key_name(key) {
+                    let config = parse_query_config(
+                        &allocator,
+                        decorator,
+                        "ContentChildren",
+                        source_text,
+                        consts,
+                    );
+                    if let Some(predicate) = config.predicate {
+                        content_children_queries.push(R3QueryMetadata {
+                            property_name,
+                            first: false,
+                            predicate,
+                            descendants: config.descendants,
+                            emit_distinct_changes_only: config.emit_distinct_changes_only,
+                            read: config.read,
+                            is_static: config.is_static,
+                            is_signal: false,
+                        });
+                    }
+                }
+            }
+        }
+        match element {
             ClassElement::MethodDefinition(method)
                 if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
             {
@@ -1966,22 +1970,38 @@ pub(crate) fn member_query_error<'a>(
     consts: &super::StringConsts<'a>,
 ) -> Option<(String, Span)> {
     class.body.body.iter().find_map(|element| {
-        let (decorators, value, is_static, span) = match element {
+        // Upstream's `isPropertyTypeMember`: only getters, setters and
+        // properties (incl. auto-accessors) may hold a query decorator.
+        let (decorators, value, is_static, span, is_property_type) = match element {
             ClassElement::PropertyDefinition(prop) => {
-                (&prop.decorators, prop.value.as_ref(), prop.r#static, prop.span)
+                (&prop.decorators, prop.value.as_ref(), prop.r#static, prop.span, true)
             }
-            ClassElement::AccessorProperty(accessor) => {
-                (&accessor.decorators, accessor.value.as_ref(), accessor.r#static, accessor.span)
-            }
-            ClassElement::MethodDefinition(method) => {
-                (&method.decorators, None, method.r#static, method.span)
-            }
+            ClassElement::AccessorProperty(accessor) => (
+                &accessor.decorators,
+                accessor.value.as_ref(),
+                accessor.r#static,
+                accessor.span,
+                true,
+            ),
+            ClassElement::MethodDefinition(method) => (
+                &method.decorators,
+                None,
+                method.r#static,
+                method.span,
+                matches!(method.kind, MethodDefinitionKind::Get | MethodDefinitionKind::Set),
+            ),
             _ => return None,
         };
         let decorator = QUERY_TYPES.iter().find_map(|name| {
             find_decorator_by_name(decorators, name, Some(consts)).zip(Some(*name))
         });
-        // A query decorator's own errors come first (`tryGetQueryFromFieldDecorator`).
+        // Its member-kind check (DECORATOR_UNEXPECTED) runs before the
+        // decorator metadata is parsed upstream (`isPropertyTypeMember`
+        // precedes `extractDecoratorQueryMetadata`).
+        if decorator.is_some() && !is_property_type {
+            return Some(("Query decorator must go on a property-type member".to_string(), span));
+        }
+        // A query decorator's own errors come next (`tryGetQueryFromFieldDecorator`).
         if let Some((decorator, name)) = decorator
             && let Some(error) =
                 member_query(allocator, decorator, name, span, source_text, consts).err()

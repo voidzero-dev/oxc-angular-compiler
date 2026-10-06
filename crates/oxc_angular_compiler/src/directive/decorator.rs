@@ -1041,10 +1041,11 @@ fn upsert_input<'a>(inputs: &mut Vec<'a, R3InputMetadata<'a>>, input: R3InputMet
     upsert_meta(inputs, input, |i| i.class_property_name.as_str());
 }
 
-/// Angular's `@Component` / `@Directive` / `@Pipe` decorator on `class`
-/// (imported from `@angular/core`, in the file `consts` was collected from),
-/// its metadata object (if any) and its name. `@Pipe` is here because ngtsc
-/// runs `extractDirectiveMetadata` — and its io/query checks — for pipes too.
+/// Angular's `@Component` / `@Directive` decorator on `class` (imported from
+/// `@angular/core`, in the file `consts` was collected from), its metadata
+/// object (if any) and its name. `@Pipe` is excluded: upstream's
+/// `PipeDecoratorHandler` never runs `extractDirectiveMetadata`, so io and
+/// query checks don't apply to pipes.
 pub(crate) fn angular_decorator_config<'a>(
     class: &'a Class<'a>,
     consts: &StringConsts<'_>,
@@ -1053,9 +1054,6 @@ pub(crate) fn angular_decorator_config<'a>(
         .map(|d| (d, "Component"))
         .or_else(|| {
             find_directive_decorator(&class.decorators, Some(consts)).map(|d| (d, "Directive"))
-        })
-        .or_else(|| {
-            crate::pipe::find_pipe_decorator(&class.decorators, Some(consts)).map(|d| (d, "Pipe"))
         })?;
     let config = match &decorator.expression {
         Expression::CallExpression(call) => match call.arguments.first() {

@@ -24,7 +24,7 @@ let TestComponent = class TestComponent {
 			type: undefined,
 			decorators: [{ type: Injectable }]
 		},
-		{ type: undefined }
+		null
 	];
 };
 TestComponent = __decorate([Component({
