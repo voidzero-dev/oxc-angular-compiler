@@ -750,7 +750,7 @@ fn find_last_import_end(program_body: &[Statement<'_>]) -> Option<usize> {
 }
 
 /// Build the `ɵsetClassMetadata(...)` declaration string for a non-`@Component`
-/// decorated class (`@Directive`/`@Pipe`/`@Injectable`/`@NgModule`).
+/// decorated class (`@Directive`/`@Pipe`/`@Injectable`/`@NgModule`/`@Service`).
 ///
 /// Mirrors the `@Component` metadata block (without template/style inlining):
 /// emits the decorator metadata, `ctorParameters` (reflected from the class, with
@@ -758,12 +758,16 @@ fn find_last_import_end(program_body: &[Statement<'_>]) -> Option<usize> {
 /// (real `@Input`/`@Output`/query plus synthesized initializer-API). Returns an
 /// empty string when metadata emission is disabled. Matches ngc, which emits
 /// `setClassMetadata` for all decorated classes (needed for TestBed overrides).
+///
+/// The decorators array lists ALL of the class's `@angular/core` decorators in
+/// source order — ngtsc's `extractClassMetadata` filters on `isAngularDecorator`
+/// (imported from `@angular/core`), so a duplicate `@Directive` or a co-located
+/// `@Injectable` appears alongside the decorator that was compiled (issue #521).
 #[allow(clippy::too_many_arguments)]
 fn build_set_class_metadata_decls<'a>(
     allocator: &'a Allocator,
     class: &oxc_ast::ast::Class<'a>,
     class_name: &str,
-    decorator: &oxc_ast::ast::Decorator<'a>,
     options: &TransformOptions,
     source: &'a str,
     string_consts: &crate::directive::StringConsts<'a>,
@@ -771,6 +775,15 @@ fn build_set_class_metadata_decls<'a>(
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> String {
     if !options.emit_class_metadata || options.advanced_optimizations {
+        return String::new();
+    }
+
+    let angular_decorators: std::vec::Vec<_> = class
+        .decorators
+        .iter()
+        .filter(|d| crate::directive::is_angular_core_decorator(d, Some(string_consts)))
+        .collect();
+    if angular_decorators.is_empty() {
         return String::new();
     }
 
@@ -782,8 +795,9 @@ fn build_set_class_metadata_decls<'a>(
         r#type: type_expr,
         decorators: build_decorator_metadata_array(
             &allocator,
-            &[decorator],
+            &angular_decorators,
             Some(source),
+            None,
             None,
             None,
             Some(string_consts),
@@ -3076,9 +3090,24 @@ pub fn transform_angular_file(
                             // Add class metadata for TestBed support (after debug info, before HMR)
                             // Only emit when enabled and not in advanced optimizations mode
                             if options.emit_class_metadata && !options.advanced_optimizations {
-                                if let Some(decorator) =
-                                    find_component_decorator(&class.decorators, &string_consts)
-                                {
+                                // List ALL of the class's `@angular/core` decorators, in
+                                // source order — ngtsc's `extractClassMetadata` filters on
+                                // `isAngularDecorator` (imported from `@angular/core`), so
+                                // a second `@Component` (kept on the emitted class like
+                                // ngtsc's `__decorate` entry) or a co-located `@Injectable`
+                                // appears alongside the decorator that was compiled
+                                // (issue #521).
+                                let angular_decorators: std::vec::Vec<_> = class
+                                    .decorators
+                                    .iter()
+                                    .filter(|d| {
+                                        crate::directive::is_angular_core_decorator(
+                                            d,
+                                            Some(&string_consts),
+                                        )
+                                    })
+                                    .collect();
+                                if !angular_decorators.is_empty() {
                                     let emitter = JsEmitter::new();
 
                                     // Build the type expression: reference to the class
@@ -3102,10 +3131,11 @@ pub fn transform_angular_file(
                                         r#type: type_expr,
                                         decorators: build_decorator_metadata_array(
                                             &allocator,
-                                            &[decorator],
+                                            &angular_decorators,
                                             Some(source),
                                             Some(template),
                                             Some(metadata.styles.as_slice()),
+                                            component_decorator,
                                             Some(&string_consts),
                                         ),
                                         ctor_parameters: build_ctor_params_metadata_in(
@@ -3376,22 +3406,16 @@ pub fn transform_angular_file(
 
                     // Emit setClassMetadata for TestBed support (overrideDirective +
                     // signal members), mirroring the @Component path.
-                    let decls_after_class =
-                        find_directive_decorator(&class.decorators, Some(&string_consts))
-                            .map(|decorator| {
-                                build_set_class_metadata_decls(
-                                    &allocator,
-                                    class,
-                                    &class_name,
-                                    decorator,
-                                    options,
-                                    source,
-                                    &string_consts,
-                                    &import_map,
-                                    &mut file_namespace_registry,
-                                )
-                            })
-                            .unwrap_or_default();
+                    let decls_after_class = build_set_class_metadata_decls(
+                        &allocator,
+                        class,
+                        &class_name,
+                        options,
+                        source,
+                        &string_consts,
+                        &import_map,
+                        &mut file_namespace_registry,
+                    );
 
                     class_positions.push((
                         class_name.clone(),
@@ -3492,22 +3516,16 @@ pub fn transform_angular_file(
                         ));
 
                         // Emit setClassMetadata for TestBed support (overridePipe).
-                        let decls_after_class =
-                            find_pipe_decorator(&class.decorators, Some(&string_consts))
-                                .map(|decorator| {
-                                    build_set_class_metadata_decls(
-                                        &allocator,
-                                        class,
-                                        &class_name,
-                                        decorator,
-                                        options,
-                                        source,
-                                        &string_consts,
-                                        &import_map,
-                                        &mut file_namespace_registry,
-                                    )
-                                })
-                                .unwrap_or_default();
+                        let decls_after_class = build_set_class_metadata_decls(
+                            &allocator,
+                            class,
+                            &class_name,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
 
                         class_positions.push((
                             class_name.clone(),
@@ -3622,26 +3640,21 @@ pub fn transform_angular_file(
 
                         // Emit setClassMetadata for TestBed support (overrideModule),
                         // appended after the NgModule's external declarations.
-                        if let Some(decorator) =
-                            find_ng_module_decorator(&class.decorators, Some(&string_consts))
-                        {
-                            let metadata = build_set_class_metadata_decls(
-                                &allocator,
-                                class,
-                                &class_name,
-                                decorator,
-                                options,
-                                source,
-                                &string_consts,
-                                &import_map,
-                                &mut file_namespace_registry,
-                            );
-                            if !metadata.is_empty() {
-                                if !external_decls.is_empty() {
-                                    external_decls.push('\n');
-                                }
-                                external_decls.push_str(&metadata);
+                        let metadata = build_set_class_metadata_decls(
+                            &allocator,
+                            class,
+                            &class_name,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
+                        if !metadata.is_empty() {
+                            if !external_decls.is_empty() {
+                                external_decls.push('\n');
                             }
+                            external_decls.push_str(&metadata);
                         }
 
                         // NgModule: external_decls go AFTER the class (they reference the class name)
@@ -3731,7 +3744,6 @@ pub fn transform_angular_file(
                             &allocator,
                             class,
                             &class_name,
-                            service_decorator,
                             options,
                             source,
                             &string_consts,
@@ -3809,22 +3821,16 @@ pub fn transform_angular_file(
                         ));
 
                         // Emit setClassMetadata for TestBed support.
-                        let decls_after_class =
-                            find_injectable_decorator(&class.decorators, Some(&string_consts))
-                                .map(|decorator| {
-                                    build_set_class_metadata_decls(
-                                        &allocator,
-                                        class,
-                                        &class_name,
-                                        decorator,
-                                        options,
-                                        source,
-                                        &string_consts,
-                                        &import_map,
-                                        &mut file_namespace_registry,
-                                    )
-                                })
-                                .unwrap_or_default();
+                        let decls_after_class = build_set_class_metadata_decls(
+                            &allocator,
+                            class,
+                            &class_name,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
 
                         class_positions.push((
                             class_name.clone(),
@@ -5946,6 +5952,179 @@ export class SecondComponent {}
         assert!(
             result.code.contains("class SecondComponent"),
             "Code should contain SecondComponent"
+        );
+    }
+
+    /// The decorators array inside `ɵsetClassMetadata(...)` on a single line,
+    /// for whitespace-insensitive comparison.
+    fn set_class_metadata_decorators(code: &str) -> String {
+        let start = code.find("ɵsetClassMetadata(").expect("code should contain ɵsetClassMetadata");
+        code[start..].split_whitespace().collect()
+    }
+
+    #[test]
+    fn test_duplicate_component_decorators() {
+        // Issue #521: two @Component decorators on one class. ngtsc gives no
+        // diagnostic — it compiles the FIRST @Component, leaves the second on
+        // the class (downleveled by TS into `__decorate`), and lists BOTH in
+        // `setClassMetadata`'s decorators array.
+        let allocator = Allocator::default();
+        let source = r#"import {Component} from '@angular/core';
+@Component({selector: 'a-cmp', template: 'first'})
+@Component({selector: 'b-cmp', template: 'second'})
+export class C {}
+"#;
+
+        let result = transform_angular_file(&allocator, "c.ts", source, None, None);
+
+        assert_eq!(result.component_count, 1);
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics);
+
+        // The first decorator is compiled: ɵcmp selects 'a-cmp' with the first template.
+        assert!(
+            result.code.contains("selectors:[[\"a-cmp\"]]"),
+            "ɵcmp should compile the first @Component, but got:\n{}",
+            result.code
+        );
+
+        // The second decorator stays on the emitted class (like ngtsc's
+        // __decorate entry for the decorator the compiler did not take).
+        assert!(
+            result.code.contains("@Component({selector: 'b-cmp', template: 'second'})"),
+            "the second @Component should be preserved on the class, but got:\n{}",
+            result.code
+        );
+
+        // setClassMetadata lists BOTH decorators in source order.
+        let metadata = set_class_metadata_decorators(&result.code);
+        assert!(
+            metadata.contains(
+                "ɵsetClassMetadata(C,[{type:Component,args:[{selector:\"a-cmp\",template:\"first\"}]},{type:Component,args:[{selector:\"b-cmp\",template:\"second\"}]}]"
+            ),
+            "setClassMetadata should list both @Component decorators, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_duplicate_directive_decorators() {
+        // Same as the @Component duplicate: ngtsc compiles the first
+        // @Directive and lists both in setClassMetadata.
+        let allocator = Allocator::default();
+        let source = r#"import {Directive} from '@angular/core';
+@Directive({selector: '[a-dir]'})
+@Directive({selector: '[b-dir]'})
+export class D {}
+"#;
+
+        let result = transform_angular_file(&allocator, "d.ts", source, None, None);
+
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics);
+        assert!(
+            result.code.contains("selectors:[[\"\",\"a-dir\",\"\"]]"),
+            "ɵdir should compile the first @Directive, but got:\n{}",
+            result.code
+        );
+        assert!(
+            result.code.contains("@Directive({selector: '[b-dir]'})"),
+            "the second @Directive should be preserved on the class, but got:\n{}",
+            result.code
+        );
+        let metadata = set_class_metadata_decorators(&result.code);
+        assert!(
+            metadata.contains(
+                "[{type:Directive,args:[{selector:\"[a-dir]\"}]},{type:Directive,args:[{selector:\"[b-dir]\"}]}]"
+            ),
+            "setClassMetadata should list both @Directive decorators, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_duplicate_injectable_decorators() {
+        // A standalone @Injectable lists both decorators in setClassMetadata.
+        let allocator = Allocator::default();
+        let source = r#"import {Injectable} from '@angular/core';
+@Injectable({providedIn: 'root'})
+@Injectable({providedIn: 'platform'})
+export class S {}
+"#;
+
+        let result = transform_angular_file(&allocator, "s.ts", source, None, None);
+
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics);
+        assert!(
+            result.code.contains("@Injectable({providedIn: 'platform'})"),
+            "the second @Injectable should be preserved on the class, but got:\n{}",
+            result.code
+        );
+        let metadata = set_class_metadata_decorators(&result.code);
+        assert!(
+            metadata.contains(
+                "[{type:Injectable,args:[{providedIn:\"root\"}]},{type:Injectable,args:[{providedIn:\"platform\"}]}]"
+            ),
+            "setClassMetadata should list both @Injectable decorators, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_co_located_injectable_decorator_in_class_metadata() {
+        // ngtsc's `isAngularDecorator` filter admits every decorator imported
+        // from `@angular/core`, so a co-located @Injectable is listed in
+        // setClassMetadata too (it is also the one removed alongside the
+        // compiled @Component's).
+        let allocator = Allocator::default();
+        let source = r#"import {Component, Injectable} from '@angular/core';
+@Component({selector: 'a-cmp', template: 'x'})
+@Injectable()
+export class C {}
+"#;
+
+        let result = transform_angular_file(&allocator, "c.ts", source, None, None);
+
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics);
+        assert!(
+            !result.code.contains("@Injectable"),
+            "the @Injectable decorator is compiled into ɵprov and removed, but got:\n{}",
+            result.code
+        );
+        let metadata = set_class_metadata_decorators(&result.code);
+        assert!(
+            metadata.contains(
+                "[{type:Component,args:[{selector:\"a-cmp\",template:\"x\"}]},{type:Injectable}]"
+            ),
+            "setClassMetadata should list @Component and @Injectable, but got:\n{}",
+            result.code
+        );
+    }
+
+    #[test]
+    fn test_non_angular_decorator_not_in_class_metadata() {
+        // A decorator not imported from `@angular/core` is not Angular's:
+        // ngtsc's `isAngularDecorator` filter excludes it from setClassMetadata
+        // while the decorator itself stays on the emitted class.
+        let allocator = Allocator::default();
+        let source = r#"import {Component} from '@angular/core';
+declare function MyDec(): ClassDecorator;
+@Component({selector: 'a-cmp', template: 'x'})
+@MyDec()
+export class C {}
+"#;
+
+        let result = transform_angular_file(&allocator, "c.ts", source, None, None);
+
+        assert!(!result.has_errors(), "diagnostics: {:?}", result.diagnostics);
+        assert!(
+            result.code.contains("@MyDec()"),
+            "the non-Angular decorator should be preserved on the class, but got:\n{}",
+            result.code
+        );
+        let metadata = set_class_metadata_decorators(&result.code);
+        assert!(
+            !metadata.contains("MyDec"),
+            "setClassMetadata should not list a non-Angular decorator, but got:\n{}",
+            result.code
         );
     }
 
