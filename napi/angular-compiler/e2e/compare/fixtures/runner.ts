@@ -140,8 +140,29 @@ async function testFixture(fixture: Fixture, verbose?: boolean): Promise<Fixture
     const undocumented = (result.staticFieldDiffs ?? [])
       .map((diff) => `${diff.className}.${diff.fieldName}`)
       .filter((field) => !known.fields.includes(field))
-    if (undocumented.length > 0) {
-      return { ...result, knownDifferences, undocumentedFields: [...new Set(undocumented)] }
+    const undocumentedImports = (result.importDiffs ?? [])
+      .filter(
+        (diff) =>
+          !(known.importDiffs ?? []).some(
+            (k) =>
+              k.type === diff.type &&
+              k.moduleSource === diff.moduleSource &&
+              JSON.stringify(k.expected ?? []) === JSON.stringify(diff.expected ?? []) &&
+              JSON.stringify(k.actual ?? []) === JSON.stringify(diff.actual ?? []),
+          ),
+      )
+      .map(
+        (diff) =>
+          `import ${diff.moduleSource} expected { ${(diff.expected ?? []).join(', ')} } ` +
+          `got { ${(diff.actual ?? []).join(', ')} }`,
+      )
+    const allUndocumented = [...undocumented, ...undocumentedImports]
+    if (allUndocumented.length > 0) {
+      return {
+        ...result,
+        knownDifferences,
+        undocumentedFields: [...new Set(allUndocumented)],
+      }
     }
     return { ...result, status: 'known-difference', knownDifferences }
   }

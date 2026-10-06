@@ -6,9 +6,13 @@
  * `fields`, so a new difference elsewhere in the same fixture still fails. A listed fixture
  * that matches Angular fails too, so fixed entries get removed.
  */
+import type { ImportDiff } from '../src/compare.js'
+
 interface KnownDifference {
   /** `Class.field` of every static field that differs, e.g. `MyComponent.ɵcmp`. */
   fields: string[]
+  /** Every import difference, exactly as `compareImports` reports it. */
+  importDiffs?: ImportDiff[]
   /** Why each difference exists. */
   reasons: string[]
 }
@@ -27,6 +31,8 @@ const SELECTOR_WHITESPACE =
   'runs of whitespace inside shimmed selectors are collapsed where Angular keeps them'
 const INJECTABLE_FACTORY_WRAPPER =
   'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
+const SET_CLASS_METADATA_IMPORT =
+  'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'animations/animation-metadata-with-change-detection': {
@@ -40,6 +46,42 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'class-metadata/class-metadata-pipe': {
     fields: ['TestablePipe.ɵfac'],
     reasons: [FACTORY],
+  },
+  'class-metadata/class-metadata-injectable': {
+    fields: [],
+    importDiffs: [
+      {
+        type: 'different',
+        moduleSource: '@angular/core',
+        expected: ['Injectable', 'InjectionToken'],
+        actual: ['Inject', 'Injectable', 'InjectionToken'],
+      },
+    ],
+    reasons: [SET_CLASS_METADATA_IMPORT],
+  },
+  'class-metadata/class-metadata-with-inject': {
+    fields: [],
+    importDiffs: [
+      {
+        type: 'different',
+        moduleSource: '@angular/core',
+        expected: ['Component', 'InjectionToken'],
+        actual: ['Component', 'Inject', 'InjectionToken'],
+      },
+    ],
+    reasons: [SET_CLASS_METADATA_IMPORT],
+  },
+  'full-file/component-with-services': {
+    fields: [],
+    importDiffs: [
+      {
+        type: 'different',
+        moduleSource: '@angular/core',
+        expected: ['Component', 'InjectionToken', 'inject'],
+        actual: ['Component', 'Inject', 'InjectionToken', 'inject'],
+      },
+    ],
+    reasons: [SET_CLASS_METADATA_IMPORT],
   },
   'component-meta/change-detection-default': {
     fields: ['ChangeDetectionDefaultComponent.ɵcmp'],
