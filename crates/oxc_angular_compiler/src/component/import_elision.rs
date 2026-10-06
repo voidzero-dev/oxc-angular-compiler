@@ -21,6 +21,11 @@
 //! - Constructor parameter decorators (`@Inject`, `@Optional`, etc.) - Angular removes these
 //! - DI tokens used only in `@Inject(TOKEN)` arguments
 //!
+//! The last two apply only when no `ɵsetClassMetadata` is emitted: the
+//! metadata's `ctorParameters` callback names the param decorators and
+//! `@Inject` tokens as bare identifiers, so their imports must survive
+//! (matching ngtsc, which keeps them).
+//!
 //! ## What gets preserved
 //!
 //! - Decorators used at runtime (@Component, @Input, etc.)
@@ -63,7 +68,16 @@ impl<'a> ImportElisionAnalyzer<'a> {
     ///
     /// This builds a semantic model from the program and checks each import
     /// specifier to see if it has any non-type references.
-    pub fn analyze(program: &'a Program<'a>) -> Self {
+    ///
+    /// `emit_metadata` must mirror whether the transform will emit
+    /// `ɵsetClassMetadata` for this file (`emit_class_metadata &&
+    /// !advanced_optimizations`). The metadata callback names constructor
+    /// parameter decorators (`{type: Optional}`), `@Inject(TOKEN)` argument
+    /// tokens (`args: [TOKEN]`), and member decorators (`{type: Input}`) by
+    /// their local (imported) name, so those imports must survive elision —
+    /// like ngtsc, which keeps them. When no metadata is emitted, the
+    /// decorators are stripped outright and the imports can be dropped.
+    pub fn analyze(program: &'a Program<'a>, emit_metadata: bool) -> Self {
         let semantic_ret = SemanticBuilder::new().build(program);
         let semantic = &semantic_ret.semantic;
 
@@ -71,9 +85,14 @@ impl<'a> ImportElisionAnalyzer<'a> {
 
         // First, collect all symbols that are used ONLY in constructor parameter decorators.
         // These should be elided because Angular removes these decorators during compilation.
+        // When class metadata is emitted, `ctorParameters`/`propDecorators` reference the
+        // same names, so nothing collected here is elidable.
         let consts = crate::directive::StringConsts::declarations_of(program);
-        let ctor_param_decorator_only =
-            Self::collect_ctor_param_decorator_only_imports(program, &consts);
+        let ctor_param_decorator_only = if emit_metadata {
+            FxHashSet::default()
+        } else {
+            Self::collect_ctor_param_decorator_only_imports(program, &consts)
+        };
 
         // Analyze each import declaration
         for stmt in &program.body {
@@ -726,7 +745,9 @@ impl<'a> ImportElisionAnalyzer<'a> {
         file_path: &Path,
         cross_file_analyzer: &mut super::cross_file_elision::CrossFileAnalyzer,
     ) -> Self {
-        let mut analyzer = Self::analyze(program);
+        // Compare-test helper: no `setClassMetadata` context is available, so
+        // analyze as if no class metadata is emitted.
+        let mut analyzer = Self::analyze(program, false);
 
         // Enhanced analysis: check cross-file for remaining imports
         for stmt in &program.body {
@@ -1031,10 +1052,14 @@ mod tests {
     }
 
     fn analyze_source(source: &str) -> FxHashSet<String> {
+        analyze_source_with_metadata(source, false)
+    }
+
+    fn analyze_source_with_metadata(source: &str, emit_metadata: bool) -> FxHashSet<String> {
         let allocator = Allocator::default();
         let source_type = SourceType::ts();
         let parser_ret = Parser::new(&allocator, source, source_type).parse();
-        let analyzer = ImportElisionAnalyzer::analyze(&parser_ret.program);
+        let analyzer = ImportElisionAnalyzer::analyze(&parser_ret.program, emit_metadata);
         analyzer.type_only_specifiers().iter().map(|a| a.to_string()).collect()
     }
 
@@ -1100,7 +1125,7 @@ const service = new AuthService();
         let allocator = Allocator::default();
         let source_type = SourceType::ts();
         let parser_ret = Parser::new(&allocator, source, source_type).parse();
-        let analyzer = ImportElisionAnalyzer::analyze(&parser_ret.program);
+        let analyzer = ImportElisionAnalyzer::analyze(&parser_ret.program, false);
         filter_imports(source, &parser_ret.program, &analyzer)
     }
 
@@ -1626,6 +1651,51 @@ export class TestComponent {
 
         // Component should be preserved
         assert!(!type_only.contains("Component"), "Component should be preserved");
+    }
+
+    #[test]
+    fn test_param_decorators_and_inject_token_kept_when_metadata_emitted() {
+        // Same source as test_multiple_param_decorators_elided, but analyzed as
+        // if `ɵsetClassMetadata` will be emitted: `ctorParameters` names all of
+        // these bare, so none is type-only (issue #520; ngtsc keeps them).
+        let source = r#"
+import { Component, Inject, Optional, Self, SkipSelf, Host } from "@angular/core";
+import { LOCALE_ID } from "@angular/core";
+
+@Component({ selector: 'app-test' })
+export class TestComponent {
+    constructor(
+        @Optional() @Self() service1: Service1,
+        @Optional() @SkipSelf() service2: Service2,
+        @Host() service3: Service3,
+        @Inject(LOCALE_ID) locale: string,
+    ) {}
+}
+"#;
+        let type_only = analyze_source_with_metadata(source, true);
+
+        for name in ["Inject", "Optional", "Self", "SkipSelf", "Host", "LOCALE_ID"] {
+            assert!(
+                !type_only.contains(name),
+                "{name} must survive while setClassMetadata is emitted"
+            );
+        }
+
+        // Type-only imports are still elided under metadata emission: the
+        // parameter type is referenced via a namespace import (`i1.MyService`),
+        // not by its bare name.
+        let source2 = r#"
+import { Component, Optional } from "@angular/core";
+import { MyService } from "./service";
+
+@Component({ selector: 'app-test' })
+export class TestComponent {
+    constructor(@Optional() service: MyService) {}
+}
+"#;
+        let type_only2 = analyze_source_with_metadata(source2, true);
+        assert!(!type_only2.contains("Optional"), "Optional must survive");
+        assert!(type_only2.contains("MyService"), "MyService is type-only — still elided");
     }
 
     #[test]

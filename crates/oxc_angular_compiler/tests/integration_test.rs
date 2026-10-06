@@ -3689,8 +3689,10 @@ export class TestComponent {
     );
 }
 
-/// Test that constructor parameter decorators (@Optional, @Inject, etc.) are elided from imports.
-/// Angular removes these decorators during compilation and encodes them in factory metadata.
+/// Test that constructor parameter decorators (@Optional, @Inject, etc.) keep their imports
+/// while `ɵsetClassMetadata` is emitted (the default), and are elided once it is disabled.
+/// The metadata's `ctorParameters` callback names them as bare identifiers, so dropping the
+/// imports leaves unbound references (issue #520). ngtsc keeps them too.
 #[test]
 fn test_import_elision_ctor_param_decorators() {
     let allocator = Allocator::default();
@@ -3727,16 +3729,15 @@ export class BitLabelComponent {
         .unwrap();
     println!("Angular core import line: {import_line}");
 
-    // Optional should be elided (only used as ctor param decorator)
+    // ctorParameters emits `{type: Optional}` / `{type: Inject, args: [DOCUMENT]}`
+    // bare, so both imports must be retained while setClassMetadata is emitted.
     assert!(
-        !import_line.contains("Optional"),
-        "Optional should be elided from imports. Import line: {import_line}"
+        import_line.contains("Optional"),
+        "Optional should be kept in imports (named by setClassMetadata). Import line: {import_line}"
     );
-
-    // Inject should be elided (only used as ctor param decorator)
     assert!(
-        !import_line.contains("Inject"),
-        "Inject should be elided from imports. Import line: {import_line}"
+        import_line.contains("Inject"),
+        "Inject should be kept in imports (named by setClassMetadata). Import line: {import_line}"
     );
 
     // ElementRef should be elided (only used in type annotation, DI comes from namespace)
@@ -3751,17 +3752,43 @@ export class BitLabelComponent {
         "Component should be in imports. Import line: {import_line}"
     );
 
-    // Find the @angular/common import line (if it exists)
+    // DOCUMENT is named bare inside ctorParameters `args`, so its import stays too.
     let common_import =
         code.lines().find(|l| l.starts_with("import") && l.contains("@angular/common"));
+    let common_line =
+        common_import.unwrap_or_else(|| panic!("DOCUMENT import missing. Code: {code}"));
+    assert!(
+        common_line.contains("DOCUMENT"),
+        "DOCUMENT should be kept in imports (named by setClassMetadata). Import line: {common_line}"
+    );
 
-    // DOCUMENT should be elided (only used in @Inject argument)
-    // If the import line exists, it should not contain DOCUMENT
-    // Or the entire import should be removed
-    if let Some(common_line) = common_import {
+    // With class metadata emission disabled, the same imports are elided again.
+    let no_metadata = ComponentTransformOptions {
+        emit_class_metadata: false,
+        ..ComponentTransformOptions::default()
+    };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&no_metadata), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    assert!(!code.contains("setClassMetadata"), "metadata should not be emitted: {code}");
+
+    let import_line = code
+        .lines()
+        .find(|l| l.starts_with("import") && l.contains("@angular/core") && !l.contains("* as"))
+        .unwrap();
+    for decorator in ["Optional", "Inject"] {
+        assert!(
+            !import_line.contains(decorator),
+            "{decorator} should be elided when no setClassMetadata is emitted. Import line: {import_line}"
+        );
+    }
+    if let Some(common_line) =
+        code.lines().find(|l| l.starts_with("import") && l.contains("@angular/common"))
+    {
         assert!(
             !common_line.contains("DOCUMENT"),
-            "DOCUMENT should be elided from imports. Import line: {common_line}"
+            "DOCUMENT should be elided when no setClassMetadata is emitted. Import line: {common_line}"
         );
     }
 }
