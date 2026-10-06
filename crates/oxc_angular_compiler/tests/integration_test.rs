@@ -16155,8 +16155,12 @@ fn test_static_input_on_component_and_pipe_is_diagnostic() {
 fn test_static_output_member_is_diagnostic() {
     // `model()` is covered by the input test: ngtsc's `parseInputFields` runs
     // first, so a static model reports the Input error, not the Output one.
+    // Members without an initializer — a bare declaration and a method — hit
+    // the same check (tryParseDecoratorOutput accepts any member kind).
     for member in [
         "@Output() static y = new EventEmitter();",
+        "@Output() static y: EventEmitter<number>;",
+        "@Output() static emit() {}",
         "static y = output<number>();",
         "static y = outputFromObservable(of(0));",
     ] {

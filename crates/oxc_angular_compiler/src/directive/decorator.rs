@@ -1179,12 +1179,16 @@ pub fn decorator_io_errors<'a>(
                 return Some(error);
             }
             // ngtsc's `tryParseInitializerBasedOutput` rejects `output.required()`
-            // while parsing the member, before the checks below.
-            if let Some((_, true, call)) = initializer_api_call(
-                value?,
-                Some(consts),
-                &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API],
-            ) {
+            // while parsing the member, before the checks below. Members
+            // without an initializer (incl. every method) fall through to the
+            // static-member and @Output-on-signal checks.
+            if let Some(value) = value
+                && let Some((_, true, call)) = initializer_api_call(
+                    value,
+                    Some(consts),
+                    &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API],
+                )
+            {
                 return Some(("Output does not support \".required()\".".to_string(), call.span));
             }
             // Then `@Output` on an `output()` or a model, like ngtsc's

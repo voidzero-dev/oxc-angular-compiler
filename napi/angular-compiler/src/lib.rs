@@ -2084,6 +2084,7 @@ pub fn compile_class_metadata_sync(
         None,
         None,
         None,
+        Some(&string_consts),
     );
 
     // Build constructor parameters metadata
