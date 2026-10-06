@@ -1553,18 +1553,25 @@ pub(crate) fn extract_host_bindings_in<'a>(
     let mut bindings = Vec::new_in(&allocator);
 
     for element in &class.body.body {
-        let (decorators, property_name) = match element {
+        let (decorators, property_name, is_static) = match element {
             ClassElement::PropertyDefinition(prop) => {
-                (&prop.decorators, get_property_key_name(&prop.key))
+                (&prop.decorators, get_property_key_name(&prop.key), prop.r#static)
             }
             ClassElement::MethodDefinition(method) => {
-                (&method.decorators, get_property_key_name(&method.key))
+                (&method.decorators, get_property_key_name(&method.key), method.r#static)
             }
             ClassElement::AccessorProperty(prop) => {
-                (&prop.decorators, get_property_key_name(&prop.key))
+                (&prop.decorators, get_property_key_name(&prop.key), prop.r#static)
             }
             _ => continue,
         };
+
+        // ngtsc's `filterToMembersWithDecorator` ignores static members: a
+        // `@HostBinding()` on one is not a host binding. Private (`#x`) members
+        // can't carry decorators, and `get_property_key_name` skips them anyway.
+        if is_static {
+            continue;
+        }
 
         let Some(decorator) = find_decorator_by_name(decorators, "HostBinding", consts) else {
             continue;
@@ -1636,15 +1643,21 @@ pub(crate) fn extract_host_listeners_in<'a>(
 
     for element in &class.body.body {
         // Handle both MethodDefinition and PropertyDefinition (for arrow function handlers)
-        let (decorators, property_name) = match element {
+        let (decorators, property_name, is_static) = match element {
             ClassElement::MethodDefinition(method) => {
-                (&method.decorators, get_property_key_name(&method.key))
+                (&method.decorators, get_property_key_name(&method.key), method.r#static)
             }
             ClassElement::PropertyDefinition(prop) => {
-                (&prop.decorators, get_property_key_name(&prop.key))
+                (&prop.decorators, get_property_key_name(&prop.key), prop.r#static)
             }
             _ => continue,
         };
+
+        // ngtsc's `filterToMembersWithDecorator` ignores static members: a
+        // `@HostListener()` on one is not a host listener.
+        if is_static {
+            continue;
+        }
 
         let Some(decorator) = find_decorator_by_name(decorators, "HostListener", consts) else {
             continue;

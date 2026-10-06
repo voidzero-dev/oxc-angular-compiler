@@ -6137,6 +6137,55 @@ export class TestComponent {
     );
 }
 
+/// @HostBinding / @HostListener on `static` members are not host bindings:
+/// ngtsc's `filterToMembersWithDecorator` filters `!member.isStatic` before
+/// collecting them (typescript.ts). They must not appear in `hostBindings`,
+/// `hostVars`, or `propDecorators`.
+#[test]
+fn test_static_host_binding_and_listener_are_ignored() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive, HostBinding, HostListener } from '@angular/core';
+
+@Directive({ selector: '[d]' })
+export class D {
+    @HostBinding('class.a') a = true;
+    @HostBinding('class.b') static b = true;
+    @HostListener('click') onClick() {}
+    @HostListener('scroll') static onScroll() {}
+}
+";
+
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // Instance member still produces a binding and a listener.
+    assert!(
+        compact.contains(r#"ɵɵclassProp("a",ctx.a)"#),
+        "instance @HostBinding should emit a classProp. Got:\n{code}"
+    );
+    assert!(
+        compact.contains(r#"ɵɵlistener("click""#),
+        "instance @HostListener should emit a listener. Got:\n{code}"
+    );
+
+    // Static members are ignored entirely.
+    assert!(
+        !compact.contains(r#"classProp("b""#),
+        "static @HostBinding should not emit a binding. Got:\n{code}"
+    );
+    assert!(
+        !compact.contains(r#"listener("scroll""#),
+        "static @HostListener should not emit a listener. Got:\n{code}"
+    );
+    assert!(
+        compact.contains("hostVars:2"),
+        "hostVars should count only the instance classProp. Got:\n{code}"
+    );
+}
+
 /// `setClassMetadata`'s `propDecorators` mirrors ngtsc's `extractClassMetadata`
 /// (metadata.ts): static and ECMAScript-private members are excluded, and
 /// string-literal member keys are emitted quoted (`shouldQuoteName`).
