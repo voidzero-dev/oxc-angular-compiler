@@ -1,0 +1,46 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+
+import { Component, Inject, Injectable } from '@angular/core';
+import { Inject as ForeignInject } from 'not-angular';
+import * as i0 from '@angular/core';
+
+const TOKEN = 'token';
+
+export class TestComponent {
+    @Component()
+    componentMember: any;
+
+    @Inject(TOKEN)
+    knownMember: any;
+
+    @ForeignInject(TOKEN)
+    foreignMember: any;
+
+    constructor(
+        known: any,
+        @Injectable() customDec: any,
+        @ForeignInject(TOKEN) foreign: any,
+    ) {}
+
+static ɵfac = function TestComponent_Factory(__ngFactoryType__) {
+  return new (__ngFactoryType__ || TestComponent)(i0.ɵɵdirectiveInject(TOKEN),i0.ɵɵinvalidFactoryDep(1),
+      i0.ɵɵinvalidFactoryDep(2));
+};
+static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selectors:[["app-test"]],decls:0,
+    vars:0,template:function TestComponent_Template(rf,ctx) {
+    },encapsulation:2});
+}
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassDebugInfo(TestComponent,
+      {className:"TestComponent",filePath:"test.component.ts",lineNumber:8}));
+})();
+(() =>{
+  (((typeof ngDevMode === "undefined") || ngDevMode) && i0.ɵsetClassMetadata(TestComponent,
+      [{type:Component,args:[{selector:"app-test",template:""}]}],() =>[{type:undefined,
+          decorators:[{type:Inject,args:[TOKEN]}]},{type:undefined,decorators:[{type:Injectable}]},
+          {type:undefined,decorators:[]}],{componentMember:[{type:Component}],knownMember:[{type:Inject,
+          args:[TOKEN]}]}));
+})();

@@ -101,11 +101,12 @@ pub(crate) fn angular_core_decorator(
 ///
 /// This is ngtsc's `isAngularDecorator`
 /// (`decorator.import.from === '@angular/core'`), the gate for the JIT
-/// `propDecorators` lowering: the import decides, not the name, so even
-/// `@Component` on a member is lowered into `propDecorators`. (The JIT
-/// `ctorParameters` path still name-checks against [`PARAM_DECORATORS`].)
-/// Without the file (`None`), any named decorator counts (same fallback as
-/// [`angular_core_decorator`]'s name match).
+/// `propDecorators`/`ctorParameters` lowering and `setClassMetadata`'s
+/// decorator lists: the import decides, not the name, so even `@Component` on
+/// a member or constructor parameter is listed. Without the file (`None`),
+/// any named decorator counts (same fallback as
+/// [`angular_core_decorator`]'s name match); callers that can't prove
+/// provenance keep the known-name lists instead.
 pub(crate) fn is_angular_core_decorator(
     decorator: &Decorator<'_>,
     consts: Option<&super::StringConsts<'_>>,
