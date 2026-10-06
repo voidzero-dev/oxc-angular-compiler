@@ -6137,6 +6137,74 @@ export class TestComponent {
     );
 }
 
+/// `setClassMetadata`'s `propDecorators` mirrors ngtsc's `extractClassMetadata`
+/// (metadata.ts): static and ECMAScript-private members are excluded, and
+/// string-literal member keys are emitted quoted (`shouldQuoteName`).
+#[test]
+fn test_set_class_metadata_prop_decorators_member_shape() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Input } from '@angular/core';
+import { input } from '@angular/core';
+
+@Component({
+    selector: 'test-comp',
+    template: '<div>hello</div>',
+    standalone: true,
+})
+export class TestComponent {
+    @Input() instanceProp: any;
+    @Input() static staticProp: any;
+    @Input() #priv: any;
+    @Input() 'str-key': any;
+    static statSignal = input(0);
+}
+";
+
+    let options = ComponentTransformOptions {
+        emit_class_metadata: true,
+        ..ComponentTransformOptions::default()
+    };
+
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let metadata_section = result
+        .code
+        .split("ɵsetClassMetadata")
+        .nth(1)
+        .expect("setClassMetadata should be present in output");
+    let compact: String = metadata_section.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // Instance member with an Angular decorator is listed.
+    assert!(
+        compact.contains("instanceProp:[{type:Input}]"),
+        "instance member should be in propDecorators. Metadata:\n{metadata_section}"
+    );
+    // String-literal key is quoted, like ngtsc's shouldQuoteName.
+    assert!(
+        compact.contains(r#""str-key":[{type:Input}]"#),
+        "string-literal member key should be quoted in propDecorators. Metadata:\n{metadata_section}"
+    );
+    // Static members — decorated or signal-initialized — are excluded, like
+    // ngtsc's `!member.isStatic` filter.
+    assert!(
+        !compact.contains("staticProp:"),
+        "static members should not appear in propDecorators. Metadata:\n{metadata_section}"
+    );
+    assert!(
+        !compact.contains("statSignal:"),
+        "static signal member should not get a synthesized entry. Metadata:\n{metadata_section}"
+    );
+    // ECMAScript-private members are excluded.
+    assert!(
+        !compact.contains("priv:"),
+        "private members should not appear in propDecorators. Metadata:\n{metadata_section}"
+    );
+}
+
 // ============================================================================
 // Namespace Attribute Const Collection Tests
 // ============================================================================

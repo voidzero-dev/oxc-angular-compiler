@@ -509,20 +509,28 @@ pub fn build_prop_decorators_metadata_in<'a>(
     let mut prop_entries = AllocVec::new_in(&allocator);
 
     for element in &class.body.body {
-        let (decorators, property_name, value) = match element {
+        let (decorators, key, is_static, value) = match element {
             ClassElement::PropertyDefinition(prop) => {
-                (&prop.decorators, get_property_key_name(&prop.key), prop.value.as_ref())
+                (&prop.decorators, &prop.key, prop.r#static, prop.value.as_ref())
             }
             ClassElement::MethodDefinition(method) => {
-                (&method.decorators, get_property_key_name(&method.key), None)
+                (&method.decorators, &method.key, method.r#static, None)
             }
             ClassElement::AccessorProperty(prop) => {
-                (&prop.decorators, get_property_key_name(&prop.key), prop.value.as_ref())
+                (&prop.decorators, &prop.key, prop.r#static, prop.value.as_ref())
             }
             _ => continue,
         };
 
-        let Some(prop_name) = property_name else {
+        // ngtsc excludes static and ECMAScript-private members from
+        // `propDecorators` (`!member.isStatic && accessLevel !==
+        // EcmaScriptPrivate`); a private name yields `None` from
+        // `member_key_name` either way.
+        if is_static {
+            continue;
+        }
+
+        let Some((prop_name, quoted)) = member_key_name(key) else {
             continue;
         };
 
@@ -546,7 +554,7 @@ pub fn build_prop_decorators_metadata_in<'a>(
                 None,
                 None,
             );
-            prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
+            prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, quoted));
             continue;
         }
 
@@ -566,7 +574,7 @@ pub fn build_prop_decorators_metadata_in<'a>(
                 consts,
             )
         {
-            prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, false));
+            prop_entries.push(LiteralMapEntry::new(prop_name, decorators_array, quoted));
         }
     }
 
@@ -985,6 +993,24 @@ fn get_property_key_name<'a>(key: &PropertyKey<'a>) -> Option<Ident<'a>> {
     match key {
         PropertyKey::StaticIdentifier(id) => Some(id.name.into()),
         PropertyKey::StringLiteral(lit) => Some(lit.value.into()),
+        _ => None,
+    }
+}
+
+/// A class member's `propDecorators` key and whether it's quoted.
+///
+/// Like ngtsc's `shouldQuoteName` (`ts.isStringLiteralLike(nameNode)`), a
+/// string-literal key (`'x-y'`, `'x'`) is always quoted in the emitted object
+/// literal; a bare identifier is not. A no-substitution template literal
+/// counts too; private (`#x`), computed and numeric keys have no usable name
+/// and return `None`.
+fn member_key_name<'a>(key: &PropertyKey<'a>) -> Option<(Ident<'a>, bool)> {
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some((id.name.into(), false)),
+        PropertyKey::StringLiteral(lit) => Some((lit.value.into(), true)),
+        PropertyKey::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {
+            tpl.quasis.first().and_then(|q| q.value.cooked.clone().map(|v| (v.into(), true)))
+        }
         _ => None,
     }
 }
