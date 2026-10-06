@@ -12308,6 +12308,77 @@ export class UnresolvedComponent {}
 }
 
 // =============================================================================
+// Issue #514: `selector: ''` on @Component falls back to `ng-component`
+// =============================================================================
+// ngtsc maps `selector: ''` to the default selector (`resolved === '' ?
+// defaultSelector : resolved` in annotations/directive/src/shared.ts). For
+// components the default is `ng-component`, identical to a missing selector;
+// for directives the default is `null`, which raises NG2004 (directive
+// diagnostics are tracked separately — OXC emits no `selectors` entry here,
+// which is also the closest non-error output).
+
+#[test]
+fn component_empty_selector_falls_back_to_ng_component() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: '', template: '' })
+export class C {}
+"#;
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let cmp_start = result.code.find("ɵɵdefineComponent({").expect("ɵcmp missing");
+    let cmp_section = &result.code[cmp_start..];
+    let cmp_end = cmp_section.find("})").expect("ɵcmp not terminated");
+    let cmp_def = &cmp_section[..cmp_end];
+    assert!(
+        cmp_def.contains(r#"selectors:[["ng-component"]]"#),
+        "Empty selector should fall back to `ng-component`.\nɵcmp:\n{cmp_def}"
+    );
+
+    // The .d.ts selector type parameter must also fall back.
+    let decl = result.dts_declarations.iter().find(|d| d.class_name == "C").expect("d.ts missing");
+    assert!(
+        decl.members.contains("\"ng-component\""),
+        "d.ts selector should be `ng-component`.\nMembers:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn directive_empty_selector_emits_no_invalid_selectors() {
+    // Upstream, `selector: ''` on @Directive resolves to the `null` default
+    // selector and raises NG2004. Until directive diagnostics land, the best
+    // OXC can do is not emit an invalid `selectors` array like `[[""]]` —
+    // and it must NOT fall back to `ng-component` (that fallback is
+    // component-only).
+    let allocator = Allocator::default();
+    let source = r#"
+import { Directive } from '@angular/core';
+
+@Directive({ selector: '' })
+export class D {}
+"#;
+    let result = transform_angular_file(&allocator, "d.directive.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let dir_start = result.code.find("ɵɵdefineDirective({").expect("ɵdir missing");
+    let dir_section = &result.code[dir_start..];
+    let dir_end = dir_section.find("})").expect("ɵdir not terminated");
+    let dir_def = &dir_section[..dir_end];
+    assert!(
+        !dir_def.contains("selectors"),
+        "Empty directive selector must not emit `selectors`.\nɵdir:\n{dir_def}"
+    );
+    assert!(
+        !dir_def.contains("ng-component"),
+        "Directives must not get the component default selector.\nɵdir:\n{dir_def}"
+    );
+}
+
+// =============================================================================
 // Issue #287: TDZ-safe hoisting of consts referenced by emitted Ivy definitions
 // =============================================================================
 // When `@Component` metadata references a `const` (or other binding) declared

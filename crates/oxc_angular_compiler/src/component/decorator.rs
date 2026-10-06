@@ -90,7 +90,12 @@ pub fn extract_component_metadata<'a>(
             match key_name.as_str() {
                 "selector" => {
                     metadata.selector =
-                        crate::directive::extract_string_value(allocator, &prop.value, consts);
+                        crate::directive::extract_string_value(allocator, &prop.value, consts)
+                            // ngtsc maps `selector: ''` to the default selector
+                            // ('ng-component' for components), same as a missing
+                            // selector. See annotations/directive/src/shared.ts
+                            // (`resolved === '' ? defaultSelector : resolved`).
+                            .filter(|s| !s.as_str().is_empty());
                 }
                 "template" => {
                     metadata.template =
@@ -1263,6 +1268,22 @@ mod tests {
         "#;
         assert_metadata(code, |meta| {
             assert_eq!(meta.selector.as_ref().unwrap().as_str(), "[appDirective]");
+        });
+    }
+
+    #[test]
+    fn test_extract_empty_selector_falls_back_to_default() {
+        // ngtsc maps `selector: ''` to the default selector ('ng-component'),
+        // same as a missing selector. Storing None lets every emit path
+        // (ɵcmp selectors, partial ɵɵngDeclareComponent, .d.ts) apply that
+        // default. See https://github.com/voidzero-dev/oxc-angular-compiler/issues/514
+        let code = r#"
+            import {Component} from '@angular/core';
+            @Component({ selector: '', template: '' })
+            class EmptySelectorComponent {}
+        "#;
+        assert_metadata(code, |meta| {
+            assert!(meta.selector.is_none(), "Empty selector should normalize to None");
         });
     }
 
