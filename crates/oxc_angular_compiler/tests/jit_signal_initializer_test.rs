@@ -316,7 +316,8 @@ fn member_decorators_named_like_angular_ones_count_only_from_angular_core() {
         "Got:\n{out}"
     );
 
-    // `@angular/core`'s `Inject` under an alias is treated like `@Inject`.
+    // `@angular/core`'s `Inject` under an alias is treated like `@Inject`:
+    // it goes to `propDecorators`, referenced by its written name (`Inj`).
     let aliased = compile_jit(
         "import { Component, Inject as Inj } from '@angular/core';\n\
          @Component({ selector: 'c', template: '', standalone: true })\n\
@@ -327,10 +328,62 @@ fn member_decorators_named_like_angular_ones_count_only_from_angular_core() {
          @Component({ selector: 'c', template: '', standalone: true })\n\
          export class C {\n  @Inject(X) a: any;\n}\n",
     );
-    assert!(!aliased.contains("Inj(X)"), "Got:\n{aliased}");
-    assert_eq!(
-        aliased.replace("Inject as Inj", "Inject"),
-        plain,
-        "aliased:\n{aliased}\nplain:\n{plain}"
+    let compact = |s: String| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+    assert!(
+        compact(aliased.clone()).contains("a:[{type:Inj,args:[X]}]"),
+        "aliased @Inject should go to propDecorators as written. Got:\n{aliased}"
+    );
+    assert!(
+        compact(plain.clone()).contains("a:[{type:Inject,args:[X]}]"),
+        "@Inject should go to propDecorators. Got:\n{plain}"
+    );
+}
+
+#[test]
+fn member_decorators_from_angular_core_all_go_to_prop_decorators() {
+    // Issue #522: ngtsc's `isAngularDecorator` only checks that the decorator is
+    // imported from `@angular/core`, not its name — so `@Inject`, `@Optional`,
+    // `@Attribute`, and even `@Component` on a member are lowered into
+    // `propDecorators`, keeping decorator order.
+    let out = compile_jit(&component(
+        "  @Inject(TOKEN) @Optional() x: any;\n\
+         @Attribute('a') y: any;\n\
+         @Input() @Inject(TOKEN) z: any;\n\
+         @Inject(TOKEN) 'x-y': any;\n",
+        "Inject, Optional, Attribute, Input",
+    ));
+    let compact: String = out.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("x:[{type:Inject,args:[TOKEN]},{type:Optional}]"),
+        "member @Inject/@Optional should be in propDecorators in order. Got:\n{out}"
+    );
+    assert!(
+        compact.contains("y:[{type:Attribute,args:[\"a\"]}]"),
+        "member @Attribute should be in propDecorators. Got:\n{out}"
+    );
+    assert!(
+        compact.contains("z:[{type:Input},{type:Inject,args:[TOKEN]}]"),
+        "mixed member should keep both entries in order. Got:\n{out}"
+    );
+    assert!(
+        compact.contains("\"x-y\":[{type:Inject,args:[TOKEN]}]"),
+        "string-literal member key should be quoted in propDecorators. Got:\n{out}"
+    );
+
+    // A namespace-imported `@angular/core` decorator (`@core.Host()`) counts too.
+    let namespaced = compile_jit(
+        "import { Component } from '@angular/core';\n\
+         import * as core from '@angular/core';\n\
+         @Component({ selector: 'c', template: '', standalone: true })\n\
+         export class C {\n  @core.Host() h: any;\n  @core.Component({}) m: any;\n}\n",
+    );
+    let compact: String = namespaced.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("h:[{type:core.Host}]"),
+        "namespaced @core.Host() should be in propDecorators. Got:\n{namespaced}"
+    );
+    assert!(
+        compact.contains("m:[{type:core.Component,args:[{}]}]"),
+        "namespaced @core.Component() on a member should be in propDecorators. Got:\n{namespaced}"
     );
 }

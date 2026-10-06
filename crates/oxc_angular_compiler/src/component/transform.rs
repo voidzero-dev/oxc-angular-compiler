@@ -882,6 +882,9 @@ struct JitParamDecorator {
 struct JitMemberDecorator {
     /// The property/member name.
     member_name: String,
+    /// Whether the member name came from a string-literal key (`'x-y'`) and
+    /// must be quoted in the `propDecorators` object literal.
+    quoted_key: bool,
     /// The Angular decorators on this member.
     decorators: std::vec::Vec<JitParamDecorator>,
 }
@@ -1131,42 +1134,10 @@ fn extract_jit_ctor_params(
     (params, other_decorators)
 }
 
-/// Angular's decorators. On a member, one imported from `@angular/core` (see
-/// [`crate::directive::angular_core_decorator`]) goes to `propDecorators` if it's
-/// a field decorator and is dropped otherwise (ngtsc lists those in
-/// `propDecorators` too). Like ngtsc's JIT transform, where a decorator comes
-/// from decides, not its name: another module's `@Inject` stays a `__decorate()`
-/// call.
-const ANGULAR_DECORATOR_NAMES: &[&str] = &[
-    // Field decorators (→ propDecorators)
-    "Input",
-    "Output",
-    "HostBinding",
-    "HostListener",
-    "ViewChild",
-    "ViewChildren",
-    "ContentChild",
-    "ContentChildren",
-    // Parameter decorators (→ ctorParameters)
-    "Inject",
-    "Optional",
-    "Self",
-    "SkipSelf",
-    "Host",
-    "Attribute",
-    // Class decorators (→ class __decorate)
-    "Component",
-    "Directive",
-    "Pipe",
-    "Injectable",
-    "Service",
-    "NgModule",
-];
-
 /// Extract all member decorators for JIT transformation in a single pass.
 ///
 /// Returns two collections:
-/// - Angular field decorators → emitted as `static propDecorators = { ... }`
+/// - Angular decorators (`@angular/core` imports) → `static propDecorators = { ... }`
 /// - Non-Angular decorators → emitted as `__decorate([...], target, "name", desc)` calls
 fn extract_all_jit_member_decorators(
     source: &str,
@@ -1180,36 +1151,37 @@ fn extract_all_jit_member_decorators(
     let mut non_angular_members: std::vec::Vec<JitNonAngularMemberDecorator> = std::vec::Vec::new();
 
     for element in &class.body.body {
-        let (member_name, is_static, is_property, decorators, initializer) = match element {
-            ClassElement::PropertyDefinition(prop) => {
-                let name = match &prop.key {
-                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-                    PropertyKey::StringLiteral(s) => s.value.to_string(),
-                    _ => continue,
-                };
-                (name, prop.r#static, true, &prop.decorators, prop.value.as_ref())
-            }
-            ClassElement::MethodDefinition(method) => {
-                if method.kind == MethodDefinitionKind::Constructor {
-                    continue;
+        let (member_name, quoted_key, is_static, is_property, decorators, initializer) =
+            match element {
+                ClassElement::PropertyDefinition(prop) => {
+                    let (name, quoted) = match &prop.key {
+                        PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
+                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        _ => continue,
+                    };
+                    (name, quoted, prop.r#static, true, &prop.decorators, prop.value.as_ref())
                 }
-                let name = match &method.key {
-                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-                    PropertyKey::StringLiteral(s) => s.value.to_string(),
-                    _ => continue,
-                };
-                (name, method.r#static, false, &method.decorators, None)
-            }
-            ClassElement::AccessorProperty(accessor) => {
-                let name = match &accessor.key {
-                    PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-                    PropertyKey::StringLiteral(s) => s.value.to_string(),
-                    _ => continue,
-                };
-                (name, accessor.r#static, false, &accessor.decorators, None)
-            }
-            _ => continue,
-        };
+                ClassElement::MethodDefinition(method) => {
+                    if method.kind == MethodDefinitionKind::Constructor {
+                        continue;
+                    }
+                    let (name, quoted) = match &method.key {
+                        PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
+                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        _ => continue,
+                    };
+                    (name, quoted, method.r#static, false, &method.decorators, None)
+                }
+                ClassElement::AccessorProperty(accessor) => {
+                    let (name, quoted) = match &accessor.key {
+                        PropertyKey::StaticIdentifier(id) => (id.name.to_string(), false),
+                        PropertyKey::StringLiteral(s) => (s.value.to_string(), true),
+                        _ => continue,
+                    };
+                    (name, quoted, accessor.r#static, false, &accessor.decorators, None)
+                }
+                _ => continue,
+            };
 
         let mut angular_decs: std::vec::Vec<JitParamDecorator> = std::vec::Vec::new();
         let mut non_angular_texts: std::vec::Vec<String> = std::vec::Vec::new();
@@ -1244,21 +1216,21 @@ fn extract_all_jit_member_decorators(
                 let name =
                     source[callee.span().start as usize..callee.span().end as usize].to_string();
                 angular_decs.push(JitParamDecorator { name, args: call_args });
-            } else if crate::directive::angular_core_decorator(
-                decorator,
-                Some(string_consts),
-                ANGULAR_DECORATOR_NAMES,
-            )
-            .is_none()
-            {
+            } else if crate::directive::is_angular_core_decorator(decorator, Some(string_consts)) {
+                // Any other `@angular/core` decorator on a member (`@Inject`,
+                // `@Optional`, `@Attribute`, even `@Component`) also goes into
+                // propDecorators: ngtsc's `isAngularDecorator` checks only the
+                // import, not the decorator name.
+                let name =
+                    source[callee.span().start as usize..callee.span().end as usize].to_string();
+                angular_decs.push(JitParamDecorator { name, args: call_args });
+            } else {
                 // Non-Angular decorator (another module's `@Input` or `@Inject`
                 // too) → goes into __decorate() call
                 let expr_start = decorator.expression.span().start;
                 let expr_end = decorator.expression.span().end;
                 non_angular_texts.push(source[expr_start as usize..expr_end as usize].to_string());
             }
-            // Angular non-field decorators (e.g. @Inject on a member) are silently dropped
-            // since they have no meaningful effect on members.
         }
 
         // Signal initializer-API lowering: synthesize @Input / @Output / @ViewChild / etc.
@@ -1281,6 +1253,7 @@ fn extract_all_jit_member_decorators(
         if !angular_decs.is_empty() {
             angular_members.push(JitMemberDecorator {
                 member_name: member_name.clone(),
+                quoted_key,
                 decorators: angular_decs,
             });
         }
@@ -1622,7 +1595,13 @@ fn build_prop_decorators_text(members: &[JitMemberDecorator]) -> Option<String> 
                 }
             })
             .collect();
-        entries.push(format!("    {}: [{}]", member.member_name, dec_strs.join(", ")));
+        // String-literal member keys ('x-y') need quotes in the object literal.
+        let key = if member.quoted_key {
+            format!("\"{}\"", escape_js_string(&member.member_name))
+        } else {
+            member.member_name.clone()
+        };
+        entries.push(format!("    {}: [{}]", key, dec_strs.join(", ")));
     }
 
     Some(format!("static propDecorators = {{\n{}\n}}", entries.join(",\n")))

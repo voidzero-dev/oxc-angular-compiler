@@ -95,6 +95,41 @@ pub(crate) fn angular_core_decorator(
     names.iter().copied().find(|n| *n == name)
 }
 
+/// Whether `decorator` comes from `@angular/core`: `@X`/`@X()` with `X`
+/// imported from it (by any alias or default), or `@ns.Y()` with
+/// `import * as ns from '@angular/core'` (see [`is_core_namespace`]).
+///
+/// This is ngtsc's `isAngularDecorator`
+/// (`decorator.import.from === '@angular/core'`), the gate for the JIT
+/// `propDecorators` lowering: the import decides, not the name, so even
+/// `@Component` on a member is lowered into `propDecorators`. (The JIT
+/// `ctorParameters` path still name-checks against [`PARAM_DECORATORS`].)
+/// Without the file (`None`), any named decorator counts (same fallback as
+/// [`angular_core_decorator`]'s name match).
+pub(crate) fn is_angular_core_decorator(
+    decorator: &Decorator<'_>,
+    consts: Option<&super::StringConsts<'_>>,
+) -> bool {
+    let callee = match &decorator.expression {
+        Expression::CallExpression(call) => &call.callee,
+        expr => expr,
+    };
+    match callee {
+        Expression::Identifier(id) => match consts {
+            Some(consts) => consts
+                .scope()
+                .import(&id.name)
+                .is_some_and(|import| import.module == "@angular/core"),
+            None => true,
+        },
+        Expression::StaticMemberExpression(m) => match &m.object {
+            Expression::Identifier(ns) => is_core_namespace(consts, &ns.name),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 /// Which of Angular's member decorators ([`MEMBER_DECORATORS`]) `decorator`
 /// is (see [`angular_core_decorator`]). Without the file (the public
 /// `extract_*` functions), any decorator with that name.

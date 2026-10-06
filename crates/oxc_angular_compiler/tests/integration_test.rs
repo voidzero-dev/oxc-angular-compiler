@@ -9064,11 +9064,12 @@ export class TestService {
 }
 
 #[test]
-fn test_jit_angular_param_decorators_not_in_member_decorate() {
-    // Angular parameter decorators (@Inject, @Optional, @Self, @SkipSelf, @Host, @Attribute)
-    // should NOT be emitted in __decorate() calls if they appear on a member.
-    // While these are designed for constructor params, if someone puts them on a member,
-    // they should be treated as Angular decorators (not lowered via __decorate).
+fn test_jit_angular_param_decorators_go_to_prop_decorators() {
+    // Angular parameter decorators (@Inject, @Optional, @Self, @SkipSelf, @Host,
+    // @Attribute) on a member go into `propDecorators`, like ngtsc's
+    // `isAngularDecorator` which checks only the `@angular/core` import, not the
+    // decorator name (issue #522). Only non-Angular decorators are lowered via
+    // __decorate() calls.
     let allocator = Allocator::default();
     let source = r"
 import { Injectable, Inject, Optional } from '@angular/core';
@@ -9099,8 +9100,20 @@ export class MyService {
         result.code
     );
 
-    // @Inject and @Optional should NOT appear in __decorate calls for members
-    // They are Angular decorators and should not be treated as non-Angular
+    // @Inject and @Optional should appear in propDecorators, like ngtsc
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("token:[{type:Inject,args:[\"TOKEN\"]}]"),
+        "propDecorators should contain the @Inject entry. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("optionalDep:[{type:Optional}]"),
+        "propDecorators should contain the @Optional entry. Got:\n{}",
+        result.code
+    );
+
+    // They must not appear in member __decorate calls
     let member_decorate_calls: Vec<&str> = result
         .code
         .lines()

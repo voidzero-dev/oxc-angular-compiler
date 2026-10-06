@@ -11,6 +11,13 @@ let MyService = class MyService {
 	token;
 	optionalDep;
 	customProp = "";
+	static propDecorators = {
+		token: [{
+			type: Inject,
+			args: ["TOKEN"]
+		}],
+		optionalDep: [{ type: Optional }]
+	};
 };
 __decorate([Custom()], MyService.prototype, "customProp", void 0);
 MyService = __decorate([Injectable()], MyService);
