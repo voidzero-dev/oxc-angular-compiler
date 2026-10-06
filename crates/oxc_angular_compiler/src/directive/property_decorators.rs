@@ -1928,9 +1928,12 @@ fn member_query<'a>(
     decorator_query(allocator, consts, &evaluator, name, args, span, "", source_text)
 }
 
-/// The first error ngtsc raises for a class's query member decorators
-/// (`parseQueriesOfClassFields`), in member order: the one
-/// [`member_query`] reports, on the node ngtsc points at.
+/// The first error ngtsc raises for a class's query members
+/// (`parseQueriesOfClassFields`), in member order: the one [`member_query`]
+/// reports for a decorator, the ones `tryParseSignalQueryFromInitializer`
+/// reports for a signal initializer, or — once a member is a query — it being
+/// on a static member (`INCORRECTLY_DECLARED_ON_STATIC_MEMBER`), each on the
+/// node ngtsc points at.
 pub(crate) fn member_query_error<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
@@ -1938,19 +1941,66 @@ pub(crate) fn member_query_error<'a>(
     consts: &super::StringConsts<'a>,
 ) -> Option<(String, Span)> {
     class.body.body.iter().find_map(|element| {
-        let (decorators, span) = match element {
-            ClassElement::PropertyDefinition(prop) => (&prop.decorators, prop.span),
-            ClassElement::MethodDefinition(method)
-                if matches!(method.kind, MethodDefinitionKind::Set | MethodDefinitionKind::Get) =>
-            {
-                (&method.decorators, method.span)
+        let (decorators, value, is_static, span) = match element {
+            ClassElement::PropertyDefinition(prop) => {
+                (&prop.decorators, prop.value.as_ref(), prop.r#static, prop.span)
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                (&accessor.decorators, accessor.value.as_ref(), accessor.r#static, accessor.span)
+            }
+            ClassElement::MethodDefinition(method) => {
+                (&method.decorators, None, method.r#static, method.span)
             }
             _ => return None,
         };
-        let (decorator, name) = QUERY_TYPES.iter().find_map(|name| {
-            Some((find_decorator_by_name(decorators, name, Some(consts))?, *name))
-        })?;
-        member_query(allocator, decorator, name, span, source_text, consts).err()
+        let decorator = QUERY_TYPES.iter().find_map(|name| {
+            find_decorator_by_name(decorators, name, Some(consts)).zip(Some(*name))
+        });
+        // A query decorator's own errors come first (`tryGetQueryFromFieldDecorator`).
+        if let Some((decorator, name)) = decorator
+            && let Some(error) =
+                member_query(allocator, decorator, name, span, source_text, consts).err()
+        {
+            return Some(error);
+        }
+        // Then the signal query's own errors (`tryParseSignalQueryFromInitializer`).
+        let signal = value.and_then(|value| {
+            super::decorator::initializer_api_call(
+                value,
+                Some(consts),
+                &super::decorator::QUERY_APIS,
+            )
+        });
+        if let Some((_, _, call)) = signal {
+            if call.arguments.first().and_then(Argument::as_expression).is_none() {
+                return Some(("No locator specified.".to_string(), call.span));
+            }
+            if let Some(options) = call.arguments.get(1)
+                && !matches!(options, Argument::ObjectExpression(_))
+            {
+                return Some((
+                    "Argument needs to be an object literal.".to_string(),
+                    options.span(),
+                ));
+            }
+        }
+        // ngtsc rejects `@ViewChild` (and friends) with a signal query initializer.
+        if let (Some((decorator, name)), Some(_)) = (decorator, signal) {
+            let message = format!("Using @{name} with a signal-based query is not allowed.");
+            return Some((message, decorator.span));
+        }
+        // A query on a static member (INCORRECTLY_DECLARED_ON_STATIC_MEMBER),
+        // on the decorator or the call.
+        if is_static {
+            let node = decorator
+                .map(|(decorator, _)| decorator.span)
+                .or(signal.map(|(_, _, call)| call.span));
+            if let Some(span) = node {
+                let message = "Query is incorrectly declared on a static class member.".to_string();
+                return Some((message, span));
+            }
+        }
+        None
     })
 }
 

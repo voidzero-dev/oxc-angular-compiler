@@ -6144,8 +6144,8 @@ export class TestComponent {
 fn test_set_class_metadata_prop_decorators_member_shape() {
     let allocator = Allocator::default();
     let source = r"
-import { Component, Input } from '@angular/core';
-import { input } from '@angular/core';
+import { Component, HostBinding, Input } from '@angular/core';
+import { signal } from '@angular/core';
 
 @Component({
     selector: 'test-comp',
@@ -6154,10 +6154,10 @@ import { input } from '@angular/core';
 })
 export class TestComponent {
     @Input() instanceProp: any;
-    @Input() static staticProp: any;
+    @HostBinding('class.b') static staticProp: any;
     @Input() #priv: any;
     @Input() 'str-key': any;
-    static statSignal = input(0);
+    static statSignal = signal(0);
 }
 ";
 
@@ -15483,5 +15483,214 @@ export class CounterService {}
         decl.members.contains("static ɵprov: i0.ɵɵInjectableDeclaration<CounterService>;"),
         "Should contain ɵprov. Got:\n{}",
         decl.members
+    );
+}
+
+// ============================================================================
+// Angular decorators on `static` members (INCORRECTLY_DECLARED_ON_STATIC_MEMBER)
+// ============================================================================
+// ngtsc's `extractDirectiveMetadata` rejects inputs, outputs and queries on
+// static members (shared.ts `parseInputFields` / `parseOutputFields` /
+// `parseQueriesOfClassFields`). `decorator_io_errors` mirrors those checks for
+// @Component/@Directive/@Pipe classes. HostBinding/HostListener on statics are
+// ignored upstream (`filterToMembersWithDecorator` drops static members), so
+// they stay silent.
+
+fn expect_diagnostics(source: &str) -> Vec<String> {
+    let allocator = Allocator::default();
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    result.diagnostics.iter().map(|d| format!("{d}")).collect()
+}
+
+#[test]
+fn test_static_input_member_is_diagnostic() {
+    // `@Input` on a static field, setter and signal/model initializer all map
+    // to the same upstream error, with the member and class names.
+    for member in [
+        "@Input() static x = 0;",
+        "@Input() static set x(v: number) {}",
+        "static x = input(0);",
+        "static x = input.required<number>();",
+        "static x = model(0);",
+    ] {
+        let source = format!(
+            "import {{ Directive, Input, input, model }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        let expected = "Input \"x\" is incorrectly declared as static member of \"D\".";
+        assert!(
+            diagnostics.iter().any(|d| d.contains(expected)),
+            "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_static_input_on_component_and_pipe_is_diagnostic() {
+    // extractDirectiveMetadata runs for @Component and @Pipe too.
+    for decorator in ["@Component({ selector: 'c', template: '' })", "@Pipe({ name: 'p' })"] {
+        let source = format!(
+            "import {{ Component, Directive, Input, Pipe }} from '@angular/core';\n\
+             {decorator}\n\
+             export class C {{\n    @Input() static x = 0;\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        let expected = "Input \"x\" is incorrectly declared as static member of \"C\".";
+        assert!(
+            diagnostics.iter().any(|d| d.contains(expected)),
+            "{decorator} should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_static_output_member_is_diagnostic() {
+    // `model()` is covered by the input test: ngtsc's `parseInputFields` runs
+    // first, so a static model reports the Input error, not the Output one.
+    for member in [
+        "@Output() static y = new EventEmitter();",
+        "static y = output<number>();",
+        "static y = outputFromObservable(of(0));",
+    ] {
+        let source = format!(
+            "import {{ Directive, EventEmitter, Output, model, output }} from '@angular/core';\n\
+             import {{ outputFromObservable }} from '@angular/core/rxjs-interop';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        let expected = "Output is incorrectly declared on a static class member.";
+        assert!(
+            diagnostics.iter().any(|d| d.contains(expected)),
+            "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_static_query_member_is_diagnostic() {
+    for member in [
+        "@ViewChild('el') static z: any;",
+        "@ViewChildren('el') static z: any;",
+        "@ContentChild('el') static z: any;",
+        "@ContentChildren('el') static z: any;",
+        "static z = viewChild('el');",
+        "static z = viewChildren('el');",
+        "static z = contentChild.required('el');",
+        "static z = contentChildren('el');",
+    ] {
+        let source = format!(
+            "import {{ Component, ContentChild, ContentChildren, ViewChild, ViewChildren, \
+             contentChild, contentChildren, viewChild, viewChildren }} from '@angular/core';\n\
+             @Component({{ selector: 'c', template: '' }})\n\
+             export class C {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        let expected = "Query is incorrectly declared on a static class member.";
+        assert!(
+            diagnostics.iter().any(|d| d.contains(expected)),
+            "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_static_host_binding_and_listener_produce_no_diagnostic() {
+    // ngtsc's `filterToMembersWithDecorator` drops static members before host
+    // metadata is collected: @HostBinding/@HostListener on statics are ignored
+    // upstream, not an error (#544), so no diagnostic is emitted for them.
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive, HostBinding, HostListener } from '@angular/core';
+
+@Directive({ selector: '[d]' })
+export class D {
+    @HostBinding('class.b') static b = true;
+    @HostListener('scroll') static onScroll() {}
+}
+";
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "@HostBinding/@HostListener on statics must not produce a diagnostic: {:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn test_static_member_checks_keep_ngtsc_error_order() {
+    // `tryParseInputFieldMapping` reports a decorator+initializer collision
+    // before `parseInputFields` gets to the static check.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input, input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Input() static x = input(0);\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.contains("Using @Input with a signal input is not allowed.")),
+        "@Input + input() should report the collision, not the static error. Got: {diagnostics:?}"
+    );
+
+    // `tryParseInitializerBasedOutput` rejects output.required() before the
+    // static check (INITIALIZER_API_NO_REQUIRED_FUNCTION).
+    let diagnostics = expect_diagnostics(
+        "import { Directive, output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    static y = output.required();\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.contains("Output does not support \".required()\".")),
+        "output.required() should report the required() error. Got: {diagnostics:?}"
+    );
+
+    // `tryParseSignalQueryFromInitializer` reports its own errors and the
+    // decorator+signal collision before the static check.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    static z = viewChild();\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.contains("No locator specified.")),
+        "viewChild() without a locator should error. Got: {diagnostics:?}"
+    );
+    let diagnostics = expect_diagnostics(
+        "import { Directive, ViewChild, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @ViewChild('a') static z = viewChild('b');\n}",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.contains("Using @ViewChild with a signal-based query is not allowed.")),
+        "@ViewChild + viewChild() should report the collision. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_instance_input_output_query_members_have_no_static_diagnostic() {
+    // The same declarations without `static` stay valid.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, EventEmitter, Input, Output, ViewChild, input, output, viewChild }
+    from '@angular/core';
+
+@Component({ selector: 'c', template: '' })
+export class C {
+    @Input() x = 0;
+    @Output() y = new EventEmitter<number>();
+    @ViewChild('el') z: any;
+    xi = input(0);
+    yo = output<number>();
+    vq = viewChild('el');
+}
+";
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(
+        !result.has_errors(),
+        "instance members must not produce the static-member diagnostic: {:?}",
+        result.diagnostics
     );
 }
