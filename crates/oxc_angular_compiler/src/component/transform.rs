@@ -2592,7 +2592,14 @@ pub fn transform_angular_file(
     // Run import elision analysis on the original program.
     // This identifies type-only imports that can be removed.
     // Must run BEFORE transformation to capture correct type vs value references.
-    let import_elision = ImportElisionAnalyzer::analyze(&parser_ret.program);
+    // `ɵsetClassMetadata` names ctor-param decorators (`{type: Optional}`),
+    // `@Inject` tokens (`args: [TOKEN]`) and member decorators (`{type: Input}`)
+    // by their imported names, so those imports must stay whenever metadata
+    // will be emitted (ngtsc keeps them too).
+    let import_elision = ImportElisionAnalyzer::analyze(
+        &parser_ret.program,
+        options.emit_class_metadata && !options.advanced_optimizations,
+    );
 
     // Collect class definitions by class name.
     // Each entry is (class_name, static_definitions_to_insert, external_declarations)
