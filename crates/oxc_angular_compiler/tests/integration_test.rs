@@ -15605,3 +15605,282 @@ export class CounterService {}
         decl.members
     );
 }
+
+// ============================================================================
+// Issue #515: `jit: true` in decorator metadata opts a class out of AOT
+// ============================================================================
+// ngtsc's extractDirectiveMetadata / NgModuleDecoratorHandler return jitForced
+// when the decorator's options object has `jit`, producing no analysis (no
+// ɵcmp/ɵdir/ɵmod/ɵfac/setClassMetadata) and registering the class in
+// jitDeclarationRegistry so the JIT transform downlevels its decorators.
+
+#[test]
+fn test_jit_true_component_skips_aot() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+@Component({ jit: true, selector: 'c', template: '<p>{{x}}</p>' })
+export class C { x = 1 }
+";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    for forbidden in ["ɵcmp", "ɵfac", "ɵsetClassMetadata"] {
+        assert!(
+            !result.code.contains(forbidden),
+            "jit:true class must not emit {forbidden}. Got:\n{}",
+            result.code
+        );
+    }
+    assert!(
+        result.code.contains("import { __decorate } from \"tslib\""),
+        "Should import __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("let C = class C {"),
+        "Class should be restructured as a class expression. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code
+            .contains("C = __decorate([\n    Component({ jit: true, selector: 'c', template: '<p>{{x}}</p>' })\n], C);"),
+        "Should downlevel the decorator via __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("export { C };"), "Should re-export. Got:\n{}", result.code);
+    // No Ivy fields in the .d.ts either.
+    assert!(result.dts_declarations.is_empty(), "jit:true must not emit d.ts Ivy fields");
+}
+
+#[test]
+fn test_jit_true_directive_skips_aot() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive } from '@angular/core';
+
+@Directive({ jit: true, selector: '[d]' })
+export class D {}
+";
+    let result = transform_angular_file(&allocator, "d.directive.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    for forbidden in ["ɵdir", "ɵfac", "ɵsetClassMetadata"] {
+        assert!(
+            !result.code.contains(forbidden),
+            "jit:true directive must not emit {forbidden}. Got:\n{}",
+            result.code
+        );
+    }
+    assert!(
+        result
+            .code
+            .contains("D = __decorate([\n    Directive({ jit: true, selector: '[d]' })\n], D);"),
+        "Should downlevel via __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(result.dts_declarations.is_empty());
+}
+
+#[test]
+fn test_jit_true_ng_module_skips_aot() {
+    let allocator = Allocator::default();
+    let source = r"
+import { NgModule } from '@angular/core';
+
+@NgModule({ jit: true, declarations: [] })
+export class M {}
+";
+    let result = transform_angular_file(&allocator, "m.module.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    for forbidden in ["ɵmod", "ɵinj", "ɵfac", "ɵsetClassMetadata"] {
+        assert!(
+            !result.code.contains(forbidden),
+            "jit:true NgModule must not emit {forbidden}. Got:\n{}",
+            result.code
+        );
+    }
+    assert!(
+        result
+            .code
+            .contains("M = __decorate([\n    NgModule({ jit: true, declarations: [] })\n], M);"),
+        "Should downlevel via __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(result.dts_declarations.is_empty());
+}
+
+#[test]
+fn test_jit_true_mixed_file() {
+    // A jit:true class and a normal component in the same file: only the
+    // jit:true class is skipped; the other still compiles AOT.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+@Component({ jit: true, selector: 'jit-c', template: 'jit' })
+export class JitComp {}
+
+@Component({ selector: 'aot-c', template: 'aot' })
+export class AotComp {}
+";
+    let result = transform_angular_file(&allocator, "mix.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert_eq!(result.component_count, 1, "Only the AOT component counts");
+    assert!(
+        result.code.contains("JitComp = __decorate("),
+        "JitComp should be downleveled. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("AotComp.ɵcmp") || result.code.contains("static ɵcmp"),
+        "AotComp should still compile. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("JitComp.ɵfac"),
+        "JitComp must not get ɵfac. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_jit_true_member_and_ctor_metadata() {
+    // Member decorators become propDecorators, constructor parameters become
+    // ctorParameters, and their imports stay live (upstream: TypeScript's
+    // import elision sees the rewritten AST).
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Input, Inject, Optional } from '@angular/core';
+import { SomeService } from './svc';
+
+@Component({ jit: true, selector: 'c', template: 'hi' })
+export class C {
+    @Input() x = 1;
+    constructor(private s: SomeService, @Optional() @Inject('TOK') private t?: string) {}
+}
+";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(
+        result.code.contains("import { SomeService } from './svc';"),
+        "ctor type import must survive elision. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("import { Component, Input, Inject, Optional }"),
+        "Angular imports must survive. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("static ctorParameters"), "Got:\n{}", result.code);
+    assert!(result.code.contains("{ type: SomeService }"), "Got:\n{}", result.code);
+    assert!(
+        result.code.contains("{ type: Optional }") && result.code.contains("type: Inject"),
+        "Param decorators belong in ctorParameters. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("static propDecorators")
+            && result.code.contains("x: [{ type: Input }]"),
+        "@Input belongs in propDecorators. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !result.code.contains("@Input"),
+        "Member decorator must be removed. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_jit_true_with_injectable() {
+    // Upstream's InjectableHandler runs independently of the jitForced
+    // short-circuit: a @Component({jit:true}) + @Injectable class keeps its
+    // ɵfac/ɵprov and setClassMetadata while its decorators are downleveled.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Injectable } from '@angular/core';
+
+@Component({ jit: true, selector: 'c', template: 'hi' })
+@Injectable()
+export class C {}
+";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    assert!(result.code.contains("static ɵfac"), "ɵfac expected. Got:\n{}", result.code);
+    assert!(result.code.contains("static ɵprov"), "ɵprov expected. Got:\n{}", result.code);
+    assert!(!result.code.contains("ɵcmp"), "No ɵcmp. Got:\n{}", result.code);
+    assert!(
+        result.code.contains("Injectable()") && result.code.contains("C = __decorate("),
+        "Both decorators should be downleveled. Got:\n{}",
+        result.code
+    );
+    assert!(
+        result.code.contains("import * as i0 from '@angular/core'"),
+        "ɵfac/ɵprov need i0. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_jit_false_still_compiles_aot() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+@Component({ jit: false, selector: 'c', template: 'hi' })
+export class C {}
+";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert_eq!(result.component_count, 1);
+    assert!(result.code.contains("static ɵcmp"), "Got:\n{}", result.code);
+}
+
+#[test]
+fn test_jit_true_signal_apis() {
+    // Signal initializer APIs synthesize propDecorators referencing the
+    // @angular/core namespace — the i0 import must be added for a jit:true
+    // class even though nothing else in the file needs it.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, input } from '@angular/core';
+
+@Component({ jit: true, selector: 'c', template: 'hi' })
+export class C {
+    x = input.required<string>();
+}
+";
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result.code.contains("import * as i0 from '@angular/core'"),
+        "Synthesized i0.Input needs the namespace import. Got:\n{}",
+        result.code
+    );
+    assert!(result.code.contains("type: i0.Input"), "Got:\n{}", result.code);
+}
+
+#[test]
+fn test_jit_true_no_stray_i0_import() {
+    // A jit:true class without signal APIs / @Injectable references no i0 —
+    // no @angular/core namespace import should be added.
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive } from '@angular/core';
+
+@Directive({ jit: true, selector: '[d]' })
+export class D {}
+";
+    let result = transform_angular_file(&allocator, "d.ts", source, None, None);
+    assert!(
+        !result.code.contains("import * as i0"),
+        "Unused i0 import must not be emitted. Got:\n{}",
+        result.code
+    );
+}

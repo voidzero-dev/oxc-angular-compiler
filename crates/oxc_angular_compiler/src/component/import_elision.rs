@@ -694,6 +694,19 @@ impl<'a> ImportElisionAnalyzer<'a> {
         self.type_only_specifiers.contains(&Ident::from(name))
     }
 
+    /// Keep `name`'s import even though the source only references it in
+    /// positions the analysis marks elidable.
+    ///
+    /// `jit: true` classes are downleveled like JIT-mode output: constructor
+    /// parameter decorators and types move into `ctorParameters`/`__param`,
+    /// so they remain value references in the emitted code even though the
+    /// source position made them look removable. Upstream sees the same
+    /// result because TypeScript's import elision runs after ngtsc's
+    /// transforms, on the rewritten AST.
+    pub fn preserve(&mut self, name: &'a str) {
+        self.type_only_specifiers.remove(&Ident::from(name));
+    }
+
     /// Get the set of type-only specifier names.
     pub fn type_only_specifiers(&self) -> &FxHashSet<Ident<'a>> {
         &self.type_only_specifiers
