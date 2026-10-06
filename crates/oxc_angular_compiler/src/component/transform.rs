@@ -1275,7 +1275,10 @@ fn extract_all_jit_member_decorators(
                 string_consts,
                 core_namespace,
             );
-            angular_decs.extend(synthesized);
+            // Upstream inserts the synthesized decorator ahead of the member's
+            // existing decorators (`[newDecorator, ...member.node.modifiers]`),
+            // so it precedes any explicit ones in `propDecorators`.
+            angular_decs.splice(0..0, synthesized);
         }
 
         if !angular_decs.is_empty() {

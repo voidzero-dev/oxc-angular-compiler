@@ -334,3 +334,31 @@ fn member_decorators_named_like_angular_ones_count_only_from_angular_core() {
         "aliased:\n{aliased}\nplain:\n{plain}"
     );
 }
+
+#[test]
+fn synthesized_decorator_precedes_explicit_member_decorators() {
+    // Issue #540: upstream prepends the synthesized signal-API decorator ahead
+    // of the member's existing decorators
+    // (`[newDecorator, ...member.node.modifiers]`), so a member like
+    // `@Output() x = input(0)` lists the synthesized `i0.Input` before the
+    // explicit `Output` in `propDecorators` — not after it.
+    let out = compile_jit(&component("  @Output() x = input(0);\n", "input, Output, EventEmitter"));
+    let compact: String = out.chars().filter(|c| !c.is_whitespace()).collect();
+    let input_pos = compact.find("type:i0.Input").expect("synthesized i0.Input missing");
+    let output_pos = compact.find("type:Output").expect("explicit Output missing");
+    assert!(
+        input_pos < output_pos,
+        "synthesized i0.Input should precede the explicit @Output in propDecorators. Got:\n{out}"
+    );
+
+    // model() synthesizes two decorators; both precede an explicit decorator.
+    let model_out =
+        compile_jit(&component("  @HostBinding('class.x') m = model(0);\n", "model, HostBinding"));
+    let compact: String = model_out.chars().filter(|c| !c.is_whitespace()).collect();
+    let host_pos = compact.find("type:HostBinding").expect("explicit HostBinding missing");
+    assert!(
+        compact.find("type:i0.Input").expect("synthesized i0.Input missing") < host_pos
+            && compact.find("type:i0.Output").expect("synthesized i0.Output missing") < host_pos,
+        "synthesized model() decorators should precede the explicit @HostBinding. Got:\n{model_out}"
+    );
+}
