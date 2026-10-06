@@ -29,26 +29,48 @@ use crate::output::oxc_converter::{
 ///
 /// When `inlined_template` and/or `inlined_styles` are provided (typically for
 /// `@Component` decorators with `templateUrl`/`styleUrls`/`styleUrl` resolved
-/// via `ResolvedResources`), the first argument of the first decorator (the
-/// component config object literal) is rewritten so that `templateUrl` becomes
-/// `template` (with content inlined) and `styleUrls`/`styleUrl` are folded into
-/// the `styles` array. This matches Angular's `transformDecoratorResources` (see
-/// `inline_component_resources` below for the source-cited semantics) and is
-/// required for TestBed JIT recompilation, since Angular's
-/// `componentNeedsResolution(metadata)` check throws when `templateUrl` is set
-/// without a sibling `template` field, or when `styleUrls?.length > 0`, even
-/// though the AOT-compiled `ɵcmp` already has the template baked in.
+/// via `ResolvedResources`), the component config object literal is rewritten
+/// so that `templateUrl` becomes `template` (with content inlined) and
+/// `styleUrls`/`styleUrl` are folded into the `styles` array. This matches
+/// Angular's `transformDecoratorResources` (see `inline_component_resources`
+/// below for the source-cited semantics) and is required for TestBed JIT
+/// recompilation, since Angular's `componentNeedsResolution(metadata)` check
+/// throws when `templateUrl` is set without a sibling `template` field, or
+/// when `styleUrls?.length > 0`, even though the AOT-compiled `ɵcmp` already
+/// has the template baked in.
+///
+/// `component_decorator` is the `@Component` decorator that was compiled (the
+/// first one on the class, as `find_component_decorator` resolves it). It is
+/// the decorator whose evaluated metadata map `transformDecoratorResources`
+/// reads (`component/src/handler.ts` passes the compiled `component` map), so
+/// it decides whether resource inlining applies. When its config object
+/// references external resources, upstream rewrites the `args` of EVERY
+/// class decorator literally named `Component` to that same transformed map —
+/// including a second `@Component` the compiler did not take (issue #521).
+/// Decorators spelled differently (`@Cmp` aliases) stay verbatim, matching
+/// upstream's `if (dec.name !== 'Component') return dec;`.
 pub fn build_decorator_metadata_array<'a>(
     allocator: &'a Allocator,
     decorators: &[&Decorator<'a>],
     source_text: Option<&'a str>,
     inlined_template: Option<&'a str>,
     inlined_styles: Option<&[Ident<'a>]>,
+    component_decorator: Option<&Decorator<'a>>,
     consts: Option<&StringConsts<'a>>,
 ) -> OutputExpression<'a> {
+    // Whether `transformDecoratorResources` rewrites the `args` of decorators
+    // named `Component`: the compiled decorator's config object references
+    // external resources (component/src/resources.ts checks the evaluated
+    // `component` map for `templateUrl`/`styleUrls`/`styleUrl`/`styles`).
+    let component_source_obj = component_decorator.and_then(|d| match &d.expression {
+        Expression::CallExpression(call) => call.arguments.first().and_then(|a| a.as_expression()),
+        _ => None,
+    });
+    let transform_resources = matches!(component_source_obj, Some(Expression::ObjectExpression(obj)) if has_resource_property(obj));
+
     let mut decorator_entries = AllocVec::new_in(&allocator);
 
-    for (decorator_idx, decorator) in decorators.iter().enumerate() {
+    for decorator in decorators.iter() {
         let mut map_entries = AllocVec::new_in(&allocator);
 
         // Get decorator type name
@@ -88,72 +110,85 @@ pub fn build_decorator_metadata_array<'a>(
         // Add "type" entry
         map_entries.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
-        // Add "args" entry if the decorator has arguments
-        if let Expression::CallExpression(call) = &decorator.expression
-            && !call.arguments.is_empty()
-        {
-            // Gate resource inlining on the decorator's name, matching Angular's
-            // `if (dec.name !== 'Component') return dec;` at the top of
-            // `transformDecoratorResources`. Without this, other decorators that
-            // happen to use resource-shaped keys (e.g. `@Inject({ templateUrl: … })`,
-            // legal TS even if nonsensical) get their literals stripped.
-            let is_component_decorator =
-                get_decorator_name(decorator).is_some_and(|n| n == "Component");
+        // Gate resource inlining on the decorator's written name, matching
+        // Angular's `if (dec.name !== 'Component') return dec;` at the top of
+        // `transformDecoratorResources` — an `@Cmp` alias stays verbatim even
+        // when the compiled decorator (resolved by import) has resources.
+        // Without this, other decorators that happen to use resource-shaped
+        // keys (e.g. `@Inject({ templateUrl: … })`, legal TS even if
+        // nonsensical) would get their literals stripped.
+        let is_component_decorator =
+            get_decorator_name(decorator).is_some_and(|n| n == "Component");
 
-            let mut args = AllocVec::new_in(&allocator);
+        let mut args = AllocVec::new_in(&allocator);
+        let mut args_emitted = false;
+
+        // When the compiled decorator's config references external resources,
+        // upstream replaces `args` of every `Component`-named decorator with a
+        // single object literal rebuilt from the COMPILED decorator's metadata
+        // map (`{...dec, args: [createObjectLiteralExpression(newMetadataFields)]}`)
+        // — a duplicate `@Component` gets the same transformed args, not its own.
+        if transform_resources
+            && is_component_decorator
+            && let Some(obj) = component_source_obj
+        {
+            // ngtsc rebuilds the metadata from its plain properties when it
+            // inlines resources, so methods and accessors are dropped.
+            let mut converted = match obj {
+                Expression::ObjectExpression(o) => {
+                    convert_plain_properties(allocator, o, source_text)
+                }
+                _ => convert_oxc_expression(allocator, obj, source_text),
+            };
+            if let Some(converted) = &mut converted {
+                inline_component_resources(&allocator, converted, inlined_template, inlined_styles);
+                // Drop config fields whose value is a template literal with an
+                // unresolvable `${…}` interpolation, matching the AOT `ɵcmp` path
+                // (which drops e.g. an unresolved `selector`). Otherwise the raw
+                // template literal would leak verbatim into `setClassMetadata`.
+                if let Some(consts) = consts {
+                    drop_unresolvable_template_literal_fields(&allocator, converted, obj, consts);
+                }
+            }
+            if let Some(converted) = converted {
+                args.push(converted);
+                args_emitted = true;
+            }
+        }
+
+        if !args_emitted && let Expression::CallExpression(call) = &decorator.expression {
             for (arg_idx, arg) in call.arguments.iter().enumerate() {
                 let expr = arg.to_expression();
-                let converted = match expr {
-                    // ngtsc rebuilds the metadata from its plain properties when it
-                    // inlines resources, so methods and accessors are dropped.
-                    Expression::ObjectExpression(obj)
-                        if is_component_decorator
-                            && decorator_idx == 0
-                            && arg_idx == 0
-                            && has_resource_property(obj) =>
-                    {
-                        convert_plain_properties(allocator, obj, source_text)
-                    }
-                    _ => convert_oxc_expression(allocator, expr, source_text),
-                };
+                let converted = convert_oxc_expression(allocator, expr, source_text);
                 if let Some(mut converted) = converted {
-                    // Inline resolved templates/styles into the first arg of the
-                    // first @Component decorator. Other decorators / other args
-                    // are left alone.
-                    if is_component_decorator && decorator_idx == 0 && arg_idx == 0 {
-                        inline_component_resources(
+                    // Same template-literal drop as the transformed path, applied
+                    // to the config object of each `Component`-named decorator
+                    // left verbatim (issue #521: a second `@Component` too).
+                    if is_component_decorator
+                        && arg_idx == 0
+                        && let Some(consts) = consts
+                    {
+                        drop_unresolvable_template_literal_fields(
                             &allocator,
                             &mut converted,
-                            inlined_template,
-                            inlined_styles,
+                            expr,
+                            consts,
                         );
-                        // Drop config fields whose value is a template literal with an
-                        // unresolvable `${…}` interpolation, matching the AOT `ɵcmp` path
-                        // (which drops e.g. an unresolved `selector`). Otherwise the raw
-                        // template literal would leak verbatim into `setClassMetadata`.
-                        if let Some(consts) = consts {
-                            drop_unresolvable_template_literal_fields(
-                                &allocator,
-                                &mut converted,
-                                expr,
-                                consts,
-                            );
-                        }
                     }
                     args.push(converted);
                 }
             }
+        }
 
-            if !args.is_empty() {
-                map_entries.push(LiteralMapEntry::new(
-                    Ident::from("args"),
-                    OutputExpression::LiteralArray(Box::new_in(
-                        LiteralArrayExpr { entries: args, source_span: None },
-                        &allocator,
-                    )),
-                    false,
-                ));
-            }
+        if !args.is_empty() {
+            map_entries.push(LiteralMapEntry::new(
+                Ident::from("args"),
+                OutputExpression::LiteralArray(Box::new_in(
+                    LiteralArrayExpr { entries: args, source_span: None },
+                    &allocator,
+                )),
+                false,
+            ));
         }
 
         // Create the decorator object: { type: ..., args: [...] }
@@ -428,6 +463,7 @@ pub fn build_ctor_params_metadata_in<'a>(
                 None,
                 None,
                 None,
+                None,
             );
             map_entries.push(LiteralMapEntry::new(
                 Ident::from("decorators"),
@@ -550,6 +586,7 @@ pub fn build_prop_decorators_metadata_in<'a>(
                 &allocator,
                 &angular_decorators,
                 source_text,
+                None,
                 None,
                 None,
                 None,
