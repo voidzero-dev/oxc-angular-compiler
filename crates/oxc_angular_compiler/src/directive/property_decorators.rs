@@ -1648,12 +1648,18 @@ pub(crate) fn extract_host_listeners_in<'a>(
     let mut listeners = Vec::new_in(&allocator);
 
     for element in &class.body.body {
-        // Handle both MethodDefinition and PropertyDefinition (for arrow function handlers)
+        // Handle MethodDefinition, PropertyDefinition (for arrow function
+        // handlers) and AccessorProperty: ngtsc's `reflectClassMember` reports
+        // a TS `accessor` field as a PropertyDeclaration, so
+        // `filterToMembersWithDecorator` sees @HostListener on one.
         let (decorators, property_name, is_static) = match element {
             ClassElement::MethodDefinition(method) => {
                 (&method.decorators, get_property_key_name(&method.key), method.r#static)
             }
             ClassElement::PropertyDefinition(prop) => {
+                (&prop.decorators, get_property_key_name(&prop.key), prop.r#static)
+            }
+            ClassElement::AccessorProperty(prop) => {
                 (&prop.decorators, get_property_key_name(&prop.key), prop.r#static)
             }
             _ => continue,
