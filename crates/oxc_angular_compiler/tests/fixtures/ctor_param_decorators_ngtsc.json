@@ -518,8 +518,7 @@
       "ctorParameters": "[{type:i1.Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:Optional}]},{type:i1.Dep,decorators:[{type:Self}]},{type:i1.Dep,decorators:[{type:SkipSelf}]},{type:i1.Dep,decorators:[{type:Host}]},{type:i1.Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
       "paramDecoratorsLeft": [],
       "jitCtorParameters": "[{type:Dep,decorators:[{type:Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:Optional}]},{type:Dep,decorators:[{type:Self}]},{type:Dep,decorators:[{type:SkipSelf}]},{type:Dep,decorators:[{type:Host}]},{type:Dep,decorators:[{type:Attribute,args:[\"x\"]}]}]",
-      "jitParamDecorators": [],
-      "skip": "pre-existing: oxc's `@NgModule` factory ignores `@Inject(TOKEN)` and injects the parameter's type, whatever the decorator is called"
+      "jitParamDecorators": []
     },
     {
       "name": "ctor-mod-alias",
@@ -533,8 +532,7 @@
       "ctorParameters": "[{type:i1.Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:OpX}]},{type:i1.Dep,decorators:[{type:Slf}]},{type:i1.Dep,decorators:[{type:SkS}]},{type:i1.Dep,decorators:[{type:HoX}]},{type:i1.Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
       "paramDecoratorsLeft": [],
       "jitCtorParameters": "[{type:Dep,decorators:[{type:InX,args:[TOKEN]}]},{type:Dep,decorators:[{type:OpX}]},{type:Dep,decorators:[{type:Slf}]},{type:Dep,decorators:[{type:SkS}]},{type:Dep,decorators:[{type:HoX}]},{type:Dep,decorators:[{type:AtX,args:[\"x\"]}]}]",
-      "jitParamDecorators": [],
-      "skip": "pre-existing: see `ctor-mod-named`"
+      "jitParamDecorators": []
     },
     {
       "name": "ctor-mod-ns",
@@ -548,8 +546,7 @@
       "ctorParameters": "[{type:i1.Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:i1.Dep,decorators:[{type:ng.Optional}]},{type:i1.Dep,decorators:[{type:ng.Self}]},{type:i1.Dep,decorators:[{type:ng.SkipSelf}]},{type:i1.Dep,decorators:[{type:ng.Host}]},{type:i1.Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
       "paramDecoratorsLeft": [],
       "jitCtorParameters": "[{type:Dep,decorators:[{type:ng.Inject,args:[TOKEN]}]},{type:Dep,decorators:[{type:ng.Optional}]},{type:Dep,decorators:[{type:ng.Self}]},{type:Dep,decorators:[{type:ng.SkipSelf}]},{type:Dep,decorators:[{type:ng.Host}]},{type:Dep,decorators:[{type:ng.Attribute,args:[\"x\"]}]}]",
-      "jitParamDecorators": [],
-      "skip": "pre-existing: see `ctor-mod-named`"
+      "jitParamDecorators": []
     },
     {
       "name": "ctor-mod-foreign",

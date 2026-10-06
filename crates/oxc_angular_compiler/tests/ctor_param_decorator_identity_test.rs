@@ -220,7 +220,7 @@ fn ctor_param_decorators_match_ngtsc() {
         failures.len(),
         failures.join("\n\n")
     );
-    assert_eq!(compared, 29, "fixtures compared");
+    assert_eq!(compared, 32, "fixtures compared");
 }
 
 /// A parameter decorator left in the output keeps its import: another module's

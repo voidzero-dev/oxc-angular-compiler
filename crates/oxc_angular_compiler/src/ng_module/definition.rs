@@ -215,7 +215,11 @@ pub fn generate_full_ng_module_definition<'a>(
             // statement upstream-mandated; the linker re-creates remote
             // scoping at link time if needed. See
             // `compiler-cli/src/ngtsc/annotations/ng_module/src/handler.ts:971`.
-            let fac_definition = compile_declare_factory_for_ng_module(allocator, &r3_metadata);
+            let fac_definition = compile_declare_factory_for_ng_module(
+                allocator,
+                &r3_metadata,
+                metadata.deps.as_ref(),
+            );
             let mod_definition = compile_declare_ng_module_from_metadata(allocator, &r3_metadata);
             // Build the injector metadata using the same conversion the
             // full path uses (`generate_ng_module_inj`'s builder), then
@@ -641,6 +645,116 @@ mod tests {
         assert!(
             js.contains(",12)") || js.contains(", 12)"),
             "Factory should pass flags = 12 (Optional | SkipSelf)"
+        );
+    }
+
+    /// Extract `NgModuleMetadata` from `code`'s single class declaration.
+    fn module_metadata_from_code<'a>(
+        allocator: &'a Allocator,
+        code: &'a str,
+    ) -> crate::ng_module::decorator::NgModuleMetadata<'a> {
+        use crate::ng_module::decorator::extract_ng_module_metadata;
+        use oxc_ast::ast::{Declaration, Statement};
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+
+        let parser_ret = Parser::new(allocator, code, SourceType::tsx()).parse();
+        let program = allocator.alloc(parser_ret.program);
+        let class = program
+            .body
+            .iter()
+            .find_map(|stmt| match stmt {
+                Statement::ClassDeclaration(class) => Some(class.as_ref()),
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    Declaration::ClassDeclaration(class) => Some(class.as_ref()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("Should find class declaration");
+        extract_ng_module_metadata(allocator, class, Some(code))
+            .expect("Should extract NgModule metadata")
+    }
+
+    #[test]
+    fn test_ng_module_inject_decorator_token() {
+        // Issue #519: @Inject(TOKEN) on an @NgModule ctor param must emit
+        // ɵɵinject(TOKEN), not ɵɵinvalidFactoryDep.
+        let allocator = Allocator::default();
+        let code = r#"
+            @NgModule({})
+            class M {
+                constructor(@Inject(TOKEN) x: unknown) {}
+            }
+        "#;
+
+        let metadata = module_metadata_from_code(&allocator, code);
+        let deps = metadata.deps.as_ref().expect("Should have constructor deps");
+        assert_eq!(deps.len(), 1);
+        assert!(deps[0].token.is_some(), "@Inject(TOKEN) should give the dep a token");
+
+        let definition =
+            generate_full_ng_module_definition(&allocator, &metadata, CompilationMode::Full)
+                .expect("Should generate definition");
+        let js = emit_full_ng_module_definition("M", &definition);
+        assert!(
+            !js.contains("invalidFactoryDep"),
+            "Factory should NOT contain invalidFactoryDep, got: {js}"
+        );
+        assert!(
+            js.contains("ɵɵinject(TOKEN"),
+            "Factory should inject the @Inject token (ɵɵinject for NgModule), got: {js}"
+        );
+        assert!(
+            !js.contains("ɵɵdirectiveInject"),
+            "NgModule deps use ɵɵinject, not ɵɵdirectiveInject, got: {js}"
+        );
+    }
+
+    #[test]
+    fn test_ng_module_inject_decorator_overrides_type() {
+        // @Inject(Other) overrides the token a `Real` type annotation would give.
+        let allocator = Allocator::default();
+        let code = r#"
+            @NgModule({})
+            class M {
+                constructor(@Inject(Other) x: Real) {}
+            }
+        "#;
+
+        let metadata = module_metadata_from_code(&allocator, code);
+        let definition =
+            generate_full_ng_module_definition(&allocator, &metadata, CompilationMode::Full)
+                .expect("Should generate definition");
+        let js = emit_full_ng_module_definition("M", &definition);
+        assert!(js.contains("ɵɵinject(Other"), "Should inject Other, got: {js}");
+        assert!(!js.contains("ɵɵinject(Real"), "Should not inject Real, got: {js}");
+    }
+
+    #[test]
+    fn test_ng_module_partial_factory_carries_deps() {
+        // Partial mode must carry ctor deps into the ɵɵngDeclareFactory call —
+        // the linker builds the factory from them.
+        let allocator = Allocator::default();
+        let code = r#"
+            @NgModule({})
+            class M {
+                constructor(@Inject(TOKEN) x: unknown) {}
+            }
+        "#;
+
+        let metadata = module_metadata_from_code(&allocator, code);
+        let definition =
+            generate_full_ng_module_definition(&allocator, &metadata, CompilationMode::Partial)
+                .expect("Should generate definition");
+        let js = emit_full_ng_module_definition("M", &definition);
+        assert!(
+            js.contains("token:TOKEN") || js.contains("token: TOKEN"),
+            "Partial ɵfac should carry the @Inject token, got: {js}"
+        );
+        assert!(
+            !js.contains("deps:[]") && !js.contains("deps: []"),
+            "Partial ɵfac should not drop ctor deps, got: {js}"
         );
     }
 

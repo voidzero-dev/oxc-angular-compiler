@@ -289,7 +289,7 @@ pub(crate) fn extract_ng_module_metadata_in<'a>(
     }
 
     // Extract constructor dependencies
-    metadata.deps = extract_constructor_deps(allocator, class, consts);
+    metadata.deps = extract_constructor_deps(allocator, class, source_text, consts);
 
     Some(metadata)
 }
@@ -428,7 +428,8 @@ fn extract_identifier_array<'a>(
 /// - `None` if the class has no constructor (use inherited factory pattern)
 /// - `Some(vec)` with the dependencies if constructor exists
 ///
-/// Handles parameter decorators like `@Optional()`, `@SkipSelf()`, `@Self()`, `@Host()`.
+/// Handles parameter decorators like `@Inject()`, `@Optional()`, `@SkipSelf()`,
+/// `@Self()`, `@Host()`.
 ///
 /// Example:
 /// ```typescript
@@ -440,6 +441,7 @@ fn extract_identifier_array<'a>(
 pub fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    source_text: Option<&'a str>,
     consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
@@ -457,7 +459,7 @@ pub fn extract_constructor_deps<'a>(
     let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
-        let dep = extract_param_dependency(allocator, param, consts);
+        let dep = extract_param_dependency(allocator, param, source_text, consts);
         deps.push(dep);
     }
 
@@ -470,18 +472,29 @@ pub fn extract_constructor_deps<'a>(
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
+    source_text: Option<&'a str>,
     consts: Option<&StringConsts<'_>>,
 ) -> R3DependencyMetadata<'a> {
-    // Extract flags from decorators
+    // Extract flags and @Inject token from decorators
     let mut optional = false;
     let mut skip_self = false;
     let mut self_ = false;
     let mut host = false;
+    let mut inject_token: Option<OutputExpression<'a>> = None;
     let mut attribute_name: Option<Ident<'a>> = None;
 
     for decorator in &param.decorators {
         if let Some(name) = crate::directive::angular_param_decorator(decorator, consts) {
             match name {
+                "Inject" => {
+                    // @Inject(TOKEN) - extract the token
+                    if let Expression::CallExpression(call) = &decorator.expression {
+                        if let Some(arg) = call.arguments.first() {
+                            inject_token =
+                                convert_oxc_expression(allocator, arg.to_expression(), source_text);
+                        }
+                    }
+                }
                 "Optional" => optional = true,
                 "SkipSelf" => skip_self = true,
                 "Self" => self_ = true,
@@ -499,8 +512,10 @@ fn extract_param_dependency<'a>(
         }
     }
 
-    // Extract the token (type annotation or parameter name)
-    let token = extract_param_token(allocator, param);
+    // Determine the token:
+    // 1. If @Inject(TOKEN) is present, use TOKEN
+    // 2. Otherwise, use the type annotation
+    let token = inject_token.or_else(|| extract_param_token(allocator, param));
 
     // Handle @Attribute decorator
     if let Some(attr_name) = attribute_name {

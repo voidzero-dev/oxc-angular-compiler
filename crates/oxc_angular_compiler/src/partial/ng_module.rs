@@ -79,26 +79,48 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
 }
 
 /// Builds the partial ɵfac factory paired with this NgModule.
+///
+/// `deps` is the module's extracted constructor dependencies (`None` when it
+/// has no constructor). A class without a constructor gets `deps: []` to
+/// match upstream's golden behavior (see compiler-cli/test/compliance/
+/// test_cases/r3_view_compiler/hello_world/GOLDEN_PARTIAL.js — every ɵfac
+/// for an NgModule carries `deps: []`). The linker then generates the
+/// simple `new MyModule()` factory. OXC doesn't track base classes, so the
+/// no-ctor `deps: null` upstream uses for the inherited-factory pattern
+/// becomes `[]` here — a suboptimal-but-correct factory.
 pub fn compile_declare_factory_for_ng_module<'a>(
     allocator: &'a Allocator,
     meta: &R3NgModuleMetadata<'a>,
+    deps: Option<&Vec<'a, crate::factory::R3DependencyMetadata<'a>>>,
 ) -> OutputExpression<'a> {
-    // R3NgModuleMetadata doesn't carry constructor deps — the OXC
-    // NgModule analyzer doesn't extract them since NgModule classes are
-    // virtually always parameterless. Emit `deps: []` to match upstream's
-    // golden behavior (see compiler-cli/test/compliance/test_cases/
-    // r3_view_compiler/hello_world/GOLDEN_PARTIAL.js — every ɵfac for
-    // an NgModule carries `deps: []`). The linker then generates the
-    // simple `new MyModule()` factory.
-    //
-    // An NgModule that extends another class is exotic enough that
-    // accepting a suboptimal-but-correct factory there is fine.
+    let factory_deps = match deps {
+        Some(deps) => {
+            let mut factory_deps: Vec<'a, crate::factory::R3DependencyMetadata<'a>> =
+                Vec::with_capacity_in(deps.len(), &allocator);
+            for dep in deps {
+                factory_deps.push(crate::factory::R3DependencyMetadata {
+                    token: dep.token.as_ref().map(|t| t.clone_in(allocator)),
+                    attribute_name_type: dep
+                        .attribute_name_type
+                        .as_ref()
+                        .map(|a| a.clone_in(allocator)),
+                    host: dep.host,
+                    optional: dep.optional,
+                    self_: dep.self_,
+                    skip_self: dep.skip_self,
+                    type_only_invalid: dep.type_only_invalid,
+                });
+            }
+            R3FactoryDeps::Valid(factory_deps)
+        }
+        None => R3FactoryDeps::Valid(Vec::new_in(&allocator)),
+    };
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
         name: Ident::from("NgModuleFactory"),
         type_expr: meta.r#type.value.clone_in(allocator),
         type_decl: meta.r#type.value.clone_in(allocator),
         type_argument_count: 0,
-        deps: R3FactoryDeps::Valid(Vec::new_in(&allocator)),
+        deps: factory_deps,
         target: FactoryTarget::NgModule,
     });
     compile_declare_factory_function(allocator, &factory_meta)
