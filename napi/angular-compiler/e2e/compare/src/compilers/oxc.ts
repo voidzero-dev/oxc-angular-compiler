@@ -78,6 +78,8 @@ export function compileWithOxcFullFileRaw(
     angularVersion: OXC_ANGULAR_VERSION,
     // Enable cross-file analysis for barrel export tracing
     crossFileElision: true,
+    // Evaluate decorator metadata imported from other files, as ngtsc does
+    resolveImportedValues: true,
     baseDir: path.dirname(filePath),
     // Pass tsconfig for resolving monorepo path aliases (e.g., @cu/*)
     tsconfigPath: options?.tsconfigPath,

@@ -42,6 +42,8 @@ pub(crate) use decorator::{merge_by_class_property, parse_decorator_io};
 pub use definition::{DirectiveDefinitions, generate_directive_definitions};
 pub(crate) use dts_type::quote as ts_string_literal;
 pub use evaluator::input_transform_types;
+#[cfg(feature = "cross_file_elision")]
+pub(crate) use evaluator::{Evaluator, ImportValueResolver, StaticValue};
 pub use metadata::{
     QueryPredicate, R3DirectiveMetadata, R3DirectiveMetadataBuilder, R3HostDirectiveMetadata,
     R3HostMetadata, R3InputMetadata, R3QueryMetadata,

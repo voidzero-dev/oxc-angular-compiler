@@ -497,12 +497,33 @@ pub struct StringConsts<'a> {
     program: Option<&'a Program<'a>>,
     /// Built on first use: most files have no decorator metadata to evaluate.
     scope: std::cell::OnceCell<FileScope<'a>>,
+    /// Reads the value an imported binding has in its exporting file, like
+    /// ngtsc's program-wide checker (`None`: imports stay opaque references).
+    /// `Rc`-shared so it can borrow the analyzer that produced it.
+    #[cfg(feature = "cross_file_elision")]
+    resolver: Option<std::rc::Rc<dyn super::evaluator::ImportValueResolver>>,
 }
 
 impl<'a> StringConsts<'a> {
     /// The folded string value of a same-file `const`.
     pub fn get(&self, name: &str) -> Option<&Ident<'a>> {
         self.strings.get(name)
+    }
+
+    /// The import value resolver attached to these consts, if any.
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn resolver(&self) -> Option<&dyn super::evaluator::ImportValueResolver> {
+        self.resolver.as_deref()
+    }
+
+    /// Attach an import value resolver (see [`Self::resolver`]).
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn with_resolver(
+        mut self,
+        resolver: std::rc::Rc<dyn super::evaluator::ImportValueResolver>,
+    ) -> Self {
+        self.resolver = Some(resolver);
+        self
     }
 
     /// `program`'s declarations without its folded strings: enough to tell
@@ -513,6 +534,8 @@ impl<'a> StringConsts<'a> {
             strings: HashMap::default(),
             program: Some(program),
             scope: std::cell::OnceCell::new(),
+            #[cfg(feature = "cross_file_elision")]
+            resolver: None,
         }
     }
 
@@ -564,6 +587,8 @@ pub fn collect_string_consts<'a>(
         strings: HashMap::default(),
         program: Some(program),
         scope: std::cell::OnceCell::new(),
+        #[cfg(feature = "cross_file_elision")]
+        resolver: None,
     };
     loop {
         let before = map.strings.len();

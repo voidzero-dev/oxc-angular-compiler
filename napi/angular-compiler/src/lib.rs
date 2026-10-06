@@ -182,6 +182,18 @@ pub struct TransformOptions {
     /// handle import elision during tree-shaking.
     pub cross_file_elision: Option<bool>,
 
+    /// Evaluate decorator metadata values imported from other files
+    /// (`@Directive({inputs: INPUTS})`, `@Input(OPTS)`, ...), the way ngtsc's
+    /// program-wide checker does.
+    ///
+    /// When true, exported `const` initializers resolve through re-exports and
+    /// `export *` chains. Unresolvable values keep the
+    /// "cannot evaluate values from other files" diagnostic, and read files
+    /// appear in `TransformResult.dependencies`.
+    ///
+    /// Uses `baseDir`/`tsconfigPath` for module resolution.
+    pub resolve_imported_values: Option<bool>,
+
     /// Base directory for module resolution.
     ///
     /// Used when `cross_file_elision` is enabled to resolve relative imports.
@@ -252,6 +264,8 @@ impl From<TransformOptions> for RustTransformOptions {
             // Cross-file elision options (feature-gated in Rust, always available via NAPI)
             #[cfg(feature = "cross_file_elision")]
             cross_file_elision: options.cross_file_elision.unwrap_or(false),
+            #[cfg(feature = "cross_file_elision")]
+            resolve_imported_values: options.resolve_imported_values.unwrap_or(false),
             #[cfg(feature = "cross_file_elision")]
             base_dir: options.base_dir.map(std::path::PathBuf::from),
             #[cfg(feature = "cross_file_elision")]

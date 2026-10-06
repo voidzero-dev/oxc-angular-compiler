@@ -851,6 +851,19 @@ export interface TransformOptions {
    */
   crossFileElision?: boolean
   /**
+   * Evaluate decorator metadata values imported from other files
+   * (`@Directive({inputs: INPUTS})`, `@Input(OPTS)`, ...), the way ngtsc's
+   * program-wide checker does.
+   *
+   * When true, exported `const` initializers resolve through re-exports and
+   * `export *` chains. Unresolvable values keep the
+   * "cannot evaluate values from other files" diagnostic, and read files
+   * appear in `TransformResult.dependencies`.
+   *
+   * Uses `baseDir`/`tsconfigPath` for module resolution.
+   */
+  resolveImportedValues?: boolean
+  /**
    * Base directory for module resolution.
    *
    * Used when `cross_file_elision` is enabled to resolve relative imports.

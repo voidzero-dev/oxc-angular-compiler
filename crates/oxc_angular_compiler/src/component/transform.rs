@@ -152,6 +152,22 @@ pub struct TransformOptions {
     #[cfg(feature = "cross_file_elision")]
     pub cross_file_elision: bool,
 
+    /// Evaluate decorator metadata values imported from other files
+    /// (`@Directive({inputs: INPUTS})`, `@Input(OPTS)`, ...), the way ngtsc's
+    /// program-wide checker does.
+    ///
+    /// When true, imported bindings in evaluated positions resolve to their
+    /// exporting file's value — following re-exports, `export *` chains and
+    /// `const` chains across files. Values that can't be resolved or read
+    /// statically (packages, `.d.ts` declarations, non-literals) stay opaque
+    /// and keep the "cannot evaluate values from other files" diagnostic.
+    ///
+    /// Files read this way are reported in `TransformResult::dependencies`.
+    /// Uses `base_dir`/`tsconfig_path` for module resolution, like
+    /// `cross_file_elision`.
+    #[cfg(feature = "cross_file_elision")]
+    pub resolve_imported_values: bool,
+
     /// Base directory for module resolution.
     ///
     /// Used when `cross_file_elision` is enabled to resolve relative imports.
@@ -249,6 +265,8 @@ impl Default for TransformOptions {
             // Cross-file elision options (feature-gated)
             #[cfg(feature = "cross_file_elision")]
             cross_file_elision: false,
+            #[cfg(feature = "cross_file_elision")]
+            resolve_imported_values: false,
             #[cfg(feature = "cross_file_elision")]
             base_dir: None,
             #[cfg(feature = "cross_file_elision")]
@@ -2922,47 +2940,62 @@ pub fn transform_angular_file(
     // by tracking the next index and passing it to each component.
     let mut shared_pool_index: u32 = 0;
 
+    // One analyzer serves both cross-file features: the type-only scan for
+    // import elision and, when resolve_imported_values is on, the resolver the
+    // decorator evaluator reads imported bindings through. It's declared
+    // before `string_consts` so the resolver borrowed by it drops first.
+    #[cfg(feature = "cross_file_elision")]
+    let cross_file_analyzer: Option<CrossFileAnalyzer> =
+        if options.cross_file_elision || options.resolve_imported_values {
+            let file_path = std::path::Path::new(path);
+            let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
+            base_dir.map(|base| {
+                CrossFileAnalyzer::new(
+                    base,
+                    options.tsconfig_path.as_deref(),
+                    options.resolve_imported_values,
+                )
+            })
+        } else {
+            None
+        };
+
     // When cross_file_elision is enabled, collect type-only information for each import
     // by checking if the exported symbol is an interface or type alias. This is separate
     // from barrel resolution to avoid changing namespace import paths.
     #[cfg(feature = "cross_file_elision")]
-    let cross_file_type_only: FxHashMap<String, bool> = if options.cross_file_elision {
+    let cross_file_type_only: FxHashMap<String, bool> = if options.cross_file_elision
+        && let Some(analyzer) = &cross_file_analyzer
+    {
         let file_path = std::path::Path::new(path);
-        let base_dir = options.base_dir.as_deref().or_else(|| file_path.parent());
+        let mut type_only: FxHashMap<String, bool> = FxHashMap::default();
 
-        if let Some(base) = base_dir {
-            let mut analyzer = CrossFileAnalyzer::new(base, options.tsconfig_path.as_deref());
-            let mut type_only: FxHashMap<String, bool> = FxHashMap::default();
+        for stmt in &parser_ret.program.body {
+            let Statement::ImportDeclaration(import_decl) = stmt else {
+                continue;
+            };
 
-            for stmt in &parser_ret.program.body {
-                let Statement::ImportDeclaration(import_decl) = stmt else {
-                    continue;
-                };
+            let source = import_decl.source.value.as_str();
+            let Some(specifiers) = &import_decl.specifiers else {
+                continue;
+            };
 
-                let source = import_decl.source.value.as_str();
-                let Some(specifiers) = &import_decl.specifiers else {
-                    continue;
-                };
+            for specifier in specifiers {
+                if let ImportDeclarationSpecifier::ImportSpecifier(spec) = specifier {
+                    let local_name = spec.local.name.as_str();
+                    let imported_name = spec.imported.name().as_str();
 
-                for specifier in specifiers {
-                    if let ImportDeclarationSpecifier::ImportSpecifier(spec) = specifier {
-                        let local_name = spec.local.name.as_str();
-                        let imported_name = spec.imported.name().as_str();
-
-                        // Check if this import is type-only using the original import path.
-                        // Resolves the file and checks if the exported symbol is an interface
-                        // or type alias. Unresolvable imports return false (conservative).
-                        if analyzer.is_type_only_import(source, imported_name, file_path) {
-                            type_only.insert(local_name.to_string(), true);
-                        }
+                    // Check if this import is type-only using the original import path.
+                    // Resolves the file and checks if the exported symbol is an interface
+                    // or type alias. Unresolvable imports return false (conservative).
+                    if analyzer.is_type_only_import(source, imported_name, file_path) {
+                        type_only.insert(local_name.to_string(), true);
                     }
                 }
             }
-
-            type_only
-        } else {
-            FxHashMap::default()
         }
+
+        type_only
     } else {
         FxHashMap::default()
     };
@@ -2977,8 +3010,18 @@ pub fn transform_angular_file(
 
     // Collect file-scope string consts so decorator metadata can resolve identifier
     // references (e.g. `host: { [ATTR_NAME]: '' }`) the same way the official
-    // Angular compiler does.
-    let string_consts = collect_string_consts(allocator, &parser_ret.program);
+    // Angular compiler does. `resolve_imported_values` teaches the evaluator
+    // to read imported bindings the way ngtsc's checker does.
+    #[allow(unused_mut)]
+    let mut string_consts = collect_string_consts(allocator, &parser_ret.program);
+    #[cfg(feature = "cross_file_elision")]
+    if options.resolve_imported_values
+        && let Some(analyzer) = &cross_file_analyzer
+    {
+        string_consts = string_consts.with_resolver(std::rc::Rc::new(
+            analyzer.value_resolver(std::path::PathBuf::from(path)),
+        ));
+    }
 
     #[cfg(feature = "cross_file_elision")]
     let mut import_map =
@@ -4313,6 +4356,16 @@ pub fn transform_angular_file(
         result.map = map;
     } else {
         result.code = apply_edits(source, edits);
+    }
+
+    // Files read to resolve imported metadata values become watch
+    // dependencies, like template/style URLs — only when the option that
+    // asked for those reads is on.
+    #[cfg(feature = "cross_file_elision")]
+    if options.resolve_imported_values
+        && let Some(analyzer) = &cross_file_analyzer
+    {
+        result.dependencies.extend(analyzer.take_value_dependencies());
     }
 
     result

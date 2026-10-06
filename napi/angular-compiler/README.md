@@ -183,6 +183,8 @@ interface TransformOptions {
 
   // Cross-file elision
   crossFileElision?: boolean
+  // Evaluate decorator metadata imported from other files (as ngtsc does)
+  resolveImportedValues?: boolean
   baseDir?: string
   tsconfigPath?: string
 }

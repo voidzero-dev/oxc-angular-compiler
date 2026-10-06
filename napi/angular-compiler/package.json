@@ -54,14 +54,14 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build-dev": "oxnode build.ts --esm --platform --features allocator",
+    "build-dev": "oxnode build.ts --esm --platform --features allocator,cross_file_elision",
     "build-test": "oxnode build.ts --esm --platform --features allocator,cross_file_elision && pnpm run build:ts",
     "build": "pnpm run build:native && pnpm run build:ts",
     "build:native": "pnpm run build-dev --release",
     "build:ts": "tsc -p tsconfig.json",
     "test": "vitest run --dir ./test",
     "test:e2e": "playwright test --config=e2e/playwright.config.ts",
-    "preversion": "oxnode build.ts --platform --esm --features allocator && git add index.js index.d.ts",
+    "preversion": "oxnode build.ts --platform --esm --features allocator,cross_file_elision && git add index.js index.d.ts",
     "prepublishOnly": "napi pre-publish -t npm"
   },
   "dependencies": {

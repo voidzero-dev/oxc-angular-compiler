@@ -1181,8 +1181,9 @@ pub(crate) enum Value<'a> {
     String(String),
     Array(Vec<Value<'a>>),
     Object(Vec<Prop<'a>>),
-    /// `import * as ns`.
-    Module,
+    /// `import * as ns`, with the module specifier it was imported from so
+    /// member access can ask the resolver about `ns`'s exports.
+    Module(&'a str),
     Reference {
         name: String,
         kind: RefKind<'a>,
@@ -1199,6 +1200,92 @@ pub(crate) enum Value<'a> {
     /// An arrow or function expression written directly as a property value;
     /// the only place ngtsc keeps a function expression analyzable.
     Function(FnDef<'a>),
+}
+
+/// A value read from another file, in the owned form an
+/// [`ImportValueResolver`] hands the evaluator. ngtsc resolves imported
+/// bindings through the whole program's checker; a resolver answers the same
+/// question for the bindings it can see (`cross_file_elision`'s
+/// `CrossFileAnalyzer`), so an exported `const` evaluates the way it does
+/// here.
+#[derive(Clone, Debug)]
+// Only `to_static` (feature-gated) builds these; without the feature the enum
+// is just the resolver's return type.
+#[cfg_attr(not(feature = "cross_file_elision"), allow(dead_code))]
+pub(crate) enum StaticValue {
+    Null,
+    Undefined,
+    Bool(bool),
+    Number(f64),
+    String(String),
+    Array(Vec<StaticValue>),
+    /// Object literal properties. Later duplicates win, like [`Value::prop`].
+    Object(Vec<(String, StaticValue)>),
+}
+
+impl StaticValue {
+    /// `value` as a [`StaticValue`], or `None` when any part of it can't leave
+    /// its file (references, functions, builtins, dynamic or partial members).
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn to_static(value: &Value<'_>) -> Option<Self> {
+        match value {
+            Value::Null => Some(Self::Null),
+            Value::Undefined => Some(Self::Undefined),
+            Value::Bool(b) => Some(Self::Bool(*b)),
+            Value::Number(n) => Some(Self::Number(*n)),
+            Value::String(s) => Some(Self::String(s.clone())),
+            Value::Array(items) => {
+                items.iter().map(Self::to_static).collect::<Option<_>>().map(Self::Array)
+            }
+            Value::Object(props) => props
+                .iter()
+                .map(|p| Self::to_static(&p.value).map(|v| (p.key.clone(), v)))
+                .collect::<Option<_>>()
+                .map(Self::Object),
+            // An enum member carries its resolved value.
+            Value::Enum { value, .. } => Self::to_static(value),
+            _ => None,
+        }
+    }
+
+    /// The [`Value`] an identifier bound to this import resolves to. Built
+    /// from owned data, so it fits any arena lifetime.
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn to_value(&self) -> Value<'static> {
+        match self {
+            Self::Null => Value::Null,
+            Self::Undefined => Value::Undefined,
+            Self::Bool(b) => Value::Bool(*b),
+            Self::Number(n) => Value::Number(*n),
+            Self::String(s) => Value::String(s.clone()),
+            Self::Array(items) => Value::Array(items.iter().map(Self::to_value).collect()),
+            Self::Object(props) => Value::Object(
+                props
+                    .iter()
+                    .map(|(key, value)| Prop {
+                        key: key.clone(),
+                        value: value.to_value(),
+                        expr: None,
+                        origin: None,
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// Answers the value an imported binding has in the file it's exported from.
+///
+/// The evaluator consults it at the two places a [`Value`] is built from an
+/// `import`: the identifier itself, and a member of `import * as ns`. `None`
+/// falls back to the opaque import reference, so every diagnostic and emit a
+/// missing or unresolvable value produced before is unchanged.
+#[cfg(feature = "cross_file_elision")]
+pub(crate) trait ImportValueResolver {
+    /// The exported value of `name` in `module`, as `module` is written in
+    /// the importing file (`import { name } from 'module'`), or `None` when
+    /// it can't be resolved or read statically.
+    fn resolve(&self, module: &str, name: &str) -> Option<StaticValue>;
 }
 
 /// ngtsc's `KnownFn`s (partial_evaluator/src/builtin.ts), bound to their receiver.
@@ -1235,6 +1322,13 @@ impl<'a> Value<'a> {
             Value::String(s) => Some(s),
             _ => None,
         }
+    }
+
+    /// This value in the owned form that crosses a file boundary
+    /// ([`StaticValue`]), or `None` when any part of it can't leave its file.
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn as_static(&self) -> Option<StaticValue> {
+        StaticValue::to_static(self)
     }
 
     /// Whether this is an imported binding (or a value computed from one), which
@@ -1300,7 +1394,7 @@ impl<'a> Value<'a> {
                     .collect::<std::vec::Vec<_>>()
                     .join(", ")
             ),
-            Value::Module => "(module)".into(),
+            Value::Module(_) => "(module)".into(),
             _ if self.is_dynamic() => "(not statically analyzable)".into(),
             Value::Reference { name, .. } | Value::Enum { name, .. } => name.clone(),
             Value::Builtin(_) => "Function".into(),
@@ -1522,6 +1616,13 @@ impl<'s, 'a> Evaluator<'s, 'a> {
 
     pub(crate) fn evaluate(&self, expr: &'a Expression<'a>) -> Value<'a> {
         self.eval(expr, 0, &Frame::default())
+    }
+
+    /// The value a top-level `name` resolves to where the metadata is read.
+    /// Used by cross-file value resolution to read an export by its name.
+    #[cfg(feature = "cross_file_elision")]
+    pub(crate) fn evaluate_name(&self, name: &'a str) -> Value<'a> {
+        self.identifier(name, 0, &Frame::default())
     }
 
     /// `expr` (evaluated in `frame`) as it can be written where the metadata is
@@ -1956,13 +2057,24 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         if let Some(import) = scope.imports.get(name) {
             return match import.imported {
                 Some(imported) => {
+                    // `imported` is the name the other file exports it under
+                    // ("default" for a default import); an import resolver
+                    // reads its value across the file boundary like ngtsc's
+                    // checker, and everything unresolvable keeps the opaque
+                    // reference and its diagnostics.
+                    #[cfg(feature = "cross_file_elision")]
+                    if let Some(resolver) = self.consts.resolver()
+                        && let Some(value) = resolver.resolve(import.module, imported)
+                    {
+                        return value.to_value();
+                    }
                     let declared = if imported == "default" { name } else { imported };
                     Value::Reference {
                         name: declared.into(),
                         kind: RefKind::Import { namespace_member: false, local: Some(name) },
                     }
                 }
-                None => Value::Module,
+                None => Value::Module(import.module),
             };
         }
         match name {
@@ -2499,10 +2611,20 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             Value::String(s) if matches!(key, Key::Str("concat")) => {
                 Value::Builtin(Builtin::StringConcat(s))
             }
-            Value::Module => Value::Reference {
-                name: key_str(),
-                kind: RefKind::Import { namespace_member: true, local: None },
-            },
+            Value::Module(_module) => {
+                // `ns.x`: the resolver answers with `x`'s value in `module`,
+                // like the identifier path does for `import { x }`.
+                #[cfg(feature = "cross_file_elision")]
+                if let Some(resolver) = self.consts.resolver()
+                    && let Some(value) = resolver.resolve(_module, &key_str())
+                {
+                    return value.to_value();
+                }
+                Value::Reference {
+                    name: key_str(),
+                    kind: RefKind::Import { namespace_member: true, local: None },
+                }
+            }
             Value::Reference { kind: RefKind::Class(class), .. } => {
                 self.static_member(class, &key_str(), depth)
             }

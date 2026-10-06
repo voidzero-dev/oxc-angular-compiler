@@ -11,7 +11,7 @@
 import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { ServerResponse } from 'node:http'
-import { dirname, resolve } from 'node:path'
+import { dirname, isAbsolute, resolve } from 'node:path'
 
 import { createDebug } from 'obug'
 import type { Plugin, ResolvedConfig, ViteDevServer, Connect, ModuleNode } from 'vite'
@@ -254,6 +254,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
     angularVersion: options.angularVersion,
     emitClassMetadata: options.emitClassMetadata ?? true,
     compilationMode: options.compilationMode ?? 'full',
+    tsconfig: options.tsconfig,
   }
 
   let resolvedConfig: ResolvedConfig
@@ -924,6 +925,37 @@ export function angular(options: PluginOptions = {}): Plugin[] {
           // bundles (see @angular/build application-code-bundle.js).
           const isSSR = !!options?.ssr
 
+          // Transform with Rust compiler
+          const transformOptions: TransformOptions = {
+            sourcemap: pluginOptions.sourceMap,
+            jit: pluginOptions.jit,
+            hmr: pluginOptions.liveReload && watchMode && !isSSR,
+            angularVersion: pluginOptions.angularVersion,
+            minifyComponentStyles: getMinifyComponentStyles(this as any),
+            emitClassMetadata: pluginOptions.emitClassMetadata,
+            compilationMode: pluginOptions.compilationMode,
+            // Evaluate decorator metadata imported from other files the way
+            // ngtsc's program-wide checker does (`inputs: INPUTS`, `@Input(OPTS)`).
+            // Read files land in `result.dependencies`, tracked below.
+            resolveImportedValues: true,
+            baseDir: dirname(actualId),
+            tsconfigPath: pluginOptions.tsconfig,
+          }
+
+          const result = await transformAngularFile(code, actualId, transformOptions, resources)
+
+          // Resource deps (templates/styles) plus files the compiler read to
+          // resolve imported decorator-metadata values (`result.dependencies`).
+          // Those `import` statements are often elided from the emitted JS —
+          // the module graph would not cover `meta.ts`, so without this, edits
+          // to metadata files leave stale compiled output. `result.dependencies`
+          // also carries raw `templateUrl`/`styleUrl` strings — they can be
+          // relative, so absolutize them against the component's directory.
+          const componentDir = dirname(actualId)
+          const allDeps = dependencies
+            .concat(result.dependencies)
+            .map((dep) => (isAbsolute(dep) ? dep : resolve(componentDir, dep)))
+
           // Track dependencies for resource cache invalidation and HMR.
           // `handleHotUpdate` below dispatches based on `resourceToComponent`
           // membership. Preprocessor deps can resolve outside the root
@@ -942,7 +974,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
             // referenced different resources (e.g., templateUrl was renamed),
             // drop the old entries so `handleHotUpdate` stops treating them
             // as component-owned.
-            const newDeps = new Set(dependencies.map(normalizePath))
+            const newDeps = new Set(allDeps.map(normalizePath))
             for (const [resource, owner] of resourceToComponent) {
               if (owner === actualId && !newDeps.has(resource)) {
                 resourceToComponent.delete(resource)
@@ -961,7 +993,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               }
             }
 
-            for (const dep of dependencies) {
+            for (const dep of allDeps) {
               const normalizedDep = normalizePath(dep)
               // Track reverse mapping for HMR: resource → component
               resourceToComponent.set(normalizedDep, actualId)
@@ -1001,19 +1033,6 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               }
             }
           }
-
-          // Transform with Rust compiler
-          const transformOptions: TransformOptions = {
-            sourcemap: pluginOptions.sourceMap,
-            jit: pluginOptions.jit,
-            hmr: pluginOptions.liveReload && watchMode && !isSSR,
-            angularVersion: pluginOptions.angularVersion,
-            minifyComponentStyles: getMinifyComponentStyles(this as any),
-            emitClassMetadata: pluginOptions.emitClassMetadata,
-            compilationMode: pluginOptions.compilationMode,
-          }
-
-          const result = await transformAngularFile(code, actualId, transformOptions, resources)
 
           // Report errors and warnings
           for (const error of result.errors) {
