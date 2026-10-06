@@ -1029,6 +1029,79 @@ export class Dir {
     );
 }
 
+/// A global declared outside the file (`window`, `atob`, `document`, ... from
+/// a lib or `.d.ts`) resolves to a reference in ngtsc's evaluator, which is
+/// truthy like any reference: `window ? atob : btoa` is `atob` (ngtsc 22.1.7
+/// compiles `transform: window ? atob : btoa` to `atob`, #517). oxc can't
+/// tell a lib's global from a name declared nowhere, so an ambient name is
+/// evaluated the same way in `?:`, `&&` and `||`, but stays dynamic where a
+/// value would be read from it (`x.y`, `x[k]`, `x()`).
+#[test]
+fn ambient_globals_are_truthy_references() {
+    // Each ambient name picks a branch of `?:`, `||` or `&&`; `undefined`
+    // isn't a reference and a declared const evaluates as itself.
+    let cases = [
+        ("window ? atob : btoa", "atob"),
+        ("document ? btoa : atob", "btoa"),
+        ("atob || btoa", "atob"),
+        ("unknownGlobal && atob", "atob"),
+        ("undefined ? atob : btoa", "btoa"),
+        ("no ? atob : btoa", "btoa"),
+        ("yes ? unknownGlobal : btoa", "unknownGlobal"),
+    ];
+    let members: String = cases
+        .iter()
+        .enumerate()
+        .map(|(i, (expr, _))| format!("@Input({{transform: {expr}}}) i{i}: any;\n"))
+        .collect();
+    let source = format!(
+        "import {{Directive, Input}} from '@angular/core';
+const no = false;
+const yes = true;
+@Directive({{selector: '[d]'}})
+export class Dir {{\n  {members}}}\n"
+    );
+    let result = transform(&source);
+    assert!(errors(&result, &source).is_empty(), "{:?}", errors(&result, &source));
+    let code = strip(&result.code);
+    for (i, (_, transform_name)) in cases.iter().enumerate() {
+        assert!(
+            code.contains(&format!(r#"i{i}:[2,"i{i}","i{i}",{transform_name}]"#)),
+            "{transform_name} expected for input i{i}\n{code}"
+        );
+    }
+
+    // The same in `inputs:` metadata.
+    let source = "import {Directive} from '@angular/core';
+@Directive({selector: '[d]', inputs: [{name: 'x', transform: window ? atob : btoa}]})
+export class Dir {}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    assert!(strip(&result.code).contains(r#"inputs:{x:[2,"x","x",atob]}"#), "{}", result.code);
+
+    // A member read from a global is still dynamic (`window.location`), so the
+    // transform is reported unresolvable, as is `??`, which ngtsc doesn't
+    // evaluate either.
+    for expr in ["window.location ? atob : btoa", "window ?? atob"] {
+        let source = format!(
+            "import {{Directive}} from '@angular/core';
+@Directive({{selector: '[d]', inputs: [{{name: 'x', transform: {expr}}}]}})
+export class Dir {{}}
+"
+        );
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(
+                "Input transform must be a function Value could not be determined statically."
+                    .to_string(),
+                expr.to_string()
+            )],
+            "{expr}"
+        );
+    }
+}
+
 /// ngtsc checks an overloaded static method's first declaration, not its
 /// implementation (checked with @angular/compiler-cli 22.1.7, which compiles
 /// this; the snapshot can't hold it because ngtsc emits the method's bare name,

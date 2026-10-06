@@ -1154,10 +1154,12 @@ pub(crate) enum RefKind<'a> {
     Global,
     /// Any other identifier this file doesn't declare or import: a global
     /// declared outside it, in a lib such as the DOM's (`atob`, `window`) or in
-    /// a project `.d.ts`, which ngtsc resolves to that declaration, or a name
-    /// declared nowhere, which ngtsc can't resolve. oxc can't tell these apart,
-    /// so it's dynamic (see [`Value::is_dynamic`]), except that an input
-    /// transform assumes it's a function, as it does an imported one.
+    /// a project `.d.ts`, which ngtsc resolves to a reference to that
+    /// declaration, or a name declared nowhere, which ngtsc can't resolve
+    /// (`DynamicValue`). oxc can't tell these apart, so the reference stands
+    /// where one can (`?:`, `&&`, `||`, an input transform: a truthy name),
+    /// and is dynamic where a concrete value would be read (member access,
+    /// calls, spreads, ..., see [`Value::is_dynamic`]).
     Ambient,
     /// A static getter or setter, or a static property without an
     /// initializer, declared at the span.
@@ -1252,8 +1254,12 @@ impl<'a> Value<'a> {
         }
     }
 
-    /// Whether ngtsc's value is unknown: dynamic, or a global declared outside
-    /// the file, which is only kept as a name so a transform can refer to it.
+    /// Whether ngtsc's value is unknown: dynamic, or a name declared outside
+    /// the file or nowhere (`RefKind::Ambient`), which is kept only as a name
+    /// (`Value could not be determined statically`) where a concrete value
+    /// would be read. Where only truthiness or the name matters (`?:`, `&&`,
+    /// `||`, a transform) it's the truthy reference ngtsc resolves a global
+    /// to; callers that read it as a value check `Value::Dynamic` instead.
     pub(crate) fn is_dynamic(&self) -> bool {
         matches!(self, Value::Dynamic | Value::Reference { kind: RefKind::Ambient, .. })
     }
@@ -1823,7 +1829,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         frame: &Frame<'a>,
     ) -> Value<'a> {
         match self.eval(&c.test, depth, frame) {
-            test if test.is_dynamic() => Value::Dynamic,
+            // A reference (a global included) is truthy: `window ? a : b` is `a`.
+            Value::Dynamic => Value::Dynamic,
             test if test.is_import() => test.computed(),
             test if test.truthy() => self.eval(&c.consequent, depth, frame),
             _ => self.eval(&c.alternate, depth, frame),
@@ -1842,7 +1849,7 @@ impl<'s, 'a> Evaluator<'s, 'a> {
             return Value::Dynamic;
         }
         match self.eval(&u.argument, depth, frame) {
-            value if value.is_dynamic() => Value::Dynamic,
+            Value::Dynamic => Value::Dynamic,
             value if value.is_import() => value.computed(),
             value => unary(u.operator, &value),
         }
@@ -1881,7 +1888,8 @@ impl<'s, 'a> Evaluator<'s, 'a> {
         let left = self.eval(&l.left, depth, frame);
         let right = self.eval(&l.right, depth, frame);
         match (left, right) {
-            (left, right) if left.is_dynamic() || right.is_dynamic() => Value::Dynamic,
+            // A reference (a global included) is truthy: `window && f` is `f`.
+            (Value::Dynamic, _) | (_, Value::Dynamic) => Value::Dynamic,
             (left, _) if left.is_import() => left.computed(),
             (left, right) => match (l.operator, left.truthy()) {
                 (LogicalOperator::And, true) | (LogicalOperator::Or, false) => right,
