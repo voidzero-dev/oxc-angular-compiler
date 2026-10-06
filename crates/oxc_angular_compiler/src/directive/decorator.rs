@@ -1041,9 +1041,10 @@ fn upsert_input<'a>(inputs: &mut Vec<'a, R3InputMetadata<'a>>, input: R3InputMet
     upsert_meta(inputs, input, |i| i.class_property_name.as_str());
 }
 
-/// Angular's `@Component` / `@Directive` decorator on `class` (imported from
-/// `@angular/core`, in the file `consts` was collected from), its metadata
-/// object (if any) and its name.
+/// Angular's `@Component` / `@Directive` / `@Pipe` decorator on `class`
+/// (imported from `@angular/core`, in the file `consts` was collected from),
+/// its metadata object (if any) and its name. `@Pipe` is here because ngtsc
+/// runs `extractDirectiveMetadata` — and its io/query checks — for pipes too.
 pub(crate) fn angular_decorator_config<'a>(
     class: &'a Class<'a>,
     consts: &StringConsts<'_>,
@@ -1052,6 +1053,9 @@ pub(crate) fn angular_decorator_config<'a>(
         .map(|d| (d, "Component"))
         .or_else(|| {
             find_directive_decorator(&class.decorators, Some(consts)).map(|d| (d, "Directive"))
+        })
+        .or_else(|| {
+            crate::pipe::find_pipe_decorator(&class.decorators, Some(consts)).map(|d| (d, "Pipe"))
         })?;
     let config = match &decorator.expression {
         Expression::CallExpression(call) => match call.arguments.first() {
@@ -1091,12 +1095,17 @@ pub fn decorator_io_errors<'a>(
     };
     let evaluator = Evaluator::new(consts);
 
+    let class_name = class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
     let input_members = || {
         class.body.body.iter().find_map(|element| {
-            let (key, decorators, value) = match element {
-                ClassElement::PropertyDefinition(p) => (&p.key, &p.decorators, p.value.as_ref()),
-                ClassElement::AccessorProperty(p) => (&p.key, &p.decorators, p.value.as_ref()),
-                ClassElement::MethodDefinition(m) => (&m.key, &m.decorators, None),
+            let (key, decorators, value, is_static) = match element {
+                ClassElement::PropertyDefinition(p) => {
+                    (&p.key, &p.decorators, p.value.as_ref(), p.r#static)
+                }
+                ClassElement::AccessorProperty(p) => {
+                    (&p.key, &p.decorators, p.value.as_ref(), p.r#static)
+                }
+                ClassElement::MethodDefinition(m) => (&m.key, &m.decorators, None, m.r#static),
                 _ => return None,
             };
             let name = key.static_name()?;
@@ -1122,6 +1131,22 @@ pub fn decorator_io_errors<'a>(
             if error.is_some() {
                 return error;
             }
+            // ngtsc's `parseInputFields` rejects an input on a static member
+            // once the mapping parsed (INCORRECTLY_DECLARED_ON_STATIC_MEMBER):
+            // an `@Input` decorator or an `input()`/`model()` initializer.
+            if is_static {
+                let mapped = decorator.is_some()
+                    || value.is_some_and(|value| {
+                        is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API])
+                    });
+                if mapped {
+                    let message = format!(
+                        "Input \"{name}\" is incorrectly declared as static member of \
+                         \"{class_name}\"."
+                    );
+                    return Some((message, element.span()));
+                }
+            }
             // A signal input only collides with a metadata entry of the same name.
             let value = value.filter(|_| meta_inputs.contains(&name.as_ref()))?;
             let is_input = is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API]);
@@ -1135,18 +1160,32 @@ pub fn decorator_io_errors<'a>(
     };
     let output_members = || {
         class.body.body.iter().find_map(|element| {
-            // `@Output(...)`, as ngtsc's `tryParseDecoratorOutput` reads it, on
-            // the members an output is compiled from.
-            let (decorators, value) = match element {
-                ClassElement::PropertyDefinition(p) => (Some(&p.decorators), p.value.as_ref()),
-                ClassElement::AccessorProperty(p) => (Some(&p.decorators), p.value.as_ref()),
-                _ => (None, None),
+            // `@Output(...)`, as ngtsc's `tryParseDecoratorOutput` reads it; it
+            // accepts any member kind, so a decorated (static) method counts.
+            let (decorators, value, is_static) = match element {
+                ClassElement::PropertyDefinition(p) => {
+                    (Some(&p.decorators), p.value.as_ref(), p.r#static)
+                }
+                ClassElement::AccessorProperty(p) => {
+                    (Some(&p.decorators), p.value.as_ref(), p.r#static)
+                }
+                ClassElement::MethodDefinition(m) => (Some(&m.decorators), None, m.r#static),
+                _ => (None, None, false),
             };
             let decorator = decorators.and_then(|decorators| {
                 super::property_decorators::member_decorator(decorators, "Output", consts)
             });
             if let Some(error) = decorator.and_then(|d| output_decorator_error(d, &evaluator)) {
                 return Some(error);
+            }
+            // ngtsc's `tryParseInitializerBasedOutput` rejects `output.required()`
+            // while parsing the member, before the checks below.
+            if let Some((_, true, call)) = initializer_api_call(
+                value?,
+                Some(consts),
+                &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API],
+            ) {
+                return Some(("Output does not support \".required()\".".to_string(), call.span));
             }
             // Then `@Output` on an `output()` or a model, like ngtsc's
             // `parseOutputFields`.
@@ -1161,6 +1200,23 @@ pub fn decorator_io_errors<'a>(
                 };
                 if let Some(message) = message {
                     return Some((message.to_string(), decorator.span));
+                }
+            }
+            // ngtsc's `parseOutputFields` rejects an output on a static member
+            // (INCORRECTLY_DECLARED_ON_STATIC_MEMBER): an `@Output` decorator
+            // or an `output()`/`outputFromObservable()`/`model()` initializer,
+            // on the decorator or the call.
+            if is_static {
+                let apis = [OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, MODEL_API];
+                let node = decorator.map(|d| d.span).or_else(|| {
+                    value
+                        .and_then(|value| initializer_api_call(value, Some(consts), &apis))
+                        .map(|(_, _, call)| call.span)
+                });
+                if let Some(span) = node {
+                    let message =
+                        "Output is incorrectly declared on a static class member.".to_string();
+                    return Some((message, span));
                 }
             }
             let ClassElement::PropertyDefinition(prop) = element else { return None };
