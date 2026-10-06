@@ -404,9 +404,13 @@ pub fn build_ctor_params_metadata<'a>(
 /// [`build_ctor_params_metadata`] for a class in the file `consts` was
 /// collected from.
 ///
-/// A parameter decorator (`@Inject()`, `@Optional()`, ...) is listed only when
-/// it's Angular's, imported from `@angular/core` by name, under any alias, or
-/// through a namespace import (see [`crate::directive::angular_param_decorator`]).
+/// A parameter decorator is listed only when it's Angular's, imported from
+/// `@angular/core` — by name, under any alias, or through a namespace import —
+/// whatever its name (`isAngularDecorator`, see
+/// [`crate::directive::is_angular_core_decorator`]): `@Component()` on a
+/// parameter counts too. Without the file's imports (`consts` is `None`), the
+/// known-name list ([`crate::directive::angular_param_decorator`]) is used:
+/// provenance can't be proven, so no `@Component()` on a parameter is listed.
 /// Like ngtsc, a parameter that has decorators, none of them Angular's, gets
 /// `decorators: []`.
 pub fn build_ctor_params_metadata_in<'a>(
@@ -570,12 +574,17 @@ pub fn build_prop_decorators_metadata_in<'a>(
             continue;
         };
 
-        // Filter to Angular property decorators: with the file's imports, only
-        // `@angular/core`'s (see `angular_member_decorator`), like ngtsc.
+        // Filter to Angular property decorators: with the file's imports, any
+        // `@angular/core` decorator counts (`isAngularDecorator`, see
+        // [`crate::directive::is_angular_core_decorator`]) — `@Inject()` or
+        // `@Component()` on a member too, not only the known member decorator
+        // names. Without them (`None`), the known-name list stays: the import
+        // can't be checked, so accepting every named decorator would mislist
+        // foreign ones.
         let angular_decorators: std::vec::Vec<_> = decorators
             .iter()
             .filter(|d| match consts {
-                Some(_) => crate::directive::angular_member_decorator(d, consts).is_some(),
+                Some(_) => crate::directive::is_angular_core_decorator(d, consts),
                 None => get_decorator_name(d).is_some_and(|n| ANGULAR_PROP_DECORATORS.contains(&n)),
             })
             .collect();
@@ -999,8 +1008,12 @@ fn extract_param_type_expression<'a>(
     }
 }
 
-/// Extract Angular's decorators from a constructor parameter (see
-/// [`crate::directive::angular_param_decorator`]).
+/// Extract Angular's decorators from a constructor parameter. With the file
+/// (`Some(consts)`), any decorator imported from `@angular/core` is Angular's,
+/// whatever its name — ngtsc's `isAngularDecorator` (`metadata.ts`), see
+/// [`crate::directive::is_angular_core_decorator`]. Without it, only the known
+/// parameter decorator names ([`crate::directive::angular_param_decorator`]):
+/// provenance can't be proven, so a bare name-match is all that's safe.
 fn extract_angular_decorators_from_param<'a, 'b>(
     param: &'b FormalParameter<'a>,
     consts: Option<&StringConsts<'a>>,
@@ -1008,7 +1021,10 @@ fn extract_angular_decorators_from_param<'a, 'b>(
     param
         .decorators
         .iter()
-        .filter(|d| crate::directive::angular_param_decorator(d, consts).is_some())
+        .filter(|d| match consts {
+            Some(consts) => crate::directive::is_angular_core_decorator(d, Some(consts)),
+            None => crate::directive::angular_param_decorator(d, consts).is_some(),
+        })
         .collect()
 }
 

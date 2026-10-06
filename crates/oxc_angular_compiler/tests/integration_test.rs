@@ -9273,6 +9273,152 @@ export class MyService {
     insta::assert_snapshot!("jit_angular_param_decorators_on_members", result.code);
 }
 
+#[test]
+fn test_jit_any_angular_core_param_decorator_goes_to_ctor_parameters() {
+    // Issue #538: ngtsc's `isAngularDecorator` on constructor parameters checks
+    // only the `@angular/core` import, not the decorator name
+    // (`downlevel_decorators_transform.ts:475`). So a `@angular/core` decorator
+    // whose name isn't a DI one — `@Component()`, or any name imported from it
+    // (`@CustomDec`) — is listed in `ctorParameters` instead of staying a
+    // `__param` decorator. Only a foreign decorator is lowered as
+    // `__param(index, dec)`.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Component as Cmp, Inject, Injectable } from '@angular/core';
+import { Inject as ForeignInject } from 'not-angular';
+
+const TOKEN = 'token';
+
+@Component({ selector: 'app-test', template: '' })
+export class TestComponent {
+    constructor(
+        @Inject(TOKEN) known: any,
+        @Cmp() componentDec: any,
+        @Injectable customDec: any,
+        @ForeignInject(TOKEN) foreign: any,
+    ) {}
+}
+";
+
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // All @angular/core decorators land in ctorParameters, listed as written.
+    assert!(
+        compact.contains(
+            "{type:undefined,decorators:[{type:Inject,args:[TOKEN]}]},\
+             {type:undefined,decorators:[{type:Cmp}]},\
+             {type:undefined,decorators:[{type:Injectable}]},"
+        ),
+        "Angular core param decorators should be in ctorParameters. Got:\n{}",
+        result.code
+    );
+
+    // The foreign @Inject is not Angular's: no ctorParameters decorators for
+    // param 3, and it's lowered as __param.
+    assert!(
+        compact.contains("{type:undefined}]"),
+        "foreign-decorated param should have no decorators entry. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("__param(3,ForeignInject(TOKEN))"),
+        "Foreign @Inject should be lowered as __param. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !compact.contains("__param(0,")
+            && !compact.contains("__param(1,")
+            && !compact.contains("__param(2,"),
+        "Angular core param decorators must not be lowered as __param. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("jit_angular_core_param_decorators_ctor_parameters", result.code);
+}
+
+#[test]
+fn test_class_metadata_lists_any_angular_core_decorator() {
+    // Issue #538: `setClassMetadata`'s `ctorParameters` and `propDecorators`
+    // filter member/param decorators by the `@angular/core` import alone
+    // (`metadata.ts:174-176` and `:190-191` — `isAngularDecorator`), not by a
+    // decorator-name list. A member decorated `@Component()` and a parameter
+    // decorated `@Injectable()` (both imported from `@angular/core`) are
+    // listed; a same-named decorator from another module is not.
+    //
+    // Note: ngtsc rejects a non-DI `@angular/core` decorator on a ctor param
+    // in DI analysis (DECORATOR_UNEXPECTED), so upstream never emits this
+    // metadata — oxc lists it, matching the metadata filter's own semantics.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component, Inject, Injectable } from '@angular/core';
+import { Inject as ForeignInject } from 'not-angular';
+
+const TOKEN = 'token';
+
+@Component({ selector: 'app-test', template: '' })
+export class TestComponent {
+    @Component()
+    componentMember: any;
+
+    @Inject(TOKEN)
+    knownMember: any;
+
+    @ForeignInject(TOKEN)
+    foreignMember: any;
+
+    constructor(
+        @Inject(TOKEN) known: any,
+        @Injectable() customDec: any,
+        @ForeignInject(TOKEN) foreign: any,
+    ) {}
+}
+";
+
+    let options = ComponentTransformOptions::default();
+    let result =
+        transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // propDecorators: any @angular/core member decorator counts, even
+    // @Component(); the foreign one doesn't.
+    assert!(
+        compact.contains("componentMember:[{type:Component}]"),
+        "@Component() member should be in propDecorators. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("knownMember:[{type:Inject,args:[TOKEN]}]"),
+        "@Inject member should be in propDecorators. Got:\n{}",
+        result.code
+    );
+    assert!(
+        !compact.contains("foreignMember:["),
+        "foreign-decorated member should not be in propDecorators. Got:\n{}",
+        result.code
+    );
+
+    // ctorParameters: same import-only gate; a param with only foreign
+    // decorators still gets `decorators: []`, like ngtsc.
+    assert!(
+        compact.contains(
+            "{type:undefined,decorators:[{type:Inject,args:[TOKEN]}]},\
+             {type:undefined,decorators:[{type:Injectable}]},\
+             {type:undefined,decorators:[]}"
+        ),
+        "ctorParameters should list @angular/core decorators and [] for the foreign one. Got:\n{}",
+        result.code
+    );
+
+    insta::assert_snapshot!("class_metadata_angular_core_decorators", result.code);
+}
+
 // =========================================================================
 // Reference output comparison tests
 // =========================================================================

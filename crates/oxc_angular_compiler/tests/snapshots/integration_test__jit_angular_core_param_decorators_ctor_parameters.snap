@@ -1,0 +1,34 @@
+---
+source: crates/oxc_angular_compiler/tests/integration_test.rs
+expression: result.code
+---
+import { Component, Component as Cmp, Inject, Injectable } from "@angular/core";
+import { Inject as ForeignInject } from "not-angular";
+import { __decorate, __param } from "tslib";
+const TOKEN = "token";
+let TestComponent = class TestComponent {
+	constructor(known, componentDec, customDec, foreign) {}
+	static ctorParameters = () => [
+		{
+			type: undefined,
+			decorators: [{
+				type: Inject,
+				args: [TOKEN]
+			}]
+		},
+		{
+			type: undefined,
+			decorators: [{ type: Cmp }]
+		},
+		{
+			type: undefined,
+			decorators: [{ type: Injectable }]
+		},
+		{ type: undefined }
+	];
+};
+TestComponent = __decorate([Component({
+	selector: "app-test",
+	template: ""
+}), __param(3, ForeignInject(TOKEN))], TestComponent);
+export { TestComponent };

@@ -1143,11 +1143,13 @@ fn find_jit_forced_decorator<'a>(
 ///
 /// Like Angular's JIT transform (`downlevel_decorators_transform.ts`), a
 /// parameter decorator goes into `ctorParameters` only when it's Angular's,
-/// imported from `@angular/core` (see
-/// [`crate::directive::angular_param_decorator`]), listed as written
-/// (`{ type: Inj }`, `{ type: ng.Optional }`). Any other one stays a decorator
-/// of the class, lowered as `__param(index, decorator)`; those are returned
-/// second, in source order.
+/// imported from `@angular/core` — the gate is the import alone, not the
+/// decorator name (`isAngularDecorator`, see
+/// [`crate::directive::is_angular_core_decorator`]), so even `@Component()` on
+/// a parameter counts, listed as written (`{ type: Inj }`,
+/// `{ type: ng.Optional }`). Any other one stays a decorator of the class,
+/// lowered as `__param(index, decorator)`; those are returned second, in
+/// source order.
 fn extract_jit_ctor_params(
     source: &str,
     class: &oxc_ast::ast::Class<'_>,
@@ -1178,9 +1180,12 @@ fn extract_jit_ctor_params(
             .and_then(|ann| extract_type_name_from_annotation(&ann.type_annotation));
 
         // Angular's decorators go into ctorParameters, by their written name.
+        // The gate is the `@angular/core` import alone, like ngtsc's
+        // `isAngularDecorator`: `@Component()` or a custom name imported from
+        // it on a parameter counts too.
         let mut decorators = std::vec::Vec::new();
         for decorator in &param.decorators {
-            if crate::directive::angular_param_decorator(decorator, Some(consts)).is_none() {
+            if !crate::directive::is_angular_core_decorator(decorator, Some(consts)) {
                 let expr = decorator.expression.span();
                 other_decorators.push(format!(
                     "__param({index}, {})",
