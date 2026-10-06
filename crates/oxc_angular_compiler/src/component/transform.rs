@@ -2853,21 +2853,20 @@ pub fn transform_angular_file(
                             &injectable_metadata,
                             type_argument_count,
                         ));
-                        if let Some(injectable_decorator) =
-                            find_injectable_decorator(&class.decorators, Some(&string_consts))
-                        {
-                            after_class_extra = build_set_class_metadata_decls(
-                                &allocator,
-                                class,
-                                &info.class_name,
-                                injectable_decorator,
-                                options,
-                                source,
-                                &string_consts,
-                                &import_map,
-                                &mut file_namespace_registry,
-                            );
-                        }
+                        // `build_set_class_metadata_decls` lists every
+                        // @angular/core class decorator itself, so the
+                        // metadata covers the injectable alongside the
+                        // jit-forced decorator.
+                        after_class_extra = build_set_class_metadata_decls(
+                            &allocator,
+                            class,
+                            &info.class_name,
+                            options,
+                            source,
+                            &string_consts,
+                            &import_map,
+                            &mut file_namespace_registry,
+                        );
                     }
                 }
 
