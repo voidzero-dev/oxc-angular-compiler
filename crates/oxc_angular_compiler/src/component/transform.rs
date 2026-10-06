@@ -10,7 +10,7 @@ use std::path::Path;
 use oxc_allocator::{Allocator, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, Declaration, ExportDefaultDeclarationKind, Expression, ImportDeclarationSpecifier,
-    ImportOrExportKind, ModuleExportName, ObjectPropertyKind, PropertyKey, Statement,
+    ImportOrExportKind, ModuleExportName, ObjectPropertyKind, Program, PropertyKey, Statement,
 };
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
@@ -2116,6 +2116,235 @@ fn strip_typescript(allocator: &Allocator, path: &str, code: &str) -> String {
     codegen_ret.code
 }
 
+/// Every name bound at the program's top level (imports, declarations,
+/// variables incl. destructured bindings), for checking that a synthesized
+/// name doesn't collide.
+fn top_level_binding_names(program: &Program<'_>) -> rustc_hash::FxHashSet<String> {
+    let mut names = rustc_hash::FxHashSet::default();
+    fn collect_pattern(
+        pattern: &oxc_ast::ast::BindingPattern<'_>,
+        out: &mut rustc_hash::FxHashSet<String>,
+    ) {
+        use oxc_ast::ast::BindingPattern;
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                out.insert(id.name.to_string());
+            }
+            BindingPattern::ObjectPattern(obj) => {
+                for prop in &obj.properties {
+                    collect_pattern(&prop.value, out);
+                }
+                if let Some(rest) = &obj.rest {
+                    collect_pattern(&rest.argument, out);
+                }
+            }
+            BindingPattern::ArrayPattern(arr) => {
+                for el in arr.elements.iter().flatten() {
+                    collect_pattern(el, out);
+                }
+                if let Some(rest) = &arr.rest {
+                    collect_pattern(&rest.argument, out);
+                }
+            }
+            BindingPattern::AssignmentPattern(assign) => {
+                collect_pattern(&assign.left, out);
+            }
+        }
+    }
+    let decl_binding = |decl: &Declaration<'_>, out: &mut rustc_hash::FxHashSet<String>| match decl
+    {
+        Declaration::VariableDeclaration(var) => {
+            for d in &var.declarations {
+                collect_pattern(&d.id, out);
+            }
+        }
+        Declaration::FunctionDeclaration(f) => {
+            if let Some(id) = &f.id {
+                out.insert(id.name.to_string());
+            }
+        }
+        Declaration::ClassDeclaration(c) => {
+            if let Some(id) = &c.id {
+                out.insert(id.name.to_string());
+            }
+        }
+        Declaration::TSTypeAliasDeclaration(t) => {
+            out.insert(t.id.name.to_string());
+        }
+        Declaration::TSInterfaceDeclaration(i) => {
+            out.insert(i.id.name.to_string());
+        }
+        Declaration::TSEnumDeclaration(e) => {
+            out.insert(e.id.name.to_string());
+        }
+        Declaration::TSNamespaceDeclaration(m) => {
+            out.insert(m.id.name.to_string());
+        }
+        _ => {}
+    };
+    // `var` binds at module scope even from inside nested blocks and loops
+    // (but never from inside a function or class body, which own a scope).
+    fn collect_hoisted_vars(stmt: &Statement<'_>, out: &mut rustc_hash::FxHashSet<String>) {
+        use oxc_ast::ast::{ForStatementInit, ForStatementLeft};
+        match stmt {
+            Statement::VariableDeclaration(var) => {
+                if var.kind.is_var() {
+                    for d in &var.declarations {
+                        collect_pattern(&d.id, out);
+                    }
+                }
+            }
+            Statement::BlockStatement(block) => {
+                for s in &block.body {
+                    collect_hoisted_vars(s, out);
+                }
+            }
+            Statement::IfStatement(if_stmt) => {
+                collect_hoisted_vars(&if_stmt.consequent, out);
+                if let Some(alt) = &if_stmt.alternate {
+                    collect_hoisted_vars(alt, out);
+                }
+            }
+            Statement::ForStatement(for_stmt) => {
+                if let Some(ForStatementInit::VariableDeclaration(var)) = &for_stmt.init
+                    && var.kind.is_var()
+                {
+                    for d in &var.declarations {
+                        collect_pattern(&d.id, out);
+                    }
+                }
+                collect_hoisted_vars(&for_stmt.body, out);
+            }
+            Statement::ForInStatement(for_in) => {
+                if let ForStatementLeft::VariableDeclaration(var) = &for_in.left
+                    && var.kind.is_var()
+                {
+                    for d in &var.declarations {
+                        collect_pattern(&d.id, out);
+                    }
+                }
+                collect_hoisted_vars(&for_in.body, out);
+            }
+            Statement::ForOfStatement(for_of) => {
+                if let ForStatementLeft::VariableDeclaration(var) = &for_of.left
+                    && var.kind.is_var()
+                {
+                    for d in &var.declarations {
+                        collect_pattern(&d.id, out);
+                    }
+                }
+                collect_hoisted_vars(&for_of.body, out);
+            }
+            Statement::WhileStatement(w) => collect_hoisted_vars(&w.body, out),
+            Statement::DoWhileStatement(dw) => collect_hoisted_vars(&dw.body, out),
+            Statement::LabeledStatement(l) => collect_hoisted_vars(&l.body, out),
+            Statement::WithStatement(w) => collect_hoisted_vars(&w.body, out),
+            Statement::SwitchStatement(switch) => {
+                for case in &switch.cases {
+                    for s in &case.consequent {
+                        collect_hoisted_vars(s, out);
+                    }
+                }
+            }
+            Statement::TryStatement(try_stmt) => {
+                for s in &try_stmt.block.body {
+                    collect_hoisted_vars(s, out);
+                }
+                if let Some(handler) = &try_stmt.handler {
+                    for s in &handler.body.body {
+                        collect_hoisted_vars(s, out);
+                    }
+                }
+                if let Some(fin) = &try_stmt.finalizer {
+                    for s in &fin.body {
+                        collect_hoisted_vars(s, out);
+                    }
+                }
+            }
+            // Declarations introduce their own scope; other statements hold
+            // no statements. `TSModuleDeclaration` bodies are namespace-scoped.
+            _ => {}
+        }
+    }
+    for stmt in &program.body {
+        match stmt {
+            Statement::ImportDeclaration(import) => {
+                if let Some(specifiers) = &import.specifiers {
+                    for spec in specifiers {
+                        let local = match spec {
+                            oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(s) => {
+                                &s.local.name
+                            }
+                            oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(s) => {
+                                &s.local.name
+                            }
+                            oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                                s,
+                            ) => &s.local.name,
+                        };
+                        names.insert(local.to_string());
+                    }
+                }
+            }
+            Statement::TSImportEqualsDeclaration(import_eq) => {
+                names.insert(import_eq.id.name.to_string());
+            }
+            Statement::ExportAllDeclaration(export_all) => {
+                // `export * as X from 'm'` binds X locally; `export *` doesn't.
+                if let Some(exported) = &export_all.exported
+                    && let Some(name) = exported.identifier_name()
+                {
+                    names.insert(name.to_string());
+                }
+            }
+            Statement::ExportDefaultDeclaration(export) => match &export.declaration {
+                ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                    if let Some(id) = &class.id {
+                        names.insert(id.name.to_string());
+                    }
+                }
+                ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
+                    if let Some(id) = &func.id {
+                        names.insert(id.name.to_string());
+                    }
+                }
+                ExportDefaultDeclarationKind::TSInterfaceDeclaration(iface) => {
+                    names.insert(iface.id.name.to_string());
+                }
+                _ => {}
+            },
+            Statement::ExportDeclaration(export) => {
+                decl_binding(&export.declaration, &mut names);
+            }
+            _ => {
+                if let Some(decl) = stmt.as_declaration() {
+                    decl_binding(decl, &mut names);
+                } else {
+                    collect_hoisted_vars(stmt, &mut names);
+                }
+            }
+        }
+    }
+    names
+}
+
+/// The synthesized name for a jit-forced class with no `id` — upstream's JIT
+/// downleveling registers the node regardless of a name, so `export default
+/// @Component({ jit: true, ... }) class {}` still opts out of AOT. The
+/// `default_N` shape matches TypeScript's own emit for anonymous default
+/// exports; `taken` is the file's top-level bindings plus names already
+/// synthesized.
+fn synthetic_default_name(taken: &mut rustc_hash::FxHashSet<String>) -> String {
+    let mut n = 1;
+    loop {
+        let name = format!("default_{n}");
+        if taken.insert(name.clone()) {
+            return name;
+        }
+        n += 1;
+    }
+}
+
 /// Collect the [`JitClassInfo`] for one class: all class-level decorator spans
 /// and texts (the primary Angular decorator's text rewritten for resources,
 /// the rest verbatim), constructor parameters, and member decorators.
@@ -2246,28 +2475,40 @@ fn jit_class_edits(
         }
     }
 
-    // Class restructuring: `export class X` → `let X = class X`
-    // For abstract classes, also strip the `abstract` keyword since class expressions can't be abstract.
-    let class_keyword_start = if jit_info.is_abstract {
-        let rest = &source[jit_info.class_start as usize..];
-        let offset = rest.find("class").unwrap_or(0);
-        jit_info.class_start + offset as u32
+    // Class restructuring: `export class X` → `let X = class X`. `class_start`
+    // includes the decorators (their deletes begin there), so the replace ends
+    // at `class_start`, never inside them.
+    let insert_start = if jit_info.is_exported || jit_info.is_default_export {
+        jit_info.stmt_start
     } else {
         jit_info.class_start
     };
+    edits.push(Edit::replace(
+        insert_start,
+        jit_info.class_start,
+        format!("let {} = ", jit_info.class_name),
+    ));
 
-    if jit_info.is_exported || jit_info.is_default_export {
-        edits.push(Edit::replace(
-            jit_info.stmt_start,
-            class_keyword_start,
-            format!("let {} = ", jit_info.class_name),
-        ));
-    } else {
-        edits.push(Edit::replace(
-            jit_info.class_start,
-            class_keyword_start,
-            format!("let {} = ", jit_info.class_name),
-        ));
+    // For abstract classes, strip the `abstract` keyword — class expressions
+    // can't be abstract. Searching past the decorators matters: `class_start`
+    // is the first decorator's `@`, so a raw `find("class")` could land inside
+    // a decorator's own text (e.g. `@my.class(...)`).
+    if jit_info.is_abstract {
+        let search_from = jit_info
+            .all_class_decorator_spans
+            .iter()
+            .map(|span| span.end as usize)
+            .max()
+            .unwrap_or(jit_info.class_start as usize);
+        if let Some(offset) = source[search_from..].find("abstract")
+            && let Some(class_offset) = source[search_from..].find("class")
+            && offset < class_offset
+        {
+            edits.push(Edit::delete(
+                (search_from + offset) as u32,
+                (search_from + offset + "abstract".len()) as u32,
+            ));
+        }
     }
 
     // Add extra (Ivy) statics, then ctorParameters and propDecorators inside
@@ -2393,6 +2634,9 @@ fn transform_angular_file_jit(
     let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
     let mut resource_counter: u32 = 0;
     let mut resource_imports: std::vec::Vec<(String, String)> = std::vec::Vec::new();
+    // Lazily collected once an anonymous (nameless) class needs a synthesized
+    // name — then kept as the pool of taken names.
+    let mut taken_names: Option<rustc_hash::FxHashSet<String>> = None;
 
     for stmt in &parser_ret.program.body {
         let (class, stmt_start, is_exported, is_default_export) = match stmt {
@@ -2415,15 +2659,23 @@ fn transform_angular_file_jit(
         };
 
         let Some(class) = class else { continue };
-        let Some(class_name) = class.id.as_ref().map(|id| id.name.to_string()) else {
-            continue;
-        };
 
         let Some((decorator_kind, angular_decorator)) =
             find_angular_decorator(class, &import_map, &string_consts)
         else {
             continue;
         };
+
+        // A nameless class (only possible as `export default`) still gets
+        // downleveled upstream; synthesize a name like TypeScript's `default_N`.
+        let class_name = class.id.as_ref().map_or_else(
+            || {
+                synthetic_default_name(
+                    taken_names.get_or_insert_with(|| top_level_binding_names(&parser_ret.program)),
+                )
+            },
+            |id| id.name.to_string(),
+        );
 
         // Version gating: the `@Service` decorator requires Angular v22+, where the
         // runtime JIT facade gained `compileService`/`ɵɵdefineService`. When targeting an
@@ -2648,6 +2900,9 @@ pub fn transform_angular_file(
     // Lazily computed on the first jit-forced class; the name synthesized
     // propDecorators use to reference `@angular/core` (`i0.Input`).
     let mut jit_core_namespace: Option<(String, bool)> = None;
+    // Lazily collected once a nameless jit-forced class needs a name
+    // (top-level bindings + synthesized names).
+    let mut taken_names: Option<rustc_hash::FxHashSet<String>> = None;
     // Set when a jit-forced class also carries @Injectable: the emitted
     // ɵfac/ɵprov reference `i0`, so the registry's `import * as i0` must be
     // emitted even when no AOT-compiled class exists.
@@ -2789,9 +3044,8 @@ pub fn transform_angular_file(
             // and downlevels the decorators through the JIT transform
             // (compiler.ts:848-870). Same here: the class is lowered like a
             // JIT-mode class while the rest of the file still compiles AOT.
-            if class.id.is_some()
-                && let Some((jit_kind, jit_decorator)) =
-                    find_jit_forced_decorator(class, &string_consts)
+            if let Some((jit_kind, jit_decorator)) =
+                find_jit_forced_decorator(class, &string_consts)
             {
                 let core_namespace = jit_core_namespace
                     .get_or_insert_with(|| jit_angular_core_namespace(&parser_ret.program))
@@ -2802,11 +3056,23 @@ pub fn transform_angular_file(
                     Statement::ExportDefaultDeclaration(_) => (false, true),
                     _ => (false, false),
                 };
+                // A nameless class (`export default class {}`) has no
+                // decorator-name requirement upstream either; it gets a
+                // synthesized name like TypeScript's `default_N`.
+                let jit_class_name =
+                    class.id.as_ref().map_or_else(
+                        || {
+                            synthetic_default_name(taken_names.get_or_insert_with(|| {
+                                top_level_binding_names(&parser_ret.program)
+                            }))
+                        },
+                        |id| id.name.to_string(),
+                    );
                 let info = collect_jit_class_info(
                     allocator,
                     source,
                     class,
-                    class.id.as_ref().map_or_else(String::new, |id| id.name.to_string()),
+                    jit_class_name,
                     stmt_start,
                     is_exported,
                     is_default_export,

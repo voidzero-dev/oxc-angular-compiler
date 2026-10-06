@@ -15964,6 +15964,132 @@ export class AotComp {}
 }
 
 #[test]
+fn test_jit_true_anonymous_default_export() {
+    // Upstream registers the class node in jitDeclarationRegistry regardless
+    // of a name; `export default class {}` still opts out of AOT and is
+    // downleveled under a synthesized `default_N` name (TypeScript's own
+    // convention for anonymous default exports).
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+export default @Component({ jit: true, selector: 'c', template: 'x' }) class {}
+";
+    let result = transform_angular_file(&allocator, "anon.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        !compact.contains("ɵcmp"),
+        "anonymous jit:true class must not compile AOT. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("letdefault_1=class"),
+        "anonymous class gets a synthesized name. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("default_1=__decorate("),
+        "downleveled with __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("exportdefaultdefault_1;"),
+        "re-exported as default. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_jit_true_anonymous_name_collision() {
+    // A file-level `default_1` binding bumps the synthesized name to
+    // `default_2`.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+const default_1 = 0;
+
+export default @Component({ jit: true, selector: 'c', template: 'x' }) class {}
+";
+    let result = transform_angular_file(&allocator, "anon.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("letdefault_2=class"),
+        "collision picks default_2. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("exportdefaultdefault_2;"),
+        "default_2 re-exported. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_jit_mode_anonymous_default_export() {
+    // Whole-file JIT mode (`options.jit`): an anonymous decorated class
+    // downlevels too — upstream's JIT transform has no name requirement.
+    let allocator = Allocator::default();
+    let source = r"
+import { Component } from '@angular/core';
+
+export default @Component({ selector: 'c', template: 'x' }) class {}
+";
+    let options = ComponentTransformOptions { jit: true, ..Default::default() };
+    let result = transform_angular_file(&allocator, "anon.ts", source, Some(&options), None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        compact.contains("letdefault_1=class"),
+        "anonymous class gets a synthesized name. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("default_1=__decorate("),
+        "downleveled with __decorate. Got:\n{}",
+        result.code
+    );
+    assert!(
+        compact.contains("exportdefaultdefault_1;"),
+        "re-exported as default. Got:\n{}",
+        result.code
+    );
+    assert!(!compact.contains("ɵcmp"), "JIT mode emits no definitions. Got:\n{}", result.code);
+}
+
+#[test]
+fn test_jit_true_abstract_class() {
+    // `abstract` must be stripped for the `let X = class` lowering, and the
+    // search for it must not land inside decorator text.
+    let allocator = Allocator::default();
+    for (decl, name) in [
+        ("@Component({jit:true, selector:'c', template:'x'}) export abstract class C {}", "C"),
+        (
+            "export default @Component({jit:true, selector:'c', template:'x'}) abstract class {}",
+            "default_1",
+        ),
+    ] {
+        let source = format!("import {{ Component }} from '@angular/core';\n{decl}\n");
+        let result = transform_angular_file(&allocator, "t.ts", &source, None, None);
+        assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+        let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            compact.contains(&format!("let{name}=class")),
+            "abstract class restructured. Got:\n{}",
+            result.code
+        );
+        assert!(
+            compact.contains(&format!("{name}=__decorate(")),
+            "decorators downleveled. Got:\n{}",
+            result.code
+        );
+        assert!(!compact.contains("abstract"), "abstract must be stripped. Got:\n{}", result.code);
+    }
+}
+
+#[test]
 fn test_jit_true_member_and_ctor_metadata() {
     // Member decorators become propDecorators, constructor parameters become
     // ctorParameters, and their imports stay live (upstream: TypeScript's
