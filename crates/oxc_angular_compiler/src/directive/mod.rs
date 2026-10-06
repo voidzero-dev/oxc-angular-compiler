@@ -33,7 +33,7 @@ pub(crate) use decorator::{
 };
 pub use decorator::{
     StringConsts, collect_string_consts, decorator_io_errors, extract_directive_metadata,
-    find_directive_decorator_span,
+    find_directive_decorator_span, param_decorator_errors,
 };
 pub(crate) use decorator::{
     angular_decorator_config, extract_string_value, resolve_template_literal,

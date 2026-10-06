@@ -9386,8 +9386,9 @@ fn test_class_metadata_lists_any_angular_core_decorator() {
     // listed; a same-named decorator from another module is not.
     //
     // Note: ngtsc rejects a non-DI `@angular/core` decorator on a ctor param
-    // in DI analysis (DECORATOR_UNEXPECTED), so upstream never emits this
-    // metadata — oxc lists it, matching the metadata filter's own semantics.
+    // in DI analysis (`Unexpected decorator Injectable on parameter.`),
+    // which oxc now reports too (#550); the metadata emit assertion below
+    // still verifies the filter's own semantics on the emitted code.
     let allocator = Allocator::default();
     let source = r"
 import { Component, Inject, Injectable } from '@angular/core';
@@ -9417,7 +9418,14 @@ export class TestComponent {
     let options = ComponentTransformOptions::default();
     let result =
         transform_angular_file(&allocator, "test.component.ts", source, Some(&options), None);
-    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| format!("{d}").contains("Unexpected decorator Injectable on parameter.")),
+        "Should report DECORATOR_UNEXPECTED for @Injectable on a ctor param: {:?}",
+        result.diagnostics
+    );
 
     let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
 
@@ -16345,6 +16353,132 @@ fn test_static_member_checks_keep_ngtsc_error_order() {
             .iter()
             .any(|d| d.contains("Using @ViewChild with a signal-based query is not allowed.")),
         "@ViewChild + viewChild() should report the collision. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_param_decorator_arity_is_diagnostic() {
+    // ngtsc's `getConstructorDependencies` (di.ts): `@Inject`/`@Attribute` need
+    // exactly one argument; bare (`@Inject`) counts as zero.
+    for (param, expected) in [
+        ("@Inject() x: any", "Unexpected number of arguments to @Inject()."),
+        ("@Inject(A, B) x: any", "Unexpected number of arguments to @Inject()."),
+        ("@Inject x: any", "Unexpected number of arguments to @Inject()."),
+        ("@Attribute() x: any", "Unexpected number of arguments to @Attribute()."),
+        ("@Attribute('a', 'b') x: any", "Unexpected number of arguments to @Attribute()."),
+        ("@Input() x: any", "Unexpected decorator Input on parameter."),
+    ] {
+        let source = format!(
+            "import {{ Directive, Inject, Attribute, Input }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    constructor({param}) {{}}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.contains(expected)),
+            "`{param}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_param_decorator_checks_respect_import_and_kind() {
+    // Only the constructor's parameters are checked (upstream only visits
+    // ctor params), only `@angular/core` decorators count, and aliases resolve
+    // to the imported name.
+    for (source, expected) in [
+        // Foreign @Inject: no diagnostic.
+        (
+            "import { Directive } from '@angular/core';\n\
+             import { Inject } from 'not-angular';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@Inject() x: any) {}\n}",
+            None,
+        ),
+        // Aliased import reports the imported name upstream
+        // (`dec.import.name`).
+        (
+            "import { Directive, Inject as Inj } from '@angular/core';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@Inj() x: any) {}\n}",
+            Some("Unexpected number of arguments to @Inject()."),
+        ),
+        // Namespace import resolves the member name.
+        (
+            "import { Directive } from '@angular/core';\n\
+             import * as core from '@angular/core';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@core.Inject() x: any) {}\n}",
+            Some("Unexpected number of arguments to @Inject()."),
+        ),
+        // A bad decorator on a non-ctor param is not checked.
+        (
+            "import { Directive, Inject } from '@angular/core';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    m(@Inject() x: any) {}\n}",
+            None,
+        ),
+        // An undecorated class is never looked at.
+        (
+            "import { Inject } from '@angular/core';\n\
+             export class D {\n    constructor(@Inject() x: any) {}\n}",
+            None,
+        ),
+        // Valid decorators: arity ok, and flags take no arity check.
+        (
+            "import { Directive, Inject, Attribute, Optional } from '@angular/core';\n\
+             const TOKEN = 't';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@Inject(TOKEN) a: any, @Attribute('x') b: any, @Optional(1) c: any) {}\n}",
+            None,
+        ),
+        // A bodiless overload signature is not the checked constructor.
+        (
+            "import { Directive, Inject } from '@angular/core';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@Inject() x: any);\n    constructor(x: any) {}\n}",
+            None,
+        ),
+        // Default import resolves to the local name upstream
+        // (`getExportedName` falls back for non-ImportSpecifier decls).
+        (
+            "import { Directive } from '@angular/core';\n\
+             import Inj from '@angular/core';\n\
+             @Directive({ selector: '[d]' })\n\
+             export class D {\n    constructor(@Inj() x: any) {}\n}",
+            Some("Unexpected decorator Inj on parameter."),
+        ),
+    ] {
+        let diagnostics = expect_diagnostics(source);
+        match expected {
+            Some(expected) => assert!(
+                diagnostics.iter().any(|d| d.contains(expected)),
+                "should report {expected:?}. Got: {diagnostics:?}"
+            ),
+            None => assert!(
+                diagnostics.is_empty(),
+                "should not report a param-decorator error. Got: {diagnostics:?}"
+            ),
+        }
+    }
+}
+
+#[test]
+fn test_param_decorator_error_waits_for_io_checks() {
+    // Upstream throws the io error first: `getConstructorDependencies` runs
+    // last inside `extractDirectiveMetadata`, so a class with both problems
+    // reports only the input error.
+    let source = "import { Directive, Inject, Input } from '@angular/core';\n\
+                  @Directive({ selector: '[d]' })\n\
+                  export class D {\n    @Input() static x = 0;\n    constructor(@Inject() y: any) {}\n}";
+    let diagnostics = expect_diagnostics(source);
+    assert!(
+        diagnostics.iter().any(|d| d.contains("is incorrectly declared as static")),
+        "io error should be reported. Got: {diagnostics:?}"
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d.contains("Unexpected number of arguments")),
+        "param error should be suppressed while an io error exists. Got: {diagnostics:?}"
     );
 }
 

@@ -1268,6 +1268,91 @@ pub fn decorator_io_errors<'a>(
         .collect()
 }
 
+/// The name upstream sees for a `@angular/core` decorator (`dec.import?.name
+/// ?? dec.name`): the imported name for an aliased import (`@Inj(...)` for
+/// `import { Inject as Inj }` is `Inject`), the member name for a namespace
+/// import (`@core.Inject()`), the local name otherwise.
+fn angular_decorator_name<'a>(decorator: &'a Decorator<'a>, consts: &StringConsts<'a>) -> &'a str {
+    let callee = match &decorator.expression {
+        Expression::CallExpression(call) => &call.callee,
+        expr => expr,
+    };
+    match callee {
+        Expression::Identifier(id) => consts
+            .scope()
+            .import(&id.name)
+            .and_then(|import| import.imported)
+            // A default import has no imported name upstream
+            // (`getExportedName` falls back to the local identifier).
+            .filter(|name| *name != "default")
+            .unwrap_or(id.name.as_str()),
+        Expression::StaticMemberExpression(m) => m.property.name.as_str(),
+        _ => "",
+    }
+}
+
+/// The first error ngtsc's `getConstructorDependencies` (`di.ts`) raises for a
+/// class's constructor parameters: `@Inject()` / `@Attribute()` with anything
+/// but one argument (`DECORATOR_ARITY_WRONG`), or another `@angular/core`
+/// decorator on a parameter (`Unexpected decorator X on parameter.`).
+///
+/// Runs for every class a DI handler compiles — `@Component`, `@Directive`,
+/// `@Pipe`, `@NgModule` and `@Injectable` all call it — after the io/query
+/// checks, which is where it sits inside `extractDirectiveMetadata`.
+/// `getConstructorDependencies` only sees the constructor's parameters, so
+/// decorators on other parameters are not checked.
+pub fn param_decorator_errors<'a>(
+    class: &'a Class<'a>,
+    consts: &StringConsts<'a>,
+) -> std::vec::Vec<OxcDiagnostic> {
+    // Not a class any DI handler compiles: per-class analysis never looks
+    // at its parameters. (Upstream's `InjectableClassRegistry` can still
+    // reach undecorated provider/base classes through `getConstructorDependencies`;
+    // oxc has no equivalent registry checks.)
+    if !class.decorators.iter().any(|d| super::angular_class_decorator(d, consts).is_some()) {
+        return std::vec::Vec::new();
+    }
+
+    class
+        .body
+        .body
+        .iter()
+        .filter_map(|element| match element {
+            // Upstream picks the first constructor *with a body*
+            // (typescript.ts `findConstructorDeclaration`): an overload
+            // signature's parameters are not checked.
+            ClassElement::MethodDefinition(m)
+                if m.kind == MethodDefinitionKind::Constructor && m.value.body.is_some() =>
+            {
+                Some(m)
+            }
+            _ => None,
+        })
+        .flat_map(|ctor| ctor.value.params.items.iter())
+        .flat_map(|param| param.decorators.iter())
+        .filter(|d| super::is_angular_core_decorator(d, Some(consts)))
+        .find_map(|decorator| {
+            let args: Option<&oxc_allocator::Vec<'_, Argument<'_>>> = match &decorator.expression {
+                Expression::CallExpression(call) => Some(&call.arguments),
+                _ => None,
+            };
+            let error = match angular_decorator_name(decorator, consts) {
+                name @ ("Inject" | "Attribute") => {
+                    if args.is_none_or(|a| a.len() != 1) {
+                        Some(format!("Unexpected number of arguments to @{name}()."))
+                    } else {
+                        None
+                    }
+                }
+                "Optional" | "Self" | "SkipSelf" | "Host" => None,
+                name => Some(format!("Unexpected decorator {name} on parameter.")),
+            };
+            error.map(|message| OxcDiagnostic::error(message).with_label(decorator.span))
+        })
+        .into_iter()
+        .collect()
+}
+
 /// ngtsc's error for the `@Input(...)` decorator of the member `name`
 /// (`tryParseInputFieldMapping`): more than one argument, an argument that
 /// isn't `null`, a string or an object, or a `transform` it can't use. Options

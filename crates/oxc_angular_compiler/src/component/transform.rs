@@ -42,7 +42,7 @@ use crate::directive::collect_string_consts;
 use crate::directive::{
     R3QueryMetadata, create_content_queries_function, create_view_queries_function,
     decorator_io_errors, extract_class_queries, extract_directive_metadata,
-    find_directive_decorator, generate_directive_definitions,
+    find_directive_decorator, generate_directive_definitions, param_decorator_errors,
 };
 use crate::dts;
 use crate::injectable::{
@@ -2910,12 +2910,17 @@ pub fn transform_angular_file(
             let implicit_standalone = options.implicit_standalone();
 
             // `inputs:`/`outputs:` forms ngtsc rejects, rather than dropping them silently.
-            result.diagnostics.extend(decorator_io_errors(
-                allocator,
-                class,
-                Some(source),
-                &string_consts,
-            ));
+            let io_errors = decorator_io_errors(allocator, class, Some(source), &string_consts);
+            result.diagnostics.extend(io_errors.iter().cloned());
+            if io_errors.is_empty() {
+                // Constructor parameter decorators: ngtsc's
+                // `getConstructorDependencies` (arity, unexpected decorators)
+                // runs only once the io/query checks passed. Upstream also
+                // throws earlier — malformed decorator args, a missing
+                // selector — for shapes oxc doesn't diagnose yet, so this
+                // can be the first error where ngtsc would report another.
+                result.diagnostics.extend(param_decorator_errors(class, &string_consts));
+            }
 
             if let Some(mut metadata) = extract_component_metadata(
                 &allocator,
