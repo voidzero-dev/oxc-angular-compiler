@@ -6137,6 +6137,40 @@ export class TestComponent {
     );
 }
 
+/// @HostListener on a TS `accessor` field is a host listener: ngtsc's
+/// `reflectClassMember` reports auto-accessors as PropertyDeclarations, so
+/// `filterToMembersWithDecorator` collects them (typescript.ts:695). A
+/// `static accessor` stays excluded per the `!member.isStatic` filter.
+#[test]
+fn test_host_listener_on_accessor_member() {
+    let allocator = Allocator::default();
+    let source = r"
+import { Directive, HostListener } from '@angular/core';
+
+@Directive({ selector: '[d]' })
+export class D {
+    @HostListener('click', ['$event']) accessor onClick = ($event: any) => {};
+    @HostListener('scroll') static accessor onScroll = () => {};
+}
+";
+
+    let result = transform_angular_file(&allocator, "test.ts", source, None, None);
+    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    let code = &result.code;
+    let compact: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+
+    // Instance accessor member produces a listener.
+    assert!(
+        compact.contains(r#"ɵɵlistener("click""#),
+        "instance @HostListener on an accessor should emit a listener. Got:\n{code}"
+    );
+    // Static accessor member is ignored, like other static members.
+    assert!(
+        !compact.contains(r#"listener("scroll""#),
+        "static @HostListener on an accessor should not emit a listener. Got:\n{code}"
+    );
+}
+
 /// `setClassMetadata`'s `propDecorators` mirrors ngtsc's `extractClassMetadata`
 /// (metadata.ts): static and ECMAScript-private members are excluded, and
 /// string-literal member keys are emitted quoted (`shouldQuoteName`).
