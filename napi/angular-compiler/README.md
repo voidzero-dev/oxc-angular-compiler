@@ -25,8 +25,9 @@ pnpm add @oxc-angular/vite
 
 ```typescript
 // vite.config.ts
-import { defineConfig } from 'vite'
+
 import { angular } from '@oxc-angular/vite/vite-plugin'
+import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [

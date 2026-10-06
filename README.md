@@ -32,8 +32,9 @@ yarn add @oxc-angular/vite
 
 ```typescript
 // vite.config.ts
-import { defineConfig } from 'vite'
+
 import { angular } from '@oxc-angular/vite'
+import { defineConfig } from 'vite'
 
 export default defineConfig({
   plugins: [
