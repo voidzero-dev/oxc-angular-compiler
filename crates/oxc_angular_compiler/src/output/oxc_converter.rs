@@ -104,6 +104,10 @@ pub fn convert_oxc_expression<'a>(
         // Function expressions - fall back to raw source if available
         Expression::FunctionExpression(func) => make_raw_source(allocator, source_text, func.span),
 
+        // Class expressions - fall back to raw source if available
+        // (ngtsc emits them as written, e.g. a `@ViewChild(class Foo {})` predicate)
+        Expression::ClassExpression(class) => make_raw_source(allocator, source_text, class.span),
+
         // Member expressions
         Expression::StaticMemberExpression(member) => {
             let receiver = convert_oxc_expression(allocator, &member.object, source_text)?;
@@ -715,7 +719,7 @@ fn convert_oxc_binary_operator(op: oxc_ast::ast::BinaryOperator) -> Option<Binar
 /// re-generating the expression as JavaScript.
 ///
 /// Returns `None` if `source_text` is not available.
-fn make_raw_source<'a>(
+pub(crate) fn make_raw_source<'a>(
     allocator: &'a Allocator,
     source_text: Option<&'a str>,
     span: Span,

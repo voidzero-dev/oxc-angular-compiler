@@ -1277,3 +1277,85 @@ export class Dir {
     assert!(code.contains(r#"inputs:{a:"a"},outputs:{b:"b"}}"#), "{}", result.code);
     assert!(code.contains("{a:[{type:In}],b:[{type:core.Output}]}"), "{}", result.code);
 }
+
+/// A query predicate that isn't statically evaluable is emitted as written
+/// (ngtsc's `WrappedNodeExpr`, github issue #516): `extractQueryMetadata`
+/// wraps `Reference`/`DynamicValue` predicates and the signal queries'
+/// `parseLocator` wraps any non-string locator. A class expression is such a
+/// value, so `@ViewChild(class Foo {})` is `ɵɵviewQuery(class Foo {}, 5)`,
+/// not "predicate cannot be interpreted".
+#[test]
+fn unevaluated_query_predicates_are_emitted_as_written() {
+    // Member decorator and `queries:` metadata.
+    let source = "import {Component, ViewChild} from '@angular/core';
+@Component({selector: 'c', template: '', queries: {q2: new ViewChild(class Bar {})}})
+export class C {
+  @ViewChild(class Foo {}) q1: any;
+  q2: any;
+}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    let code = strip(&result.code);
+    // Member queries precede `queries:` ones in one chained `ɵɵviewQuery`.
+    assert!(code.contains("ɵɵviewQuery(classFoo{},5)(classBar{},5)"), "{}", result.code);
+
+    // Signal query locator (upstream `parseLocator` wraps non-strings as written).
+    let source = "import {Component, viewChild} from '@angular/core';
+@Component({selector: 'c', template: ''})
+export class C {
+  q = viewChild(class Foo {});
+}
+";
+    let result = transform(source);
+    assert!(errors(&result, source).is_empty(), "{:?}", errors(&result, source));
+    assert!(strip(&result.code).contains("ɵɵviewQuerySignal(ctx.q,classFoo{}"), "{}", result.code);
+}
+
+/// The predicates ngtsc rejects are still rejected: anything that is neither
+/// a string, a string array, nor a reference/dynamic value it can emit
+/// verbatim (a number, an object literal, a non-string array member, ...).
+#[test]
+fn uninterpretable_query_predicates_are_still_errors() {
+    let cases = [
+        ("@ViewChild(42) q: any;", "q", "42"),
+        ("@ViewChild({}) q: any;", "q", "{}"),
+        ("@ViewChild(true) q: any;", "q", "true"),
+        ("@ViewChild(null) q: any;", "q", "null"),
+    ];
+    for (member, _, predicate) in cases {
+        let source = format!(
+            "import {{Component, ViewChild}} from '@angular/core';
+@Component({{selector: 'c', template: ''}})
+export class C {{
+  {member}
+}}
+"
+        );
+        let message = match predicate {
+            "{}" => "@ViewChild predicate cannot be interpreted Value is of type '{}'.",
+            "null" => "@ViewChild predicate cannot be interpreted Value is of type 'null'.",
+            "true" => "@ViewChild predicate cannot be interpreted Value is of type 'boolean'.",
+            _ => "@ViewChild predicate cannot be interpreted Value is of type 'number'.",
+        };
+        assert_eq!(
+            errors(&transform(&source), &source),
+            vec![(message.to_string(), predicate.to_string())],
+            "{member}"
+        );
+    }
+
+    // The options argument is still checked literally (NG1001), even when it
+    // names a same-file const: ngtsc requires an object literal node.
+    let source = "import {Component, ViewChild} from '@angular/core';
+const OPTS = {static: true};
+@Component({selector: 'c', template: ''})
+export class C {
+  @ViewChild('a', OPTS) q: any;
+}
+";
+    assert_eq!(
+        errors(&transform(source), source),
+        vec![("@ViewChild options must be an object literal".to_string(), "OPTS".to_string())]
+    );
+}

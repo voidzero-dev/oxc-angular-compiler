@@ -22,7 +22,7 @@ use oxc_str::Ident;
 use super::evaluator::{Evaluator, Value};
 use super::metadata::{QueryPredicate, R3InputMetadata, R3QueryMetadata};
 use crate::output::ast::OutputExpression;
-use crate::output::oxc_converter::convert_oxc_expression;
+use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
 use crate::util::is_metadata_property;
 
 // ============================================================================
@@ -980,7 +980,9 @@ fn parse_query_config<'a>(
             list.push(lit.value.clone().into());
             Some(QueryPredicate::Selectors(list))
         }
-        _ => convert_oxc_expression(allocator, node, source_text).map(QueryPredicate::Type),
+        _ => convert_oxc_expression(allocator, node, source_text)
+            .or_else(|| make_raw_source(allocator, source_text, node.span()))
+            .map(QueryPredicate::Type),
     };
 
     // Parse options from second argument if present
@@ -1100,7 +1102,10 @@ fn try_parse_signal_query<'a>(
             let expr = predicate_arg.to_expression();
             // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
             let unwrapped_expr = try_unwrap_forward_ref(expr, consts).unwrap_or(expr);
-            let output_expr = convert_oxc_expression(allocator, unwrapped_expr, source_text)?;
+            // ngtsc emits a non-string locator as written (`WrappedNodeExpr`),
+            // so fall back to the source text for what can't be converted.
+            let output_expr = convert_oxc_expression(allocator, unwrapped_expr, source_text)
+                .or_else(|| make_raw_source(allocator, source_text, unwrapped_expr.span()))?;
             QueryPredicate::Type(output_expr)
         }
     };
@@ -1976,8 +1981,13 @@ fn decorator_query<'a>(
     let node = try_unwrap_forward_ref(first, Some(consts)).unwrap_or(first);
     let at_node = |message: String| (message, node.span());
     let predicate = match evaluator.evaluate(node) {
+        // Like ngtsc, a reference or a value that can't be statically
+        // evaluated is wrapped in a `WrappedNodeExpr` and emitted as written,
+        // so the source text is the fallback for nodes the output AST can't
+        // represent (`class Foo {}`, an import, ...).
         Value::Reference { .. } | Value::Dynamic | Value::Function(_) => {
             let expr = convert_oxc_expression(allocator, node, source_text)
+                .or_else(|| make_raw_source(allocator, source_text, node.span()))
                 .ok_or_else(|| at_node(format!("@{name} predicate cannot be interpreted")))?;
             QueryPredicate::Type(expr)
         }
