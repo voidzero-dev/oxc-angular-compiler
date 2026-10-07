@@ -422,6 +422,48 @@ export class C {
     assert!(compact.contains(r#"minVersion:"17.2.0""#), "expected minVersion 17.2.0, got:\n{code}");
 }
 
+/// A `forwardRef(() => Child)` predicate must stay wrapped in the partial
+/// output: the declaration is evaluated at class-definition time, so a bare
+/// `Child` would hit the TDZ when `Child` is declared later. Upstream
+/// re-wraps via `convertFromMaybeForwardRefExpression` (util.ts).
+#[test]
+fn partial_component_preserves_forward_ref_query_predicates() {
+    let allocator = Allocator::default();
+    let source = "import { Component, ViewChild, forwardRef } from '@angular/core';
+import { ChildDir } from './child';
+
+@Component({ selector: 'c', template: '<div></div>' })
+export class C {
+  @ViewChild(forwardRef(() => ChildDir)) q!: ChildDir;
+}
+";
+    let code = compile_partial(&allocator, "test.ts", source);
+    assert!(
+        code.contains("predicate:i0.forwardRef(function") && code.contains("return ChildDir"),
+        "expected forwardRef-wrapped predicate, got:\n{code}"
+    );
+}
+
+/// Same for signal queries — `viewChild(forwardRef(() => T))` keeps its
+/// wrapper and still emits `isSignal: true`.
+#[test]
+fn partial_component_signal_query_preserves_forward_ref() {
+    let allocator = Allocator::default();
+    let source = "import { Component, viewChild, forwardRef } from '@angular/core';
+import { ChildDir } from './child';
+
+@Component({ selector: 'c', template: '<div></div>' })
+export class C {
+  q = viewChild(forwardRef(() => ChildDir));
+}
+";
+    let code = compile_partial(&allocator, "test.ts", source);
+    assert!(
+        code.contains("predicate:i0.forwardRef(function") && code.contains("isSignal:true"),
+        "expected forwardRef-wrapped signal predicate, got:\n{code}"
+    );
+}
+
 /// Round-trip: the linked ɵɵdefineComponent must carry the queries so
 /// `@ViewChild`/`@ContentChild` actually resolve at runtime (the issue's
 /// user-visible symptom).

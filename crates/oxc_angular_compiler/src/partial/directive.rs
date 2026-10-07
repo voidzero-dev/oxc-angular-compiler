@@ -465,12 +465,15 @@ fn compile_query<'a>(allocator: &'a Allocator, q: &R3QueryMetadata<'a>) -> Outpu
     if q.first {
         entries.push(LiteralMapEntry::new(Ident::from("first"), bool_lit(allocator, true), false));
     }
-    // predicate: type expression OR string array of selectors. (Forward-ref
-    // wrapping on a Type predicate is not tracked in the local metadata,
-    // so we emit the expression verbatim. If we add forward-ref tracking
-    // to QueryPredicate::Type, this is the place to wrap.)
+    // predicate: type expression OR string array of selectors. A `Type`
+    // predicate that was `forwardRef(() => X)` in source is emitted
+    // re-wrapped — upstream's convertFromMaybeForwardRefExpression —
+    // because the declaration is evaluated at class-definition time.
     let predicate_expr = match &q.predicate {
-        QueryPredicate::Type(expr) => expr.clone_in(allocator),
+        QueryPredicate::Type(expr) => {
+            let expr = expr.clone_in(allocator);
+            if q.is_forward_ref { wrap_forward_ref(allocator, expr) } else { expr }
+        }
         QueryPredicate::Selectors(selectors) => {
             let mut elements: Vec<'a, OutputExpression<'a>> =
                 Vec::with_capacity_in(selectors.len(), &allocator);

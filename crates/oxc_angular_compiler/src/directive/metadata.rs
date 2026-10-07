@@ -94,6 +94,13 @@ pub struct R3QueryMetadata<'a> {
 
     /// Whether the query is signal-based.
     pub is_signal: bool,
+
+    /// Whether a `Type` predicate was written `forwardRef(() => X)` in the
+    /// source and unwrapped during extraction. The partial emitter re-wraps
+    /// it (`convertFromMaybeForwardRefExpression` in render3/util.ts); the
+    /// full emitter leaves it bare because query calls run after class
+    /// initialization.
+    pub is_forward_ref: bool,
 }
 
 /// Query predicate type.
@@ -118,6 +125,7 @@ impl<'a> R3QueryMetadata<'a> {
             read: None,
             is_static: false,
             is_signal: false,
+            is_forward_ref: false,
         }
     }
 }

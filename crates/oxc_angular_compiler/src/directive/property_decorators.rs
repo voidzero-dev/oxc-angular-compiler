@@ -898,6 +898,9 @@ struct QueryConfig<'a> {
     descendants: bool,
     /// Whether a `QueryList` only notifies when its contents change.
     emit_distinct_changes_only: bool,
+    /// Whether the predicate was a `forwardRef(() => X)` that extraction
+    /// unwrapped. Kept so the partial emitter can re-wrap it.
+    is_forward_ref: bool,
 }
 
 impl<'a> Default for QueryConfig<'a> {
@@ -916,6 +919,7 @@ impl<'a> QueryConfig<'a> {
             predicate: None,
             is_static: false,
             read: None,
+            is_forward_ref: false,
             // For @ContentChildren, default is false; for all others, default is true
             descendants: decorator_name != "ContentChildren",
             emit_distinct_changes_only: true,
@@ -957,6 +961,7 @@ fn parse_query_config<'a>(
                 read: query.read,
                 descendants: query.descendants,
                 emit_distinct_changes_only: query.emit_distinct_changes_only,
+                is_forward_ref: query.is_forward_ref,
             },
             Err(_) => QueryConfig::default_for(decorator_name),
         };
@@ -972,9 +977,12 @@ fn parse_query_config<'a>(
 
     let mut config = QueryConfig::default_for(decorator_name);
 
-    // The predicate: a string selector or a type/token.
-    // forwardRef isn't included in compiled output.
-    let node = try_unwrap_forward_ref(first_arg, None).unwrap_or(first_arg);
+    // The predicate: a string selector or a type/token. `forwardRef` is
+    // unwrapped for evaluation; `is_forward_ref` lets the partial emitter
+    // re-wrap it (upstream convertFromMaybeForwardRefExpression).
+    let unwrapped = try_unwrap_forward_ref(first_arg, None);
+    config.is_forward_ref = unwrapped.is_some();
+    let node = unwrapped.unwrap_or(first_arg);
     config.predicate = match node {
         Expression::StringLiteral(lit) => {
             let mut list = Vec::new_in(&allocator);
@@ -1091,6 +1099,7 @@ fn try_parse_signal_query<'a>(
 
     // Parse the predicate from the first argument
     let predicate_arg = call_expr.arguments.first()?;
+    let mut is_forward_ref = false;
     let predicate = match predicate_arg {
         // String selector: viewChild('myRef')
         Argument::StringLiteral(lit) => {
@@ -1101,8 +1110,11 @@ fn try_parse_signal_query<'a>(
         // Type predicate: viewChild(TemplateRef) or viewChild(forwardRef(() => MyClass))
         _ => {
             let expr = predicate_arg.to_expression();
-            // Unwrap forwardRef if present - Angular doesn't include forwardRef in compiled output
-            let unwrapped_expr = try_unwrap_forward_ref(expr, consts).unwrap_or(expr);
+            // Unwrap forwardRef for evaluation; `is_forward_ref` records it so
+            // the partial emitter can re-wrap the predicate.
+            let unwrapped = try_unwrap_forward_ref(expr, consts);
+            is_forward_ref = unwrapped.is_some();
+            let unwrapped_expr = unwrapped.unwrap_or(expr);
             // ngtsc emits a non-string locator as written (`WrappedNodeExpr`),
             // so fall back to the source text for what can't be converted.
             let output_expr = convert_oxc_expression(allocator, unwrapped_expr, source_text)
@@ -1150,6 +1162,7 @@ fn try_parse_signal_query<'a>(
             read,
             is_static: false, // Signal queries are never static
             is_signal: true,
+            is_forward_ref,
         },
     ))
 }
@@ -1244,6 +1257,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                             read: config.read,
                             is_static: config.is_static,
                             is_signal: false,
+                            is_forward_ref: config.is_forward_ref,
                         });
                     }
                 }
@@ -1268,6 +1282,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                             read: config.read,
                             is_static: config.is_static,
                             is_signal: false,
+                            is_forward_ref: config.is_forward_ref,
                         });
                     }
                 }
@@ -1299,6 +1314,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
+                                is_forward_ref: config.is_forward_ref,
                             });
                         }
                     }
@@ -1323,6 +1339,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
+                                is_forward_ref: config.is_forward_ref,
                             });
                         }
                     }
@@ -1432,6 +1449,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                             read: config.read,
                             is_static: config.is_static,
                             is_signal: false,
+                            is_forward_ref: config.is_forward_ref,
                         });
                     }
                 }
@@ -1456,6 +1474,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                             read: config.read,
                             is_static: config.is_static,
                             is_signal: false,
+                            is_forward_ref: config.is_forward_ref,
                         });
                     }
                 }
@@ -1487,6 +1506,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
+                                is_forward_ref: config.is_forward_ref,
                             });
                         }
                     }
@@ -1511,6 +1531,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                                 read: config.read,
                                 is_static: config.is_static,
                                 is_signal: false,
+                                is_forward_ref: config.is_forward_ref,
                             });
                         }
                     }
@@ -2068,7 +2089,9 @@ fn decorator_query<'a>(
     let Some(first) = args.first().and_then(Argument::as_expression) else {
         return Err((format!("@{name} must have arguments"), span));
     };
-    let node = try_unwrap_forward_ref(first, Some(consts)).unwrap_or(first);
+    let unwrapped = try_unwrap_forward_ref(first, Some(consts));
+    let is_forward_ref = unwrapped.is_some();
+    let node = unwrapped.unwrap_or(first);
     let at_node = |message: String| (message, node.span());
     let predicate = match evaluator.evaluate(node) {
         // Like ngtsc, a reference or a value that can't be statically
@@ -2156,6 +2179,7 @@ fn decorator_query<'a>(
         read: config.read,
         is_static: config.is_static,
         is_signal: false,
+        is_forward_ref,
     })
 }
 

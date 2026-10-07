@@ -925,6 +925,7 @@ mod tests {
             emit_distinct_changes_only: false,
             is_static: false,
             is_signal: true,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -967,6 +968,7 @@ mod tests {
             emit_distinct_changes_only: false,
             is_static: false,
             is_signal: true,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1017,6 +1019,7 @@ mod tests {
             emit_distinct_changes_only: false,
             is_static: false,
             is_signal: true,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1031,6 +1034,7 @@ mod tests {
             emit_distinct_changes_only: false,
             is_static: false,
             is_signal: true,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1088,6 +1092,7 @@ mod tests {
             emit_distinct_changes_only: true,
             is_static: false,
             is_signal: false,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1102,6 +1107,7 @@ mod tests {
             emit_distinct_changes_only: true,
             is_static: false,
             is_signal: false,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1151,6 +1157,7 @@ mod tests {
             emit_distinct_changes_only: true,
             is_static: false,
             is_signal: false,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1165,6 +1172,7 @@ mod tests {
             emit_distinct_changes_only: true,
             is_static: false,
             is_signal: false,
+            is_forward_ref: false,
             read: None,
         };
 
@@ -1215,6 +1223,7 @@ mod tests {
             emit_distinct_changes_only: false,
             is_static: false,
             is_signal: true,
+            is_forward_ref: false,
             read: None,
         };
 
