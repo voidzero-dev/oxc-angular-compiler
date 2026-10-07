@@ -752,7 +752,30 @@ impl JsEmitter {
                 self.visit_expression(&e.expr, ctx);
             }
             OutputExpression::Parenthesized(e) => {
+                // Keep the parens. `Parenthesized` carries source parens —
+                // ngtsc emits such expressions verbatim via WrappedNodeExpr —
+                // or a required paren the strip_nonrequired_parentheses phase
+                // kept. Dropping them breaks `({a: 1}).a`, `(-1) ** 2`,
+                // `(1).toString()` and `(obj?.m)()` (issue #510). Upstream's
+                // emitter drops ParenthesizedExpr parens only because it
+                // re-adds them contextually via `shouldParenthesize` and never
+                // sees source parens at all.
+                //
+                // Skip printing when the inner expression already wraps
+                // itself, or `((a + b))` sources would emit double parens.
+                let self_parenthesized = matches!(
+                    e.expr.as_ref(),
+                    OutputExpression::BinaryOperator(_)
+                        | OutputExpression::Conditional(_)
+                        | OutputExpression::Comma(_)
+                ) || matches!(&e.expr.as_ref(), OutputExpression::UnaryOperator(u) if u.parens);
+                if !self_parenthesized {
+                    ctx.print("(");
+                }
                 self.visit_expression(&e.expr, ctx);
+                if !self_parenthesized {
+                    ctx.print(")");
+                }
             }
             OutputExpression::Comma(e) => {
                 ctx.print("(");
@@ -781,24 +804,18 @@ impl JsEmitter {
                 ctx.print(") =>");
                 match &e.body {
                     ArrowFunctionBody::Expression(body_expr) => {
-                        // Check if the body is an object literal (needs parens).
-                        // Also unwrap Parenthesized wrapper, which comes from converting
-                        // OXC's ParenthesizedExpression (e.g. `() => ({ key: val })`).
-                        let inner = match body_expr.as_ref() {
-                            OutputExpression::Parenthesized(p) => p.expr.as_ref(),
-                            other => other,
-                        };
-                        // Objects the converter keeps as written arrive as raw source.
-                        let is_object_literal = match inner {
-                            OutputExpression::LiteralMap(_) => true,
-                            OutputExpression::RawSource(raw) => raw.source.starts_with('{'),
-                            _ => false,
-                        };
-                        if is_object_literal {
+                        // The body needs parens when its emitted text starts
+                        // with `{` — a bare object literal, or an expression
+                        // whose leftmost token is one, like
+                        // `({value: v}).value` (issue #510). A `Parenthesized`
+                        // body prints its own parens when needed, so a raw
+                        // `LiteralMap` inside it is still covered.
+                        let needs_parens = emits_leading_brace(body_expr);
+                        if needs_parens {
                             ctx.print("(");
                         }
                         self.visit_expression(body_expr, ctx);
-                        if is_object_literal {
+                        if needs_parens {
                             ctx.print(")");
                         }
                     }
@@ -1192,6 +1209,28 @@ impl Default for JsEmitter {
 // ============================================================================
 
 /// Convert a binary operator to its JavaScript string representation.
+/// Whether the emitted text of `expr` begins with `{` — the JavaScript
+/// block-statement hazard that requires parentheses. Walks the leftmost
+/// token through member access, calls and tagged templates
+/// (`({a: 1}).a`, `({a: 1})()`, `({a: 1})`t``). `Parenthesized` is never
+/// "leading `{`": it prints its own parens whenever its inner expression
+/// would need them.
+///
+/// Expressions that self-parenthesize (`BinaryOperator`, `Conditional`,
+/// `Comma`) or print an operator/keyword first (`new `, `!`, `typeof`,
+/// `void`, unary `+`/`-`) return `false` — their first token isn't `{`.
+fn emits_leading_brace(expr: &OutputExpression<'_>) -> bool {
+    match expr {
+        OutputExpression::LiteralMap(_) => true,
+        OutputExpression::RawSource(raw) => raw.source.starts_with('{'),
+        OutputExpression::ReadProp(e) => emits_leading_brace(&e.receiver),
+        OutputExpression::ReadKey(e) => emits_leading_brace(&e.receiver),
+        OutputExpression::InvokeFunction(e) => emits_leading_brace(&e.fn_expr),
+        OutputExpression::TaggedTemplateLiteral(e) => emits_leading_brace(&e.tag),
+        _ => false,
+    }
+}
+
 fn binary_operator_to_str(op: BinaryOperator) -> &'static str {
     match op {
         BinaryOperator::Equals => "==",

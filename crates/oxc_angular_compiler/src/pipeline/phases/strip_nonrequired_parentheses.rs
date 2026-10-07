@@ -22,7 +22,7 @@ use oxc_allocator::{Allocator, Box as ArenaBox};
 
 use crate::ast::expression::{AngularExpression, BinaryOperator};
 use crate::ir::expression::{
-    IrExpression, VisitorContextFlag, transform_expressions_in_create_op,
+    IrBinaryOperator, IrExpression, VisitorContextFlag, transform_expressions_in_create_op,
     transform_expressions_in_update_op,
 };
 use crate::pipeline::compilation::{ComponentCompilationJob, HostBindingCompilationJob};
@@ -304,6 +304,21 @@ fn check_ir_expression_for_required_parens(
             check_ir_expression_for_required_parens(&cc.expr, required);
         }
         IrExpression::Binary(binary) => {
+            // IR-level binaries need the same "required parens" marking as
+            // upstream's `o.BinaryOperatorExpr` walk — pipe-bearing operands
+            // become IrExpressions, so `(| pipe)`-adjacent parens live here.
+            match binary.operator {
+                IrBinaryOperator::Exponentiation => {
+                    check_ir_exponentiation_parens(binary, required);
+                }
+                IrBinaryOperator::NullishCoalesce => {
+                    check_ir_nullish_coalescing_parens(binary, required);
+                }
+                IrBinaryOperator::And | IrBinaryOperator::Or => {
+                    check_ir_and_or_parens(binary, required);
+                }
+                _ => {}
+            }
             check_ir_expression_for_required_parens(&binary.lhs, required);
             check_ir_expression_for_required_parens(&binary.rhs, required);
         }
@@ -522,9 +537,18 @@ fn check_ast_expression_for_required_parens(
 fn check_exponentiation_parens(expr: &AngularExpression<'_>, required: &mut HashSet<*const ()>) {
     if let AngularExpression::Binary(binary) = expr {
         if binary.operation == BinaryOperator::Power {
-            // Check if left side is a parenthesized unary expression
+            // Check if left side is a parenthesized unary expression. Upstream
+            // checks only `UnaryOperatorExpr` because its output goes through
+            // the TypeScript printer, which re-adds parens; we emit JS
+            // directly, so `!`/`typeof`/`void` bases need parens kept too.
             if let AngularExpression::ParenthesizedExpression(paren) = &binary.left {
-                if matches!(paren.expression, AngularExpression::Unary(_)) {
+                if matches!(
+                    paren.expression,
+                    AngularExpression::Unary(_)
+                        | AngularExpression::PrefixNot(_)
+                        | AngularExpression::TypeofExpression(_)
+                        | AngularExpression::VoidExpression(_)
+                ) {
                     // Mark this parenthesized expression as required
                     let ptr = paren as *const _ as *const ();
                     required.insert(ptr);
@@ -599,6 +623,103 @@ fn is_logical_and_or(expr: &AngularExpression<'_>) -> bool {
     }
 }
 
+/// `-2 ** 3` needs `(-2) ** 3` — mirror of [`check_exponentiation_parens`]
+/// for IR expressions (`ir.Binary` carries the AST `Binary` hazard too).
+fn check_ir_exponentiation_parens(
+    binary: &crate::ir::expression::BinaryExpr<'_>,
+    required: &mut HashSet<*const ()>,
+) {
+    if let IrExpression::Parenthesized(paren) = binary.lhs.as_ref()
+        && ir_is_unary(&paren.expr)
+    {
+        required.insert(paren.as_ref() as *const _ as *const ());
+    }
+}
+
+/// `(a && b) ?? c`, `a ?? (b && c)`, `(a ? b : c) ?? d` — mirror of
+/// [`check_nullish_coalescing_parens`] for IR expressions.
+fn check_ir_nullish_coalescing_parens(
+    binary: &crate::ir::expression::BinaryExpr<'_>,
+    required: &mut HashSet<*const ()>,
+) {
+    for operand in [binary.lhs.as_ref(), binary.rhs.as_ref()] {
+        if let IrExpression::Parenthesized(paren) = operand
+            && (ir_is_logical_and_or(&paren.expr) || ir_is_conditional(&paren.expr))
+        {
+            required.insert(paren.as_ref() as *const _ as *const ());
+        }
+    }
+}
+
+/// `(a ?? b) && c` — mirror of [`check_and_or_parens`] for IR expressions.
+fn check_ir_and_or_parens(
+    binary: &crate::ir::expression::BinaryExpr<'_>,
+    required: &mut HashSet<*const ()>,
+) {
+    if let IrExpression::Parenthesized(paren) = binary.lhs.as_ref()
+        && ir_is_nullish_coalesce(&paren.expr)
+    {
+        required.insert(paren.as_ref() as *const _ as *const ());
+    }
+}
+
+/// The hazard checks see `AngularExpression` shapes at the AST level; at the
+/// IR level the same operand may be an `IrExpression` or still a wrapped AST.
+/// "Unary" here means every unary-precedence operator (`+`, `-`, `!`,
+/// `typeof`, `void`) — all forbidden as the `**` base without parens.
+/// Upstream checks only `UnaryOperatorExpr` because its emit round-trips
+/// through the TypeScript printer; our emitter prints raw JS.
+fn ir_is_unary(expr: &IrExpression<'_>) -> bool {
+    match expr {
+        // Look through nested parens: in `((-1)) ** 2` the outer wrapper is
+        // the required one (the inner then strips to `(-1)`).
+        IrExpression::Parenthesized(p) => ir_is_unary(&p.expr),
+        IrExpression::Unary(_)
+        | IrExpression::Not(_)
+        | IrExpression::Typeof(_)
+        | IrExpression::Void(_) => true,
+        IrExpression::Ast(ast) => matches!(
+            ast.as_ref(),
+            AngularExpression::Unary(_)
+                | AngularExpression::PrefixNot(_)
+                | AngularExpression::TypeofExpression(_)
+                | AngularExpression::VoidExpression(_)
+        ),
+        _ => false,
+    }
+}
+
+fn ir_is_logical_and_or(expr: &IrExpression<'_>) -> bool {
+    match expr {
+        IrExpression::Parenthesized(p) => ir_is_logical_and_or(&p.expr),
+        IrExpression::Binary(b) => {
+            matches!(b.operator, IrBinaryOperator::And | IrBinaryOperator::Or)
+        }
+        IrExpression::Ast(ast) => is_logical_and_or(ast),
+        _ => false,
+    }
+}
+
+fn ir_is_conditional(expr: &IrExpression<'_>) -> bool {
+    match expr {
+        IrExpression::Parenthesized(p) => ir_is_conditional(&p.expr),
+        IrExpression::Ternary(_) => true,
+        IrExpression::Ast(ast) => matches!(ast.as_ref(), AngularExpression::Conditional(_)),
+        _ => false,
+    }
+}
+
+fn ir_is_nullish_coalesce(expr: &IrExpression<'_>) -> bool {
+    match expr {
+        IrExpression::Parenthesized(p) => ir_is_nullish_coalesce(&p.expr),
+        IrExpression::Binary(b) => b.operator == IrBinaryOperator::NullishCoalesce,
+        IrExpression::Ast(ast) => {
+            matches!(ast.as_ref(), AngularExpression::Binary(b) if b.operation == BinaryOperator::NullishCoalescing)
+        }
+        _ => false,
+    }
+}
+
 /// Strip non-required parentheses from an IR expression.
 fn strip_parens_in_expression<'a>(
     expr: &mut IrExpression<'a>,
@@ -616,6 +737,19 @@ fn strip_parens_in_expression<'a>(
                     crate::ir::expression::clone_angular_expression(&paren.expression, &allocator);
                 *expr = IrExpression::Ast(ArenaBox::new_in(inner_cloned, &allocator));
             }
+        }
+    }
+
+    // Handle IR-level parenthesized expressions the same way. Upstream has a
+    // single expression tree, so its strip pass covers these; our pipe-aware
+    // ingest produces `IrExpression::Parenthesized` (e.g. `(a | async) || b`),
+    // which used to be invisible here — the emitter dropped the parens.
+    if let IrExpression::Parenthesized(paren) = expr {
+        let ptr = paren.as_ref() as *const _ as *const ();
+        if !required.contains(&ptr) {
+            let inner =
+                std::mem::replace(paren.expr.as_mut(), IrExpression::empty(allocator, None));
+            *expr = inner;
         }
     }
 }
