@@ -367,19 +367,31 @@ fn parse_members(
     Some(parsed)
 }
 
-/// The position just past `position`'s line, skipping newlines that fall
-/// inside comments — a multiline trailing comment can't split the
-/// insertion.
-fn end_of_line_after(source: &str, position: usize, comment_spans: &[(usize, usize)]) -> usize {
+/// The position where a new import can be spliced: just past `position`
+/// and any comments that begin on the same line (trailing comments,
+/// multiline included). Code sharing the import's line
+/// (`import …; export declare class X {`) must stay below the new import,
+/// so the scan never advances past non-comment syntax.
+fn import_insert_position(
+    source: &str,
+    position: usize,
+    comment_spans: &[(usize, usize)],
+) -> usize {
     let bytes = source.as_bytes();
     let mut cursor = position;
     loop {
-        let newline = bytes[cursor..].iter().position(|&b| b == b'\n').map(|i| cursor + i);
-        let end = newline.unwrap_or(source.len());
-        let covering = comment_spans.iter().find(|(start, cend)| *start <= end && end < *cend);
-        match covering {
-            None => return newline.map_or(source.len(), |n| n + 1),
-            Some(&(_, cend)) => cursor = cend,
+        let line_end =
+            bytes[cursor..].iter().position(|&b| b == b'\n').map_or(source.len(), |i| cursor + i);
+        // A comment beginning on this line at-or-after `cursor` is a
+        // trailing comment of the import; keep it on the import's line.
+        let next = comment_spans
+            .iter()
+            .filter(|&&(start, _)| start >= cursor && start < line_end)
+            .map(|&(_, end)| end)
+            .min();
+        match next {
+            Some(comment_end) => cursor = comment_end,
+            None => return cursor,
         }
     }
 }
@@ -565,16 +577,27 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
             _ => None,
         });
         if let Some(end) = last_import_end {
-            // End of the last import's line, skipping multiline trailing
-            // comments (`import x from "m"; /* keep\nme */`) so the comment
-            // keeps its line and the new import lands on the next one.
+            // After the last import and any trailing comments on its line
+            // (`import x from "m"; /* keep\nme */` keeps the comment with
+            // it; `import x; export class` doesn't spill inside the class).
             let comment_spans: Vec<(usize, usize)> = program
                 .comments
                 .iter()
                 .map(|c| (c.span.start as usize, c.span.end as usize))
                 .collect();
-            let position = end_of_line_after(source, end, &comment_spans);
-            splices.push((position, position, format!("{text}\n")));
+            let position = import_insert_position(source, end, &comment_spans);
+            // Source's own newline at `position` separates the new import;
+            // otherwise we open a line — and close ours too when code
+            // follows on the same line.
+            let at_newline = source.as_bytes().get(position) == Some(&b'\n');
+            splices.push((
+                position,
+                position,
+                format!(
+                    "\n{text}{}",
+                    if at_newline || position == source.len() { "" } else { "\n" }
+                ),
+            ));
         } else if let Some(first) = program.body.first() {
             // Before the first statement keeps leading comments and
             // triple-slash reference directives at the top of the file.

@@ -347,6 +347,47 @@ describe('injectDtsDeclarations', () => {
     expect(out.match(/ɵfac/g)).toHaveLength(2)
   })
 
+  it('keeps the generated import outside a class declared on the import line', () => {
+    // `import …; export declare class Foo {` on one line must not let the
+    // import insertion scan past `{` — that would splice the import into
+    // the class body.
+    const source = 'import type { A } from "./a"; export declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    const importIdx = out.indexOf('import * as i0')
+    const classIdx = out.indexOf('export declare class Foo')
+    const openBrace = out.indexOf('{', classIdx)
+    expect(importIdx).toBeGreaterThan(-1)
+    expect(importIdx).toBeLessThan(classIdx)
+    expect(importIdx).toBeLessThan(openBrace)
+  })
+
+  it('injects into a class in a dotted ambient namespace', () => {
+    // `declare namespace Outer.Inner {}` parses as nested module
+    // declarations — the search must descend through them.
+    const source = 'declare namespace Outer.Inner {\n  export class Foo {\n  }\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    const facIdx = out.indexOf('ɵfac')
+    const classIdx = out.indexOf('class Foo')
+    const closeIdx = out.lastIndexOf('}')
+    expect(classIdx).toBeLessThan(facIdx)
+    expect(facIdx).toBeLessThan(closeIdx)
+  })
+
+  it('keeps a line comment on the last import with it', () => {
+    // `import …; // note` at EOF has no newline after the comment — the
+    // new import must not land inside the comment.
+    const source = 'import type { A } from "./a"; // note\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out).toContain('// note\nimport * as i0 from "@angular/core";')
+  })
+
   it('handles declarations with empty or comment-only members', () => {
     // The wrapper always yields a class, but nothing should be spliced —
     // no crash, no members, no imports.
