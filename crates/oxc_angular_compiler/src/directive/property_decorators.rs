@@ -23,6 +23,7 @@ use super::evaluator::{Evaluator, Value};
 use super::metadata::{QueryPredicate, R3InputMetadata, R3QueryMetadata};
 use crate::output::ast::OutputExpression;
 use crate::output::oxc_converter::{convert_oxc_expression, make_raw_source};
+use crate::r3::CORE;
 use crate::util::is_metadata_property;
 
 // ============================================================================
@@ -38,7 +39,7 @@ use crate::util::is_metadata_property;
 fn is_core_namespace(consts: Option<&super::StringConsts<'_>>, name: &str) -> bool {
     consts
         .and_then(|consts| consts.scope().import(name))
-        .is_some_and(|import| import.module == "@angular/core" && import.imported.is_none())
+        .is_some_and(|import| import.module == CORE && import.imported.is_none())
 }
 
 /// Angular's member decorators, which are compiled into the definition.
@@ -77,7 +78,7 @@ pub(crate) fn angular_core_decorator(
         Expression::Identifier(id) => match consts {
             Some(consts) => {
                 let import = consts.scope().import(&id.name)?;
-                if import.module != "@angular/core" {
+                if import.module != CORE {
                     return None;
                 }
                 import.imported?
@@ -117,10 +118,9 @@ pub(crate) fn is_angular_core_decorator(
     };
     match callee {
         Expression::Identifier(id) => match consts {
-            Some(consts) => consts
-                .scope()
-                .import(&id.name)
-                .is_some_and(|import| import.module == "@angular/core"),
+            Some(consts) => {
+                consts.scope().import(&id.name).is_some_and(|import| import.module == CORE)
+            }
             None => true,
         },
         Expression::StaticMemberExpression(m) => match &m.object {
@@ -287,7 +287,7 @@ fn try_unwrap_forward_ref<'a>(
     let is_forward_ref = match &call.callee {
         Expression::Identifier(id) => match consts {
             Some(consts) => consts.scope().import(&id.name).is_some_and(|import| {
-                import.module == "@angular/core" && import.imported == Some("forwardRef")
+                import.module == CORE && import.imported == Some("forwardRef")
             }),
             None => id.name == "forwardRef",
         },
@@ -1882,7 +1882,7 @@ pub(crate) fn parse_decorator_queries<'a>(
             Expression::Identifier(id) => consts
                 .scope()
                 .import(id.name.as_str())
-                .filter(|i| i.module == "@angular/core")
+                .filter(|i| i.module == CORE)
                 .and_then(|i| i.imported),
             Expression::StaticMemberExpression(m) => match &m.object {
                 Expression::Identifier(ns) if is_core_namespace(Some(consts), &ns.name) => {

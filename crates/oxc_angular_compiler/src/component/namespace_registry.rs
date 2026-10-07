@@ -57,13 +57,13 @@ impl<'a> NamespaceRegistry<'a> {
             allocator,
         };
         // Pre-register @angular/core
-        let core_module = Ident::from("@angular/core");
+        let core_module = Ident::from(crate::r3::identifiers::CORE);
         let core_alias = match reused_core_alias {
             Some(alias) => {
                 registry.reused_modules.insert(core_module);
                 alias
             }
-            None => registry.unique_name("i0"),
+            None => registry.unique_name(crate::r3::identifiers::CORE_ALIAS),
         };
         registry.modules.insert(core_module, core_alias);
         registry
@@ -91,7 +91,7 @@ impl<'a> NamespaceRegistry<'a> {
     /// The alias generated `@angular/core` references use (usually `i0`).
     pub fn angular_core_ns(&self) -> Ident<'a> {
         // @angular/core is always pre-registered by the constructors.
-        self.modules[&Ident::from("@angular/core")]
+        self.modules[&Ident::from(crate::r3::identifiers::CORE)]
     }
 
     /// Get the namespace alias for a module, assigning one if not yet assigned.

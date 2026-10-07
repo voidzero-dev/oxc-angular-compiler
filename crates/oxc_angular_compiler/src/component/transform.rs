@@ -16,6 +16,8 @@ use oxc_diagnostics::OxcDiagnostic;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
 use oxc_str::Ident;
+
+use crate::r3::CORE;
 use rustc_hash::FxHashMap;
 
 use crate::optimizer::{Edit, apply_edits, apply_edits_with_sourcemap};
@@ -1015,7 +1017,7 @@ pub(crate) fn is_angular_core_export(
     exported_name: &str,
 ) -> bool {
     let Some(info) = import_map.get(&Ident::from(local_name)) else { return false };
-    if info.source_module.as_str() != "@angular/core" {
+    if info.source_module.as_str() != CORE {
         return false;
     }
     match &info.imported_name {
@@ -1031,8 +1033,7 @@ pub(crate) fn is_angular_core_export(
 pub(crate) fn is_angular_core_namespace(import_map: &ImportMap<'_>, local_name: &str) -> bool {
     import_map
         .get(&Ident::from(local_name))
-        .map(|info| info.source_module.as_str() == "@angular/core" && !info.is_named_import)
-        .unwrap_or(false)
+        .is_some_and(|info| info.source_module.as_str() == CORE && !info.is_named_import)
 }
 
 /// Return the name of the first non-`Service` `@angular/core` decorator on
@@ -1452,7 +1453,7 @@ fn classify_initializer_api(
 /// `i0.Input` / `i0.Output` / etc. backed by `import * as i0 from "@angular/core"`.
 /// Without this prefixing, the synthesized `static propDecorators` would reference
 /// an undefined identifier and throw `ReferenceError` at module-evaluation time.
-pub(crate) const JIT_ANGULAR_CORE_NS: &str = "i0";
+pub(crate) const JIT_ANGULAR_CORE_NS: &str = crate::r3::CORE_ALIAS;
 
 /// Identifiers referenced inside constructor parameters — types and
 /// decorators. Used for jit-forced classes, whose parameters are re-emitted
@@ -1557,7 +1558,7 @@ fn reused_angular_core_namespace<'a>(
 ) -> Option<Ident<'a>> {
     for stmt in program.body.iter().rev() {
         let Statement::ImportDeclaration(import) = stmt else { continue };
-        if import.source.value != "@angular/core" || import.import_kind.is_type() {
+        if import.source.value != CORE || import.import_kind.is_type() {
             continue;
         }
         let namespace = import.specifiers.iter().flatten().find_map(|spec| match spec {
@@ -4981,8 +4982,8 @@ fn compile_component_full<'a>(
         // Add the @angular/core namespace dependency under whatever alias the
         // file's registry assigned (`i0`, a uniquified `i0_1`, or a reused
         // `import * as ns`).
-        let core_ns = namespace_registry.get_or_assign(&Ident::from("@angular/core"));
-        hmr_meta.add_namespace_dependency(Ident::from("@angular/core"), core_ns);
+        let core_ns = namespace_registry.get_or_assign(&Ident::from(CORE));
+        hmr_meta.add_namespace_dependency(Ident::from(CORE), core_ns);
 
         // Generate the HMR initializer expression
         let hmr_expr = compile_hmr_initializer(allocator, &hmr_meta);
@@ -5356,7 +5357,7 @@ pub fn compile_template_to_js_with_options<'a>(
     if let Some(ref host_input) = options.host {
         if let Some(host_result) = compile_host_bindings_from_input(
             &allocator,
-            "i0",
+            crate::r3::CORE_ALIAS,
             host_input,
             component_name,
             options.selector.as_deref(),

@@ -656,7 +656,7 @@ impl JsEmitter {
                 // Variable references are key for source mapping - map the variable name
                 let var_span = e.source_span.and_then(|span| ctx.span_to_source_span(span));
                 let name = match &self.core_namespace {
-                    Some(ns) if e.name == "i0" => ns.as_str(),
+                    Some(ns) if e.name == crate::r3::CORE_ALIAS => ns.as_str(),
                     _ => e.name.as_str(),
                 };
                 ctx.print_with_span(name, var_span);

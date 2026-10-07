@@ -390,9 +390,9 @@ fn get_ng_import_namespace<'a>(call: &'a CallExpression<'a>) -> &'a str {
             if let Expression::Identifier(ident) = &member.object {
                 return ident.name.as_str();
             }
-            "i0"
+            crate::r3::CORE_ALIAS
         }
-        _ => "i0",
+        _ => crate::r3::CORE_ALIAS,
     }
 }
 

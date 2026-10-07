@@ -10,6 +10,12 @@
 /// The Angular core module name.
 pub const CORE: &str = "@angular/core";
 
+/// The preferred namespace alias for `@angular/core` imports (`i0`,
+/// uniquified to `i0_1`, `i0_2`, … when a source file already binds `i0`).
+/// Matches ngtsc's declaration `ImportManager`, which reserves `i0` for
+/// core references.
+pub const CORE_ALIAS: &str = "i0";
+
 /// Angular runtime identifiers used in code generation.
 ///
 /// Each identifier corresponds to a runtime instruction exported from `@angular/core`.

@@ -64,9 +64,9 @@ pub fn compile_hmr_initializer<'a>(
     let core_ns = meta
         .namespace_dependencies
         .iter()
-        .find(|dep| dep.module_name.as_str() == "@angular/core")
+        .find(|dep| dep.module_name.as_str() == crate::r3::CORE)
         .map(|dep| dep.assigned_name)
-        .unwrap_or_else(|| Ident::from("i0"));
+        .unwrap_or_else(|| Ident::from(crate::r3::CORE_ALIAS));
 
     // i0.ɵɵreplaceMetadata(Comp, m.default, [...namespaces], [...locals], import.meta, id)
     let replace_call = invoke_fn(

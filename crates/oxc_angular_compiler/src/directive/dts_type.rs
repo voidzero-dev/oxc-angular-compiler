@@ -21,6 +21,7 @@ use oxc_span::GetSpan;
 
 use super::evaluator::{AliasTarget, FileScope};
 use crate::output::emitter::format_number_like_js;
+use crate::r3::CORE;
 
 pub(crate) struct TypePrinter<'s, 'a> {
     pub scope: &'s FileScope<'a>,
@@ -252,7 +253,7 @@ impl<'a> TypePrinter<'_, 'a> {
             match target {
                 // `import Core = require('@angular/core')`: `Core.X` is
                 // `i0.X`, like a namespace import's member.
-                AliasTarget::Module("@angular/core") => {
+                AliasTarget::Module(CORE) => {
                     return Some(Resolved::Core(
                         parts[len..].iter().map(|m| format!(".{m}")).collect(),
                     ));
@@ -286,7 +287,7 @@ impl<'a> TypePrinter<'_, 'a> {
     /// other module, as written otherwise.
     fn value_name(&mut self, head: &str, rest: &str) -> String {
         match self.scope.import(head) {
-            Some(import) if import.module == "@angular/core" => match import.imported {
+            Some(import) if import.module == CORE => match import.imported {
                 Some(imported) => format!("{}.{imported}{rest}", self.core_ns),
                 None => format!("{}{rest}", self.core_ns),
             },

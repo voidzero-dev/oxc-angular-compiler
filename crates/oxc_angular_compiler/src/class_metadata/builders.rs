@@ -803,7 +803,7 @@ fn build_core_decorator<'a>(
     decorator_name: &'static str,
     args: AllocVec<'a, OutputExpression<'a>>,
 ) -> OutputExpression<'a> {
-    let core_namespace = namespace_registry.get_or_assign(&Ident::from("@angular/core"));
+    let core_namespace = namespace_registry.get_or_assign(&Ident::from(crate::r3::CORE));
     let type_expr = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(

@@ -13,7 +13,7 @@ use crate::output::ast::{
     LiteralExpr, LiteralValue, OutputExpression, OutputStatement, ReadVarExpr, StmtModifier,
     clone_output_statement,
 };
-use crate::r3::{Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
+use crate::r3::{CORE, Identifiers, get_interpolate_instruction, get_pipe_bind_instruction};
 use oxc_allocator::Box;
 use oxc_str::Ident;
 
@@ -533,7 +533,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(allocator.alloc_str(instruction))),
                                 },
                                 source_span: None,
@@ -600,7 +600,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(fn_name)),
                                 },
                                 source_span: None,
@@ -643,7 +643,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(Identifiers::PIPE_BIND_V)),
                                 },
                                 source_span: None,
@@ -1005,7 +1005,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(Identifiers::TWO_WAY_BINDING_SET)),
                                 },
                                 source_span: None,
@@ -1038,7 +1038,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(Identifiers::READ_CONTEXT_LET)),
                                 },
                                 source_span: None,
@@ -1066,7 +1066,7 @@ fn convert_pure_function_body<'a>(
                         OutputExpression::External(Box::new_in(
                             ExternalExpr {
                                 value: ExternalReference {
-                                    module_name: Some(Ident::from("@angular/core")),
+                                    module_name: Some(Ident::from(CORE)),
                                     name: Some(Ident::from(Identifiers::STORE_LET)),
                                 },
                                 source_span: None,

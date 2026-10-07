@@ -36,6 +36,8 @@ use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType, Span};
 
+use crate::r3::{CORE, CORE_ALIAS};
+
 /// One class's `.d.ts` static member declarations.
 pub struct DtsInjectDeclaration {
     /// The class the members belong to.
@@ -285,14 +287,15 @@ struct HeadCollector<'ns, 'r> {
 }
 
 /// `i0`, `i0_1`, `i0_2`, … — the aliases the namespace registry prefers
-/// for `@angular/core`. When `namespace_imports` is absent these are the
-/// only unmapped heads safe to infer as core, preserving the pre-
-/// canonicalization behavior of always emitting the `i0` import. `i1`+
-/// aliases can stand for any module and stay untouched.
+/// for `@angular/core` (`CORE_ALIAS` uniquified). When `namespace_imports`
+/// is absent these are the only unmapped heads safe to infer as core,
+/// preserving the pre-canonicalization behavior of always emitting the
+/// `i0` import. `i1`+ aliases can stand for any module and stay untouched.
 fn is_core_alias_convention(alias: &str) -> bool {
-    alias == "i0"
+    let uniquified_prefix = format!("{CORE_ALIAS}_");
+    alias == CORE_ALIAS
         || alias
-            .strip_prefix("i0_")
+            .strip_prefix(uniquified_prefix.as_str())
             .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
 }
 
@@ -304,7 +307,7 @@ impl<'a> Visit<'a> for HeadCollector<'_, '_> {
             let unmapped_core =
                 self.namespace_imports.is_empty() && is_core_alias_convention(&alias);
             if module.is_some() || node.right.name.starts_with('ɵ') || unmapped_core {
-                let specifier = module.cloned().unwrap_or_else(|| "@angular/core".to_string());
+                let specifier = module.cloned().unwrap_or_else(|| CORE.to_string());
                 self.collected.push((
                     left.span.start as usize - self.offset,
                     alias,
@@ -491,7 +494,7 @@ pub fn inject_dts_declarations(source: &str, declarations: &[DtsInjectDeclaratio
         if let Some((_, alias)) = canonical.get(&head.resolved) {
             return alias.clone();
         }
-        let preferred = if head.module == "@angular/core" { "i0" } else { head.alias.as_str() };
+        let preferred = if head.module == CORE { CORE_ALIAS } else { head.alias.as_str() };
         // Reuse an existing import only when it binds this alias AND
         // specifier — same module under the same name (which is exactly
         // what an idempotent re-run sees on its second pass), never a

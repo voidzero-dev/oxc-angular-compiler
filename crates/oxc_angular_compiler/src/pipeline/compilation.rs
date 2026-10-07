@@ -279,7 +279,7 @@ impl<'a> ComponentCompilationJob<'a> {
             content_selectors: None,
             angular_version: None,
             legacy_optional_chaining: None,
-            core_namespace: Ident::from("i0"),
+            core_namespace: Ident::from(crate::r3::CORE_ALIAS),
             diagnostics: std::vec::Vec::new(),
         }
     }
@@ -730,7 +730,7 @@ impl<'a> HostBindingCompilationJob<'a> {
             diagnostics: std::vec::Vec::new(),
             angular_version: None,
             legacy_optional_chaining: None,
-            core_namespace: Ident::from("i0"),
+            core_namespace: Ident::from(crate::r3::CORE_ALIAS),
         }
     }
 

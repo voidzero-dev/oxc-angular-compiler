@@ -23,6 +23,7 @@ use super::metadata::{
 use crate::factory::R3DependencyMetadata;
 use crate::output::ast::{OutputAstBuilder, OutputExpression, ReadVarExpr};
 use crate::output::oxc_converter::convert_oxc_expression;
+use crate::r3::CORE;
 use crate::util::is_metadata_property;
 
 /// Find the @Directive decorator in a list of decorators. With the file's
@@ -1467,18 +1468,18 @@ fn output_decorator_error<'a>(
 
 /// An initializer API: its function name and the module exporting it.
 pub(crate) type InitializerApi = (&'static str, &'static str);
-pub(crate) const INPUT_API: InitializerApi = ("input", "@angular/core");
-pub(crate) const MODEL_API: InitializerApi = ("model", "@angular/core");
-pub(crate) const OUTPUT_API: InitializerApi = ("output", "@angular/core");
+pub(crate) const INPUT_API: InitializerApi = ("input", CORE);
+pub(crate) const MODEL_API: InitializerApi = ("model", CORE);
+pub(crate) const OUTPUT_API: InitializerApi = ("output", CORE);
 pub(crate) const OUTPUT_FROM_OBSERVABLE_API: InitializerApi =
     ("outputFromObservable", "@angular/core/rxjs-interop");
 
 /// Angular's signal query functions (ngtsc's `QUERY_INITIALIZER_FNS`).
 pub(crate) const QUERY_APIS: [InitializerApi; 4] = [
-    ("viewChild", "@angular/core"),
-    ("viewChildren", "@angular/core"),
-    ("contentChild", "@angular/core"),
-    ("contentChildren", "@angular/core"),
+    ("viewChild", CORE),
+    ("viewChildren", CORE),
+    ("contentChild", CORE),
+    ("contentChildren", CORE),
 ];
 
 /// Whether `value` calls one of `apis` (see [`initializer_api_call`]).
