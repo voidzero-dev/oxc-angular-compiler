@@ -2,7 +2,6 @@
 source: crates/oxc_angular_compiler/tests/integration_test.rs
 expression: result.code
 ---
-
 import { Component, Inject, Injectable } from '@angular/core';
 import { Inject as ForeignInject } from 'not-angular';
 import * as i0 from '@angular/core';
@@ -42,5 +41,5 @@ static ɵcmp = /*@__PURE__*/ i0.ɵɵdefineComponent({type:TestComponent,selector
       [{type:Component,args:[{selector:"app-test",template:""}]}],() =>[{type:undefined,
           decorators:[{type:Inject,args:[TOKEN]}]},{type:undefined,decorators:[{type:Injectable}]},
           {type:undefined,decorators:[]}],{componentMember:[{type:Component}],knownMember:[{type:Inject,
-          args:[TOKEN]}]}));
+          args:[TOKEN]}],foreignMember:[]}));
 })();

@@ -1327,7 +1327,9 @@ export class Cmp {{
 /// `@angular/core`, under any alias or through a namespace import. Only those
 /// are compiled (the snapshot's `memberDecorator-*` probes), removed from the
 /// class and listed in `setClassMetadata`. Another module's `@Input` is left on
-/// the class and its options aren't checked, as ngtsc 22.1.7 does.
+/// the class and its options aren't checked, as ngtsc 22.1.7 does. Such
+/// foreign-decorated members still get a `propDecorators` entry — with an
+/// empty array, since none of their decorators are Angular's (issue #511).
 #[test]
 fn only_angular_member_decorators_are_compiled_and_removed() {
     let source = "import {Directive, Input as In} from '@angular/core';
@@ -1348,7 +1350,7 @@ export class Dir {
     assert!(code.contains("@Input({transform:5})c:any;"), "{}", result.code);
     assert!(code.contains("@HostListener('click')d(){}"), "{}", result.code);
     assert!(code.contains(r#"inputs:{a:"a"},outputs:{b:"b"}}"#), "{}", result.code);
-    assert!(code.contains("{a:[{type:In}],b:[{type:core.Output}]}"), "{}", result.code);
+    assert!(code.contains("{a:[{type:In}],b:[{type:core.Output}],c:[],d:[]}"), "{}", result.code);
 }
 
 /// A query predicate that isn't statically evaluable is emitted as written

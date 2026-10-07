@@ -399,9 +399,12 @@ fn convert_call_expression_with_optional<'a>(
     for arg in &call.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
-                // Handle spread arguments
+                // Keep the spread — `f(...P)` is not `f(P)` (issue #511).
                 let expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
-                args.push(expr);
+                args.push(OutputExpression::SpreadElement(Box::new_in(
+                    SpreadElementExpr { expr: Box::new_in(expr, &allocator), source_span: None },
+                    &allocator,
+                )));
             }
             _ => {
                 let expr = arg.to_expression();
@@ -437,8 +440,12 @@ fn convert_new_expression<'a>(
     for arg in &new_expr.arguments {
         match arg {
             Argument::SpreadElement(spread) => {
+                // Keep the spread — `new X(...P)` is not `new X(P)` (#511).
                 let expr = convert_oxc_expression(allocator, &spread.argument, source_text)?;
-                args.push(expr);
+                args.push(OutputExpression::SpreadElement(Box::new_in(
+                    SpreadElementExpr { expr: Box::new_in(expr, &allocator), source_span: None },
+                    &allocator,
+                )));
             }
             _ => {
                 let expr = arg.to_expression();

@@ -589,7 +589,13 @@ pub fn build_prop_decorators_metadata_in<'a>(
             })
             .collect();
 
-        if !angular_decorators.is_empty() {
+        // ngtsc lists any member that carries decorators — even when none
+        // of them are Angular's — as `prop: []` (`decoratedClassMemberTo-
+        // Metadata` filters to Angular decorators, but the member entry is
+        // unconditional on `member.decorators.length > 0`, metadata.ts:107).
+        // Only truly undecorated members reach the initializer-API
+        // synthesis below.
+        if !decorators.is_empty() {
             // Build decorators array from the real decorators present in source.
             let decorators_array = build_decorator_metadata_array(
                 &allocator,

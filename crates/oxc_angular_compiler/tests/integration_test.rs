@@ -9430,7 +9430,10 @@ export class TestComponent {
     let compact: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
 
     // propDecorators: any @angular/core member decorator counts, even
-    // @Component(); the foreign one doesn't.
+    // @Component(). The member entry is unconditional on having decorators
+    // (metadata.ts:107 `member.decorators.length > 0`), so the foreign
+    // decorator yields `foreignMember: []` — filtered to no Angular
+    // decorators — same as the ctorParameters `decorators: []` below (#511).
     assert!(
         compact.contains("componentMember:[{type:Component}]"),
         "@Component() member should be in propDecorators. Got:\n{}",
@@ -9442,8 +9445,8 @@ export class TestComponent {
         result.code
     );
     assert!(
-        !compact.contains("foreignMember:["),
-        "foreign-decorated member should not be in propDecorators. Got:\n{}",
+        compact.contains("foreignMember:[]"),
+        "foreign-decorated member should get an empty propDecorators entry. Got:\n{}",
         result.code
     );
 
