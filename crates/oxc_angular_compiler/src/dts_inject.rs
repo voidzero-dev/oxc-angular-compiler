@@ -284,12 +284,26 @@ struct HeadCollector<'ns, 'r> {
     collected: Vec<(usize, String, String, String)>,
 }
 
+/// `i0`, `i0_1`, `i0_2`, … — the aliases the namespace registry prefers
+/// for `@angular/core`. When `namespace_imports` is absent these are the
+/// only unmapped heads safe to infer as core, preserving the pre-
+/// canonicalization behavior of always emitting the `i0` import. `i1`+
+/// aliases can stand for any module and stay untouched.
+fn is_core_alias_convention(alias: &str) -> bool {
+    alias == "i0"
+        || alias
+            .strip_prefix("i0_")
+            .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
 impl<'a> Visit<'a> for HeadCollector<'_, '_> {
     fn visit_ts_qualified_name(&mut self, node: &TSQualifiedName<'a>) {
         if let TSTypeName::IdentifierReference(left) = &node.left {
             let alias = left.name.to_string();
             let module = self.namespace_imports.get(&alias);
-            if module.is_some() || node.right.name.starts_with('ɵ') {
+            let unmapped_core =
+                self.namespace_imports.is_empty() && is_core_alias_convention(&alias);
+            if module.is_some() || node.right.name.starts_with('ɵ') || unmapped_core {
                 let specifier = module.cloned().unwrap_or_else(|| "@angular/core".to_string());
                 self.collected.push((
                     left.span.start as usize - self.offset,

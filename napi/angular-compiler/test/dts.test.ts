@@ -388,6 +388,36 @@ describe('injectDtsDeclarations', () => {
     expect(out).toContain('// note\nimport * as i0 from "@angular/core";')
   })
 
+  it('infers unmapped i0 aliases as @angular/core when namespaceImports is absent', () => {
+    // Legacy callers pass no `namespaceImports`; the compiler's registry
+    // reserves `i0`/`i0_N` for `@angular/core`, so an unmapped `i0.Signal`
+    // head must still emit the core import — previously the member was
+    // injected with `i0` unresolvable.
+    const source = 'export declare class Dir {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Dir',
+        members: 'static ngAcceptInputType_x: i0.Signal<number>;',
+      },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('i0.Signal<number>')
+  })
+
+  it('does not infer unmapped i1+ aliases without namespaceImports', () => {
+    // `i1` isn't reserved for core — it could be a relative dep. Without a
+    // map the head is left alone rather than guessing a module.
+    const source = 'export declare class Dir {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Dir',
+        members: 'static ngAcceptInputType_x: i1.Signal<number>;',
+      },
+    ])
+    expect(out).not.toContain('@angular/core')
+    expect(out).toContain('i1.Signal<number>')
+  })
+
   it('handles declarations with empty or comment-only members', () => {
     // The wrapper always yields a class, but nothing should be spliced —
     // no crash, no members, no imports.
