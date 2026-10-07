@@ -464,6 +464,17 @@ fn convert_arrow_function_expression<'a>(
     arrow: &oxc_ast::ast::ArrowFunctionExpression<'a>,
     source_text: Option<&'a str>,
 ) -> Option<OutputExpression<'a>> {
+    // `ArrowFunctionExpr`/`FnParam` can't express `async`, default values,
+    // or a rest parameter — emit the source verbatim (types stripped), as
+    // for destructured params and non-arrow function expressions. Dropping
+    // any of these would change runtime behavior (issue #512).
+    if arrow.r#async
+        || arrow.params.rest.is_some()
+        || arrow.params.items.iter().any(|p| p.initializer.is_some())
+    {
+        return make_raw_source(allocator, source_text, arrow.span);
+    }
+
     // Convert parameters
     let mut params = OxcVec::with_capacity_in(arrow.params.items.len(), &allocator);
     for param in &arrow.params.items {

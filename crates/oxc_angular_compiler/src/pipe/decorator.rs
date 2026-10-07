@@ -128,7 +128,7 @@ pub fn extract_pipe_metadata_in<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
     implicit_standalone: bool,
-    _source_text: Option<&'a str>,
+    source_text: Option<&'a str>,
     consts: Option<&StringConsts<'_>>,
 ) -> Option<PipeMetadata<'a>> {
     // Get the class name
@@ -185,7 +185,7 @@ pub fn extract_pipe_metadata_in<'a>(
     }
 
     // Extract constructor dependencies for factory generation
-    metadata.deps = extract_constructor_deps(allocator, class, consts);
+    metadata.deps = extract_constructor_deps(allocator, class, source_text, consts);
 
     Some(metadata)
 }
@@ -264,6 +264,7 @@ fn extract_boolean_value(expr: &Expression<'_>) -> Option<bool> {
 fn extract_constructor_deps<'a>(
     allocator: &'a Allocator,
     class: &'a Class<'a>,
+    source_text: Option<&'a str>,
     consts: Option<&StringConsts<'_>>,
 ) -> Option<Vec<'a, R3DependencyMetadata<'a>>> {
     // Find the constructor method
@@ -281,7 +282,7 @@ fn extract_constructor_deps<'a>(
     let mut deps = Vec::with_capacity_in(params.items.len(), &allocator);
 
     for param in &params.items {
-        let dep = extract_param_dependency(allocator, param, consts);
+        let dep = extract_param_dependency(allocator, param, source_text, consts);
         deps.push(dep);
     }
 
@@ -294,6 +295,7 @@ fn extract_constructor_deps<'a>(
 fn extract_param_dependency<'a>(
     allocator: &'a Allocator,
     param: &oxc_ast::ast::FormalParameter<'a>,
+    source_text: Option<&'a str>,
     consts: Option<&StringConsts<'_>>,
 ) -> R3DependencyMetadata<'a> {
     // Extract flags and @Inject token from decorators
@@ -312,7 +314,7 @@ fn extract_param_dependency<'a>(
                     if let Expression::CallExpression(call) = &decorator.expression {
                         if let Some(arg) = call.arguments.first() {
                             inject_token =
-                                convert_oxc_expression(allocator, arg.to_expression(), None);
+                                convert_oxc_expression(allocator, arg.to_expression(), source_text);
                         }
                     }
                 }
