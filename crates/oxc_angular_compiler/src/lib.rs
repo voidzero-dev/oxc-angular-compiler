@@ -33,6 +33,7 @@ pub mod compilation_mode;
 pub mod component;
 pub mod directive;
 pub mod dts;
+pub mod dts_inject;
 pub mod factory;
 pub mod hmr;
 pub mod i18n;
@@ -165,6 +166,9 @@ pub use dts::{
     DtsDeclaration, generate_component_dts, generate_directive_dts, generate_injectable_dts,
     generate_ng_module_dts, generate_pipe_dts,
 };
+
+// Re-export the .d.ts injection pass used by bundler plugins
+pub use dts_inject::{DtsInjectDeclaration, inject_dts_declarations};
 
 // Re-export linker types
 pub use linker::{LinkResult, link};

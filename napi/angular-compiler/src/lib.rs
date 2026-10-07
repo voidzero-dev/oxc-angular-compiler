@@ -403,6 +403,42 @@ pub struct TransformResult {
     pub dts_declarations: Vec<DtsDeclaration>,
 }
 
+/// One class's `.d.ts` declarations for [`inject_dts_declarations`].
+#[derive(Default)]
+#[napi(object)]
+pub struct DtsInjectDeclaration {
+    /// The class the members belong to.
+    pub class_name: String,
+    /// Newline-separated `static …;` member declarations.
+    pub members: String,
+    /// alias → module specifier for every namespace the members reference.
+    #[napi(ts_type = "Record<string, string>")]
+    pub namespace_imports: Option<HashMap<String, String>>,
+    /// The source module the declaration was compiled from; used to resolve
+    /// relative specifiers in `namespace_imports` for identity.
+    pub source_file: Option<String>,
+}
+
+/// Inject Ivy `.d.ts` member declarations into an emitted declaration file.
+///
+/// Splices each declaration's `static` members into the matching class body
+/// and emits the namespace imports they reference, canonicalized one alias
+/// per module identity. See `dts_inject` in `oxc_angular_compiler` for the
+/// full contract.
+#[napi]
+pub fn inject_dts_declarations(source: String, declarations: Vec<DtsInjectDeclaration>) -> String {
+    let declarations: Vec<oxc_angular_compiler::DtsInjectDeclaration> = declarations
+        .into_iter()
+        .map(|d| oxc_angular_compiler::DtsInjectDeclaration {
+            class_name: d.class_name,
+            members: d.members,
+            namespace_imports: d.namespace_imports.unwrap_or_default().into_iter().collect(),
+            source_file: d.source_file,
+        })
+        .collect();
+    oxc_angular_compiler::inject_dts_declarations(&source, &declarations)
+}
+
 /// Compile an Angular template to JavaScript.
 ///
 /// This compiles a template string to a template function that can be

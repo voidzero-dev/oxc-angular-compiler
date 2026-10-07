@@ -221,6 +221,21 @@ export interface DtsDeclaration {
   namespaceImports: Record<string, string>
 }
 
+/** One class's `.d.ts` declarations for [`inject_dts_declarations`]. */
+export interface DtsInjectDeclaration {
+  /** The class the members belong to. */
+  className: string
+  /** Newline-separated `static …;` member declarations. */
+  members: string
+  /** alias → module specifier for every namespace the members reference. */
+  namespaceImports?: Record<string, string>
+  /**
+   * The source module the declaration was compiled from; used to resolve
+   * relative specifiers in `namespace_imports` for identity.
+   */
+  sourceFile?: string
+}
+
 /**
  * Encapsulate CSS styles for a component using attribute selectors.
  *
@@ -558,6 +573,19 @@ export interface HostMetadataInput {
   /** Special attribute for static style binding. */
   styleAttr?: string
 }
+
+/**
+ * Inject Ivy `.d.ts` member declarations into an emitted declaration file.
+ *
+ * Splices each declaration's `static` members into the matching class body
+ * and emits the namespace imports they reference, canonicalized one alias
+ * per module identity. See `dts_inject` in `oxc_angular_compiler` for the
+ * full contract.
+ */
+export declare function injectDtsDeclarations(
+  source: string,
+  declarations: Array<DtsInjectDeclaration>,
+): string
 
 /**
  * Input for compiling an injector.

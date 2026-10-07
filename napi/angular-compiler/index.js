@@ -919,6 +919,7 @@ const {
   extractComponentUrls,
   generateHmrModule,
   generateStyleModule,
+  injectDtsDeclarations,
   linkAngularPackage,
   linkAngularPackageSync,
   optimizeAngularPackage,
@@ -940,6 +941,7 @@ export { extractComponentMetadataSync }
 export { extractComponentUrls }
 export { generateHmrModule }
 export { generateStyleModule }
+export { injectDtsDeclarations }
 export { linkAngularPackage }
 export { linkAngularPackageSync }
 export { optimizeAngularPackage }
