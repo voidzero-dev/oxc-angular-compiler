@@ -4427,10 +4427,16 @@ fn compile_component_partial<'a>(
     allocator: &'a Allocator,
     template: &'a str,
     metadata: &ComponentMetadata<'a>,
+    view_queries: &[R3QueryMetadata<'a>],
+    content_queries: &[R3QueryMetadata<'a>],
     pool_starting_index: u32,
 ) -> FullCompilationResult {
-    let inputs =
-        crate::partial::PartialComponentInputs { template, is_inline: metadata.template.is_some() };
+    let inputs = crate::partial::PartialComponentInputs {
+        template,
+        is_inline: metadata.template.is_some(),
+        content_queries,
+        view_queries,
+    };
     let cmp_expr =
         crate::partial::compile_declare_component_from_metadata(allocator, metadata, &inputs);
     let fac_expr =
@@ -4481,7 +4487,14 @@ fn compile_component_full<'a>(
     // Partial declarations carry the template as a verbatim string and
     // let the linker re-parse at consumer build time.
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
-        return Ok(compile_component_partial(allocator, template, metadata, pool_starting_index));
+        return Ok(compile_component_partial(
+            allocator,
+            template,
+            metadata,
+            &view_queries,
+            &content_queries,
+            pool_starting_index,
+        ));
     }
 
     let mut diagnostics = Vec::new();

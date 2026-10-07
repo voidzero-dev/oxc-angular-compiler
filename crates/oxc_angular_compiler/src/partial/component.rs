@@ -41,7 +41,7 @@ use crate::component::{
     ChangeDetectionStrategy, ComponentMetadata, DeclarationListEmitMode, HostDirectiveMetadata,
     HostMetadata, TemplateDependency, TemplateDependencyKind, ViewEncapsulation,
 };
-use crate::directive::R3InputMetadata;
+use crate::directive::{R3InputMetadata, R3QueryMetadata};
 use crate::factory::{
     FactoryTarget, R3ConstructorFactoryMetadata, R3DependencyMetadata, R3FactoryDeps,
     R3FactoryMetadata,
@@ -55,7 +55,7 @@ use crate::r3::Identifiers;
 /// Inputs the partial Component emitter needs that aren't carried on the
 /// `ComponentMetadata` struct directly. Mirrors what the full-mode
 /// pipeline computes separately and threads in.
-pub struct PartialComponentInputs<'a> {
+pub struct PartialComponentInputs<'a, 'm> {
     /// The verbatim template source (inline literal or external file
     /// content). Partial mode emits this as a string literal — the linker
     /// re-parses it.
@@ -63,17 +63,23 @@ pub struct PartialComponentInputs<'a> {
     /// Whether the template came from an inline `template: '...'` literal
     /// (`true`) versus an external `templateUrl` (`false`).
     pub is_inline: bool,
+    /// Content queries (`@ContentChild*` / `contentChild*` signal queries /
+    /// `queries:` content entries), emitted as `queries`.
+    pub content_queries: &'m [R3QueryMetadata<'a>],
+    /// View queries (`@ViewChild*` / `viewChild*` signal queries /
+    /// `queries:` view entries), emitted as `viewQueries`.
+    pub view_queries: &'m [R3QueryMetadata<'a>],
 }
 
 /// Emits the `ɵɵngDeclareComponent` call for a component's `ɵcmp` static.
 pub fn compile_declare_component_from_metadata<'a>(
     allocator: &'a Allocator,
     meta: &ComponentMetadata<'a>,
-    inputs: &PartialComponentInputs<'a>,
+    inputs: &PartialComponentInputs<'a, '_>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
-    let min_version = compute_min_version(meta, inputs.template);
+    let min_version = compute_min_version(meta, inputs);
     entries.push(string_entry(allocator, "minVersion", min_version));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
 
@@ -137,6 +143,24 @@ pub fn compile_declare_component_from_metadata<'a>(
         entries.push(LiteralMapEntry::new(
             Ident::from("providers"),
             providers.clone_in(allocator),
+            false,
+        ));
+    }
+
+    // queries/viewQueries sit between providers and exportAs — where the
+    // upstream directive map (which createComponentDefinitionMap builds on)
+    // puts them (directive.ts:74-80).
+    if !inputs.content_queries.is_empty() {
+        entries.push(LiteralMapEntry::new(
+            Ident::from("queries"),
+            super::directive::compile_queries_array(allocator, inputs.content_queries),
+            false,
+        ));
+    }
+    if !inputs.view_queries.is_empty() {
+        entries.push(LiteralMapEntry::new(
+            Ident::from("viewQueries"),
+            super::directive::compile_queries_array(allocator, inputs.view_queries),
             false,
         ));
     }
@@ -351,25 +375,27 @@ pub fn compile_declare_factory_for_component<'a>(
 
 // ---- min version ---------------------------------------------------------
 
-fn compute_min_version<'a>(meta: &ComponentMetadata<'a>, template: &str) -> &'static str {
+fn compute_min_version<'a>(
+    meta: &ComponentMetadata<'a>,
+    inputs: &PartialComponentInputs<'a, '_>,
+) -> &'static str {
     let mut min: &'static str = "14.0.0";
 
     if meta.inputs.iter().any(|i| i.transform_function.is_some()) {
         min = "16.1.0";
     }
     // Component bump: control-flow blocks in template.
-    if template_uses_blocks(template) {
+    if template_uses_blocks(inputs.template) {
         min = bump(min, "17.0.0");
     }
     if needs_new_input_partial_output(&meta.inputs) {
         min = bump(min, "17.1.0");
     }
-    // Signal queries — components carry these on the same path as
-    // directives, but the metadata struct doesn't include them
-    // directly. The dispatch layer that calls us will know if any query
-    // is signal-based; for now we approximate by checking inputs only.
-    // If signal queries land on ComponentMetadata later, bump 17.2.0
-    // here.
+    // Signal-based queries emit `isSignal: true` in the query map, which
+    // linkers below 17.2.0 don't know (directive.ts:146-149).
+    if inputs.content_queries.iter().chain(inputs.view_queries.iter()).any(|q| q.is_signal) {
+        min = "17.2.0";
+    }
 
     min
 }

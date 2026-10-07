@@ -436,9 +436,12 @@ fn ident_pairs_to_string_map<'a>(
 
 // ---- queries --------------------------------------------------------------
 
-fn compile_queries_array<'a>(
+/// `pub(crate)`: the component partial emitter reuses this — components and
+/// directives share the query-map shape (upstream emits both through the
+/// same `compileQuery`).
+pub(crate) fn compile_queries_array<'a>(
     allocator: &'a Allocator,
-    queries: &Vec<'a, R3QueryMetadata<'a>>,
+    queries: &[R3QueryMetadata<'a>],
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
         Vec::with_capacity_in(queries.len(), &allocator);
