@@ -53,8 +53,9 @@ export interface DtsClassDeclaration {
    * `i0` → `"@angular/core"` for `i0.ɵɵX`/`i0.Signal`, `i1` → `"./dep"`
    * for `typeof i1.SomeDirective` host-directive references, imported
    * ctor-dep types, and `ngAcceptInputType_*` transform types alike.
-   * Relative specifiers (`"./dep"`) are expected already rebased to the
-   * emitted file by the caller, or resolved against `sourceFile`.
+   * Relative specifiers (`"./dep"`) are resolved against `sourceFile` for
+   * identity and rebased to the output file's directory when `outputFile`
+   * is passed to `injectDtsDeclarations`.
    */
   namespaceImports?: Record<string, string>
   /**
@@ -73,8 +74,12 @@ interface MemberHead {
   end: number
   /** The head's alias as compiled (what `text.slice(start, end)` reads). */
   alias: string
-  /** The module specifier the alias refers to (what gets emitted). */
+  /** The module specifier the alias refers to, as recorded by the compiler. */
   module: string
+  /** The specifier emitted in the import statement — rebased to the output
+   * file's directory when it is relative (`"./dep"` compiled under `src/a`
+   * becomes `"../src/a/dep"` in `dist/index.d.ts`). */
+  emit: string
   /** The canonical identity for deduping — the specifier resolved against
    * the declaration's source file, so `"./dep"` under different directories
    * is two modules, not one. */
@@ -156,15 +161,18 @@ function findClassBody(
   return null
 }
 
-/** Every non-computed member name in `body`, as written. */
+/** Every non-computed STATIC member name in `body`, as written. Instance
+ * members don't count: TypeScript permits `ɵfac` and `static ɵfac` to
+ * coexist, and only a previously generated static is idempotent. */
 function existingMemberNames(body: ClassBody): Set<string> {
   const names = new Set<string>()
   for (const element of body.body) {
     const member = element as {
       computed?: boolean
+      static?: boolean
       key?: { type: string; name?: string; value?: unknown }
     }
-    if (member.computed || member.key === undefined) {
+    if (member.static !== true || member.computed || member.key === undefined) {
       continue
     }
     if (member.key.type === 'Identifier' && member.key.name !== undefined) {
@@ -189,7 +197,7 @@ function existingMemberNames(body: ClassBody): Set<string> {
 function parseMembers(
   members: string,
   namespaceImports: Readonly<Record<string, string>>,
-  resolve: (specifier: string) => string,
+  paths: { resolve: (specifier: string) => string; emit: (specifier: string) => string },
 ): { name: string | null; text: string; heads: MemberHead[] }[] | null {
   const prefix = 'declare class X {\n'
   const wrapped = prefix + members + '\n}'
@@ -198,12 +206,18 @@ function parseMembers(
     return null
   }
   const cls = program.body[0]
-  if (cls.type !== 'ClassDeclaration') {
+  if (cls === undefined || cls.type !== 'ClassDeclaration') {
     return []
   }
   // Collect every namespace head in one program-wide pass (the Visitor only
   // accepts a Program), binned into the member that contains it.
-  const collected: { pos: number; alias: string; module: string; resolved: string }[] = []
+  const collected: {
+    pos: number
+    alias: string
+    module: string
+    emit: string
+    resolved: string
+  }[] = []
   new Visitor({
     TSQualifiedName(node) {
       if (node.left.type !== 'Identifier') {
@@ -221,7 +235,8 @@ function parseMembers(
         pos: node.left.start - prefix.length,
         alias,
         module: specifier,
-        resolved: resolve(specifier),
+        emit: paths.emit(specifier),
+        resolved: paths.resolve(specifier),
       })
     },
   }).visit(program)
@@ -250,6 +265,7 @@ function parseMembers(
         end: head.pos - start + head.alias.length,
         alias: head.alias,
         module: head.module,
+        emit: head.emit,
         resolved: head.resolved,
       }))
     return { name, text: members.slice(start, end), heads }
@@ -299,6 +315,18 @@ function resolvePath(path: string): string {
   return out.join('/')
 }
 
+/** The `./…` specifier `from`'s directory needs to reach `to`. */
+function relativeSpecifier(fromDir: string, to: string): string {
+  const from = fromDir.split('/').filter((s) => s !== '' && s !== '.')
+  const target = to.split('/').filter((s) => s !== '' && s !== '.')
+  let common = 0
+  while (common < from.length && common < target.length && from[common] === target[common]) {
+    common += 1
+  }
+  const rel = [...Array(from.length - common).fill('..'), ...target.slice(common)].join('/')
+  return rel.startsWith('..') ? rel : `./${rel}`
+}
+
 /**
  * Splice each declaration's static members into the matching class body in
  * `source`, and emit the namespace imports the injected members reference —
@@ -311,15 +339,20 @@ function resolvePath(path: string): string {
  * import: the members' compiled alias is kept when free, otherwise
  * uniquified (`i0_1`, …).
  *
- * The pass is idempotent: a member whose name already appears in the target
- * class is skipped — structurally, on the member name, so a second pass
- * that canonicalizes to a different alias can't inject the same member
+ * The pass is idempotent: a member whose STATIC name already appears in the
+ * target class is skipped — structurally, on the member name, so a second
+ * pass that canonicalizes to a different alias can't inject the same member
  * twice. A declaration whose class isn't found, whose members don't parse,
  * or a file the parser rejects is silently skipped.
+ *
+ * `outputFile` is the emitted asset's own path (as the caller knows it).
+ * Relative specifiers in `namespaceImports` are rebased to its directory so
+ * `"./dep"` compiled under `src/a/` resolves correctly from `dist/`.
  */
 export function injectDtsDeclarations(
   source: string,
   declarations: readonly DtsClassDeclaration[],
+  outputFile?: string,
 ): string {
   if (declarations.length === 0) {
     return source
@@ -334,21 +367,30 @@ export function injectDtsDeclarations(
   const existingImports = namespaceImportsOf(program)
 
   // Identity resolution is relative to each declaration's source module —
-  // the same "./dep" in two directories is two modules. Emitted specifiers
-  // stay verbatim (as the compiler recorded them); when `sourceFile` is
-  // known, relative specifiers are resolved for identity only.
-  const resolveFor = (sourceFile?: string) => {
+  // the same "./dep" in two directories is two modules. Emitted relative
+  // specifiers are rebased from the source module's directory to the
+  // output file's directory when both are known: `src/a/foo.ts` importing
+  // `"./dep"` lands in `dist/index.d.ts` as `"../src/a/dep"`.
+  const outDir = outputFile?.replace(/[^/\\]*$/, '')
+  const pathsFor = (sourceFile?: string) => {
     if (sourceFile === undefined) {
-      return (specifier: string) => specifier
+      const identity = (specifier: string) => specifier
+      return { resolve: identity, emit: identity }
     }
     const dir = sourceFile.replace(/[^/\\]*$/, '')
-    return (specifier: string) =>
+    const isRelative = (specifier: string) =>
       specifier.startsWith('./') || specifier.startsWith('../')
-        ? resolvePath(dir + specifier)
-        : specifier
+    return {
+      resolve: (specifier: string) =>
+        isRelative(specifier) ? resolvePath(dir + specifier) : specifier,
+      emit: (specifier: string) =>
+        isRelative(specifier) && outDir !== undefined
+          ? relativeSpecifier(outDir, resolvePath(dir + specifier))
+          : specifier,
+    }
   }
 
-  // Canonical module identity → [rawSpecifier, alias] for this file.
+  // Canonical module identity → [emittedSpecifier, alias] for this file.
   const canonical = new Map<string, [string, string]>()
   const canonicalAlias = (head: MemberHead): string => {
     const known = canonical.get(head.resolved)
@@ -356,15 +398,16 @@ export function injectDtsDeclarations(
       return known[1]
     }
     const preferred = head.module === '@angular/core' ? 'i0' : head.alias
-    // Reuse an existing import only when it binds this alias AND specifier —
-    // same module under the same name (which is exactly what an idempotent
-    // re-run sees on its second pass), never a different module.
+    // Reuse an existing import only when it binds this alias AND the
+    // specifier we're about to emit — same module under the same name
+    // (which is exactly what an idempotent re-run sees on its second
+    // pass), never a different module.
     const existing = existingImports.get(preferred)
     const alias =
-      existing !== undefined && existing === head.module
+      existing !== undefined && existing === head.emit
         ? preferred
         : uniquifyIdentifier(preferred, fileNames)
-    canonical.set(head.resolved, [head.module, alias])
+    canonical.set(head.resolved, [head.emit, alias])
     fileNames.add(alias)
     return alias
   }
@@ -375,7 +418,7 @@ export function injectDtsDeclarations(
     const members = parseMembers(
       declaration.members,
       declaration.namespaceImports ?? {},
-      resolveFor(declaration.sourceFile),
+      pathsFor(declaration.sourceFile),
     )
     if (members === null || members.length === 0) {
       continue

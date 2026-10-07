@@ -1462,7 +1462,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               ? file.source
               : Buffer.from(file.source).toString('utf-8')
 
-          const augmented = injectDtsDeclarations(source, declarations)
+          // The asset's own path lets `injectDtsDeclarations` rebase
+          // relative namespace specifiers ("./dep" collected under src/a/)
+          // so they resolve from wherever the .d.ts is emitted.
+          const outputFile = _outputOptions.dir
+            ? `${_outputOptions.dir}/${file.fileName}`
+            : _outputOptions.file
+
+          const augmented = injectDtsDeclarations(source, declarations, outputFile)
           if (augmented !== source) {
             file.source = augmented
           }
