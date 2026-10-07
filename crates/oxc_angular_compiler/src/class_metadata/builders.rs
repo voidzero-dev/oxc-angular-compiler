@@ -593,9 +593,12 @@ pub fn build_prop_decorators_metadata_in<'a>(
         // of them are Angular's — as `prop: []` (`decoratedClassMemberTo-
         // Metadata` filters to Angular decorators, but the member entry is
         // unconditional on `member.decorators.length > 0`, metadata.ts:107).
-        // Only truly undecorated members reach the initializer-API
-        // synthesis below.
-        if !decorators.is_empty() {
+        // `member.decorators` is already filtered by the reflection host:
+        // `_reflectDecorator` drops a decorator whose callee isn't an
+        // identifier or `ns.Name` access (`isDecoratorIdentifier`), so an
+        // `@a.b.Foo()` or `@(a.Foo)()` member counts as undecorated and
+        // reaches the initializer-API synthesis below.
+        if decorators.iter().any(is_reflectable_decorator) {
             // Build decorators array from the real decorators present in source.
             let decorators_array = build_decorator_metadata_array(
                 &allocator,
@@ -1032,6 +1035,24 @@ fn extract_angular_decorators_from_param<'a, 'b>(
             None => crate::directive::angular_param_decorator(d, consts).is_some(),
         })
         .collect()
+}
+
+/// Whether ngtsc's reflection host keeps `decorator` in `member.decorators`:
+/// `_reflectDecorator` returns `null` unless the (possibly called) decorator
+/// expression is an identifier or `ns.Name` property access
+/// (`isDecoratorIdentifier`). `@decs['Foo']()` or `@a.b.Foo()` don't reflect.
+fn is_reflectable_decorator(decorator: &Decorator<'_>) -> bool {
+    let expr = match &decorator.expression {
+        Expression::CallExpression(call) => &call.callee,
+        expr => expr,
+    };
+    match expr {
+        Expression::Identifier(_) => true,
+        Expression::StaticMemberExpression(m) => {
+            matches!(&m.object, Expression::Identifier(_))
+        }
+        _ => false,
+    }
 }
 
 /// Get the name of a decorator.

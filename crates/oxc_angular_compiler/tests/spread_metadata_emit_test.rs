@@ -108,3 +108,29 @@ export class C {
         "decorated signal member must emit `x: []`, got:\n{code}"
     );
 }
+
+/// A decorator whose callee isn't an identifier or `ns.Name` access never
+/// reaches `member.decorators` upstream — `_reflectDecorator` returns null
+/// for `@a.b.Foo()` (the property-access object must be an identifier) or
+/// `@decs['Foo']()` (`isDecoratorIdentifier`). The member counts as
+/// undecorated, so its `input()` initializer gets the synthesized `Input`
+/// entry, not `x: []`.
+#[test]
+fn unreflectable_decorator_leaves_signal_member_on_initializer_path() {
+    let source = "import { Component, input } from '@angular/core';
+const a: any = {};
+@Component({ selector: 'c', template: '' })
+export class C {
+  @a.b.Foo() x = input<string>('');
+}
+";
+    let code = compile(source, CompilationMode::Full);
+    assert!(
+        code.contains("x:[{type:i0.Input"),
+        "unreflectable-decorated signal member must emit the synthesized Input entry, got:\n{code}"
+    );
+    assert!(
+        !code.contains("x:[]"),
+        "unreflectable decorator must not produce an empty entry, got:\n{code}"
+    );
+}
