@@ -221,6 +221,13 @@ pub struct ComponentCompilationJob<'a> {
     /// is derived from `angular_version` (legacy for < v22, modern for >= v22,
     /// legacy when the version is unknown). See `legacy_optional_chaining()`.
     pub legacy_optional_chaining: Option<bool>,
+    /// Namespace identifier used for `@angular/core` runtime imports
+    /// (`i0.ɵɵdefineComponent`, `i0.forwardRef`, ...).
+    ///
+    /// Defaults to `i0`; the file-level `NamespaceRegistry` assigns a
+    /// collision-free alias (`i0_1`, ...) when the source file already binds
+    /// `i0` or another namespace import to `@angular/core`.
+    pub core_namespace: Ident<'a>,
     /// Diagnostics collected during compilation.
     pub diagnostics: std::vec::Vec<OxcDiagnostic>,
 }
@@ -272,6 +279,7 @@ impl<'a> ComponentCompilationJob<'a> {
             content_selectors: None,
             angular_version: None,
             legacy_optional_chaining: None,
+            core_namespace: Ident::from("i0"),
             diagnostics: std::vec::Vec::new(),
         }
     }
@@ -672,6 +680,9 @@ pub struct HostBindingCompilationJob<'a> {
     /// See [`ComponentCompilationJob::legacy_optional_chaining`] for the resolution
     /// rules; `None` derives the default from `angular_version`.
     pub legacy_optional_chaining: Option<bool>,
+    /// Namespace identifier used for `@angular/core` runtime imports.
+    /// See [`ComponentCompilationJob::core_namespace`].
+    pub core_namespace: Ident<'a>,
 }
 
 impl<'a> HostBindingCompilationJob<'a> {
@@ -719,6 +730,7 @@ impl<'a> HostBindingCompilationJob<'a> {
             diagnostics: std::vec::Vec::new(),
             angular_version: None,
             legacy_optional_chaining: None,
+            core_namespace: Ident::from("i0"),
         }
     }
 

@@ -79,8 +79,10 @@ pub fn generate_component_definitions<'a>(
     // so factory dependencies get registered first, followed by component definition dependencies.
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     let fac_definition = generate_fac_definition(allocator, metadata, namespace_registry);
+    let core_namespace = namespace_registry.angular_core_ns().as_str();
     let cmp_definition = generate_cmp_definition(
         &allocator,
+        core_namespace,
         metadata,
         options,
         job,
@@ -112,6 +114,7 @@ pub fn generate_component_definitions<'a>(
 /// ```
 fn generate_cmp_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     options: &TransformOptions,
     job: &mut ComponentCompilationJob<'a>,
@@ -266,7 +269,9 @@ fn generate_cmp_definition<'a>(
 
     // 13. features: [...] - component features like providers, lifecycle hooks, inheritance
     // See: packages/compiler/src/render3/view/compiler.ts:119-161
-    if let Some(features) = generate_features_array(allocator, metadata, namespace_registry) {
+    if let Some(features) =
+        generate_features_array(allocator, core_namespace, metadata, namespace_registry)
+    {
         entries.push(LiteralMapEntry::new(Ident::from("features"), features, false));
     }
 
@@ -324,7 +329,7 @@ fn generate_cmp_definition<'a>(
     if !job.consts.is_empty() {
         let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
-            const_entries.push(const_value_to_expression(allocator, const_value));
+            const_entries.push(const_value_to_expression(allocator, core_namespace, const_value));
         }
 
         let consts_value = if !job.consts_initializers.is_empty() {
@@ -381,7 +386,7 @@ fn generate_cmp_definition<'a>(
     // 20. dependencies: [...] - template dependencies (directives and pipes)
     // Per Angular compiler.ts lines 272-289
     if let Some(dependencies) =
-        generate_dependencies_expression(allocator, metadata, namespace_registry)
+        generate_dependencies_expression(allocator, core_namespace, metadata, namespace_registry)
     {
         entries.push(LiteralMapEntry::new(Ident::from("dependencies"), dependencies, false));
     }
@@ -524,7 +529,7 @@ fn generate_cmp_definition<'a>(
     ));
 
     // Wrap in ɵɵdefineComponent call
-    create_define_component_call(allocator, config)
+    create_define_component_call(allocator, core_namespace, config)
 }
 
 /// Generate the ɵfac factory function.
@@ -569,7 +574,7 @@ fn generate_fac_definition<'a>(
     match &metadata.constructor_deps {
         None => {
             // No constructor - use inherited factory IIFE pattern
-            generate_inherited_factory(allocator, metadata)
+            generate_inherited_factory(allocator, namespace_registry.angular_core_ns(), metadata)
         }
         Some(deps) => {
             // Constructor exists - generate normal factory
@@ -633,7 +638,10 @@ fn generate_constructor_factory<'a>(
     if deps.iter().any(|d| d.type_only_invalid) {
         statements.push(OutputStatement::Expression(Box::new_in(
             crate::output::ast::ExpressionStatement {
-                expr: create_invalid_factory_call(allocator),
+                expr: create_invalid_factory_call(
+                    allocator,
+                    namespace_registry.angular_core_ns().as_str(),
+                ),
                 source_span: None,
             },
             &allocator,
@@ -693,6 +701,7 @@ fn generate_constructor_factory<'a>(
 /// See: packages/compiler/src/render3/r3_factory.ts:160-193
 fn generate_inherited_factory<'a>(
     allocator: &'a Allocator,
+    core_namespace: Ident<'a>,
     metadata: &ComponentMetadata<'a>,
 ) -> OutputExpression<'a> {
     use crate::output::ast::{
@@ -716,7 +725,7 @@ fn generate_inherited_factory<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: core_namespace, source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -883,17 +892,18 @@ fn generate_inherited_factory<'a>(
     ))
 }
 
-/// Create an i0.ɵɵdefineComponent(config) call expression.
+/// Create an ns.ɵɵdefineComponent(config) call expression.
 fn create_define_component_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     config: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
-    // Access: i0.ɵɵdefineComponent
+    // Access: ns.ɵɵdefineComponent
     let define_component = OutputExpression::ReadProp(Box::new_in(
         crate::output::ast::ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -973,6 +983,7 @@ fn parse_selector_to_array<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:119-161
 fn generate_features_array<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
@@ -981,7 +992,7 @@ fn generate_features_array<'a>(
     // 1. ProvidersFeature - when providers or viewProviders are defined
     // Format: ɵɵProvidersFeature([providers], [viewProviders]?)
     if metadata.providers.is_some() || metadata.view_providers.is_some() {
-        let providers_feature = generate_providers_feature(allocator, metadata);
+        let providers_feature = generate_providers_feature(allocator, core_namespace, metadata);
         features.push(providers_feature);
     }
 
@@ -989,27 +1000,40 @@ fn generate_features_array<'a>(
     // Must come before InheritDefinitionFeature for correct execution order
     // Format: ɵɵHostDirectivesFeature([directives])
     if !metadata.host_directives.is_empty() {
-        let host_directives_feature =
-            generate_host_directives_feature(allocator, metadata, namespace_registry);
+        let host_directives_feature = generate_host_directives_feature(
+            allocator,
+            core_namespace,
+            metadata,
+            namespace_registry,
+        );
         features.push(host_directives_feature);
     }
 
     // 3. InheritDefinitionFeature - when the component extends another class
     // Format: ɵɵInheritDefinitionFeature (direct reference, no call)
     if metadata.uses_inheritance {
-        features.push(create_angular_fn_ref(allocator, Identifiers::INHERIT_DEFINITION_FEATURE));
+        features.push(create_angular_fn_ref(
+            allocator,
+            core_namespace,
+            Identifiers::INHERIT_DEFINITION_FEATURE,
+        ));
     }
 
     // 4. NgOnChangesFeature - when ngOnChanges lifecycle hook is implemented
     // Format: ɵɵNgOnChangesFeature (direct reference, no call)
     if metadata.lifecycle.uses_on_changes {
-        features.push(create_angular_fn_ref(allocator, Identifiers::NG_ON_CHANGES_FEATURE));
+        features.push(create_angular_fn_ref(
+            allocator,
+            core_namespace,
+            Identifiers::NG_ON_CHANGES_FEATURE,
+        ));
     }
 
     // 5. ExternalStylesFeature - when external stylesheets need to be loaded
     // Format: ɵɵExternalStylesFeature(['style1.css', 'style2.css'])
     if !metadata.external_styles.is_empty() {
-        let external_styles_feature = generate_external_styles_feature(allocator, metadata);
+        let external_styles_feature =
+            generate_external_styles_feature(allocator, core_namespace, metadata);
         features.push(external_styles_feature);
     }
 
@@ -1029,9 +1053,10 @@ fn generate_features_array<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:119-135
 fn generate_providers_feature<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::PROVIDERS_FEATURE);
+    let fn_expr = create_angular_fn_ref(allocator, core_namespace, Identifiers::PROVIDERS_FEATURE);
 
     // Build args: [providers, viewProviders?]
     let has_view_providers = metadata.view_providers.is_some();
@@ -1078,10 +1103,12 @@ fn generate_providers_feature<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:138-141, 683-723
 fn generate_host_directives_feature<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::HOST_DIRECTIVES_FEATURE);
+    let fn_expr =
+        create_angular_fn_ref(allocator, core_namespace, Identifiers::HOST_DIRECTIVES_FEATURE);
 
     // Create the host directives argument
     let host_directives_arg =
@@ -1229,9 +1256,11 @@ fn create_host_directives_arg<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:150-155
 fn generate_external_styles_feature<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::EXTERNAL_STYLES_FEATURE);
+    let fn_expr =
+        create_angular_fn_ref(allocator, core_namespace, Identifiers::EXTERNAL_STYLES_FEATURE);
 
     // Create array of external style paths
     let mut style_entries: OxcVec<'a, OutputExpression<'a>> =
@@ -1267,13 +1296,14 @@ fn generate_external_styles_feature<'a>(
 /// Create an `i0.functionName` reference expression.
 fn create_angular_fn_ref<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     fn_name: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -1305,12 +1335,13 @@ fn create_angular_fn_ref<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:272-289
 fn generate_dependencies_expression<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> Option<OutputExpression<'a>> {
     // RuntimeResolved mode uses getComponentDepsFactory
     if metadata.declaration_list_emit_mode == DeclarationListEmitMode::RuntimeResolved {
-        return Some(generate_runtime_resolved_dependencies(allocator, metadata));
+        return Some(generate_runtime_resolved_dependencies(allocator, core_namespace, metadata));
     }
 
     // No dependencies to emit
@@ -1322,7 +1353,12 @@ fn generate_dependencies_expression<'a>(
     let deps_array = create_dependencies_array(allocator, metadata, namespace_registry);
 
     // Compile based on emit mode
-    Some(compile_declaration_list(allocator, deps_array, metadata.declaration_list_emit_mode))
+    Some(compile_declaration_list(
+        allocator,
+        core_namespace,
+        deps_array,
+        metadata.declaration_list_emit_mode,
+    ))
 }
 
 /// Generate runtime-resolved dependencies expression.
@@ -1333,9 +1369,11 @@ fn generate_dependencies_expression<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:283-288
 fn generate_runtime_resolved_dependencies<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::GET_COMPONENT_DEPS_FACTORY);
+    let fn_expr =
+        create_angular_fn_ref(allocator, core_namespace, Identifiers::GET_COMPONENT_DEPS_FACTORY);
 
     let capacity = if metadata.raw_imports.is_some() { 2 } else { 1 };
     let mut args: OxcVec<'a, OutputExpression<'a>> = OxcVec::with_capacity_in(capacity, &allocator);
@@ -1416,6 +1454,7 @@ fn create_dependencies_array<'a>(
 /// See: packages/compiler/src/render3/view/compiler.ts:378-396
 fn compile_declaration_list<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     list: OutputExpression<'a>,
     mode: DeclarationListEmitMode,
 ) -> OutputExpression<'a> {
@@ -1430,7 +1469,7 @@ fn compile_declaration_list<'a>(
         }
         DeclarationListEmitMode::ClosureResolved => {
             // ClosureResolved: function() { return [MyDir].map(ng.resolveForwardRef); }
-            let resolve_fn = create_angular_fn_ref(allocator, "resolveForwardRef");
+            let resolve_fn = create_angular_fn_ref(allocator, core_namespace, "resolveForwardRef");
 
             // list.map(ng.resolveForwardRef)
             let map_call = OutputExpression::InvokeFunction(Box::new_in(
@@ -1501,6 +1540,7 @@ fn wrap_in_arrow_function<'a>(
 /// This is used to serialize the consts array entries for the component definition.
 pub fn const_value_to_expression<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     value: &ConstValue<'a>,
 ) -> OutputExpression<'a> {
     match value {
@@ -1523,7 +1563,7 @@ pub fn const_value_to_expression<'a>(
         ConstValue::Array(arr) => {
             let mut entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
             for item in arr.iter() {
-                entries.push(const_value_to_expression(allocator, item));
+                entries.push(const_value_to_expression(allocator, core_namespace, item));
             }
             OutputExpression::LiteralArray(Box::new_in(
                 LiteralArrayExpr { entries, source_span: None },
@@ -1536,7 +1576,7 @@ pub fn const_value_to_expression<'a>(
                 crate::output::ast::ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                             &allocator,
                         )),
                         &allocator,
@@ -1664,7 +1704,7 @@ mod tests {
         let metadata = create_test_metadata(&allocator);
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
-        let result = generate_features_array(&allocator, &metadata, &mut namespace_registry);
+        let result = generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry);
         assert!(result.is_none(), "Should return None when no features are needed");
     }
 
@@ -1696,7 +1736,7 @@ mod tests {
             Some(create_test_providers_array(&allocator, &["ServiceA", "ServiceB"]));
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1715,7 +1755,7 @@ mod tests {
         metadata.view_providers = Some(create_test_providers_array(&allocator, &["ViewService"]));
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1734,7 +1774,7 @@ mod tests {
         metadata.view_providers = Some(create_test_providers_array(&allocator, &["ViewService"]));
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1752,7 +1792,7 @@ mod tests {
         metadata.uses_inheritance = true;
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1770,7 +1810,7 @@ mod tests {
         metadata.lifecycle = LifecycleMetadata { uses_on_changes: true };
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1789,7 +1829,7 @@ mod tests {
         metadata.external_styles.push(Ident::from("./theme.css"));
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1809,7 +1849,7 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1830,7 +1870,7 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1854,7 +1894,7 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1877,7 +1917,7 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1910,7 +1950,7 @@ mod tests {
         metadata.host_directives.push(imported_directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1940,7 +1980,7 @@ mod tests {
         metadata.lifecycle = LifecycleMetadata { uses_on_changes: true };
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);
@@ -1962,7 +2002,7 @@ mod tests {
         let mut namespace_registry = NamespaceRegistry::new(&allocator);
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry);
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry);
         assert!(result.is_none(), "Should return None when no dependencies");
     }
 
@@ -1991,7 +2031,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Direct;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2020,7 +2060,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Closure;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2049,7 +2089,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::ClosureResolved;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2071,7 +2111,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::RuntimeResolved;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2095,7 +2135,7 @@ mod tests {
         )));
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2137,7 +2177,7 @@ mod tests {
         )));
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2166,7 +2206,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Direct;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2207,7 +2247,7 @@ mod tests {
         metadata.declaration_list_emit_mode = DeclarationListEmitMode::Direct;
 
         let result =
-            generate_dependencies_expression(&allocator, &metadata, &mut namespace_registry)
+            generate_dependencies_expression(&allocator, "i0", &metadata, &mut namespace_registry)
                 .unwrap();
 
         let emitter = JsEmitter::new();
@@ -2234,7 +2274,7 @@ mod tests {
         metadata.host_directives.push(directive);
 
         let result =
-            generate_features_array(&allocator, &metadata, &mut namespace_registry).unwrap();
+            generate_features_array(&allocator, "i0", &metadata, &mut namespace_registry).unwrap();
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&result);

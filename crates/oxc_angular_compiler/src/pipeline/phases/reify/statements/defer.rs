@@ -26,6 +26,7 @@ use super::super::utils::create_instruction_call_stmt;
 /// - flags: Defer block flags (e.g., HasHydrateTriggers = 1)
 pub fn create_defer_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     main_slot: Option<u32>,
     resolver_fn: Option<OutputExpression<'a>>,
@@ -141,7 +142,7 @@ pub fn create_defer_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -182,7 +183,7 @@ pub fn create_defer_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::DEFER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DEFER, args)
 }
 
 /// Creates an ɵɵdeferOn*() call statement based on trigger kind.
@@ -196,6 +197,7 @@ pub fn create_defer_stmt<'a>(
 /// For hydrate modifier, Viewport/Interaction/Hover triggers don't support targets.
 pub fn create_defer_on_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     trigger: DeferTriggerKind,
     target_slot: Option<u32>,
     target_slot_view_steps: Option<i32>,
@@ -347,7 +349,7 @@ pub fn create_defer_on_stmt<'a>(
         (DeferTriggerKind::Never, DeferOpModifierKind::Hydrate) => Identifiers::DEFER_HYDRATE_NEVER,
     };
 
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵdeferWhen() call statement.
@@ -357,6 +359,7 @@ pub fn create_defer_on_stmt<'a>(
 /// it uses ɵɵdeferPrefetchWhen and ɵɵdeferHydrateWhen respectively.
 pub fn create_defer_when_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     modifier: DeferOpModifierKind,
     condition: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -369,5 +372,5 @@ pub fn create_defer_when_stmt<'a>(
         DeferOpModifierKind::None => Identifiers::DEFER_WHEN,
     };
 
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }

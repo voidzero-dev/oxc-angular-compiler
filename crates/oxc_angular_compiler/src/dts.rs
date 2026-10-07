@@ -4,11 +4,15 @@
 //! to `.d.ts` files for Angular library builds. These declarations enable
 //! Angular's template type-checking system to work with pre-compiled libraries.
 //!
-//! The generated declarations use `i0` as the namespace alias for `@angular/core`,
-//! matching Angular's convention. Consumers must ensure their `.d.ts` files include:
-//! ```typescript
-//! import * as i0 from "@angular/core";
-//! ```
+//! The generated declarations reference `@angular/core` through
+//! `core_namespace` — `i0` uniquified (`i0_1`, `i0_2`, …) against every
+//! identifier in the ORIGINAL `.ts` file. That mirrors upstream's
+//! `IvyDeclarationDtsTransform`, whose `ImportManager`
+//! (`presetImportManagerForceNamespaceImports`) dedupes against the
+//! original `SourceFile.identifiers` and never reuses an existing
+//! namespace import — so the alias always matches the JS emit's.
+//! Consumers must ensure their `.d.ts` files include a matching
+//! `import * as <ns> from "@angular/core";`.
 //!
 //! Reference: Angular's `IvyDeclarationDtsTransform` in
 //! `packages/compiler-cli/src/ngtsc/transform/src/declaration.ts`
@@ -39,6 +43,16 @@ pub struct DtsDeclaration {
     /// static ɵcmp: i0.ɵɵComponentDeclaration<MyComponent, "app-my", never, {}, {}, never, never, true, never>;
     /// ```
     pub members: String,
+    /// Module specifier for every namespace alias the members reference
+    /// (alias → specifier: `i0` → `"@angular/core"` for `i0.ɵɵCmp` and
+    /// `i0.Signal`, `i1` → `"./dep"` for `typeof i1.SomeDirective`
+    /// host-directive references). Consumers must emit
+    /// `import * as <alias> from "<specifier>"` for each — or rewrite the
+    /// heads to their own canonical aliases — matching what upstream's
+    /// `IvyDeclarationDtsTransform` `ImportManager` produces.
+    /// Populated by the transform, which knows each alias's module;
+    /// empty when the members reference no namespace at all.
+    pub namespace_imports: HashMap<String, String>,
 }
 
 // =============================================================================
@@ -48,9 +62,10 @@ pub struct DtsDeclaration {
 /// Generate `.d.ts` declarations for a `@Component` class.
 ///
 /// Produces:
-/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
-/// - `static ɵcmp: i0.ɵɵComponentDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, NgContentSelectors, IsStandalone, HostDirectives, IsSignal>;`
+/// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵcmp: {core_namespace}.ɵɵComponentDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, NgContentSelectors, IsStandalone, HostDirectives, IsSignal>;`
 pub fn generate_component_dts(
+    core_namespace: &str,
     metadata: &ComponentMetadata,
     type_argument_count: u32,
     content_query_names: &[String],
@@ -65,8 +80,9 @@ pub fn generate_component_dts(
     let ctor_deps_type = generate_ctor_deps_type_from_component_deps(
         metadata.constructor_deps.as_ref().map(|v| v.as_slice() as &[R3DependencyMetadata]),
     );
-    let fac =
-        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+    let fac = format!(
+        "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
+    );
 
     // ɵcmp declaration
     let selector = match &metadata.selector {
@@ -146,20 +162,28 @@ pub fn generate_component_dts(
         type_params.push("true".to_string());
     }
 
-    let cmp = format!("static ɵcmp: i0.ɵɵComponentDeclaration<{}>;", type_params.join(", "));
+    let cmp = format!(
+        "static ɵcmp: {core_namespace}.ɵɵComponentDeclaration<{}>;",
+        type_params.join(", ")
+    );
 
     let mut members = format!("{fac}\n{cmp}");
 
     // Add ɵprov if @Injectable is also present
     if has_injectable {
-        members
-            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+        members.push_str(&format!(
+            "\nstatic ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;"
+        ));
     }
 
     // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
     generate_input_transform_fields(&metadata.inputs, accept_types, &mut members);
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================
@@ -169,9 +193,10 @@ pub fn generate_component_dts(
 /// Generate `.d.ts` declarations for a `@Directive` class.
 ///
 /// Produces:
-/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
-/// - `static ɵdir: i0.ɵɵDirectiveDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, never, IsStandalone, HostDirectives, IsSignal>;`
+/// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵdir: {core_namespace}.ɵɵDirectiveDeclaration<T, Selector, ExportAs, InputMap, OutputMap, QueryFields, never, IsStandalone, HostDirectives, IsSignal>;`
 pub fn generate_directive_dts(
+    core_namespace: &str,
     metadata: &R3DirectiveMetadata,
     has_injectable: bool,
     accept_types: &HashMap<String, String>,
@@ -182,8 +207,9 @@ pub fn generate_directive_dts(
     // ɵfac declaration
     let ctor_deps_type =
         generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
-    let fac =
-        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+    let fac = format!(
+        "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
+    );
 
     // ɵdir declaration
     let selector = match &metadata.selector {
@@ -252,19 +278,27 @@ pub fn generate_directive_dts(
         type_params.push("true".to_string());
     }
 
-    let dir = format!("static ɵdir: i0.ɵɵDirectiveDeclaration<{}>;", type_params.join(", "));
+    let dir = format!(
+        "static ɵdir: {core_namespace}.ɵɵDirectiveDeclaration<{}>;",
+        type_params.join(", ")
+    );
 
     let mut members = format!("{fac}\n{dir}");
 
     if has_injectable {
-        members
-            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+        members.push_str(&format!(
+            "\nstatic ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;"
+        ));
     }
 
     // Add ngAcceptInputType_* fields for non-signal inputs with transform functions
     generate_input_transform_fields(&metadata.inputs, accept_types, &mut members);
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================
@@ -274,9 +308,10 @@ pub fn generate_directive_dts(
 /// Generate `.d.ts` declarations for a `@Pipe` class.
 ///
 /// Produces:
-/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
-/// - `static ɵpipe: i0.ɵɵPipeDeclaration<T, Name, IsStandalone>;`
+/// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵpipe: {core_namespace}.ɵɵPipeDeclaration<T, Name, IsStandalone>;`
 pub fn generate_pipe_dts(
+    core_namespace: &str,
     metadata: &PipeMetadata,
     type_argument_count: u32,
     has_injectable: bool,
@@ -287,8 +322,9 @@ pub fn generate_pipe_dts(
     // ɵfac declaration
     let ctor_deps_type =
         generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
-    let fac =
-        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+    let fac = format!(
+        "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
+    );
 
     // ɵpipe declaration
     let pipe_name = match &metadata.pipe_name {
@@ -299,17 +335,22 @@ pub fn generate_pipe_dts(
     let is_standalone = if metadata.standalone { "true" } else { "false" };
 
     let pipe = format!(
-        "static ɵpipe: i0.ɵɵPipeDeclaration<{type_with_params}, {pipe_name}, {is_standalone}>;"
+        "static ɵpipe: {core_namespace}.ɵɵPipeDeclaration<{type_with_params}, {pipe_name}, {is_standalone}>;"
     );
 
     let mut members = format!("{fac}\n{pipe}");
 
     if has_injectable {
-        members
-            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+        members.push_str(&format!(
+            "\nstatic ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;"
+        ));
     }
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================
@@ -319,10 +360,11 @@ pub fn generate_pipe_dts(
 /// Generate `.d.ts` declarations for a `@NgModule` class.
 ///
 /// Produces:
-/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
-/// - `static ɵmod: i0.ɵɵNgModuleDeclaration<T, Declarations, Imports, Exports>;`
-/// - `static ɵinj: i0.ɵɵInjectorDeclaration<T>;`
+/// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵmod: {core_namespace}.ɵɵNgModuleDeclaration<T, Declarations, Imports, Exports>;`
+/// - `static ɵinj: {core_namespace}.ɵɵInjectorDeclaration<T>;`
 pub fn generate_ng_module_dts(
+    core_namespace: &str,
     metadata: &NgModuleMetadata,
     type_argument_count: u32,
     has_injectable: bool,
@@ -333,8 +375,9 @@ pub fn generate_ng_module_dts(
     // ɵfac declaration
     let ctor_deps_type =
         generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
-    let fac =
-        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+    let fac = format!(
+        "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
+    );
 
     // ɵmod declaration - uses typeof references for declarations/imports/exports
     let declarations_type = if metadata.declarations.is_empty() {
@@ -380,20 +423,25 @@ pub fn generate_ng_module_dts(
     };
 
     let mod_decl = format!(
-        "static ɵmod: i0.ɵɵNgModuleDeclaration<{type_with_params}, {declarations_type}, {imports_type}, {exports_type}>;"
+        "static ɵmod: {core_namespace}.ɵɵNgModuleDeclaration<{type_with_params}, {declarations_type}, {imports_type}, {exports_type}>;"
     );
 
     // ɵinj declaration
-    let inj = format!("static ɵinj: i0.ɵɵInjectorDeclaration<{type_with_params}>;");
+    let inj = format!("static ɵinj: {core_namespace}.ɵɵInjectorDeclaration<{type_with_params}>;");
 
     let mut members = format!("{fac}\n{mod_decl}\n{inj}");
 
     if has_injectable {
-        members
-            .push_str(&format!("\nstatic ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;"));
+        members.push_str(&format!(
+            "\nstatic ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;"
+        ));
     }
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================
@@ -403,9 +451,10 @@ pub fn generate_ng_module_dts(
 /// Generate `.d.ts` declarations for a standalone `@Injectable` class.
 ///
 /// Produces:
-/// - `static ɵfac: i0.ɵɵFactoryDeclaration<T, CtorDeps>;`
-/// - `static ɵprov: i0.ɵɵInjectableDeclaration<T>;`
+/// - `static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<T, CtorDeps>;`
+/// - `static ɵprov: {core_namespace}.ɵɵInjectableDeclaration<T>;`
 pub fn generate_injectable_dts(
+    core_namespace: &str,
     metadata: &InjectableMetadata,
     type_argument_count: u32,
 ) -> DtsDeclaration {
@@ -415,15 +464,21 @@ pub fn generate_injectable_dts(
     // ɵfac declaration
     let ctor_deps_type =
         generate_ctor_deps_type_from_factory_deps(metadata.deps.as_ref().map(|v| v.as_slice()));
-    let fac =
-        format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;");
+    let fac = format!(
+        "static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, {ctor_deps_type}>;"
+    );
 
     // ɵprov declaration
-    let prov = format!("static ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;");
+    let prov =
+        format!("static ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;");
 
     let members = format!("{fac}\n{prov}");
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================
@@ -437,18 +492,25 @@ pub fn generate_injectable_dts(
 /// `createInjectableType`). The ctor deps tuple is always `never` because
 /// `@Service` ɵfac is generated with empty deps.
 pub fn generate_service_dts(
+    core_namespace: &str,
     metadata: &ServiceMetadata,
     type_argument_count: u32,
 ) -> DtsDeclaration {
     let class_name = metadata.class_name.as_str();
     let type_with_params = type_with_parameters(class_name, type_argument_count);
 
-    let fac = format!("static ɵfac: i0.ɵɵFactoryDeclaration<{type_with_params}, never>;");
-    let prov = format!("static ɵprov: i0.ɵɵInjectableDeclaration<{type_with_params}>;");
+    let fac =
+        format!("static ɵfac: {core_namespace}.ɵɵFactoryDeclaration<{type_with_params}, never>;");
+    let prov =
+        format!("static ɵprov: {core_namespace}.ɵɵInjectableDeclaration<{type_with_params}>;");
 
     let members = format!("{fac}\n{prov}");
 
-    DtsDeclaration { class_name: class_name.to_string(), members }
+    DtsDeclaration {
+        class_name: class_name.to_string(),
+        members,
+        namespace_imports: HashMap::new(),
+    }
 }
 
 // =============================================================================

@@ -58,10 +58,11 @@ use crate::r3::Identifiers;
 /// Emits the `ɵɵngDeclareDirective` call for a directive's `ɵdir` static.
 pub fn compile_declare_directive_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3DirectiveMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let entries = create_directive_definition_map(allocator, meta);
-    invoke_declare(allocator, Identifiers::DECLARE_DIRECTIVE, entries)
+    let entries = create_directive_definition_map(allocator, core_namespace, meta);
+    invoke_declare(allocator, core_namespace, Identifiers::DECLARE_DIRECTIVE, entries)
 }
 
 /// Builds the directive partial-declaration definition map.
@@ -72,6 +73,7 @@ pub fn compile_declare_directive_from_metadata<'a>(
 /// identifier to `ɵɵngDeclareComponent`.
 pub(crate) fn create_directive_definition_map<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3DirectiveMetadata<'a>,
 ) -> Vec<'a, LiteralMapEntry<'a>> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
@@ -139,14 +141,14 @@ pub(crate) fn create_directive_definition_map<'a>(
     if !meta.queries.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("queries"),
-            compile_queries_array(allocator, &meta.queries),
+            compile_queries_array(allocator, core_namespace, &meta.queries),
             false,
         ));
     }
     if !meta.view_queries.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("viewQueries"),
-            compile_queries_array(allocator, &meta.view_queries),
+            compile_queries_array(allocator, core_namespace, &meta.view_queries),
             false,
         ));
     }
@@ -185,13 +187,17 @@ pub(crate) fn create_directive_definition_map<'a>(
     if !meta.host_directives.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("hostDirectives"),
-            create_host_directives_array(allocator, &meta.host_directives),
+            create_host_directives_array(allocator, core_namespace, &meta.host_directives),
             false,
         ));
     }
 
     // ngImport is emitted LAST per upstream convention (directive.ts:114).
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
 
     entries
 }
@@ -199,6 +205,7 @@ pub(crate) fn create_directive_definition_map<'a>(
 /// Builds the partial ɵfac factory paired with a Directive.
 pub fn compile_declare_factory_for_directive<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3DirectiveMetadata<'a>,
 ) -> OutputExpression<'a> {
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -209,7 +216,7 @@ pub fn compile_declare_factory_for_directive<'a>(
         deps: clone_factory_deps(allocator, &meta.deps, meta.uses_inheritance),
         target: FactoryTarget::Directive,
     });
-    compile_declare_factory_function(allocator, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
 }
 
 /// Public min-version calculator. Exposed so the component emitter (next
@@ -441,12 +448,13 @@ fn ident_pairs_to_string_map<'a>(
 /// same `compileQuery`).
 pub(crate) fn compile_queries_array<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     queries: &[R3QueryMetadata<'a>],
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
         Vec::with_capacity_in(queries.len(), &allocator);
     for q in queries {
-        entries.push(compile_query(allocator, q));
+        entries.push(compile_query(allocator, core_namespace, q));
     }
     OutputExpression::LiteralArray(Box::new_in(
         LiteralArrayExpr { entries, source_span: None },
@@ -454,7 +462,11 @@ pub(crate) fn compile_queries_array<'a>(
     ))
 }
 
-fn compile_query<'a>(allocator: &'a Allocator, q: &R3QueryMetadata<'a>) -> OutputExpression<'a> {
+fn compile_query<'a>(
+    allocator: &'a Allocator,
+    core_namespace: &'a str,
+    q: &R3QueryMetadata<'a>,
+) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(LiteralMapEntry::new(
@@ -472,7 +484,7 @@ fn compile_query<'a>(allocator: &'a Allocator, q: &R3QueryMetadata<'a>) -> Outpu
     let predicate_expr = match &q.predicate {
         QueryPredicate::Type(expr) => {
             let expr = expr.clone_in(allocator);
-            if q.is_forward_ref { wrap_forward_ref(allocator, expr) } else { expr }
+            if q.is_forward_ref { wrap_forward_ref(allocator, core_namespace, expr) } else { expr }
         }
         QueryPredicate::Selectors(selectors) => {
             let mut elements: Vec<'a, OutputExpression<'a>> =
@@ -526,6 +538,7 @@ fn compile_query<'a>(allocator: &'a Allocator, q: &R3QueryMetadata<'a>) -> Outpu
 
 fn create_host_directives_array<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     host_directives: &Vec<'a, R3HostDirectiveMetadata<'a>>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
@@ -533,7 +546,7 @@ fn create_host_directives_array<'a>(
     for hd in host_directives {
         let mut hd_entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
         let directive_expr = if hd.is_forward_reference {
-            wrap_forward_ref(allocator, hd.directive.clone_in(allocator))
+            wrap_forward_ref(allocator, core_namespace, hd.directive.clone_in(allocator))
         } else {
             hd.directive.clone_in(allocator)
         };
@@ -629,6 +642,7 @@ fn is_unsafe_object_key(key: &str) -> bool {
 
 fn invoke_declare<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     name: &'static str,
     entries: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
@@ -640,7 +654,7 @@ fn invoke_declare<'a>(
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, core_namespace, name), &allocator),
             args,
             pure: false,
             optional: false,
@@ -650,7 +664,7 @@ fn invoke_declare<'a>(
     ))
 }
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -659,7 +673,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(

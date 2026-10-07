@@ -64,30 +64,40 @@ pub fn create_element_args<'a>(
 /// Creates an ɵɵelementStart() call statement.
 pub fn create_element_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_element_args(allocator, tag, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_START, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ELEMENT_START, args)
 }
 
 /// Creates an ɵɵelement() call statement.
 pub fn create_element_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_element_args(allocator, tag, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ELEMENT, args)
 }
 
 /// Creates an ɵɵelementEnd() call statement.
-pub fn create_element_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_END, OxcVec::new_in(&allocator))
+pub fn create_element_end_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+) -> OutputStatement<'a> {
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::ELEMENT_END,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 // =============================================================================
@@ -100,13 +110,14 @@ pub fn create_element_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> O
 /// This is an optimized version that skips directive matching at runtime.
 pub fn create_dom_element_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_element_args(allocator, tag, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT_START, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DOM_ELEMENT_START, args)
 }
 
 /// Creates an ɵɵdomElement() call statement.
@@ -115,13 +126,14 @@ pub fn create_dom_element_start_stmt<'a>(
 /// This is an optimized version that skips directive matching at runtime.
 pub fn create_dom_element_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     tag: &Ident<'a>,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_element_args(allocator, tag, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DOM_ELEMENT, args)
 }
 
 /// Creates an ɵɵdomElementEnd() call statement.
@@ -129,9 +141,11 @@ pub fn create_dom_element_stmt<'a>(
 /// Used in DomOnly mode when the component has no directive dependencies.
 pub fn create_dom_element_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
         allocator,
+        core_namespace,
         Identifiers::DOM_ELEMENT_END,
         OxcVec::new_in(&allocator),
     )
@@ -144,6 +158,7 @@ pub fn create_dom_element_end_stmt<'a>(
 /// - initial_value: Optional initial text content (for static text)
 pub fn create_text_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     initial_value: Option<&'a str>,
 ) -> OutputStatement<'a> {
@@ -163,7 +178,7 @@ pub fn create_text_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::TEXT, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::TEXT, args)
 }
 
 /// Creates an ɵɵtemplate() call statement.
@@ -178,6 +193,7 @@ pub fn create_text_stmt<'a>(
 /// - localRefs: Optional const array index for local refs (if present, also adds templateRefExtractor)
 pub fn create_template_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
@@ -188,6 +204,7 @@ pub fn create_template_stmt<'a>(
 ) -> OutputStatement<'a> {
     let args = create_template_args(
         &allocator,
+        core_namespace,
         slot,
         fn_name,
         decls,
@@ -196,7 +213,7 @@ pub fn create_template_stmt<'a>(
         attributes,
         local_refs_index,
     );
-    create_instruction_call_stmt(allocator, Identifiers::TEMPLATE_CREATE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::TEMPLATE_CREATE, args)
 }
 
 /// Creates arguments for template instructions (shared between template and domTemplate).
@@ -205,6 +222,7 @@ pub fn create_template_stmt<'a>(
 /// Trailing null arguments are stripped.
 fn create_template_args<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
@@ -287,7 +305,7 @@ fn create_template_args<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -329,6 +347,7 @@ fn create_template_args<'a>(
 /// - localRefs: Optional const array index for local refs (if present, also adds templateRefExtractor)
 pub fn create_dom_template_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
@@ -339,6 +358,7 @@ pub fn create_dom_template_stmt<'a>(
 ) -> OutputStatement<'a> {
     let args = create_template_args(
         &allocator,
+        core_namespace,
         slot,
         fn_name,
         decls,
@@ -347,7 +367,7 @@ pub fn create_dom_template_stmt<'a>(
         attributes,
         local_refs_index,
     );
-    create_instruction_call_stmt(allocator, Identifiers::DOM_TEMPLATE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DOM_TEMPLATE, args)
 }
 
 /// Creates arguments for container instructions.
@@ -398,20 +418,23 @@ fn create_container_args<'a>(
 /// Creates an ɵɵcontainer() call statement.
 pub fn create_container_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_container_args(allocator, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_CONTAINER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ELEMENT_CONTAINER, args)
 }
 
 /// Creates an ɵɵcontainerEnd() call statement.
 pub fn create_container_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
         &allocator,
+        core_namespace,
         Identifiers::ELEMENT_CONTAINER_END,
         OxcVec::new_in(&allocator),
     )
@@ -420,12 +443,18 @@ pub fn create_container_end_stmt<'a>(
 /// Creates an ɵɵelementContainerStart() call statement.
 pub fn create_container_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_container_args(allocator, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::ELEMENT_CONTAINER_START, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::ELEMENT_CONTAINER_START,
+        args,
+    )
 }
 
 // =============================================================================
@@ -437,12 +466,18 @@ pub fn create_container_start_stmt<'a>(
 /// Used in DomOnly mode for ng-container elements.
 pub fn create_dom_container_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_container_args(allocator, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT_CONTAINER, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::DOM_ELEMENT_CONTAINER,
+        args,
+    )
 }
 
 /// Creates an ɵɵdomElementContainerStart() call statement.
@@ -450,12 +485,18 @@ pub fn create_dom_container_stmt<'a>(
 /// Used in DomOnly mode for ng-container elements.
 pub fn create_dom_container_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     attributes: Option<u32>,
     local_refs_index: Option<u32>,
 ) -> OutputStatement<'a> {
     let args = create_container_args(allocator, slot, attributes, local_refs_index);
-    create_instruction_call_stmt(allocator, Identifiers::DOM_ELEMENT_CONTAINER_START, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::DOM_ELEMENT_CONTAINER_START,
+        args,
+    )
 }
 
 /// Creates an ɵɵdomElementContainerEnd() call statement.
@@ -463,9 +504,11 @@ pub fn create_dom_container_start_stmt<'a>(
 /// Used in DomOnly mode for ng-container elements.
 pub fn create_dom_container_end_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
         &allocator,
+        core_namespace,
         Identifiers::DOM_ELEMENT_CONTAINER_END,
         OxcVec::new_in(&allocator),
     )
@@ -482,6 +525,7 @@ pub fn create_dom_container_end_stmt<'a>(
 /// * `fallback_vars` - Optional fallback view variable count
 pub fn create_projection_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     projection_slot_index: u32,
     attributes: Option<OutputExpression<'a>>,
@@ -549,12 +593,13 @@ pub fn create_projection_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::PROJECTION, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::PROJECTION, args)
 }
 
 /// Creates a namespace change statement.
 pub fn create_namespace_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     namespace: crate::ir::enums::Namespace,
 ) -> OutputStatement<'a> {
     let instruction = match namespace {
@@ -562,5 +607,5 @@ pub fn create_namespace_stmt<'a>(
         crate::ir::enums::Namespace::Svg => Identifiers::NAMESPACE_SVG,
         crate::ir::enums::Namespace::Math => Identifiers::NAMESPACE_MATH_ML,
     };
-    create_instruction_call_stmt(allocator, instruction, OxcVec::new_in(&allocator))
+    create_instruction_call_stmt(allocator, core_namespace, instruction, OxcVec::new_in(&allocator))
 }

@@ -25,6 +25,10 @@ use crate::output::emitter::format_number_like_js;
 pub(crate) struct TypePrinter<'s, 'a> {
     pub scope: &'s FileScope<'a>,
     pub source: &'a str,
+    /// The alias `@angular/core` names are printed through — the namespace
+    /// the file's `ImportManager` picked (`i0`, or `i0_1`, … when a user
+    /// binding collided), like ngtsc's `TypeEmitter` qualifier.
+    pub core_ns: &'a str,
     /// Set when the type references a module other than `@angular/core`.
     /// ngtsc would add an `import * as iN` for it; oxc emits `unknown` instead,
     /// since aliases numbered per source file can't be merged into bundled
@@ -212,7 +216,7 @@ impl<'a> TypePrinter<'_, 'a> {
         let mut parts = std::vec::Vec::new();
         entity_parts(name, &mut parts)?;
         Some(match self.resolve_aliases(parts)? {
-            Resolved::Core(rest) => format!("i0{rest}"),
+            Resolved::Core(rest) => format!("{}{rest}", self.core_ns),
             Resolved::OtherModule(parts) => {
                 self.other_module = true;
                 parts.join(".")
@@ -283,8 +287,8 @@ impl<'a> TypePrinter<'_, 'a> {
     fn value_name(&mut self, head: &str, rest: &str) -> String {
         match self.scope.import(head) {
             Some(import) if import.module == "@angular/core" => match import.imported {
-                Some(imported) => format!("i0.{imported}{rest}"),
-                None => format!("i0{rest}"),
+                Some(imported) => format!("{}.{imported}{rest}", self.core_ns),
+                None => format!("{}{rest}", self.core_ns),
             },
             Some(_) => {
                 self.other_module = true;
@@ -465,7 +469,7 @@ impl<'a> TypePrinter<'_, 'a> {
     fn computed_name(&mut self, parts: std::vec::Vec<&str>) -> Option<String> {
         let written = parts.join(".");
         Some(match self.resolve_aliases(parts)? {
-            Resolved::Core(rest) => format!("i0{rest}"),
+            Resolved::Core(rest) => format!("{}{rest}", self.core_ns),
             Resolved::OtherModule(_) => {
                 self.other_module = true;
                 written

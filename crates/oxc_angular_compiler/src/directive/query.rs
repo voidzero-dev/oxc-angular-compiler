@@ -101,13 +101,17 @@ mod render_flags {
 // Helper Functions
 // ============================================================================
 
-/// Create i0.identifier reference.
-fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> OutputExpression<'a> {
+/// Create ns.identifier reference.
+fn import_expr<'a>(
+    allocator: &'a Allocator,
+    core_namespace: &'a str,
+    identifier: &'static str,
+) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -354,6 +358,7 @@ enum MaybeAdvanceStatement<'a> {
 /// ɵɵqueryAdvance(count) call.
 fn collapse_advance_statements<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     statements: Vec<'a, MaybeAdvanceStatement<'a>>,
 ) -> Vec<'a, OutputStatement<'a>> {
     let mut result = Vec::new_in(&allocator);
@@ -367,7 +372,11 @@ fn collapse_advance_statements<'a>(
             if *count > 1 {
                 args.push(literal_number(allocator, *count));
             }
-            let call = call_fn(allocator, import_expr(allocator, Identifiers::QUERY_ADVANCE), args);
+            let call = call_fn(
+                allocator,
+                import_expr(allocator, core_namespace, Identifiers::QUERY_ADVANCE),
+                args,
+            );
             result.push(expr_stmt(allocator, call));
             *count = 0;
         }
@@ -443,6 +452,7 @@ impl TempAllocator {
 /// ```
 pub fn create_view_queries_function<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     view_queries: &[R3QueryMetadata<'a>],
     name: Option<&str>,
     pool: Option<&mut ConstantPool<'a>>,
@@ -497,7 +507,8 @@ pub fn create_view_queries_function<'a>(
 
         if !chain_emit {
             // Pre-v21.0.4: one statement per query, no chaining.
-            let call = call_fn(allocator, import_expr(allocator, identifier), params);
+            let call =
+                call_fn(allocator, import_expr(allocator, core_namespace, identifier), params);
             create_statements.push(expr_stmt(allocator, call));
         } else {
             // Flush the pending chain if this query's signal-ness differs
@@ -510,7 +521,7 @@ pub fn create_view_queries_function<'a>(
                 Some(prev) => prev,
                 None => {
                     current_chain_is_signal = query.is_signal;
-                    import_expr(allocator, identifier)
+                    import_expr(allocator, core_namespace, identifier)
                 }
             };
             current_chain = Some(call_fn(allocator, callee, params));
@@ -528,7 +539,7 @@ pub fn create_view_queries_function<'a>(
             // _t = ɵɵloadQuery()
             let load_query = call_fn(
                 &allocator,
-                import_expr(allocator, Identifiers::LOAD_QUERY),
+                import_expr(allocator, core_namespace, Identifiers::LOAD_QUERY),
                 Vec::new_in(&allocator),
             );
             let temp_set = OutputExpression::BinaryOperator(Box::new_in(
@@ -546,7 +557,7 @@ pub fn create_view_queries_function<'a>(
             refresh_args.push(temp_set);
             let refresh = call_fn(
                 &allocator,
-                import_expr(allocator, Identifiers::QUERY_REFRESH),
+                import_expr(allocator, core_namespace, Identifiers::QUERY_REFRESH),
                 refresh_args,
             );
 
@@ -612,7 +623,7 @@ pub fn create_view_queries_function<'a>(
     }
 
     // Collapse advances and add update statements
-    for stmt in collapse_advance_statements(allocator, update_statements) {
+    for stmt in collapse_advance_statements(allocator, core_namespace, update_statements) {
         final_update_statements.push(stmt);
     }
 
@@ -666,6 +677,7 @@ pub fn create_view_queries_function<'a>(
 /// ```
 pub fn create_content_queries_function<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     queries: &[R3QueryMetadata<'a>],
     name: Option<&str>,
     pool: Option<&mut ConstantPool<'a>>,
@@ -720,7 +732,8 @@ pub fn create_content_queries_function<'a>(
         };
 
         if !chain_emit {
-            let call = call_fn(allocator, import_expr(allocator, identifier), params);
+            let call =
+                call_fn(allocator, import_expr(allocator, core_namespace, identifier), params);
             create_statements.push(expr_stmt(allocator, call));
         } else {
             if current_chain.is_some() && current_chain_is_signal != query.is_signal {
@@ -730,7 +743,7 @@ pub fn create_content_queries_function<'a>(
                 Some(prev) => prev,
                 None => {
                     current_chain_is_signal = query.is_signal;
-                    import_expr(allocator, identifier)
+                    import_expr(allocator, core_namespace, identifier)
                 }
             };
             current_chain = Some(call_fn(allocator, callee, params));
@@ -744,7 +757,7 @@ pub fn create_content_queries_function<'a>(
 
             let load_query = call_fn(
                 &allocator,
-                import_expr(allocator, Identifiers::LOAD_QUERY),
+                import_expr(allocator, core_namespace, Identifiers::LOAD_QUERY),
                 Vec::new_in(&allocator),
             );
             let temp_set = OutputExpression::BinaryOperator(Box::new_in(
@@ -761,7 +774,7 @@ pub fn create_content_queries_function<'a>(
             refresh_args.push(temp_set);
             let refresh = call_fn(
                 &allocator,
-                import_expr(allocator, Identifiers::QUERY_REFRESH),
+                import_expr(allocator, core_namespace, Identifiers::QUERY_REFRESH),
                 refresh_args,
             );
 
@@ -823,7 +836,7 @@ pub fn create_content_queries_function<'a>(
         )));
     }
 
-    for stmt in collapse_advance_statements(allocator, update_statements) {
+    for stmt in collapse_advance_statements(allocator, core_namespace, update_statements) {
         final_update_statements.push(stmt);
     }
 
@@ -880,8 +893,14 @@ mod tests {
         let allocator = Allocator::default();
         let queries: &[R3QueryMetadata<'_>] = &[];
 
-        let result =
-            create_view_queries_function(&allocator, queries, Some("TestComponent"), None, None);
+        let result = create_view_queries_function(
+            &allocator,
+            "i0",
+            queries,
+            Some("TestComponent"),
+            None,
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -896,8 +915,14 @@ mod tests {
         let allocator = Allocator::default();
         let queries: &[R3QueryMetadata<'_>] = &[];
 
-        let result =
-            create_content_queries_function(&allocator, queries, Some("TestDirective"), None, None);
+        let result = create_content_queries_function(
+            &allocator,
+            "i0",
+            queries,
+            Some("TestDirective"),
+            None,
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -930,8 +955,14 @@ mod tests {
         };
 
         let queries = [query];
-        let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None, None);
+        let result = create_view_queries_function(
+            &allocator,
+            "i0",
+            &queries,
+            Some("TestComponent"),
+            None,
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);
@@ -975,6 +1006,7 @@ mod tests {
         let queries = [query];
         let result = create_content_queries_function(
             &allocator,
+            "i0",
             &queries,
             Some("TestDirective"),
             None,
@@ -1044,6 +1076,7 @@ mod tests {
         // separate statements instead — see `supports_chained_queries`.
         let result = create_view_queries_function(
             &allocator,
+            "i0",
             &queries,
             Some("TestComponent"),
             None,
@@ -1114,6 +1147,7 @@ mod tests {
         let queries = [query1, query2];
         let result = create_view_queries_function(
             &allocator,
+            "i0",
             &queries,
             Some("TestComponent"),
             None,
@@ -1179,6 +1213,7 @@ mod tests {
         let queries = [query1, query2];
         let result = create_content_queries_function(
             &allocator,
+            "i0",
             &queries,
             Some("TestDirective"),
             None,
@@ -1228,8 +1263,14 @@ mod tests {
         };
 
         let queries = [query];
-        let result =
-            create_view_queries_function(&allocator, &queries, Some("TestComponent"), None, None);
+        let result = create_view_queries_function(
+            &allocator,
+            "i0",
+            &queries,
+            Some("TestComponent"),
+            None,
+            None,
+        );
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);

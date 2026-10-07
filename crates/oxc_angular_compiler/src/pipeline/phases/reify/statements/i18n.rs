@@ -17,6 +17,7 @@ use super::super::utils::create_instruction_call_stmt;
 /// - `subTemplateIndex`: Optional index for nested templates within the i18n block
 pub fn create_i18n_start_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     message_index: Option<u32>,
     sub_template_index: Option<u32>,
@@ -45,7 +46,7 @@ pub fn create_i18n_start_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::I18N_START, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::I18N_START, args)
 }
 
 /// Creates an ɵɵi18n() call statement for self-closing i18n on elements.
@@ -54,6 +55,7 @@ pub fn create_i18n_start_stmt<'a>(
 /// `ɵɵi18n(index: number, messageIndex: number, subTemplateIndex?: number): void`
 pub fn create_i18n_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     message_index: Option<u32>,
     sub_template_index: Option<u32>,
@@ -82,27 +84,37 @@ pub fn create_i18n_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::I18N, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::I18N, args)
 }
 
 /// Creates an ɵɵi18nEnd() call statement.
-pub fn create_i18n_end_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::I18N_END, OxcVec::new_in(&allocator))
+pub fn create_i18n_end_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+) -> OutputStatement<'a> {
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::I18N_END,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 /// Creates an ɵɵi18nExp() call statement.
 pub fn create_i18n_exp_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::I18N_EXP, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::I18N_EXP, args)
 }
 
 /// Creates an ɵɵi18nApply() call statement.
 pub fn create_i18n_apply_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
@@ -110,7 +122,7 @@ pub fn create_i18n_apply_stmt<'a>(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
         &allocator,
     )));
-    create_instruction_call_stmt(allocator, Identifiers::I18N_APPLY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::I18N_APPLY, args)
 }
 
 /// Creates an ɵɵi18nAttributes() call statement.
@@ -122,6 +134,7 @@ pub fn create_i18n_apply_stmt<'a>(
 /// - `attrsIndex`: Index into the consts array for the attribute config array
 pub fn create_i18n_attributes_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     attrs_config_index: u32,
 ) -> OutputStatement<'a> {
@@ -139,5 +152,5 @@ pub fn create_i18n_attributes_stmt<'a>(
         &allocator,
     )));
 
-    create_instruction_call_stmt(allocator, Identifiers::I18N_ATTRIBUTES, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::I18N_ATTRIBUTES, args)
 }

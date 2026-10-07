@@ -59,6 +59,21 @@ describe('injectDtsDeclarations', () => {
     expect(out.match(/@angular\/core/g)).toHaveLength(1)
   })
 
+  it('appends members at the end of a class that already has members', () => {
+    // Upstream adds the Ivy members after the existing ones
+    // ([...members, ...newMembers]).
+    const source =
+      'export declare class Foo {\n  constructor(x: number);\n  field: string;\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    const ctorIdx = out.indexOf('constructor')
+    const facIdx = out.indexOf('ɵfac')
+    const closeIdx = out.lastIndexOf('}')
+    expect(ctorIdx).toBeLessThan(facIdx)
+    expect(facIdx).toBeLessThan(closeIdx)
+  })
+
   it('keeps the i0 import after leading triple-slash references', () => {
     const source = '/// <reference types="node" />\nexport declare class Foo {\n}\n'
     const out = injectDtsDeclarations(source, [
@@ -73,6 +88,256 @@ describe('injectDtsDeclarations', () => {
       { className: 'Missing', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Missing, never>;' },
     ])
     expect(out).toBe(source)
+  })
+
+  it('dedupes the alias against identifiers in the emitted .d.ts', () => {
+    // The bundle still binds `i0`, so members are normalized to the free
+    // `i0_1` alias and the injected import matches (#509).
+    const source = 'export declare const i0: 1;\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0_1.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out).toContain('import * as i0_1 from "@angular/core";')
+    expect(out).toContain('static ɵfac: i0_1.ɵɵFactoryDeclaration<Foo, never>;')
+    expect(out).not.toContain('import * as i0 from')
+  })
+
+  it('normalizes mixed per-file aliases to one bundle namespace', () => {
+    // Members compiled from different source files can carry different
+    // aliases — `i0` where it was free, `i0_1` where a binding collided.
+    // A bundled .d.ts needs one import, so every member is rewritten to the
+    // namespace chosen for this file.
+    const source = 'export declare class A {\n}\nexport declare class B {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'A', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<A, never>;' },
+      { className: 'B', members: 'static ɵfac: i0_1.ɵɵFactoryDeclaration<B, never>;' },
+    ])
+    expect(out.match(/@angular\/core/g)).toHaveLength(1)
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<A, never>;')
+    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<B, never>;')
+    expect(out).not.toContain('i0_1')
+  })
+
+  it('never reuses an existing differently-aliased @angular/core import', () => {
+    // ngtsc's declaration ImportManager mints its own `i0` even when the
+    // file already has `import * as ng from "@angular/core"`.
+    const source = 'import * as ng from "@angular/core";\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out.match(/@angular\/core/g)).toHaveLength(2)
+    expect(out).toContain('import * as ng from "@angular/core";')
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;')
+  })
+
+  it('mints i0 even when members arrive with a hand-written ng head', () => {
+    // The compiler never emits `ng` heads, but a declaration that has them
+    // (older binding, hand-written input) is still normalized to the
+    // canonical `i0` — upstream's ImportManager would never reuse `ng`
+    // either, it dedupes `i0` against the file's identifiers.
+    const source = 'import * as ng from "@angular/core";\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Foo',
+        members: 'static ɵfac: ng.ɵɵFactoryDeclaration<Foo, never>;',
+        namespaceImports: { ng: '@angular/core' },
+      },
+    ])
+    expect(out).toContain('import * as ng from "@angular/core";')
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;')
+  })
+
+  it('emits a namespace import for non-core member aliases', () => {
+    // `typeof i1.SomeDirective` (host directives, ctor deps) resolves through
+    // `namespaceImports` — `i1` → `./dir` — and the matching import is added.
+    const source = 'export declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Foo',
+        members:
+          'static ɵcmp: i0.ɵɵDirectiveDeclaration<Foo, never, never, {}, {}, never, never, true, [{ directive: typeof i1.SomeDirective }]>;',
+        namespaceImports: { i1: './dir' },
+      },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('import * as i1 from "./dir";')
+    expect(out).toContain('typeof i1.SomeDirective')
+  })
+
+  it('uniquifies non-core aliases that collide with file identifiers', () => {
+    const source = 'export declare const i1: number;\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Foo',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<Foo, [typeof i1.M], never, never>;',
+        namespaceImports: { i1: './dep' },
+      },
+    ])
+    expect(out).toContain('import * as i1_1 from "./dep";')
+    expect(out).toContain('typeof i1_1.M')
+    expect(out).toContain('export declare const i1: number;')
+  })
+
+  it('canonicalizes the same alias to different modules per declaration', () => {
+    // Members merged from two source files: `i1` meant `./dep` in one and
+    // `./other` in the other — each module gets its own canonical alias.
+    const source = 'export declare class A {\n}\nexport declare class B {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'A',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
+        namespaceImports: { i1: './dep' },
+      },
+      {
+        className: 'B',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<B, [typeof i1.O], never, never>;',
+        namespaceImports: { i1: './other' },
+      },
+    ])
+    expect(out).toContain('import * as i1 from "./dep";')
+    expect(out).toContain('import * as i1_1 from "./other";')
+    expect(out).toContain('typeof i1.D')
+    expect(out).toContain('typeof i1_1.O')
+  })
+
+  it('keeps a trailing comment attached to the last import', () => {
+    const source = 'import type { A } from "./a"; // keep me\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    const lines = out.split('\n')
+    expect(lines[0]).toBe('import type { A } from "./a"; // keep me')
+    expect(lines[1]).toBe('import * as i0 from "@angular/core";')
+  })
+
+  it('keeps a multiline trailing comment attached to the last import', () => {
+    // The newline inside the block comment must not be chosen as the
+    // insertion point — the import would land inside the comment.
+    const source =
+      'import type { A } from "./a"; /* keep\nme */\nexport declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    const lines = out.split('\n')
+    expect(lines[0]).toBe('import type { A } from "./a"; /* keep')
+    expect(lines[1]).toBe('me */')
+    expect(lines[2]).toBe('import * as i0 from "@angular/core";')
+  })
+
+  it('is idempotent when the incoming alias differs from the first pass', () => {
+    // Members compiled against `i0_1` normalize to `i0` on the first pass;
+    // the second pass sees `i0` occupied and would mint `i0_1` — the member
+    // check is structural (name already in the class), so nothing is added.
+    const source = 'export declare class Foo {\n}\n'
+    const decls = [
+      { className: 'Foo', members: 'static ɵfac: i0_1.ɵɵFactoryDeclaration<Foo, never>;' },
+    ]
+    const once = injectDtsDeclarations(source, decls)
+    const twice = injectDtsDeclarations(once, decls)
+    expect(twice).toBe(once)
+    expect(once.match(/ɵfac/g)).toHaveLength(1)
+    expect(once.match(/@angular\/core/g)).toHaveLength(1)
+  })
+
+  it('injects only the members the class is missing', () => {
+    // A class that already has `ɵfac` (e.g. hand-authored or from an earlier
+    // pass) still gets the missing `ɵcmp`, without duplicating `ɵfac`.
+    const source =
+      'import * as i0 from "@angular/core";\nexport declare class Foo {\n  static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Foo',
+        members:
+          'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;\n' +
+          'static ɵcmp: i0.ɵɵComponentDeclaration<Foo, "x", never, {}, {}, never, never, true, never>;',
+      },
+    ])
+    expect(out.match(/ɵfac/g)).toHaveLength(1)
+    expect(out.match(/ɵcmp/g)).toHaveLength(1)
+    expect(out.match(/@angular\/core/g)).toHaveLength(1)
+  })
+
+  it('emits the core alias for non-ɵ members via namespaceImports', () => {
+    // `ngAcceptInputType_x` types like `i0.Signal<number>` aren't `ɵ` heads;
+    // they resolve through `namespaceImports`.
+    const source = 'export declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'Foo',
+        members: 'static ngAcceptInputType_x: i0.Signal<number>;',
+        namespaceImports: { i0: '@angular/core' },
+      },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    expect(out).toContain('static ngAcceptInputType_x: i0.Signal<number>;')
+  })
+
+  it('canonicalizes identical relative specifiers under different source dirs as distinct modules', () => {
+    // `src/a/foo.ts` and `src/b/foo.ts` both import `"./dep"` — different
+    // modules, so they get different aliases even though the raw specifier
+    // strings are identical.
+    const source = 'export declare class A {\n}\nexport declare class B {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'A',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
+        namespaceImports: { i0: '@angular/core', i1: './dep' },
+        sourceFile: 'src/a/foo.ts',
+      },
+      {
+        className: 'B',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<B, [typeof i1.O], never, never>;',
+        namespaceImports: { i0: '@angular/core', i1: './dep' },
+        sourceFile: 'src/b/foo.ts',
+      },
+    ])
+    expect(out).toContain('import * as i1 from "./dep";')
+    expect(out).toContain('import * as i1_1 from "./dep";')
+    expect(out).toContain('typeof i1.D')
+    expect(out).toContain('typeof i1_1.O')
+  })
+
+  it('skips declarations whose member text does not parse', () => {
+    const source = 'export declare class Foo {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+      { className: 'Foo', members: 'this is not valid typescript {{' },
+    ])
+    // The well-formed declaration still lands; the malformed one is skipped
+    // rather than injected with unnormalized aliases.
+    expect(out).toContain('static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;')
+    expect(out).not.toContain('this is not valid')
+  })
+
+  it('injects into a class whose type-param constraint contains a brace', () => {
+    // The AST locates the class body after `<T extends { a: 1 }>`; the old
+    // regex stopped at the constraint's `{`.
+    const source = 'export declare class Foo<T extends { a: 1 }> {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    const facIdx = out.indexOf('ɵfac')
+    const classIdx = out.indexOf('class Foo')
+    const closeIdx = out.lastIndexOf('}')
+    expect(classIdx).toBeLessThan(facIdx)
+    expect(facIdx).toBeLessThan(closeIdx)
+  })
+
+  it('injects into a class nested in a declare module block', () => {
+    const source = 'declare module "pkg" {\n  export class Foo {\n  }\n}\n'
+    const out = injectDtsDeclarations(source, [
+      { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
+    ])
+    expect(out).toContain('import * as i0 from "@angular/core";')
+    const facIdx = out.indexOf('ɵfac')
+    const classIdx = out.indexOf('class Foo')
+    const closeIdx = out.lastIndexOf('}')
+    expect(classIdx).toBeLessThan(facIdx)
+    expect(facIdx).toBeLessThan(closeIdx)
   })
 })
 

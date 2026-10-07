@@ -100,6 +100,7 @@ pub struct FactoryCompileResult<'a> {
 /// See: `packages/compiler/src/render3/r3_factory.ts:106-200`
 pub fn compile_factory_function<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3FactoryMetadata<'a>,
     factory_name: &'a str,
 ) -> FactoryCompileResult<'a> {
@@ -147,7 +148,8 @@ pub fn compile_factory_function<'a>(
         }
         R3FactoryDeps::Valid(deps) => {
             // new (type)(ɵɵinject(Dep1), ɵɵinject(Dep2), ...)
-            let inject_args = inject_dependencies(allocator, deps.as_slice(), base.target);
+            let inject_args =
+                inject_dependencies(allocator, core_namespace, deps.as_slice(), base.target);
             Some(OutputExpression::Instantiate(Box::new_in(
                 InstantiateExpr {
                     class_expr: Box::new_in(type_for_ctor.clone_in(allocator), &allocator),
@@ -167,7 +169,7 @@ pub fn compile_factory_function<'a>(
 
     // Check if we need inherited factory pattern for non-delegated case with no deps
     if !meta.is_delegated() && !meta.is_expression() && matches!(&base.deps, R3FactoryDeps::None) {
-        return compile_inherited_factory(allocator, base, factory_name);
+        return compile_inherited_factory(allocator, core_namespace, base, factory_name);
     }
 
     let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
@@ -179,8 +181,12 @@ pub fn compile_factory_function<'a>(
         R3FactoryMetadata::Delegated(delegated_meta) => {
             // This type is created with a delegated factory. If a type parameter is not specified,
             // call the factory instead.
-            let delegate_args =
-                inject_dependencies(allocator, &delegated_meta.delegate_deps, base.target);
+            let delegate_args = inject_dependencies(
+                allocator,
+                core_namespace,
+                &delegated_meta.delegate_deps,
+                base.target,
+            );
 
             // Either call `new delegate(...)` or `delegate(...)` depending on delegate_type
             let factory_expr = match delegated_meta.delegate_type {
@@ -218,6 +224,7 @@ pub fn compile_factory_function<'a>(
 
             ret_expr = Some(make_conditional_factory(
                 &allocator,
+                core_namespace,
                 &mut body,
                 &factory_type_param,
                 ctor_expr,
@@ -228,6 +235,7 @@ pub fn compile_factory_function<'a>(
             // useValue or useExisting case
             ret_expr = Some(make_conditional_factory(
                 &allocator,
+                core_namespace,
                 &mut body,
                 &factory_type_param,
                 ctor_expr,
@@ -245,7 +253,7 @@ pub fn compile_factory_function<'a>(
     match ret_expr {
         None => {
             // The expression cannot be formed so render an `ɵɵinvalidFactory()` call.
-            let invalid_factory_call = create_invalid_factory_call(allocator);
+            let invalid_factory_call = create_invalid_factory_call(allocator, core_namespace);
             body.push(OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: invalid_factory_call, source_span: None },
                 &allocator,
@@ -294,6 +302,7 @@ pub fn compile_factory_function<'a>(
 /// See: `packages/compiler/src/render3/r3_factory.ts:134-143`
 fn make_conditional_factory<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     body: &mut Vec<'a, OutputStatement<'a>>,
     factory_type_param: &Ident<'a>,
     ctor_expr: Option<OutputExpression<'a>>,
@@ -345,7 +354,7 @@ fn make_conditional_factory<'a>(
         }
         None => {
             // invalidFactory()
-            let invalid_factory_call = create_invalid_factory_call(allocator);
+            let invalid_factory_call = create_invalid_factory_call(allocator, core_namespace);
             OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: invalid_factory_call, source_span: None },
                 &allocator,
@@ -415,6 +424,7 @@ fn make_conditional_factory<'a>(
 /// See: packages/compiler/src/render3/r3_factory.ts:160-193
 fn compile_inherited_factory<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     base: &crate::factory::metadata::R3ConstructorFactoryMetadata<'a>,
     factory_name: &'a str,
 ) -> FactoryCompileResult<'a> {
@@ -429,7 +439,7 @@ fn compile_inherited_factory<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -592,12 +602,13 @@ fn compile_inherited_factory<'a>(
 /// Injects dependencies by creating inject calls.
 fn inject_dependencies<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     deps: &[R3DependencyMetadata<'a>],
     target: FactoryTarget,
 ) -> Vec<'a, OutputExpression<'a>> {
     let mut result = Vec::new_in(&allocator);
     for (index, dep) in deps.iter().enumerate() {
-        result.push(compile_inject_dependency(allocator, dep, target, index));
+        result.push(compile_inject_dependency(allocator, core_namespace, dep, target, index));
     }
     result
 }
@@ -605,6 +616,7 @@ fn inject_dependencies<'a>(
 /// Compiles a single dependency injection call.
 fn compile_inject_dependency<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     dep: &R3DependencyMetadata<'a>,
     target: FactoryTarget,
     index: usize,
@@ -612,7 +624,7 @@ fn compile_inject_dependency<'a>(
     match (&dep.token, &dep.attribute_name_type) {
         (None, _) => {
             // Invalid dependency - call invalidFactoryDep(index)
-            create_invalid_factory_dep_call(allocator, index)
+            create_invalid_factory_dep_call(allocator, core_namespace, index)
         }
         (Some(token), None) => {
             // Regular inject call
@@ -644,13 +656,13 @@ fn compile_inject_dependency<'a>(
                 )));
             }
 
-            create_import_call(allocator, inject_fn, args)
+            create_import_call(allocator, core_namespace, inject_fn, args)
         }
         (Some(token), Some(_attr_type)) => {
             // Attribute injection
             let mut args = Vec::new_in(&allocator);
             args.push(token.clone_in(allocator));
-            create_import_call(allocator, Identifiers::INJECT_ATTRIBUTE, args)
+            create_import_call(allocator, core_namespace, Identifiers::INJECT_ATTRIBUTE, args)
         }
     }
 }
@@ -667,9 +679,10 @@ fn get_inject_fn(target: FactoryTarget) -> &'static str {
     }
 }
 
-/// Creates an import expression call: i0.ɵɵinject(args...)
+/// Creates an import expression call: ns.ɵɵinject(args...)
 fn create_import_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     name: &'static str,
     args: Vec<'a, OutputExpression<'a>>,
 ) -> OutputExpression<'a> {
@@ -677,7 +690,7 @@ fn create_import_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -701,14 +714,23 @@ fn create_import_call<'a>(
     ))
 }
 
-/// Creates `i0.ɵɵinvalidFactory()` call.
-pub fn create_invalid_factory_call<'a>(allocator: &'a Allocator) -> OutputExpression<'a> {
-    create_import_call(allocator, Identifiers::INVALID_FACTORY, Vec::new_in(&allocator))
+/// Creates `ns.ɵɵinvalidFactory()` call.
+pub fn create_invalid_factory_call<'a>(
+    allocator: &'a Allocator,
+    core_namespace: &'a str,
+) -> OutputExpression<'a> {
+    create_import_call(
+        allocator,
+        core_namespace,
+        Identifiers::INVALID_FACTORY,
+        Vec::new_in(&allocator),
+    )
 }
 
-/// Creates i0.ɵɵinvalidFactoryDep(index) call.
+/// Creates ns.ɵɵinvalidFactoryDep(index) call.
 fn create_invalid_factory_dep_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     index: usize,
 ) -> OutputExpression<'a> {
     let mut args = Vec::new_in(&allocator);
@@ -716,7 +738,7 @@ fn create_invalid_factory_dep_call<'a>(
         LiteralExpr { value: LiteralValue::Number(index as f64), source_span: None },
         &allocator,
     )));
-    create_import_call(allocator, Identifiers::INVALID_FACTORY_DEP, args)
+    create_import_call(allocator, core_namespace, Identifiers::INVALID_FACTORY_DEP, args)
 }
 
 #[cfg(test)]
@@ -742,7 +764,7 @@ mod tests {
             target: FactoryTarget::Pipe,
         });
 
-        let result = compile_factory_function(&allocator, &meta, "TestClass_Factory");
+        let result = compile_factory_function(&allocator, "i0", &meta, "TestClass_Factory");
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -775,7 +797,7 @@ mod tests {
             target: FactoryTarget::Pipe,
         });
 
-        let result = compile_factory_function(&allocator, &meta, "MyPipe_Factory");
+        let result = compile_factory_function(&allocator, "i0", &meta, "MyPipe_Factory");
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -800,7 +822,7 @@ mod tests {
             target: FactoryTarget::Injectable,
         });
 
-        let result = compile_factory_function(&allocator, &meta, "BrokenClass_Factory");
+        let result = compile_factory_function(&allocator, "i0", &meta, "BrokenClass_Factory");
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -825,7 +847,7 @@ mod tests {
             target: FactoryTarget::Component,
         });
 
-        let result = compile_factory_function(&allocator, &meta, "ChildClass_Factory");
+        let result = compile_factory_function(&allocator, "i0", &meta, "ChildClass_Factory");
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 

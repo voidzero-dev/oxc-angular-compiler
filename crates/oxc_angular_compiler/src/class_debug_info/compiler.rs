@@ -33,9 +33,10 @@ use crate::r3::Identifiers;
 /// Ported from Angular's `compileClassDebugInfo` function.
 pub fn compile_class_debug_info<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     debug_info: &R3ClassDebugInfo<'a>,
 ) -> OutputExpression<'a> {
-    let fn_call = internal_compile_class_debug_info(allocator, debug_info);
+    let fn_call = internal_compile_class_debug_info(allocator, core_namespace, debug_info);
     let guarded = dev_only_guarded_expression(allocator, fn_call);
     let stmt = expr_stmt(allocator, guarded);
     create_arrow_iife(allocator, stmt)
@@ -44,9 +45,10 @@ pub fn compile_class_debug_info<'a>(
 /// Compiles the internal `setClassDebugInfo` call without wrappers.
 fn internal_compile_class_debug_info<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     debug_info: &R3ClassDebugInfo<'a>,
 ) -> OutputExpression<'a> {
-    let import = import_expr(allocator, Identifiers::SET_CLASS_DEBUG_INFO);
+    let import = import_expr(allocator, core_namespace, Identifiers::SET_CLASS_DEBUG_INFO);
 
     // Build the debug info object
     // Always include className
@@ -161,13 +163,17 @@ fn dev_only_guarded_expression<'a>(
     ))
 }
 
-/// Creates an import expression: i0.identifier
-fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> OutputExpression<'a> {
+/// Creates an import expression: ns.identifier
+fn import_expr<'a>(
+    allocator: &'a Allocator,
+    core_namespace: &'a str,
+    identifier: &'static str,
+) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,

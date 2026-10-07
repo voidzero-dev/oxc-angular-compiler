@@ -58,10 +58,20 @@ pub fn compile_hmr_initializer<'a>(
     // m.default
     let default_read = read_prop(allocator, read_var(allocator, module_name), "default");
 
+    // The alias generated `@angular/core` references resolve through: the
+    // `assigned_name` the caller registered for `@angular/core` (usually
+    // `i0`, but the file may force a uniquified or reused name).
+    let core_ns = meta
+        .namespace_dependencies
+        .iter()
+        .find(|dep| dep.module_name.as_str() == "@angular/core")
+        .map(|dep| dep.assigned_name)
+        .unwrap_or_else(|| Ident::from("i0"));
+
     // i0.ɵɵreplaceMetadata(Comp, m.default, [...namespaces], [...locals], import.meta, id)
     let replace_call = invoke_fn(
         &allocator,
-        read_prop(allocator, read_var(allocator, "i0"), Identifiers::REPLACE_METADATA),
+        read_prop(allocator, read_var_ident(allocator, core_ns), Identifiers::REPLACE_METADATA),
         vec![
             meta.component_type.clone_in(allocator),
             default_read.clone_in(allocator),
@@ -88,7 +98,11 @@ pub fn compile_hmr_initializer<'a>(
     // i0.ɵɵgetReplaceMetadataURL(id, timestamp, import.meta.url)
     let url = invoke_fn(
         &allocator,
-        read_prop(allocator, read_var(allocator, "i0"), Identifiers::GET_REPLACE_METADATA_URL),
+        read_prop(
+            allocator,
+            read_var_ident(allocator, core_ns),
+            Identifiers::GET_REPLACE_METADATA_URL,
+        ),
         vec![
             read_var(allocator, id_name),
             read_var(allocator, timestamp_name),
@@ -392,6 +406,11 @@ fn read_var<'a>(allocator: &'a Allocator, name: &str) -> OutputExpression<'a> {
         ReadVarExpr { name: Ident::from(allocator.alloc_str(name)), source_span: None },
         &allocator,
     ))
+}
+
+/// Create a read variable expression from an existing [`Ident`].
+fn read_var_ident<'a>(allocator: &'a Allocator, name: Ident<'a>) -> OutputExpression<'a> {
+    OutputExpression::ReadVar(Box::new_in(ReadVarExpr { name, source_span: None }, &allocator))
 }
 
 /// Create a property read expression.

@@ -3504,6 +3504,7 @@ pub fn input_transform_types<'a>(
     class: &'a Class<'a>,
     consts: &super::StringConsts<'a>,
     source: &'a str,
+    core_namespace: &'a str,
 ) -> HashMap<String, String> {
     let evaluator = Evaluator::new(consts);
     let scope = consts.scope();
@@ -3565,8 +3566,12 @@ pub fn input_transform_types<'a>(
             };
             let ty = match def.first_param_type().ok()? {
                 Some(ty) => {
-                    let mut printer =
-                        super::dts_type::TypePrinter { scope, source, other_module: false };
+                    let mut printer = super::dts_type::TypePrinter {
+                        scope,
+                        source,
+                        core_ns: core_namespace,
+                        other_module: false,
+                    };
                     let ty = printer.print(ty);
                     if printer.other_module {
                         return None;

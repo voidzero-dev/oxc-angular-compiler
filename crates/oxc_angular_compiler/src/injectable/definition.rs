@@ -96,6 +96,7 @@ pub struct InjectableDefinition<'a> {
 /// ```
 pub fn generate_injectable_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectableMetadata<'a>,
     compilation_mode: CompilationMode,
 ) -> InjectableDefinition<'a> {
@@ -106,13 +107,15 @@ pub fn generate_injectable_definition<'a>(
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     match compilation_mode {
         CompilationMode::Full => {
-            let fac_definition = generate_fac_definition(allocator, metadata);
-            let prov_result = compile_injectable(allocator, metadata);
+            let fac_definition = generate_fac_definition(allocator, core_namespace, metadata);
+            let prov_result = compile_injectable(allocator, core_namespace, metadata);
             InjectableDefinition { prov_definition: prov_result.expression, fac_definition }
         }
         CompilationMode::Partial => {
-            let fac_definition = compile_declare_factory_for_injectable(allocator, metadata);
-            let prov_definition = compile_declare_injectable_from_metadata(allocator, metadata);
+            let fac_definition =
+                compile_declare_factory_for_injectable(allocator, core_namespace, metadata);
+            let prov_definition =
+                compile_declare_injectable_from_metadata(allocator, core_namespace, metadata);
             InjectableDefinition { prov_definition, fac_definition }
         }
     }
@@ -145,6 +148,7 @@ pub fn generate_injectable_definition<'a>(
 /// ```
 fn generate_fac_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectableMetadata<'a>,
 ) -> OutputExpression<'a> {
     // Factory function name: ServiceName_Factory
@@ -186,7 +190,7 @@ fn generate_fac_definition<'a>(
     });
 
     // Compile the factory function
-    let result = compile_factory_function(allocator, &factory_meta, factory_name);
+    let result = compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
     result.expression
 }
 
@@ -206,11 +210,12 @@ fn generate_fac_definition<'a>(
 /// `None` if the metadata couldn't be converted to R3 format.
 pub fn generate_injectable_definition_from_decorator<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &InjectableMetadata<'a>,
     compilation_mode: CompilationMode,
 ) -> Option<InjectableDefinition<'a>> {
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
-    Some(generate_injectable_definition(allocator, &r3_metadata, compilation_mode))
+    Some(generate_injectable_definition(allocator, core_namespace, &r3_metadata, compilation_mode))
 }
 
 #[cfg(test)]
@@ -238,7 +243,7 @@ mod tests {
             .unwrap();
 
         let definition =
-            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
+            generate_injectable_definition(&allocator, "i0", &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -270,7 +275,7 @@ mod tests {
             .unwrap();
 
         let definition =
-            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
+            generate_injectable_definition(&allocator, "i0", &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -297,7 +302,7 @@ mod tests {
             .unwrap();
 
         let definition =
-            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
+            generate_injectable_definition(&allocator, "i0", &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -321,7 +326,7 @@ mod tests {
             .unwrap();
 
         let definition =
-            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
+            generate_injectable_definition(&allocator, "i0", &metadata, CompilationMode::Full);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.prov_definition);
@@ -348,7 +353,7 @@ mod tests {
             .unwrap();
 
         let definition =
-            generate_injectable_definition(&allocator, &metadata, CompilationMode::Full);
+            generate_injectable_definition(&allocator, "i0", &metadata, CompilationMode::Full);
 
         // The prov_definition should be an InvokeFunction with pure=true
         match &definition.prov_definition {
@@ -399,6 +404,7 @@ mod tests {
         // Generate the full definition and check the output
         let definition = generate_injectable_definition_from_decorator(
             &allocator,
+            "i0",
             &metadata,
             CompilationMode::Full,
         );
@@ -457,6 +463,7 @@ mod tests {
         // Generate definition
         let definition = generate_injectable_definition_from_decorator(
             &allocator,
+            "i0",
             &metadata,
             CompilationMode::Full,
         );
@@ -503,6 +510,7 @@ mod tests {
         // Generate definition
         let definition = generate_injectable_definition_from_decorator(
             &allocator,
+            "i0",
             &metadata,
             CompilationMode::Full,
         );

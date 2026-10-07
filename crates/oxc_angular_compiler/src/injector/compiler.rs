@@ -35,21 +35,23 @@ pub struct InjectorCompileResult<'a> {
 /// This is the main entry point for injector compilation.
 pub fn compile_injector<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectorMetadata<'a>,
 ) -> InjectorCompileResult<'a> {
-    compile_injector_from_metadata(allocator, metadata)
+    compile_injector_from_metadata(allocator, core_namespace, metadata)
 }
 
 /// Internal implementation of injector compilation.
 pub fn compile_injector_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectorMetadata<'a>,
 ) -> InjectorCompileResult<'a> {
     // Build the definition map
     let definition_map = build_definition_map(allocator, metadata);
 
     // Create the expression: ɵɵdefineInjector(definitionMap)
-    let expression = create_define_injector_call(allocator, definition_map);
+    let expression = create_define_injector_call(allocator, core_namespace, definition_map);
 
     InjectorCompileResult { expression, statements: Vec::new_in(&allocator) }
 }
@@ -95,14 +97,15 @@ fn build_definition_map<'a>(
 /// Creates the `ɵɵdefineInjector({...})` call expression.
 fn create_define_injector_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
-    // Create i0.ɵɵdefineInjector
+    // Create ns.ɵɵdefineInjector
     let define_injector_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -156,7 +159,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injector(&allocator, &metadata);
+        let result = compile_injector(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
@@ -184,7 +187,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injector(&allocator, &metadata);
+        let result = compile_injector(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -218,7 +221,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injector(&allocator, &metadata);
+        let result = compile_injector(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -242,7 +245,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injector(&allocator, &metadata);
+        let result = compile_injector(&allocator, "i0", &metadata);
 
         // Statements should always be empty for injectors
         assert!(result.statements.is_empty());

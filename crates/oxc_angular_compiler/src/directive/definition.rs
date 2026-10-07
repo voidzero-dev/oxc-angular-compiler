@@ -74,6 +74,7 @@ pub struct DirectiveDefinitions<'a> {
 /// ```
 pub fn generate_directive_definitions<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     compilation_mode: CompilationMode,
@@ -86,9 +87,14 @@ pub fn generate_directive_definitions<'a>(
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     match compilation_mode {
         CompilationMode::Full => {
-            let fac_definition = generate_fac_definition(allocator, metadata);
-            let (dir_definition, next_pool_index) =
-                generate_dir_definition(allocator, metadata, pool_starting_index, angular_version);
+            let fac_definition = generate_fac_definition(allocator, core_namespace, metadata);
+            let (dir_definition, next_pool_index) = generate_dir_definition(
+                allocator,
+                core_namespace,
+                metadata,
+                pool_starting_index,
+                angular_version,
+            );
             DirectiveDefinitions { dir_definition, fac_definition, next_pool_index }
         }
         CompilationMode::Partial => {
@@ -97,8 +103,10 @@ pub fn generate_directive_definitions<'a>(
             // constants are emitted here. `angular_version` is irrelevant
             // because partial mode emits the verbatim selector and lets
             // the linker pick up the consumer's runtime version.
-            let fac_definition = compile_declare_factory_for_directive(allocator, metadata);
-            let dir_definition = compile_declare_directive_from_metadata(allocator, metadata);
+            let fac_definition =
+                compile_declare_factory_for_directive(allocator, core_namespace, metadata);
+            let dir_definition =
+                compile_declare_directive_from_metadata(allocator, core_namespace, metadata);
             DirectiveDefinitions {
                 dir_definition,
                 fac_definition,
@@ -125,11 +133,18 @@ pub fn generate_directive_definitions<'a>(
 /// Returns a tuple of (expression, next_pool_index).
 fn generate_dir_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
 ) -> (OutputExpression<'a>, u32) {
-    let result = compile_directive(allocator, metadata, pool_starting_index, angular_version);
+    let result = compile_directive(
+        allocator,
+        core_namespace,
+        metadata,
+        pool_starting_index,
+        angular_version,
+    );
     (result.expression, result.next_pool_index)
 }
 
@@ -154,6 +169,7 @@ fn generate_dir_definition<'a>(
 /// Ported from: `packages/compiler/src/render3/r3_factory.ts`
 fn generate_fac_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
 ) -> OutputExpression<'a> {
     // Factory function name: DirectiveName_Factory
@@ -207,7 +223,7 @@ fn generate_fac_definition<'a>(
     });
 
     // Compile the factory function
-    let result = compile_factory_function(allocator, &factory_meta, factory_name);
+    let result = compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
     result.expression
 }
 
@@ -252,8 +268,14 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let definitions =
-            generate_directive_definitions(&allocator, &metadata, 0, CompilationMode::Full, None);
+        let definitions = generate_directive_definitions(
+            &allocator,
+            "i0",
+            &metadata,
+            0,
+            CompilationMode::Full,
+            None,
+        );
 
         let emitter = JsEmitter::new();
 
@@ -276,7 +298,7 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let fac = generate_fac_definition(&allocator, &metadata);
+        let fac = generate_fac_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&fac);
@@ -320,7 +342,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let fac = generate_fac_definition(&allocator, &metadata);
+        let fac = generate_fac_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&fac);
@@ -359,7 +381,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let fac = generate_fac_definition(&allocator, &metadata);
+        let fac = generate_fac_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&fac);
@@ -408,7 +430,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let fac = generate_fac_definition(&allocator, &metadata);
+        let fac = generate_fac_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&fac);
@@ -423,7 +445,7 @@ mod tests {
         let allocator = Allocator::default();
         let metadata = create_test_metadata(&allocator);
 
-        let (dir, _next_pool_index) = generate_dir_definition(&allocator, &metadata, 0, None);
+        let (dir, _next_pool_index) = generate_dir_definition(&allocator, "i0", &metadata, 0, None);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&dir);
@@ -473,8 +495,14 @@ mod tests {
         };
 
         // Compile first directive
-        let definitions1 =
-            generate_directive_definitions(&allocator, &metadata1, 0, CompilationMode::Full, None);
+        let definitions1 = generate_directive_definitions(
+            &allocator,
+            "i0",
+            &metadata1,
+            0,
+            CompilationMode::Full,
+            None,
+        );
         let next_index = definitions1.next_pool_index;
 
         // The next_pool_index should be 0 when no constants are pooled
@@ -513,6 +541,7 @@ mod tests {
         // Compile second directive starting from where first left off
         let definitions2 = generate_directive_definitions(
             &allocator,
+            "i0",
             &metadata2,
             next_index,
             CompilationMode::Full,

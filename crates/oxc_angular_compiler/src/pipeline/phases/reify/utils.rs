@@ -21,6 +21,7 @@ pub fn strip_prefix<'a>(name: &Ident<'a>, prefix: &str) -> Ident<'a> {
 /// Creates an instruction call statement.
 pub fn create_instruction_call_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     instruction: &'a str,
     args: OxcVec<'a, OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
@@ -29,7 +30,7 @@ pub fn create_instruction_call_stmt<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -61,6 +62,7 @@ pub fn create_instruction_call_stmt<'a>(
 /// Creates an instruction call expression (not statement).
 pub fn create_instruction_call_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     instruction: &'a str,
     args: OxcVec<'a, OutputExpression<'a>>,
 ) -> OutputExpression<'a> {
@@ -68,7 +70,7 @@ pub fn create_instruction_call_expr<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -101,9 +103,15 @@ pub fn create_instruction_call_expr<'a>(
 /// passed to ɵɵproperty, ɵɵattribute, etc.
 pub fn create_value_interpolate_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
 ) -> OutputExpression<'a> {
     use crate::r3::identifiers::get_interpolate_instruction;
-    create_instruction_call_expr(allocator, get_interpolate_instruction(expr_count), args)
+    create_instruction_call_expr(
+        allocator,
+        core_namespace,
+        get_interpolate_instruction(expr_count),
+        args,
+    )
 }

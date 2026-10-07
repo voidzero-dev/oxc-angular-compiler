@@ -45,6 +45,7 @@ use crate::output::ast::ExpressionStatement;
 /// to a proper OutputStatement with all IR expressions converted.
 fn convert_statement_ir_nodes<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     stmt: &OutputStatement<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -52,16 +53,26 @@ fn convert_statement_ir_nodes<'a>(
 ) -> OutputStatement<'a> {
     match stmt {
         OutputStatement::Return(ret) => {
-            let converted_expr =
-                convert_output_expr_ir_nodes(allocator, &ret.value, expressions, root_xref);
+            let converted_expr = convert_output_expr_ir_nodes(
+                allocator,
+                core_namespace,
+                &ret.value,
+                expressions,
+                root_xref,
+            );
             OutputStatement::Return(Box::new_in(
                 ReturnStatement { value: converted_expr, source_span: ret.source_span },
                 &allocator,
             ))
         }
         OutputStatement::Expression(expr_stmt) => {
-            let converted_expr =
-                convert_output_expr_ir_nodes(allocator, &expr_stmt.expr, expressions, root_xref);
+            let converted_expr = convert_output_expr_ir_nodes(
+                allocator,
+                core_namespace,
+                &expr_stmt.expr,
+                expressions,
+                root_xref,
+            );
             OutputStatement::Expression(Box::new_in(
                 ExpressionStatement { expr: converted_expr, source_span: expr_stmt.source_span },
                 &allocator,
@@ -85,6 +96,7 @@ fn convert_statement_ir_nodes<'a>(
 /// Converts an OutputExpression that may be a WrappedIrNode to a proper OutputExpression.
 fn convert_output_expr_ir_nodes<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     expr: &OutputExpression<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -92,7 +104,7 @@ fn convert_output_expr_ir_nodes<'a>(
     match expr {
         OutputExpression::WrappedIrNode(wrapped) => {
             // Convert the wrapped IR expression to a proper output expression
-            convert_ir_expression(allocator, &wrapped.node, expressions, root_xref)
+            convert_ir_expression(allocator, core_namespace, &wrapped.node, expressions, root_xref)
         }
         // All other expressions are already proper output expressions
         // Clone them to get owned values
@@ -117,6 +129,8 @@ struct ReifyContext<'a> {
     supports_value_interpolation: bool,
     /// Whether to use `ɵɵdomProperty` (Angular 20+) or `ɵɵhostProperty` (Angular 19-).
     supports_dom_property: bool,
+    /// Namespace identifier for `@angular/core` runtime imports (`i0.ɵɵ*`).
+    core_namespace: &'a str,
 }
 
 /// Reifies IR expressions to Output AST.
@@ -156,6 +170,7 @@ pub fn reify(job: &mut ComponentCompilationJob<'_>) {
         supports_conditional_create,
         supports_value_interpolation,
         supports_dom_property,
+        core_namespace: job.core_namespace.as_str(),
     };
 
     // Collect xrefs of embedded views (excluding root) before splitting borrows
@@ -212,11 +227,21 @@ fn reify_view_to_stmts<'a>(
 ) -> (std::vec::Vec<OutputStatement<'a>>, std::vec::Vec<OutputStatement<'a>>) {
     let mut create_stmts = std::vec::Vec::new();
     let mut update_stmts = std::vec::Vec::new();
+    let core_namespace = ctx.core_namespace;
 
     // Reify create operations
     // Use iter_mut() so we can take ownership of expressions that can't be cloned
     for op in view.create.iter_mut() {
-        let stmt = reify_create_op(allocator, op, expressions, pool, root_xref, ctx, diagnostics);
+        let stmt = reify_create_op(
+            allocator,
+            core_namespace,
+            op,
+            expressions,
+            pool,
+            root_xref,
+            ctx,
+            diagnostics,
+        );
         if let Some(s) = stmt {
             create_stmts.push(s);
         }
@@ -226,6 +251,7 @@ fn reify_view_to_stmts<'a>(
     for op in view.update.iter() {
         let stmt = reify_update_op(
             &allocator,
+            core_namespace,
             op,
             expressions,
             root_xref,
@@ -245,6 +271,7 @@ fn reify_view_to_stmts<'a>(
 /// Reify a single create operation to a statement.
 fn reify_create_op<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     op: &mut CreateOp<'a>,
     expressions: &ExpressionStore<'a>,
     pool: &mut ConstantPool<'a>,
@@ -261,6 +288,7 @@ fn reify_create_op<'a>(
             if is_dom_only {
                 Some(create_dom_element_start_stmt(
                     &allocator,
+                    core_namespace,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -269,6 +297,7 @@ fn reify_create_op<'a>(
             } else {
                 Some(create_element_start_stmt(
                     &allocator,
+                    core_namespace,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -282,6 +311,7 @@ fn reify_create_op<'a>(
             if is_dom_only {
                 Some(create_dom_element_stmt(
                     &allocator,
+                    core_namespace,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -290,6 +320,7 @@ fn reify_create_op<'a>(
             } else {
                 Some(create_element_stmt(
                     &allocator,
+                    core_namespace,
                     &elem.tag,
                     slot,
                     elem.attributes,
@@ -299,9 +330,9 @@ fn reify_create_op<'a>(
         }
         CreateOp::ElementEnd(_) => {
             if is_dom_only {
-                Some(create_dom_element_end_stmt(allocator))
+                Some(create_dom_element_end_stmt(allocator, core_namespace))
             } else {
-                Some(create_element_end_stmt(allocator))
+                Some(create_element_end_stmt(allocator, core_namespace))
             }
         }
         CreateOp::Text(text) => {
@@ -311,7 +342,7 @@ fn reify_create_op<'a>(
             } else {
                 Some(text.initial_value.as_str())
             };
-            Some(create_text_stmt(allocator, slot, initial_value))
+            Some(create_text_stmt(allocator, core_namespace, slot, initial_value))
         }
         CreateOp::Template(tmpl) => {
             // Look up the function name for this template's embedded view
@@ -331,6 +362,7 @@ fn reify_create_op<'a>(
             if use_dom_template {
                 Some(create_dom_template_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     decls,
@@ -342,6 +374,7 @@ fn reify_create_op<'a>(
             } else {
                 Some(create_template_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     decls,
@@ -363,6 +396,7 @@ fn reify_create_op<'a>(
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
                         &allocator,
+                        core_namespace,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -371,6 +405,7 @@ fn reify_create_op<'a>(
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -386,8 +421,13 @@ fn reify_create_op<'a>(
             // Always add handler_expression as a return statement at the end
             // This is the actual event handler logic
             if let Some(handler_expr) = &listener.handler_expression {
-                let output_expr =
-                    convert_ir_expression(allocator, handler_expr, expressions, root_xref);
+                let output_expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    handler_expr,
+                    expressions,
+                    root_xref,
+                );
                 // Use return statement so the handler returns the result
                 handler_stmts.push(OutputStatement::Return(Box::new_in(
                     ReturnStatement { value: output_expr, source_span: None },
@@ -408,6 +448,7 @@ fn reify_create_op<'a>(
             if use_dom_listener {
                 Some(create_dom_listener_stmt_with_handler(
                     &allocator,
+                    core_namespace,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -417,6 +458,7 @@ fn reify_create_op<'a>(
             } else {
                 Some(create_listener_stmt_with_handler(
                     &allocator,
+                    core_namespace,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -446,6 +488,7 @@ fn reify_create_op<'a>(
 
             Some(create_projection_stmt(
                 &allocator,
+                core_namespace,
                 slot,
                 projection_slot_index,
                 attributes,
@@ -459,21 +502,33 @@ fn reify_create_op<'a>(
             let attributes = container.attributes;
             let local_refs_index = container.local_refs_index;
             if is_dom_only {
-                Some(create_dom_container_stmt(allocator, slot, attributes, local_refs_index))
+                Some(create_dom_container_stmt(
+                    allocator,
+                    core_namespace,
+                    slot,
+                    attributes,
+                    local_refs_index,
+                ))
             } else {
-                Some(create_container_stmt(allocator, slot, attributes, local_refs_index))
+                Some(create_container_stmt(
+                    allocator,
+                    core_namespace,
+                    slot,
+                    attributes,
+                    local_refs_index,
+                ))
             }
         }
         CreateOp::ContainerEnd(_) => {
             if is_dom_only {
-                Some(create_dom_container_end_stmt(allocator))
+                Some(create_dom_container_end_stmt(allocator, core_namespace))
             } else {
-                Some(create_container_end_stmt(allocator))
+                Some(create_container_end_stmt(allocator, core_namespace))
             }
         }
         CreateOp::DeclareLet(decl) => {
             let slot = decl.slot.map(|s| s.0).unwrap_or(0);
-            Some(create_declare_let_stmt(allocator, slot))
+            Some(create_declare_let_stmt(allocator, core_namespace, slot))
         }
         CreateOp::Conditional(cond) => {
             // Look up the function name for this branch's view
@@ -483,6 +538,7 @@ fn reify_create_op<'a>(
                 // Angular 20+: Emit ɵɵconditionalCreate for the first branch in @if/@switch
                 Some(create_conditional_create_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     cond.decls,
@@ -495,6 +551,7 @@ fn reify_create_op<'a>(
                 // Angular 19: Emit ɵɵtemplate instead (conditionalCreate doesn't exist)
                 Some(create_template_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     cond.decls,
@@ -518,6 +575,7 @@ fn reify_create_op<'a>(
             // Ported from Angular's reifyTrackBy() in reify.ts
             let track_fn_expr = reify_track_by(
                 &allocator,
+                core_namespace,
                 pool,
                 expressions,
                 root_xref,
@@ -530,6 +588,7 @@ fn reify_create_op<'a>(
 
             Some(create_repeater_create_stmt_with_track_expr(
                 &allocator,
+                core_namespace,
                 slot,
                 fn_name,
                 repeater.decls,
@@ -548,7 +607,7 @@ fn reify_create_op<'a>(
         CreateOp::Pipe(pipe) => {
             // Emit pipe instruction
             let slot = pipe.slot.map(|s| s.0).unwrap_or(0);
-            Some(create_pipe_stmt(allocator, slot, &pipe.name))
+            Some(create_pipe_stmt(allocator, core_namespace, slot, &pipe.name))
         }
         CreateOp::Defer(defer) => {
             // Emit defer instruction for @defer
@@ -572,6 +631,7 @@ fn reify_create_op<'a>(
             });
             Some(create_defer_stmt(
                 &allocator,
+                core_namespace,
                 slot,
                 defer.main_slot.map(|s| s.0),
                 defer.resolver_fn.take(),
@@ -585,12 +645,12 @@ fn reify_create_op<'a>(
         }
         CreateOp::DeferOn(defer_on) => {
             // Emit deferOn instruction based on trigger kind
-            let options = defer_on
-                .options
-                .as_ref()
-                .map(|expr| convert_ir_expression(allocator, expr, expressions, root_xref));
+            let options = defer_on.options.as_ref().map(|expr| {
+                convert_ir_expression(allocator, core_namespace, expr, expressions, root_xref)
+            });
             Some(create_defer_on_stmt(
                 &allocator,
+                core_namespace,
                 defer_on.trigger,
                 defer_on.target_slot.map(|s| s.0),
                 defer_on.target_slot_view_steps,
@@ -604,6 +664,7 @@ fn reify_create_op<'a>(
             let slot = i18n.slot.map(|s| s.0).unwrap_or(0);
             Some(create_i18n_start_stmt(
                 &allocator,
+                core_namespace,
                 slot,
                 i18n.message_index,
                 i18n.sub_template_index,
@@ -612,27 +673,37 @@ fn reify_create_op<'a>(
         CreateOp::I18n(i18n) => {
             // Emit i18n instruction
             let slot = i18n.slot.map(|s| s.0).unwrap_or(0);
-            Some(create_i18n_stmt(allocator, slot, i18n.message_index, i18n.sub_template_index))
+            Some(create_i18n_stmt(
+                allocator,
+                core_namespace,
+                slot,
+                i18n.message_index,
+                i18n.sub_template_index,
+            ))
         }
         CreateOp::I18nEnd(_) => {
             // Emit i18nEnd instruction
-            Some(create_i18n_end_stmt(allocator))
+            Some(create_i18n_end_stmt(allocator, core_namespace))
         }
         CreateOp::Namespace(ns) => {
             // Emit namespace change instruction
-            Some(create_namespace_stmt(allocator, ns.active))
+            Some(create_namespace_stmt(allocator, core_namespace, ns.active))
         }
         CreateOp::ProjectionDef(proj_def) => {
             // Emit projectionDef instruction with R3 format def expression
-            Some(create_projection_def_stmt_from_expr(allocator, proj_def.def.as_ref()))
+            Some(create_projection_def_stmt_from_expr(
+                allocator,
+                core_namespace,
+                proj_def.def.as_ref(),
+            ))
         }
         CreateOp::DisableBindings(_) => {
             // Emit disableBindings instruction
-            Some(create_disable_bindings_stmt(allocator))
+            Some(create_disable_bindings_stmt(allocator, core_namespace))
         }
         CreateOp::EnableBindings(_) => {
             // Emit enableBindings instruction
-            Some(create_enable_bindings_stmt(allocator))
+            Some(create_enable_bindings_stmt(allocator, core_namespace))
         }
         CreateOp::TwoWayListener(listener) => {
             // Emit twoWayListener instruction
@@ -644,6 +715,7 @@ fn reify_create_op<'a>(
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
                         &allocator,
+                        core_namespace,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -652,6 +724,7 @@ fn reify_create_op<'a>(
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -665,6 +738,7 @@ fn reify_create_op<'a>(
             }
             Some(create_two_way_listener_stmt(
                 &allocator,
+                core_namespace,
                 &listener.name,
                 handler_stmts,
                 listener.handler_fn_name.as_ref(),
@@ -676,6 +750,7 @@ fn reify_create_op<'a>(
             for handler_op in listener.handler_ops.iter() {
                 if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -689,6 +764,7 @@ fn reify_create_op<'a>(
             }
             Some(create_animation_listener_stmt(
                 &allocator,
+                core_namespace,
                 &listener.name,
                 listener.phase,
                 handler_stmts,
@@ -698,8 +774,14 @@ fn reify_create_op<'a>(
         }
         CreateOp::AnimationString(anim) => {
             // Emit ɵɵanimateEnter or ɵɵanimateLeave instruction for animation string bindings
-            let expr = convert_ir_expression(allocator, &anim.expression, expressions, root_xref);
-            Some(create_animation_string_stmt(allocator, anim.animation_kind, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &anim.expression,
+                expressions,
+                root_xref,
+            );
+            Some(create_animation_string_stmt(allocator, core_namespace, anim.animation_kind, expr))
         }
         CreateOp::Animation(anim) => {
             // Emit ɵɵanimateEnter or ɵɵanimateLeave instruction for animation bindings (Value kind)
@@ -708,6 +790,7 @@ fn reify_create_op<'a>(
             for handler_op in anim.handler_ops.iter() {
                 if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -721,6 +804,7 @@ fn reify_create_op<'a>(
             }
             Some(create_animation_op_stmt(
                 &allocator,
+                core_namespace,
                 anim.animation_kind,
                 handler_stmts,
                 anim.handler_fn_name.as_ref(),
@@ -729,7 +813,13 @@ fn reify_create_op<'a>(
         CreateOp::Variable(var) => {
             // Emit variable declaration with initializer
             // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts
-            let value = convert_ir_expression(allocator, &var.initializer, expressions, root_xref);
+            let value = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &var.initializer,
+                expressions,
+                root_xref,
+            );
             Some(create_variable_decl_stmt_with_value(allocator, &var.name, value))
         }
         CreateOp::ContainerStart(container) => {
@@ -738,9 +828,21 @@ fn reify_create_op<'a>(
             let attributes = container.attributes;
             let local_refs_index = container.local_refs_index;
             if is_dom_only {
-                Some(create_dom_container_start_stmt(allocator, slot, attributes, local_refs_index))
+                Some(create_dom_container_start_stmt(
+                    allocator,
+                    core_namespace,
+                    slot,
+                    attributes,
+                    local_refs_index,
+                ))
             } else {
-                Some(create_container_start_stmt(allocator, slot, attributes, local_refs_index))
+                Some(create_container_start_stmt(
+                    allocator,
+                    core_namespace,
+                    slot,
+                    attributes,
+                    local_refs_index,
+                ))
             }
         }
         CreateOp::I18nAttributes(i18n_attrs) => {
@@ -751,7 +853,7 @@ fn reify_create_op<'a>(
                     I18nSlotHandle::Single(slot_id) => slot_id.0,
                     I18nSlotHandle::Range(start, _) => start.0,
                 };
-                Some(create_i18n_attributes_stmt(allocator, slot, config_index))
+                Some(create_i18n_attributes_stmt(allocator, core_namespace, slot, config_index))
             } else {
                 None
             }
@@ -764,6 +866,7 @@ fn reify_create_op<'a>(
                 // Angular 20+: Emit ɵɵconditionalBranchCreate for branches after the first
                 Some(create_conditional_branch_create_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     branch.decls,
@@ -776,6 +879,7 @@ fn reify_create_op<'a>(
                 // Angular 19: Emit ɵɵtemplate instead (conditionalBranchCreate doesn't exist)
                 Some(create_template_stmt(
                     &allocator,
+                    core_namespace,
                     slot,
                     fn_name,
                     branch.decls,
@@ -788,7 +892,7 @@ fn reify_create_op<'a>(
         }
         CreateOp::ControlCreate(_) => {
             // Emit ɵɵcontrolCreate instruction for control binding initialization
-            Some(create_control_create_stmt(allocator))
+            Some(create_control_create_stmt(allocator, core_namespace))
         }
         // Non-emitting operations
         CreateOp::ListEnd(_)
@@ -806,6 +910,7 @@ fn reify_create_op<'a>(
 /// Reify a single update operation to a statement.
 fn reify_update_op<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     op: &UpdateOp<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -829,6 +934,7 @@ fn reify_update_op<'a>(
                 let has_extra_args = prop.sanitizer.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
                     &allocator,
+                    core_namespace,
                     &prop.expression,
                     expressions,
                     root_xref,
@@ -836,6 +942,7 @@ fn reify_update_op<'a>(
                 );
                 Some(create_property_interpolate_stmt(
                     &allocator,
+                    core_namespace,
                     &prop.name,
                     interp_args,
                     expr_count,
@@ -843,12 +950,18 @@ fn reify_update_op<'a>(
                 ))
             } else {
                 // Angular 20+: Use ɵɵproperty("name", ɵɵinterpolate1(...)) or ɵɵproperty("name", expr)
-                let expr =
-                    convert_ir_expression(allocator, &prop.expression, expressions, root_xref);
+                let expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    &prop.expression,
+                    expressions,
+                    root_xref,
+                );
                 if is_dom_only && !is_animation {
                     if supports_dom_property {
                         Some(create_dom_property_stmt(
                             &allocator,
+                            core_namespace,
                             &prop.name,
                             expr,
                             prop.sanitizer.as_ref(),
@@ -856,16 +969,18 @@ fn reify_update_op<'a>(
                     } else {
                         Some(create_host_property_stmt(
                             &allocator,
+                            core_namespace,
                             &prop.name,
                             expr,
                             prop.sanitizer.as_ref(),
                         ))
                     }
                 } else if is_aria_attribute(prop.name.as_str()) {
-                    Some(create_aria_property_stmt(allocator, &prop.name, expr))
+                    Some(create_aria_property_stmt(allocator, core_namespace, &prop.name, expr))
                 } else {
                     Some(create_property_stmt_with_expr(
                         &allocator,
+                        core_namespace,
                         &prop.name,
                         expr,
                         prop.sanitizer.as_ref(),
@@ -877,17 +992,28 @@ fn reify_update_op<'a>(
             // Handle multiple interpolations like "{{a}} and {{b}}"
             let (args, expr_count) = reify_interpolation(
                 &allocator,
+                core_namespace,
                 &interp.interpolation,
                 expressions,
                 root_xref,
                 false,
             );
-            Some(create_text_interpolate_stmt_with_args(allocator, args, expr_count))
+            Some(create_text_interpolate_stmt_with_args(
+                allocator,
+                core_namespace,
+                args,
+                expr_count,
+            ))
         }
         UpdateOp::Binding(binding) => {
-            let expr =
-                convert_ir_expression(allocator, &binding.expression, expressions, root_xref);
-            Some(create_binding_stmt_with_expr(allocator, &binding.name, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &binding.expression,
+                expressions,
+                root_xref,
+            );
+            Some(create_binding_stmt_with_expr(allocator, core_namespace, &binding.name, expr))
         }
         UpdateOp::StyleProp(style) => {
             // Strip "style." prefix if present
@@ -899,6 +1025,7 @@ fn reify_update_op<'a>(
                 let has_extra_args = style.unit.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
                     &allocator,
+                    core_namespace,
                     &style.expression,
                     expressions,
                     root_xref,
@@ -906,6 +1033,7 @@ fn reify_update_op<'a>(
                 );
                 Some(create_style_prop_interpolate_stmt(
                     &allocator,
+                    core_namespace,
                     &name,
                     interp_args,
                     expr_count,
@@ -913,16 +1041,33 @@ fn reify_update_op<'a>(
                 ))
             } else {
                 // Angular 20+: Use ɵɵstyleProp("name", ɵɵinterpolate1(...), [unit])
-                let expr =
-                    convert_ir_expression(allocator, &style.expression, expressions, root_xref);
-                Some(create_style_prop_stmt_with_expr(allocator, &name, expr, style.unit.as_ref()))
+                let expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    &style.expression,
+                    expressions,
+                    root_xref,
+                );
+                Some(create_style_prop_stmt_with_expr(
+                    allocator,
+                    core_namespace,
+                    &name,
+                    expr,
+                    style.unit.as_ref(),
+                ))
             }
         }
         UpdateOp::ClassProp(class) => {
-            let expr = convert_ir_expression(allocator, &class.expression, expressions, root_xref);
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &class.expression,
+                expressions,
+                root_xref,
+            );
             // Strip "class." prefix if present
             let name = strip_prefix(&class.name, "class.");
-            Some(create_class_prop_stmt_with_expr(allocator, &name, expr))
+            Some(create_class_prop_stmt_with_expr(allocator, core_namespace, &name, expr))
         }
         UpdateOp::Attribute(attr) => {
             // Strip "attr." prefix if present
@@ -934,6 +1079,7 @@ fn reify_update_op<'a>(
                 let has_extra_args = attr.sanitizer.is_some() || attr.namespace.is_some();
                 let (interp_args, expr_count) = reify_interpolation(
                     &allocator,
+                    core_namespace,
                     &attr.expression,
                     expressions,
                     root_xref,
@@ -941,6 +1087,7 @@ fn reify_update_op<'a>(
                 );
                 Some(create_attribute_interpolate_stmt(
                     &allocator,
+                    core_namespace,
                     &name,
                     interp_args,
                     expr_count,
@@ -949,10 +1096,16 @@ fn reify_update_op<'a>(
                 ))
             } else {
                 // Angular 20+: Use ɵɵattribute("name", ɵɵinterpolate1(...))
-                let expr =
-                    convert_ir_expression(allocator, &attr.expression, expressions, root_xref);
+                let expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    &attr.expression,
+                    expressions,
+                    root_xref,
+                );
                 Some(create_attribute_stmt_with_expr(
                     &allocator,
+                    core_namespace,
                     &name,
                     expr,
                     attr.sanitizer.as_ref(),
@@ -960,7 +1113,7 @@ fn reify_update_op<'a>(
                 ))
             }
         }
-        UpdateOp::Advance(adv) => Some(create_advance_stmt(allocator, adv.delta)),
+        UpdateOp::Advance(adv) => Some(create_advance_stmt(allocator, core_namespace, adv.delta)),
         UpdateOp::StoreLet(store) => {
             // StoreLet as an update op should have been converted to a StoreLet expression
             // during the store_let_optimization phase. If it reaches reify, it's a compiler bug.
@@ -972,29 +1125,46 @@ fn reify_update_op<'a>(
             None
         }
         UpdateOp::TwoWayProperty(twp) => {
-            let expr = convert_ir_expression(allocator, &twp.expression, expressions, root_xref);
-            Some(create_two_way_property_stmt(allocator, &twp.name, expr, twp.sanitizer.as_ref()))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &twp.expression,
+                expressions,
+                root_xref,
+            );
+            Some(create_two_way_property_stmt(
+                allocator,
+                core_namespace,
+                &twp.name,
+                expr,
+                twp.sanitizer.as_ref(),
+            ))
         }
         UpdateOp::Repeater(rep) => {
-            let expr = convert_ir_expression(allocator, &rep.collection, expressions, root_xref);
-            Some(create_repeater_stmt(allocator, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &rep.collection,
+                expressions,
+                root_xref,
+            );
+            Some(create_repeater_stmt(allocator, core_namespace, expr))
         }
         UpdateOp::Conditional(cond) => {
             // Use processed expression (built by conditionals phase).
             // Angular asserts that processed is always set by this point
             // (throws "Conditional test was not set." in reify.ts:698).
             let expr = if let Some(ref processed) = cond.processed {
-                convert_ir_expression(allocator, processed, expressions, root_xref)
+                convert_ir_expression(allocator, core_namespace, processed, expressions, root_xref)
             } else {
                 diagnostics
                     .push(OxcDiagnostic::error("AssertionError: Conditional test was not set."));
                 return None;
             };
-            let context_value = cond
-                .context_value
-                .as_ref()
-                .map(|cv| convert_ir_expression(allocator, cv, expressions, root_xref));
-            Some(create_conditional_update_stmt(allocator, expr, context_value))
+            let context_value = cond.context_value.as_ref().map(|cv| {
+                convert_ir_expression(allocator, core_namespace, cv, expressions, root_xref)
+            });
+            Some(create_conditional_update_stmt(allocator, core_namespace, expr, context_value))
         }
         UpdateOp::StyleMap(style) => {
             let is_interpolation = matches!(*style.expression, IrExpression::Interpolation(_));
@@ -1003,17 +1173,28 @@ fn reify_update_op<'a>(
                 // Angular 19: Use ɵɵstyleMapInterpolate*(s0, v0, s1, ...)
                 let (interp_args, expr_count) = reify_interpolation(
                     &allocator,
+                    core_namespace,
                     &style.expression,
                     expressions,
                     root_xref,
                     false,
                 );
-                Some(create_style_map_interpolate_stmt(allocator, interp_args, expr_count))
+                Some(create_style_map_interpolate_stmt(
+                    allocator,
+                    core_namespace,
+                    interp_args,
+                    expr_count,
+                ))
             } else {
                 // Angular 20+: Use ɵɵstyleMap(ɵɵinterpolate1(...))
-                let expr =
-                    convert_ir_expression(allocator, &style.expression, expressions, root_xref);
-                Some(create_style_map_stmt(allocator, expr))
+                let expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    &style.expression,
+                    expressions,
+                    root_xref,
+                );
+                Some(create_style_map_stmt(allocator, core_namespace, expr))
             }
         }
         UpdateOp::ClassMap(class) => {
@@ -1023,33 +1204,57 @@ fn reify_update_op<'a>(
                 // Angular 19: Use ɵɵclassMapInterpolate*(s0, v0, s1, ...)
                 let (interp_args, expr_count) = reify_interpolation(
                     &allocator,
+                    core_namespace,
                     &class.expression,
                     expressions,
                     root_xref,
                     false,
                 );
-                Some(create_class_map_interpolate_stmt(allocator, interp_args, expr_count))
+                Some(create_class_map_interpolate_stmt(
+                    allocator,
+                    core_namespace,
+                    interp_args,
+                    expr_count,
+                ))
             } else {
                 // Angular 20+: Use ɵɵclassMap(ɵɵinterpolate1(...))
-                let expr =
-                    convert_ir_expression(allocator, &class.expression, expressions, root_xref);
-                Some(create_class_map_stmt(allocator, expr))
+                let expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    &class.expression,
+                    expressions,
+                    root_xref,
+                );
+                Some(create_class_map_stmt(allocator, core_namespace, expr))
             }
         }
         UpdateOp::DomProperty(prop) => {
-            let expr = convert_ir_expression(allocator, &prop.expression, expressions, root_xref);
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &prop.expression,
+                expressions,
+                root_xref,
+            );
             // Animation bindings use syntheticHostProperty instead of domProperty
             // Matches Angular's reify.ts lines 662-675
             let is_animation =
                 matches!(prop.binding_kind, BindingKind::LegacyAnimation | BindingKind::Animation);
             if is_animation {
-                Some(create_animation_stmt(allocator, &prop.name, expr))
+                Some(create_animation_stmt(allocator, core_namespace, &prop.name, expr))
             } else if supports_dom_property {
-                Some(create_dom_property_stmt(allocator, &prop.name, expr, prop.sanitizer.as_ref()))
+                Some(create_dom_property_stmt(
+                    allocator,
+                    core_namespace,
+                    &prop.name,
+                    expr,
+                    prop.sanitizer.as_ref(),
+                ))
             } else {
                 // Angular 19: Use ɵɵhostProperty instead of ɵɵdomProperty
                 Some(create_host_property_stmt(
                     &allocator,
+                    core_namespace,
                     &prop.name,
                     expr,
                     prop.sanitizer.as_ref(),
@@ -1057,8 +1262,14 @@ fn reify_update_op<'a>(
             }
         }
         UpdateOp::I18nExpression(i18n) => {
-            let expr = convert_ir_expression(allocator, &i18n.expression, expressions, root_xref);
-            Some(create_i18n_exp_stmt(allocator, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &i18n.expression,
+                expressions,
+                root_xref,
+            );
+            Some(create_i18n_exp_stmt(allocator, core_namespace, expr))
         }
         UpdateOp::I18nApply(i18n) => {
             // Use the slot from handle, matching Angular's reify.ts line 648:
@@ -1067,24 +1278,41 @@ fn reify_update_op<'a>(
                 crate::ir::ops::I18nSlotHandle::Single(slot_id) => slot_id.0,
                 crate::ir::ops::I18nSlotHandle::Range(start, _) => start.0,
             };
-            Some(create_i18n_apply_stmt(allocator, slot))
+            Some(create_i18n_apply_stmt(allocator, core_namespace, slot))
         }
         UpdateOp::AnimationBinding(anim) => {
-            let expr = convert_ir_expression(allocator, &anim.expression, expressions, root_xref);
-            Some(create_animation_binding_stmt(allocator, &anim.name, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &anim.expression,
+                expressions,
+                root_xref,
+            );
+            Some(create_animation_binding_stmt(allocator, core_namespace, &anim.name, expr))
         }
-        UpdateOp::Control(_) => Some(create_control_stmt(allocator)),
+        UpdateOp::Control(_) => Some(create_control_stmt(allocator, core_namespace)),
         UpdateOp::Variable(var) => {
             // Emit variable declaration with initializer for update phase
             // All Variable ops use `const` (StmtModifier::Final), matching Angular's reify.ts
-            let value = convert_ir_expression(allocator, &var.initializer, expressions, root_xref);
+            let value = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &var.initializer,
+                expressions,
+                root_xref,
+            );
             Some(create_variable_decl_stmt_with_value(allocator, &var.name, value))
         }
         UpdateOp::DeferWhen(defer_when) => {
             // Emit deferWhen runtime instruction with condition
-            let expr =
-                convert_ir_expression(allocator, &defer_when.condition, expressions, root_xref);
-            Some(create_defer_when_stmt(allocator, defer_when.modifier, expr))
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &defer_when.condition,
+                expressions,
+                root_xref,
+            );
+            Some(create_defer_when_stmt(allocator, core_namespace, defer_when.modifier, expr))
         }
         // Non-emitting or already handled operations
         UpdateOp::ListEnd(_) => None,
@@ -1093,6 +1321,7 @@ fn reify_update_op<'a>(
         // These may contain WrappedIrNode expressions that need to be converted.
         UpdateOp::Statement(stmt_op) => Some(convert_statement_ir_nodes(
             &allocator,
+            core_namespace,
             &stmt_op.statement,
             expressions,
             root_xref,
@@ -1109,6 +1338,7 @@ fn reify_update_op<'a>(
 /// empty strings are dropped (the Angular runtime defaults them to "").
 fn reify_interpolation<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     interpolation: &IrExpression<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -1124,6 +1354,7 @@ fn reify_interpolation<'a>(
             if expr_count == 1 && ir_interp.strings.iter().all(|s| s.is_empty()) {
                 args.push(convert_ir_expression(
                     &allocator,
+                    core_namespace,
                     &ir_interp.expressions[0],
                     expressions,
                     root_xref,
@@ -1139,7 +1370,13 @@ fn reify_interpolation<'a>(
                             &allocator,
                         )));
                     }
-                    args.push(convert_ir_expression(allocator, expr, expressions, root_xref));
+                    args.push(convert_ir_expression(
+                        allocator,
+                        core_namespace,
+                        expr,
+                        expressions,
+                        root_xref,
+                    ));
                 }
                 if ir_interp.strings.len() > ir_interp.expressions.len() {
                     if let Some(trailing) = ir_interp.strings.last() {
@@ -1214,7 +1451,13 @@ fn reify_interpolation<'a>(
         _ => {
             // Other expression types - convert directly
             let mut args = OxcVec::new_in(&allocator);
-            args.push(convert_ir_expression(allocator, interpolation, expressions, root_xref));
+            args.push(convert_ir_expression(
+                allocator,
+                core_namespace,
+                interpolation,
+                expressions,
+                root_xref,
+            ));
             (args, 1)
         }
     }
@@ -1230,12 +1473,14 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
     let root_xref = job.root.xref;
     let supports_value_interpolation = job.supports_value_interpolation();
     let supports_dom_property = job.supports_dom_property();
+    let core_namespace = job.core_namespace.as_str();
     let mut diagnostics = Vec::new();
 
     // Reify create operations (listeners)
     for op in job.root.create.iter() {
         let stmt = reify_host_create_op(
             &allocator,
+            core_namespace,
             op,
             &job.expressions,
             root_xref,
@@ -1253,6 +1498,7 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
     for op in job.root.update.iter() {
         let stmt = reify_update_op(
             &allocator,
+            core_namespace,
             op,
             &job.expressions,
             root_xref,
@@ -1272,6 +1518,7 @@ pub fn reify_host(job: &mut HostBindingCompilationJob<'_>) {
 /// Reify a single create operation for host bindings.
 fn reify_host_create_op<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     op: &CreateOp<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -1289,6 +1536,7 @@ fn reify_host_create_op<'a>(
                     // Convert WrappedIrNode expressions in the statement to output expressions
                     let converted_stmt = convert_statement_ir_nodes(
                         &allocator,
+                        core_namespace,
                         &stmt_op.statement,
                         expressions,
                         root_xref,
@@ -1297,6 +1545,7 @@ fn reify_host_create_op<'a>(
                     handler_stmts.push(converted_stmt);
                 } else if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -1312,8 +1561,13 @@ fn reify_host_create_op<'a>(
             // Add handler_expression as a return statement at the end
             // This is the actual event handler logic
             if let Some(handler_expr) = &listener.handler_expression {
-                let output_expr =
-                    convert_ir_expression(allocator, handler_expr, expressions, root_xref);
+                let output_expr = convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    handler_expr,
+                    expressions,
+                    root_xref,
+                );
                 // Use return statement so the handler returns the result
                 handler_stmts.push(OutputStatement::Return(Box::new_in(
                     ReturnStatement { value: output_expr, source_span: None },
@@ -1335,6 +1589,7 @@ fn reify_host_create_op<'a>(
             if is_synthetic_host {
                 Some(create_synthetic_host_listener_stmt(
                     &allocator,
+                    core_namespace,
                     &listener.name,
                     handler_stmts,
                     listener.handler_fn_name.as_ref(),
@@ -1351,6 +1606,7 @@ fn reify_host_create_op<'a>(
                 let use_capture = listener.host_listener && listener.is_animation_listener;
                 Some(create_listener_stmt_with_handler(
                     &allocator,
+                    core_namespace,
                     &listener.name,
                     handler_stmts,
                     event_target,
@@ -1367,6 +1623,7 @@ fn reify_host_create_op<'a>(
                 // Host bindings use Full mode (not DomOnly)
                 if let Some(stmt) = reify_update_op(
                     &allocator,
+                    core_namespace,
                     handler_op,
                     expressions,
                     root_xref,
@@ -1380,6 +1637,7 @@ fn reify_host_create_op<'a>(
             }
             Some(create_animation_listener_stmt(
                 &allocator,
+                core_namespace,
                 &listener.name,
                 listener.phase,
                 handler_stmts,
@@ -1410,6 +1668,7 @@ fn reify_host_create_op<'a>(
 #[allow(clippy::too_many_arguments)]
 fn reify_track_by<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     pool: &mut ConstantPool<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -1427,7 +1686,7 @@ fn reify_track_by<'a>(
                 ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                             &allocator,
                         )),
                         &allocator,
@@ -1463,7 +1722,7 @@ fn reify_track_by<'a>(
                                                 receiver: Box::new_in(
                                                     OutputExpression::ReadVar(Box::new_in(
                                                         ReadVarExpr {
-                                                            name: Ident::from("i0"),
+                                                            name: Ident::from(core_namespace),
                                                             source_span: None,
                                                         },
                                                         &allocator,
@@ -1541,6 +1800,7 @@ fn reify_track_by<'a>(
             // so version flags don't matter here.
             if let Some(stmt) = reify_update_op(
                 &allocator,
+                core_namespace,
                 track_op,
                 expressions,
                 root_xref,
@@ -1599,7 +1859,8 @@ fn reify_track_by<'a>(
         //   fn = op.usesComponentInstance
         //     ? o.fn(params, [new o.ReturnStatement(op.track)])
         //     : o.arrowFn(params, op.track);
-        let track_body = convert_ir_expression(allocator, track, expressions, root_xref);
+        let track_body =
+            convert_ir_expression(allocator, core_namespace, track, expressions, root_xref);
 
         if uses_component_instance {
             let mut stmts = OxcVec::with_capacity_in(1, &allocator);

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use std::path::Path;
 
-use oxc_allocator::{Allocator, Vec as OxcVec};
+use oxc_allocator::{Allocator, FromIn, Vec as OxcVec};
 use oxc_ast::ast::{
     Argument, Declaration, ExportDefaultDeclarationKind, Expression, ImportDeclarationSpecifier,
     ImportOrExportKind, ModuleExportName, ObjectPropertyKind, Program, PropertyKey, Statement,
@@ -837,11 +837,16 @@ fn build_set_class_metadata_decls<'a>(
             Some(string_consts),
         ),
     };
+    let core_namespace = namespace_registry.angular_core_ns().as_str();
     let metadata_expr = match options.compilation_mode {
-        crate::CompilationMode::Full => compile_class_metadata(allocator, &class_metadata),
-        crate::CompilationMode::Partial => {
-            crate::partial::compile_declare_class_metadata(allocator, &class_metadata)
+        crate::CompilationMode::Full => {
+            compile_class_metadata(allocator, core_namespace, &class_metadata)
         }
+        crate::CompilationMode::Partial => crate::partial::compile_declare_class_metadata(
+            allocator,
+            core_namespace,
+            &class_metadata,
+        ),
     };
     let emitter = JsEmitter::new();
     format!("{};", emitter.emit_expression(&metadata_expr))
@@ -1462,6 +1467,60 @@ impl<'a> oxc_ast_visit::Visit<'a> for JitCtorParamIdentifiers<'a> {
     }
 }
 
+/// Identifier references inside a class's decorators — the class's own,
+/// its members', and its constructor parameters'. Downleveled metadata
+/// (`ɵsetClassMetadata`, `ctorParameters`, `propDecorators`, `__decorate`)
+/// re-emits those references as values, so the imports stay live even
+/// though the analyzer only saw them in removable positions — the same
+/// imports TypeScript's elision keeps on ngtsc's rewritten AST.
+#[derive(Default)]
+struct DecoratorIdentifiers<'a>(rustc_hash::FxHashSet<&'a str>);
+
+impl<'a> oxc_ast_visit::Visit<'a> for DecoratorIdentifiers<'a> {
+    fn visit_identifier_reference(&mut self, it: &oxc_ast::ast::IdentifierReference<'a>) {
+        self.0.insert(it.name.as_str());
+    }
+}
+
+/// Identifier references inside every decorator on `class` and its
+/// members — the pieces `emit_class_metadata` or `__decorate` re-emit.
+fn collect_decorator_identifiers<'a>(
+    class: &'a oxc_ast::ast::Class<'a>,
+) -> rustc_hash::FxHashSet<&'a str> {
+    use oxc_ast_visit::Visit;
+    let mut identifiers = DecoratorIdentifiers::default();
+    for decorator in &class.decorators {
+        identifiers.visit_decorator(decorator);
+    }
+    for element in &class.body.body {
+        match element {
+            oxc_ast::ast::ClassElement::MethodDefinition(method) => {
+                for decorator in &method.decorators {
+                    identifiers.visit_decorator(decorator);
+                }
+                for param in &method.value.params.items {
+                    for decorator in &param.decorators {
+                        identifiers.visit_decorator(decorator);
+                    }
+                }
+            }
+            oxc_ast::ast::ClassElement::PropertyDefinition(property) => {
+                for decorator in &property.decorators {
+                    identifiers.visit_decorator(decorator);
+                }
+            }
+            oxc_ast::ast::ClassElement::AccessorProperty(property) => {
+                for decorator in &property.decorators {
+                    identifiers.visit_decorator(decorator);
+                }
+            }
+            oxc_ast::ast::ClassElement::StaticBlock(_)
+            | oxc_ast::ast::ClassElement::TSIndexSignature(_) => {}
+        }
+    }
+    identifiers.0
+}
+
 /// Every identifier a file has, like TypeScript's `SourceFile.identifiers`.
 #[derive(Default)]
 struct FileIdentifiers(rustc_hash::FxHashSet<String>);
@@ -1481,13 +1540,21 @@ impl<'a> oxc_ast_visit::Visit<'a> for FileIdentifiers {
     }
 }
 
-/// The namespace JIT synthesis references `@angular/core` through, and whether
-/// the file already imports it, like ngc's `ImportManager`: the last
-/// `import * as x from '@angular/core'` that isn't type-only is reused;
-/// otherwise a new [`JIT_ANGULAR_CORE_NS`] import, renamed `i0_1`, `i0_2`, ...
-/// while the file uses that identifier anywhere (an `input as i0` import, a
-/// `const i0`, ...), so the added import can't redeclare it.
-fn jit_angular_core_namespace(program: &oxc_ast::ast::Program<'_>) -> (String, bool) {
+/// Every identifier the file declares or references (TypeScript's
+/// `SourceFile.identifiers`), used to keep generated names from colliding.
+fn file_identifiers(program: &oxc_ast::ast::Program<'_>) -> rustc_hash::FxHashSet<String> {
+    let mut identifiers = FileIdentifiers::default();
+    oxc_ast_visit::Visit::visit_program(&mut identifiers, program);
+    identifiers.0
+}
+
+/// The local name of the last non-type-only `import * as ns from
+/// '@angular/core'` in the file, like the namespace reuse in ngc's
+/// `reuse_source_file_imports.ts`.
+fn reused_angular_core_namespace<'a>(
+    program: &'a oxc_ast::ast::Program<'a>,
+    allocator: &'a Allocator,
+) -> Option<Ident<'a>> {
     for stmt in program.body.iter().rev() {
         let Statement::ImportDeclaration(import) = stmt else { continue };
         if import.source.value != "@angular/core" || import.import_kind.is_type() {
@@ -1498,19 +1565,34 @@ fn jit_angular_core_namespace(program: &oxc_ast::ast::Program<'_>) -> (String, b
             _ => None,
         });
         if let Some(namespace) = namespace {
-            return (namespace.to_string(), true);
+            return Some(Ident::from_in(namespace.as_str(), &allocator));
         }
     }
+    None
+}
 
-    let mut identifiers = FileIdentifiers::default();
-    oxc_ast_visit::Visit::visit_program(&mut identifiers, program);
+/// The namespace JIT synthesis references `@angular/core` through, and whether
+/// the file already imports it, like ngc's `ImportManager`: the last
+/// `import * as x from '@angular/core'` that isn't type-only is reused;
+/// otherwise a new [`JIT_ANGULAR_CORE_NS`] import, renamed `i0_1`, `i0_2`, ...
+/// while the file uses that identifier anywhere (an `input as i0` import, a
+/// `const i0`, ...), so the added import can't redeclare it.
+fn jit_angular_core_namespace<'a>(
+    program: &'a oxc_ast::ast::Program<'a>,
+    allocator: &'a Allocator,
+) -> (Ident<'a>, bool) {
+    if let Some(namespace) = reused_angular_core_namespace(program, allocator) {
+        return (namespace, true);
+    }
+
+    let identifiers = file_identifiers(program);
     let mut name = JIT_ANGULAR_CORE_NS.to_string();
     let mut counter = 1;
-    while identifiers.0.contains(&name) {
+    while identifiers.contains(&name) {
         name = format!("{JIT_ANGULAR_CORE_NS}_{counter}");
         counter += 1;
     }
-    (name, false)
+    (Ident::from_in(name, &allocator), false)
 }
 
 /// Inspect a property initializer; if it matches a recognized signal initializer API,
@@ -2646,7 +2728,8 @@ fn transform_angular_file_jit(
         build_import_map(allocator, &parser_ret.program.body, options.resolved_imports.as_ref());
 
     // How synthesized `propDecorators` reference `@angular/core` (`i0.Input`).
-    let (core_namespace, core_namespace_imported) = jit_angular_core_namespace(&parser_ret.program);
+    let (core_namespace, core_namespace_imported) =
+        jit_angular_core_namespace(&parser_ret.program, allocator);
 
     // 3. Walk AST to find Angular-decorated classes
     let mut jit_classes: std::vec::Vec<JitClassInfo> = std::vec::Vec::new();
@@ -2723,7 +2806,7 @@ fn transform_angular_file_jit(
             &mut resource_counter,
             &mut resource_imports,
             &string_consts,
-            &core_namespace,
+            core_namespace.as_str(),
         ));
 
         result.component_count +=
@@ -2756,7 +2839,7 @@ fn transform_angular_file_jit(
         additional_imports.push_str("import { __decorate } from \"tslib\";\n");
     }
     if !core_namespace_imported
-        && jit_classes_need_angular_core_namespace(&jit_classes, &core_namespace)
+        && jit_classes_need_angular_core_namespace(&jit_classes, core_namespace.as_str())
     {
         additional_imports
             .push_str(&format!("import * as {core_namespace} from \"@angular/core\";\n"));
@@ -2915,9 +2998,12 @@ pub fn transform_angular_file(
     let mut jit_edits: std::vec::Vec<Edit> = std::vec::Vec::new();
     let mut jit_resource_counter: u32 = 0;
     let mut jit_resource_imports: std::vec::Vec<(String, String)> = std::vec::Vec::new();
-    // Lazily computed on the first jit-forced class; the name synthesized
-    // propDecorators use to reference `@angular/core` (`i0.Input`).
-    let mut jit_core_namespace: Option<(String, bool)> = None;
+    // Computed below alongside the file-level namespace registry; the name
+    // synthesized propDecorators use to reference `@angular/core`
+    // (`i0.Input`). Defaults to the same name the registry picks for
+    // `@angular/core`, so jit-forced classes and AOT definitions agree on
+    // the namespace when a file mixes both.
+    let mut jit_core_namespace: Option<(Ident, bool)>;
     // Lazily collected once a nameless jit-forced class needs a name
     // (top-level bindings + synthesized names).
     let mut taken_names: Option<rustc_hash::FxHashSet<String>> = None;
@@ -2930,8 +3016,24 @@ pub fn transform_angular_file(
     // source positions look elidable; accumulated here for the elision pass.
     let mut import_elision_mut = import_elision;
 
-    // File-level namespace registry to collect all module imports
-    let mut file_namespace_registry = NamespaceRegistry::new(allocator);
+    // File-level namespace registry to collect all module imports.
+    //
+    // Like ngtsc's AOT `ImportManager`
+    // (`presetImportManagerForceNamespaceImports`): existing
+    // `import * as ns from "@angular/core"` is never reused — a fresh alias
+    // is minted and renamed (`i0` → `i0_1`, ...) until it no longer
+    // collides with any identifier in the file — otherwise the emitted
+    // `import * as i0` would redeclare a user binding of the same name.
+    let file_used_names = file_identifiers(&parser_ret.program);
+    let mut file_namespace_registry =
+        NamespaceRegistry::with_file_scope(allocator, None, Some(file_used_names));
+    jit_core_namespace = Some((file_namespace_registry.angular_core_ns(), false));
+    // `.d.ts` members use the same alias: upstream's second ImportManager
+    // (`IvyDeclarationDtsTransform`) dedupes `i0` against the ORIGINAL
+    // file's `SourceFile.identifiers` too (declaration.ts:96-98,160; the
+    // dts transform receives `original.getSourceFile()`, not the emitted
+    // file), so the alias it picks is identical to the registry's.
+    let dts_core_namespace = file_namespace_registry.angular_core_ns();
 
     // Shared constant pool index across all components in this file.
     // This ensures constant names (_c0, _c1, etc.) don't conflict when
@@ -3091,9 +3193,10 @@ pub fn transform_angular_file(
                 find_jit_forced_decorator(class, &string_consts)
             {
                 let core_namespace = jit_core_namespace
-                    .get_or_insert_with(|| jit_angular_core_namespace(&parser_ret.program))
-                    .0
-                    .clone();
+                    .get_or_insert_with(|| {
+                        jit_angular_core_namespace(&parser_ret.program, allocator)
+                    })
+                    .0;
                 let (is_exported, is_default_export) = match stmt {
                     Statement::ExportDeclaration(_) => (true, false),
                     Statement::ExportDefaultDeclaration(_) => (false, true),
@@ -3124,7 +3227,7 @@ pub fn transform_angular_file(
                     &mut jit_resource_counter,
                     &mut jit_resource_imports,
                     &string_consts,
-                    &core_namespace,
+                    core_namespace.as_str(),
                 );
 
                 // A co-located @Injectable still compiles: upstream's
@@ -3151,6 +3254,7 @@ pub fn transform_angular_file(
                     }
                     if let Some(inj_def) = generate_injectable_definition_from_decorator(
                         &allocator,
+                        file_namespace_registry.angular_core_ns().as_str(),
                         &injectable_metadata,
                         options.compilation_mode,
                     ) {
@@ -3164,6 +3268,7 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         result.dts_declarations.push(dts::generate_injectable_dts(
+                            dts_core_namespace.as_str(),
                             &injectable_metadata,
                             type_argument_count,
                         ));
@@ -3193,6 +3298,15 @@ pub fn transform_angular_file(
                     &mut jit_edits,
                 );
                 jit_classes.push(info);
+
+                // Identifiers used only in decorator positions (member,
+                // `declare` member, and param decorators) survive in the
+                // emitted __decorate / propDecorators calls, so their imports
+                // must be kept — the same result TypeScript's elision
+                // produces on ngtsc's rewritten AST.
+                for name in collect_decorator_identifiers(class) {
+                    import_elision_mut.preserve(name);
+                }
 
                 // Identifiers used only in constructor parameters (types,
                 // param decorators) survive in the emitted ctorParameters /
@@ -3383,6 +3497,7 @@ pub fn transform_angular_file(
                                 }
                                 if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                     &allocator,
+                                    file_namespace_registry.angular_core_ns().as_str(),
                                     injectable_metadata,
                                     options.compilation_mode,
                                 ) {
@@ -3510,6 +3625,8 @@ pub fn transform_angular_file(
                                     } else {
                                         oxc_allocator::Vec::new_in(&allocator)
                                     };
+                                    let core_namespace =
+                                        file_namespace_registry.angular_core_ns().as_str();
                                     let metadata_expr = match options.compilation_mode {
                                         crate::CompilationMode::Partial => {
                                             // Partial mode mirrors upstream's
@@ -3519,16 +3636,22 @@ pub fn transform_angular_file(
                                             // or more → async ɵɵngDeclareClassMetadataAsync.
                                             crate::partial::compile_component_declare_class_metadata(
                                                 &allocator,
+                                                core_namespace,
                                                 &class_metadata,
                                                 deferred_deps.as_slice(),
                                             )
                                         }
                                         crate::CompilationMode::Full => {
                                             if deferred_deps.is_empty() {
-                                                compile_class_metadata(allocator, &class_metadata)
+                                                compile_class_metadata(
+                                                    allocator,
+                                                    core_namespace,
+                                                    &class_metadata,
+                                                )
                                             } else {
                                                 compile_component_class_metadata(
                                                     &allocator,
+                                                    core_namespace,
                                                     &class_metadata,
                                                     Some(deferred_deps.as_slice()),
                                                 )
@@ -3577,8 +3700,10 @@ pub fn transform_angular_file(
                                 class,
                                 &string_consts,
                                 source,
+                                dts_core_namespace.as_str(),
                             );
                             result.dts_declarations.push(dts::generate_component_dts(
+                                dts_core_namespace.as_str(),
                                 &metadata,
                                 type_argument_count,
                                 &content_query_names,
@@ -3667,6 +3792,7 @@ pub fn transform_angular_file(
                     // Pass shared_pool_index to ensure unique constant names across the file
                     let definitions = generate_directive_definitions(
                         &allocator,
+                        file_namespace_registry.angular_core_ns().as_str(),
                         &directive_metadata,
                         shared_pool_index,
                         options.compilation_mode,
@@ -3704,6 +3830,7 @@ pub fn transform_angular_file(
                         }
                         if let Some(inj_def) = generate_injectable_definition_from_decorator(
                             &allocator,
+                            file_namespace_registry.angular_core_ns().as_str(),
                             injectable_metadata,
                             options.compilation_mode,
                         ) {
@@ -3719,9 +3846,14 @@ pub fn transform_angular_file(
                     let type_argument_count =
                         class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                     directive_metadata.type_argument_count = type_argument_count;
-                    let accept_types =
-                        crate::directive::input_transform_types(class, &string_consts, source);
+                    let accept_types = crate::directive::input_transform_types(
+                        class,
+                        &string_consts,
+                        source,
+                        dts_core_namespace.as_str(),
+                    );
                     result.dts_declarations.push(dts::generate_directive_dts(
+                        dts_core_namespace.as_str(),
                         &directive_metadata,
                         has_injectable,
                         &accept_types,
@@ -3787,6 +3919,7 @@ pub fn transform_angular_file(
                     // Compile pipe and generate both ɵfac and ɵpipe definitions as external property assignments
                     if let Some(definition) = generate_full_pipe_definition_from_decorator(
                         &allocator,
+                        file_namespace_registry.angular_core_ns().as_str(),
                         &pipe_metadata,
                         options.compilation_mode,
                     ) {
@@ -3818,6 +3951,7 @@ pub fn transform_angular_file(
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 &allocator,
+                                file_namespace_registry.angular_core_ns().as_str(),
                                 injectable_metadata,
                                 options.compilation_mode,
                             ) {
@@ -3833,6 +3967,7 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         result.dts_declarations.push(dts::generate_pipe_dts(
+                            dts_core_namespace.as_str(),
                             &pipe_metadata,
                             type_argument_count,
                             has_injectable,
@@ -3899,6 +4034,7 @@ pub fn transform_angular_file(
                     // Compile NgModule and generate all definitions as external property assignments
                     if let Some(definition) = generate_full_ng_module_definition(
                         &allocator,
+                        file_namespace_registry.angular_core_ns().as_str(),
                         &ng_module_metadata,
                         options.compilation_mode,
                     ) {
@@ -3932,6 +4068,7 @@ pub fn transform_angular_file(
                             }
                             if let Some(inj_def) = generate_injectable_definition_from_decorator(
                                 &allocator,
+                                file_namespace_registry.angular_core_ns().as_str(),
                                 injectable_metadata,
                                 options.compilation_mode,
                             ) {
@@ -3956,6 +4093,7 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         result.dts_declarations.push(dts::generate_ng_module_dts(
+                            dts_core_namespace.as_str(),
                             &ng_module_metadata,
                             type_argument_count,
                             has_injectable,
@@ -4045,6 +4183,7 @@ pub fn transform_angular_file(
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         let definition = generate_service_definition_from_decorator(
                             &allocator,
+                            file_namespace_registry.angular_core_ns().as_str(),
                             &service_metadata,
                             type_argument_count,
                         );
@@ -4059,6 +4198,7 @@ pub fn transform_angular_file(
                         );
 
                         result.dts_declarations.push(dts::generate_service_dts(
+                            dts_core_namespace.as_str(),
                             &service_metadata,
                             type_argument_count,
                         ));
@@ -4122,6 +4262,7 @@ pub fn transform_angular_file(
                     // Compile injectable and generate definitions
                     if let Some(definition) = generate_injectable_definition_from_decorator(
                         &allocator,
+                        file_namespace_registry.angular_core_ns().as_str(),
                         &injectable_metadata,
                         options.compilation_mode,
                     ) {
@@ -4139,6 +4280,7 @@ pub fn transform_angular_file(
                         let type_argument_count =
                             class.type_parameters.as_ref().map_or(0, |tp| tp.params.len() as u32);
                         result.dts_declarations.push(dts::generate_injectable_dts(
+                            dts_core_namespace.as_str(),
                             &injectable_metadata,
                             type_argument_count,
                         ));
@@ -4200,17 +4342,12 @@ pub fn transform_angular_file(
                 .push_str(&format!("import {{ {} }} from \"tslib\";\n", tslib_names.join(", ")));
         }
         let (core_namespace, core_namespace_imported) = jit_core_namespace
-            .clone()
-            .unwrap_or_else(|| jit_angular_core_namespace(&parser_ret.program));
+            .unwrap_or_else(|| jit_angular_core_namespace(&parser_ret.program, allocator));
         jit_needs_core_ns = !core_namespace_imported
-            && jit_classes_need_angular_core_namespace(&jit_classes, &core_namespace);
-        // When synthesized references need `@angular/core` under a name other
-        // than `i0`, it must be imported here — `i0` itself is covered by the
-        // namespace registry below.
-        if jit_needs_core_ns && core_namespace != "i0" {
-            additional_imports
-                .push_str(&format!("import * as {core_namespace} from \"@angular/core\";\n"));
-        }
+            && jit_classes_need_angular_core_namespace(&jit_classes, core_namespace.as_str());
+        // The `@angular/core` import itself is emitted by the namespace
+        // registry below under whatever alias the file allows (`i0` or a
+        // uniquified `i0_1`, ...), for every alias shape.
         for (import_name, specifier) in &jit_resource_imports {
             additional_imports
                 .push_str(&format!("import {} from \"{}\";\n", import_name, specifier));
@@ -4219,11 +4356,9 @@ pub fn transform_angular_file(
 
     // The registry's `import * as i0` (and any `i1…` aliases) is only emitted
     // when something references it: compiled definitions, or ɵfac/ɵprov on a
-    // jit-forced class, or synthesized `i0.*` propDecorators.
-    let emit_ns_imports = !class_definitions.is_empty()
-        || jit_emitted_i0_statics
-        || (jit_needs_core_ns
-            && jit_core_namespace.map(|(name, _)| name == "i0").unwrap_or_default());
+    // jit-forced class, or synthesized `{ns}.*` propDecorators.
+    let emit_ns_imports =
+        !class_definitions.is_empty() || jit_emitted_i0_statics || jit_needs_core_ns;
     if emit_ns_imports {
         additional_imports.push_str(&file_namespace_registry.generate_import_statements());
     }
@@ -4349,6 +4484,27 @@ pub fn transform_angular_file(
         ));
     }
 
+    // Members can reference namespace aliases the registry assigned to
+    // other modules (e.g. `typeof i1.SomeDirective` for host directives).
+    // Record each referenced alias's module so the consumer emits the
+    // matching `import * as <alias> from "<module>"` in the `.d.ts` —
+    // what upstream's `IvyDeclarationDtsTransform` `ImportManager` adds
+    // when a declaration references an external type.
+    if !result.dts_declarations.is_empty() {
+        let module_by_alias: HashMap<String, String> = file_namespace_registry
+            .get_all_modules()
+            .into_iter()
+            .map(|(module, alias)| (alias.as_str().to_string(), module.as_str().to_string()))
+            .collect();
+        for declaration in &mut result.dts_declarations {
+            for (alias, module) in &module_by_alias {
+                if declaration.members.contains(&format!("{alias}.")) {
+                    declaration.namespace_imports.insert(alias.clone(), module.clone());
+                }
+            }
+        }
+    }
+
     // Apply all edits in one pass
     if options.sourcemap {
         let (code, map) = apply_edits_with_sourcemap(source, edits, path);
@@ -4425,6 +4581,7 @@ struct FullCompilationResult {
 /// time. See `crate::partial::component` for the shape.
 fn compile_component_partial<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     template: &'a str,
     metadata: &ComponentMetadata<'a>,
     view_queries: &[R3QueryMetadata<'a>],
@@ -4437,10 +4594,17 @@ fn compile_component_partial<'a>(
         content_queries,
         view_queries,
     };
-    let cmp_expr =
-        crate::partial::compile_declare_component_from_metadata(allocator, metadata, &inputs);
-    let fac_expr =
-        crate::partial::component::compile_declare_factory_for_component(allocator, metadata);
+    let cmp_expr = crate::partial::compile_declare_component_from_metadata(
+        allocator,
+        core_namespace,
+        metadata,
+        &inputs,
+    );
+    let fac_expr = crate::partial::component::compile_declare_factory_for_component(
+        allocator,
+        core_namespace,
+        metadata,
+    );
 
     // Detect `@defer` block presence by a cheap string scan — partial
     // mode skips the template pipeline, but the caller's class-metadata
@@ -4489,6 +4653,7 @@ fn compile_component_full<'a>(
     if matches!(options.compilation_mode, crate::CompilationMode::Partial) {
         return Ok(compile_component_partial(
             allocator,
+            namespace_registry.angular_core_ns().as_str(),
             template,
             metadata,
             &view_queries,
@@ -4672,6 +4837,7 @@ fn compile_component_full<'a>(
         r3_result.nodes,
         ingest_options,
     );
+    job.core_namespace = namespace_registry.angular_core_ns();
 
     // BEFORE template compilation: Pool attrs const if first selector has attributes.
     // This matches TypeScript Angular which adds attrs to the pool BEFORE template ingestion.
@@ -4694,6 +4860,7 @@ fn compile_component_full<'a>(
         let fn_name = Some(metadata.class_name.as_str());
         Some(create_content_queries_function(
             &allocator,
+            job.core_namespace.as_str(),
             content_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
@@ -4707,6 +4874,7 @@ fn compile_component_full<'a>(
         let fn_name = Some(metadata.class_name.as_str());
         Some(create_view_queries_function(
             &allocator,
+            job.core_namespace.as_str(),
             view_queries.as_slice(),
             fn_name,
             Some(&mut job.pool),
@@ -4724,6 +4892,7 @@ fn compile_component_full<'a>(
     let template_pool_index = job.pool.next_name_index();
     let host_binding_output = compile_component_host_bindings(
         &allocator,
+        job.core_namespace.as_str(),
         metadata,
         template_pool_index,
         options.angular_version,
@@ -4809,8 +4978,11 @@ fn compile_component_full<'a>(
             Ident::from_in(file_path, &allocator),
         );
 
-        // Add the @angular/core namespace dependency (i0)
-        hmr_meta.add_namespace_dependency(Ident::from("@angular/core"), Ident::from("i0"));
+        // Add the @angular/core namespace dependency under whatever alias the
+        // file's registry assigned (`i0`, a uniquified `i0_1`, or a reused
+        // `import * as ns`).
+        let core_ns = namespace_registry.get_or_assign(&Ident::from("@angular/core"));
+        hmr_meta.add_namespace_dependency(Ident::from("@angular/core"), core_ns);
 
         // Generate the HMR initializer expression
         let hmr_expr = compile_hmr_initializer(allocator, &hmr_meta);
@@ -4851,7 +5023,8 @@ fn compile_component_full<'a>(
             .with_line_number(class_line_number);
 
         // Compile to IIFE-wrapped expression
-        let debug_info_expr = compile_class_debug_info(allocator, &debug_info);
+        let debug_info_expr =
+            compile_class_debug_info(allocator, job.core_namespace.as_str(), &debug_info);
 
         Some(emitter.emit_expression(&debug_info_expr))
     } else {
@@ -5183,6 +5356,7 @@ pub fn compile_template_to_js_with_options<'a>(
     if let Some(ref host_input) = options.host {
         if let Some(host_result) = compile_host_bindings_from_input(
             &allocator,
+            "i0",
             host_input,
             component_name,
             options.selector.as_deref(),
@@ -5355,7 +5529,11 @@ pub fn compile_template_for_hmr<'a>(
 
         let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
-            const_entries.push(const_value_to_expression(allocator, const_value));
+            const_entries.push(const_value_to_expression(
+                allocator,
+                job.core_namespace.as_str(),
+                const_value,
+            ));
         }
 
         let consts_expr = if !job.consts_initializers.is_empty() {
@@ -5453,6 +5631,7 @@ struct HostBindingCompilationOutput<'a> {
 /// Returns None if the component has no host bindings.
 fn compile_component_host_bindings<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &ComponentMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<AngularVersion>,
@@ -5487,6 +5666,7 @@ fn compile_component_host_bindings<'a>(
         angular_version,
         legacy_optional_chaining,
     );
+    job.core_namespace = Ident::from(core_namespace);
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation
@@ -5805,6 +5985,7 @@ fn pool_selector_attrs<'a>(
 /// via TransformOptions for isolated template compilation.
 fn compile_host_bindings_from_input<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     host_input: &HostMetadataInput,
     component_name: &str,
     selector: Option<&str>,
@@ -5843,6 +6024,7 @@ fn compile_host_bindings_from_input<'a>(
         angular_version,
         legacy_optional_chaining,
     );
+    job.core_namespace = Ident::from(core_namespace);
     let result = compile_host_bindings(&mut job);
 
     Some(result)
@@ -5874,6 +6056,7 @@ pub fn compile_host_bindings_for_linker(
     let allocator = Allocator::default();
     let result = compile_host_bindings_from_input(
         &allocator,
+        allocator.alloc_str(core_namespace),
         host_input,
         component_name,
         selector,
@@ -6012,6 +6195,7 @@ pub fn compile_template_for_linker<'a>(
         r3_result.nodes,
         ingest_options,
     );
+    job.core_namespace = Ident::from_in(core_namespace, &allocator);
 
     let compiled = compile_template(&mut job);
 
@@ -6028,7 +6212,11 @@ pub fn compile_template_for_linker<'a>(
     let consts_js = if !job.consts.is_empty() {
         let mut const_entries: OxcVec<'a, OutputExpression<'a>> = OxcVec::new_in(&allocator);
         for const_value in &job.consts {
-            const_entries.push(const_value_to_expression(allocator, const_value));
+            const_entries.push(const_value_to_expression(
+                allocator,
+                allocator.alloc_str(core_namespace),
+                const_value,
+            ));
         }
 
         let consts_expr = if !job.consts_initializers.is_empty() {

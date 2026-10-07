@@ -59,30 +59,43 @@ pub struct DirectiveCompileResult<'a> {
 /// where the previous directive's pool left off.
 pub fn compile_directive<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveCompileResult<'a> {
-    compile_directive_from_metadata(allocator, metadata, pool_starting_index, angular_version)
+    compile_directive_from_metadata(
+        allocator,
+        core_namespace,
+        metadata,
+        pool_starting_index,
+        angular_version,
+    )
 }
 
 /// Internal implementation of directive compilation.
 pub fn compile_directive_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
 ) -> DirectiveCompileResult<'a> {
     // Build the base directive fields, passing pool_starting_index for host bindings
-    let (definition_map, next_pool_index, host_declarations) =
-        build_base_directive_fields(allocator, metadata, pool_starting_index, angular_version);
+    let (definition_map, next_pool_index, host_declarations) = build_base_directive_fields(
+        allocator,
+        core_namespace,
+        metadata,
+        pool_starting_index,
+        angular_version,
+    );
 
     // Add features
     let mut definition_map = definition_map;
-    add_features(allocator, metadata, &mut definition_map);
+    add_features(allocator, core_namespace, metadata, &mut definition_map);
 
     // Create the expression: ɵɵdefineDirective(definitionMap)
-    let expression = create_define_directive_call(allocator, definition_map);
+    let expression = create_define_directive_call(allocator, core_namespace, definition_map);
 
     // Convert host binding declarations to statements
     let mut statements = Vec::new_in(&allocator);
@@ -102,6 +115,7 @@ pub fn compile_directive_from_metadata<'a>(
 /// contains any pooled constants (pure functions) from host binding compilation.
 fn build_base_directive_fields<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
@@ -130,6 +144,7 @@ fn build_base_directive_fields<'a>(
         // are not pooled. For components, pool is passed from component compilation.
         let content_queries_fn = super::query::create_content_queries_function(
             &allocator,
+            core_namespace,
             &metadata.queries,
             Some(metadata.name.as_str()),
             None,
@@ -148,6 +163,7 @@ fn build_base_directive_fields<'a>(
         // are not pooled. For components, pool is passed from component compilation.
         let view_queries_fn = super::query::create_view_queries_function(
             &allocator,
+            core_namespace,
             &metadata.view_queries,
             Some(metadata.name.as_str()),
             None,
@@ -165,6 +181,7 @@ fn build_base_directive_fields<'a>(
     if metadata.host.has_bindings() {
         if let Some((result, new_pool_index)) = compile_directive_host_bindings(
             allocator,
+            core_namespace,
             metadata,
             pool_starting_index,
             angular_version,
@@ -272,6 +289,7 @@ fn build_base_directive_fields<'a>(
 /// Corresponds to `addFeatures()` in Angular's compiler.
 fn add_features<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     definition_map: &mut Vec<'a, LiteralMapEntry<'a>>,
 ) {
@@ -281,26 +299,47 @@ fn add_features<'a>(
     if let Some(providers) = &metadata.providers {
         let mut args = Vec::new_in(&allocator);
         args.push(providers.clone_in(allocator));
-        features.push(create_feature_call(allocator, Identifiers::PROVIDERS_FEATURE, args));
+        features.push(create_feature_call(
+            allocator,
+            core_namespace,
+            Identifiers::PROVIDERS_FEATURE,
+            args,
+        ));
     }
 
     // HostDirectivesFeature (before InheritDefinitionFeature)
     if !metadata.host_directives.is_empty() {
-        let host_directives_arg =
-            create_host_directives_feature_arg(allocator, &metadata.host_directives);
+        let host_directives_arg = create_host_directives_feature_arg(
+            allocator,
+            core_namespace,
+            &metadata.host_directives,
+        );
         let mut args = Vec::new_in(&allocator);
         args.push(host_directives_arg);
-        features.push(create_feature_call(allocator, Identifiers::HOST_DIRECTIVES_FEATURE, args));
+        features.push(create_feature_call(
+            allocator,
+            core_namespace,
+            Identifiers::HOST_DIRECTIVES_FEATURE,
+            args,
+        ));
     }
 
     // InheritDefinitionFeature
     if metadata.uses_inheritance {
-        features.push(create_feature_ref(allocator, Identifiers::INHERIT_DEFINITION_FEATURE));
+        features.push(create_feature_ref(
+            allocator,
+            core_namespace,
+            Identifiers::INHERIT_DEFINITION_FEATURE,
+        ));
     }
 
     // NgOnChangesFeature
     if metadata.uses_on_changes {
-        features.push(create_feature_ref(allocator, Identifiers::NG_ON_CHANGES_FEATURE));
+        features.push(create_feature_ref(
+            allocator,
+            core_namespace,
+            Identifiers::NG_ON_CHANGES_FEATURE,
+        ));
     }
 
     if !features.is_empty() {
@@ -318,14 +357,15 @@ fn add_features<'a>(
 /// Creates the `ɵɵdefineDirective({...})` call expression.
 fn create_define_directive_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
-    // Create i0.ɵɵdefineDirective
+    // Create ns.ɵɵdefineDirective
     let define_directive_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -563,6 +603,7 @@ pub fn create_outputs_literal<'a>(
 /// next available constant pool index after host binding compilation.
 fn compile_directive_host_bindings<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3DirectiveMetadata<'a>,
     pool_starting_index: u32,
     angular_version: Option<crate::AngularVersion>,
@@ -591,6 +632,7 @@ fn compile_directive_host_bindings<'a>(
         angular_version,
         None,
     );
+    job.core_namespace = Ident::from(core_namespace);
     let result = compile_host_bindings(&mut job);
 
     // Get the next pool index after host binding compilation
@@ -806,9 +848,10 @@ fn parse_event_target(event_name: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Creates a feature call expression: i0.FeatureName(args)
+/// Creates a feature call expression: ns.FeatureName(args)
 fn create_feature_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     feature_name: &'static str,
     args: Vec<'a, OutputExpression<'a>>,
 ) -> OutputExpression<'a> {
@@ -816,7 +859,7 @@ fn create_feature_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -840,16 +883,17 @@ fn create_feature_call<'a>(
     ))
 }
 
-/// Creates a feature reference expression: i0.FeatureName
+/// Creates a feature reference expression: ns.FeatureName
 fn create_feature_ref<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     feature_name: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -865,6 +909,7 @@ fn create_feature_ref<'a>(
 /// Creates the host directives feature argument.
 fn create_host_directives_feature_arg<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     host_directives: &[R3HostDirectiveMetadata<'a>],
 ) -> OutputExpression<'a> {
     let mut items = Vec::new_in(&allocator);
@@ -903,7 +948,7 @@ fn create_host_directives_feature_arg<'a>(
                 ReadPropExpr {
                     receiver: Box::new_in(
                         OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                            ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                             &allocator,
                         )),
                         &allocator,
@@ -1018,7 +1063,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
@@ -1062,7 +1107,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1315,7 +1360,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1357,7 +1402,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1397,7 +1442,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1452,7 +1497,7 @@ mod tests {
             host_directives: Vec::new_in(&&allocator),
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -1513,7 +1558,7 @@ mod tests {
             host_directives,
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");
@@ -1578,7 +1623,7 @@ mod tests {
             host_directives,
         };
 
-        let result = compile_directive(&allocator, &metadata, 0, None);
+        let result = compile_directive(&allocator, "i0", &metadata, 0, None);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
         let normalized = output.replace([' ', '\n', '\t'], "");

@@ -30,6 +30,7 @@ use crate::r3::Identifiers;
 /// See: upstream `packages/compiler/src/render3/partial/factory.ts:27`.
 pub fn compile_declare_factory_function<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3FactoryMetadata<'a>,
 ) -> OutputExpression<'a> {
     let base = meta.base();
@@ -38,7 +39,11 @@ pub fn compile_declare_factory_function<'a>(
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_FACTORY));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(
         Ident::from("type"),
         base.type_expr.clone_in(allocator),
@@ -51,7 +56,7 @@ pub fn compile_declare_factory_function<'a>(
     ));
     entries.push(LiteralMapEntry::new(
         Ident::from("target"),
-        factory_target_expr(allocator, base.target),
+        factory_target_expr(allocator, core_namespace, base.target),
         false,
     ));
 
@@ -66,7 +71,7 @@ pub fn compile_declare_factory_function<'a>(
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
-                namespaced_prop(allocator, "i0", Identifiers::DECLARE_FACTORY),
+                namespaced_prop(allocator, core_namespace, Identifiers::DECLARE_FACTORY),
                 &allocator,
             ),
             args,
@@ -168,6 +173,7 @@ fn compile_dependency<'a>(
 /// Builds the `target` field: `i0.ɵɵFactoryTarget.<Variant>`.
 fn factory_target_expr<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     target: FactoryTarget,
 ) -> OutputExpression<'a> {
     let variant = match target {
@@ -180,7 +186,7 @@ fn factory_target_expr<'a>(
 
     let factory_target_ref = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
-            receiver: Box::new_in(read_var(allocator, "i0"), &allocator),
+            receiver: Box::new_in(read_var(allocator, core_namespace), &allocator),
             name: Ident::from(Identifiers::FACTORY_TARGET),
             optional: false,
             source_span: None,
@@ -201,7 +207,7 @@ fn factory_target_expr<'a>(
 
 // ---- small helpers --------------------------------------------------------
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -210,7 +216,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(

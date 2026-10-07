@@ -31,9 +31,10 @@ use crate::r3::Identifiers;
 /// Ported from Angular's `compileClassMetadata` function.
 pub fn compile_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ClassMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let fn_call = internal_compile_class_metadata(allocator, metadata);
+    let fn_call = internal_compile_class_metadata(allocator, core_namespace, metadata);
     let guarded = dev_only_guarded_expression(allocator, fn_call);
     let stmt = expr_stmt(allocator, guarded);
     let arrow = create_arrow_iife(allocator, stmt);
@@ -48,13 +49,14 @@ pub fn compile_class_metadata<'a>(
 /// Ported from Angular's `compileComponentClassMetadata` function.
 pub fn compile_component_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ClassMetadata<'a>,
     dependencies: Option<&[R3DeferPerComponentDependency<'a>]>,
 ) -> OutputExpression<'a> {
     match dependencies {
         None | Some([]) => {
             // No deferred dependencies - use regular setClassMetadata
-            compile_class_metadata(allocator, metadata)
+            compile_class_metadata(allocator, core_namespace, metadata)
         }
         Some(deps) => {
             // Has deferred dependencies - use setClassMetadataAsync
@@ -63,7 +65,13 @@ pub fn compile_component_class_metadata<'a>(
                 params.push(FnParam { name: dep.param_name.clone() });
             }
             let resolver = compile_component_metadata_async_resolver(allocator, deps);
-            internal_compile_set_class_metadata_async(allocator, metadata, params, resolver)
+            internal_compile_set_class_metadata_async(
+                allocator,
+                core_namespace,
+                metadata,
+                params,
+                resolver,
+            )
         }
     }
 }
@@ -75,6 +83,7 @@ pub fn compile_component_class_metadata<'a>(
 /// Ported from Angular's `compileOpaqueAsyncClassMetadata` function.
 pub fn compile_opaque_async_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ClassMetadata<'a>,
     defer_resolver: OutputExpression<'a>,
     deferred_dependency_names: &[Ident<'a>],
@@ -83,7 +92,13 @@ pub fn compile_opaque_async_class_metadata<'a>(
     for name in deferred_dependency_names {
         params.push(FnParam { name: name.clone() });
     }
-    internal_compile_set_class_metadata_async(allocator, metadata, params, defer_resolver)
+    internal_compile_set_class_metadata_async(
+        allocator,
+        core_namespace,
+        metadata,
+        params,
+        defer_resolver,
+    )
 }
 
 /// Compiles the dependency resolver function for `setClassMetadataAsync`.
@@ -197,9 +212,10 @@ pub fn compile_component_metadata_async_resolver<'a>(
 /// Compiles the internal `setClassMetadata` call without wrappers.
 fn internal_compile_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ClassMetadata<'a>,
 ) -> OutputExpression<'a> {
-    let import = import_expr(allocator, Identifiers::SET_CLASS_METADATA);
+    let import = import_expr(allocator, core_namespace, Identifiers::SET_CLASS_METADATA);
 
     let mut args = Vec::new_in(&allocator);
     args.push(metadata.r#type.clone_in(allocator));
@@ -234,12 +250,14 @@ fn internal_compile_class_metadata<'a>(
 /// Compiles `setClassMetadataAsync` with wrapper params and resolver.
 fn internal_compile_set_class_metadata_async<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ClassMetadata<'a>,
     wrapper_params: Vec<'a, FnParam<'a>>,
     dependency_resolver_fn: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     // Create the inner setClassMetadata call
-    let set_class_metadata_call = internal_compile_class_metadata(allocator, metadata);
+    let set_class_metadata_call =
+        internal_compile_class_metadata(allocator, core_namespace, metadata);
 
     // Create wrapper: (deps...) => { setClassMetadata(...); }
     let mut wrapper_stmts = Vec::new_in(&allocator);
@@ -255,7 +273,7 @@ fn internal_compile_set_class_metadata_async<'a>(
     ));
 
     // Create: setClassMetadataAsync(type, resolver, wrapper)
-    let import = import_expr(allocator, Identifiers::SET_CLASS_METADATA_ASYNC);
+    let import = import_expr(allocator, core_namespace, Identifiers::SET_CLASS_METADATA_ASYNC);
 
     let mut args = Vec::new_in(&allocator);
     args.push(metadata.r#type.clone_in(allocator));
@@ -343,13 +361,17 @@ fn guarded_expression<'a>(
     ))
 }
 
-/// Creates an import expression: i0.identifier
-fn import_expr<'a>(allocator: &'a Allocator, identifier: &'static str) -> OutputExpression<'a> {
+/// Creates an import expression: ns.identifier
+fn import_expr<'a>(
+    allocator: &'a Allocator,
+    core_namespace: &'a str,
+    identifier: &'static str,
+) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,

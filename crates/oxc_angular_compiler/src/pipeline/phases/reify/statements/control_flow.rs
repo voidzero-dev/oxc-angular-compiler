@@ -26,6 +26,7 @@ use super::super::utils::create_instruction_call_stmt;
 /// Args are trimmed from the end if they are null values.
 pub fn create_conditional_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
@@ -109,7 +110,7 @@ pub fn create_conditional_create_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -131,7 +132,7 @@ pub fn create_conditional_create_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::CONDITIONAL_CREATE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::CONDITIONAL_CREATE, args)
 }
 
 /// Creates an ɵɵconditional() update call statement.
@@ -141,6 +142,7 @@ pub fn create_conditional_create_stmt<'a>(
 /// - context_value: Optional expression for alias capture (e.g., `@if (condition as alias)`)
 pub fn create_conditional_update_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     test: OutputExpression<'a>,
     context_value: Option<OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
@@ -149,7 +151,7 @@ pub fn create_conditional_update_stmt<'a>(
     if let Some(ctx) = context_value {
         args.push(ctx);
     }
-    create_instruction_call_stmt(allocator, Identifiers::CONDITIONAL, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::CONDITIONAL, args)
 }
 
 /// Creates an ɵɵconditionalBranchCreate() call statement for branches after the first in @if/@switch.
@@ -167,6 +169,7 @@ pub fn create_conditional_update_stmt<'a>(
 /// Args are trimmed from the end if they are null values.
 pub fn create_conditional_branch_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     decls: Option<u32>,
@@ -250,7 +253,7 @@ pub fn create_conditional_branch_create_stmt<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -272,7 +275,12 @@ pub fn create_conditional_branch_create_stmt<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::CONDITIONAL_BRANCH_CREATE, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::CONDITIONAL_BRANCH_CREATE,
+        args,
+    )
 }
 
 /// Creates an ɵɵcontrolCreate() call statement for control binding initialization.
@@ -284,14 +292,16 @@ pub fn create_conditional_branch_create_stmt<'a>(
 /// The controlCreate instruction takes no arguments.
 pub fn create_control_create_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     let args = OxcVec::new_in(&allocator);
-    create_instruction_call_stmt(allocator, Identifiers::CONTROL_CREATE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::CONTROL_CREATE, args)
 }
 
 /// Creates an ɵɵadvance() call statement.
 pub fn create_advance_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     delta: u32,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
@@ -301,17 +311,18 @@ pub fn create_advance_stmt<'a>(
             &allocator,
         )));
     }
-    create_instruction_call_stmt(allocator, Identifiers::ADVANCE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ADVANCE, args)
 }
 
 /// Creates an ɵɵrepeater() call statement for @for update.
 pub fn create_repeater_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     collection: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
     args.push(collection);
-    create_instruction_call_stmt(allocator, Identifiers::REPEATER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::REPEATER, args)
 }
 
 /// Creates an ɵɵrepeaterCreate() call statement for @for with an OutputExpression for the track function.
@@ -323,6 +334,7 @@ pub fn create_repeater_stmt<'a>(
 #[allow(clippy::too_many_arguments)]
 pub fn create_repeater_create_stmt_with_track_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     fn_name: Option<Ident<'a>>,
     body_decl_count: Option<u32>,
@@ -469,7 +481,7 @@ pub fn create_repeater_create_stmt_with_track_expr<'a>(
         }
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::REPEATER_CREATE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::REPEATER_CREATE, args)
 }
 
 /// Creates a variable declaration statement with a value.
@@ -494,6 +506,7 @@ pub fn create_variable_decl_stmt_with_value<'a>(
 /// Creates an ɵɵdeclareLet() call statement.
 pub fn create_declare_let_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
@@ -501,7 +514,7 @@ pub fn create_declare_let_stmt<'a>(
         LiteralExpr { value: LiteralValue::Number(slot as f64), source_span: None },
         &allocator,
     )));
-    create_instruction_call_stmt(allocator, Identifiers::DECLARE_LET, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DECLARE_LET, args)
 }
 
 // Note: create_store_let_stmt has been removed.
@@ -523,6 +536,7 @@ mod tests {
         // and i0.ɵɵtemplateRefExtractor, matching Angular's instruction.ts conditionalCreate().
         let stmt = create_conditional_create_stmt(
             &allocator,
+            "i0",
             0,
             Some(Ident::from("TestComponent_Conditional_0_Template")),
             Some(1),
@@ -552,6 +566,7 @@ mod tests {
         // Without local refs, templateRefExtractor should not appear
         let stmt = create_conditional_create_stmt(
             &allocator,
+            "i0",
             0,
             Some(Ident::from("TestComponent_Conditional_0_Template")),
             Some(1),
@@ -574,6 +589,7 @@ mod tests {
 
         let stmt = create_conditional_branch_create_stmt(
             &allocator,
+            "i0",
             1,
             Some(Ident::from("TestComponent_Conditional_1_Template")),
             Some(1),
@@ -601,6 +617,7 @@ mod tests {
 
         let stmt = create_conditional_branch_create_stmt(
             &allocator,
+            "i0",
             1,
             Some(Ident::from("TestComponent_Conditional_1_Template")),
             Some(1),

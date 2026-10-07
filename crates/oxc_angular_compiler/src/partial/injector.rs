@@ -29,13 +29,18 @@ use crate::r3::Identifiers;
 /// Emits the `ɵɵngDeclareInjector` call.
 pub fn compile_declare_injector_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3InjectorMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_INJECTOR));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(Ident::from("type"), meta.r#type.clone_in(allocator), false));
 
     // providers: upstream emits this slot only when defined. Omitting it
@@ -74,13 +79,14 @@ pub fn compile_declare_injector_from_metadata<'a>(
         ));
     }
 
-    invoke_declare(allocator, Identifiers::DECLARE_INJECTOR, entries)
+    invoke_declare(allocator, core_namespace, Identifiers::DECLARE_INJECTOR, entries)
 }
 
 // ---- helpers ---------------------------------------------------------------
 
 fn invoke_declare<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     name: &'static str,
     entries: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
@@ -92,7 +98,7 @@ fn invoke_declare<'a>(
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, core_namespace, name), &allocator),
             args,
             pure: false,
             optional: false,
@@ -102,7 +108,7 @@ fn invoke_declare<'a>(
     ))
 }
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -111,7 +117,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(

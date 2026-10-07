@@ -44,13 +44,18 @@ use crate::r3::Identifiers;
 /// Emits the `ɵɵngDeclareNgModule` call.
 pub fn compile_declare_ng_module_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3NgModuleMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_NG_MODULE));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(
         Ident::from("type"),
         meta.r#type.value.clone_in(allocator),
@@ -75,7 +80,7 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
         entries.push(LiteralMapEntry::new(Ident::from("id"), id.clone_in(allocator), false));
     }
 
-    invoke_declare(allocator, Identifiers::DECLARE_NG_MODULE, entries)
+    invoke_declare(allocator, core_namespace, Identifiers::DECLARE_NG_MODULE, entries)
 }
 
 /// Builds the partial ɵfac factory paired with this NgModule.
@@ -90,6 +95,7 @@ pub fn compile_declare_ng_module_from_metadata<'a>(
 /// becomes `[]` here — a suboptimal-but-correct factory.
 pub fn compile_declare_factory_for_ng_module<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3NgModuleMetadata<'a>,
     deps: Option<&Vec<'a, crate::factory::R3DependencyMetadata<'a>>>,
 ) -> OutputExpression<'a> {
@@ -123,7 +129,7 @@ pub fn compile_declare_factory_for_ng_module<'a>(
         deps: factory_deps,
         target: FactoryTarget::NgModule,
     });
-    compile_declare_factory_function(allocator, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
 }
 
 // ---- ref list helpers ------------------------------------------------------
@@ -183,6 +189,7 @@ fn refs_to_array<'a>(
 
 fn invoke_declare<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     name: &'static str,
     entries: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
@@ -194,7 +201,7 @@ fn invoke_declare<'a>(
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, core_namespace, name), &allocator),
             args,
             pure: false,
             optional: false,
@@ -204,7 +211,7 @@ fn invoke_declare<'a>(
     ))
 }
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -213,7 +220,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(

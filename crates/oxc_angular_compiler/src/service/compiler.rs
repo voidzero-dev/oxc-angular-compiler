@@ -34,11 +34,12 @@ pub struct ServiceCompileResult<'a> {
 /// Compiles a service from its metadata into an `ɵɵdefineService(...)` call.
 pub fn compile_service<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3ServiceMetadata<'a>,
 ) -> ServiceCompileResult<'a> {
     let factory_expr = build_factory_expression(allocator, metadata);
     let definition_map = build_definition_map(allocator, metadata, factory_expr);
-    let expression = create_define_service_call(allocator, definition_map);
+    let expression = create_define_service_call(allocator, core_namespace, definition_map);
 
     ServiceCompileResult { expression }
 }
@@ -135,16 +136,17 @@ fn build_definition_map<'a>(
     entries
 }
 
-/// `/*@__PURE__*/ i0.ɵɵdefineService({...})`
+/// `/*@__PURE__*/ ns.ɵɵdefineService({...})`
 fn create_define_service_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
     let define_service_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -199,7 +201,7 @@ mod tests {
             factory: None,
         };
 
-        let result = compile_service(&allocator, &metadata);
+        let result = compile_service(&allocator, "i0", &metadata);
         let js = JsEmitter::new().emit_expression(&result.expression);
 
         assert!(js.contains("ɵɵdefineService"), "should emit defineService. Got: {js}");
@@ -222,7 +224,7 @@ mod tests {
             factory: None,
         };
 
-        let result = compile_service(&allocator, &metadata);
+        let result = compile_service(&allocator, "i0", &metadata);
         let js = JsEmitter::new().emit_expression(&result.expression);
 
         assert!(js.contains("autoProvided:false"), "should emit autoProvided: false. Got: {js}");
@@ -239,7 +241,7 @@ mod tests {
             factory: None,
         };
 
-        let result = compile_service(&allocator, &metadata);
+        let result = compile_service(&allocator, "i0", &metadata);
         let js = JsEmitter::new().emit_expression(&result.expression);
 
         assert!(
@@ -263,7 +265,7 @@ mod tests {
             factory: Some(factory_expr),
         };
 
-        let result = compile_service(&allocator, &metadata);
+        let result = compile_service(&allocator, "i0", &metadata);
         let js = JsEmitter::new().emit_expression(&result.expression);
 
         assert!(js.contains("makeService()"), "should call user factory inside arrow. Got: {js}");

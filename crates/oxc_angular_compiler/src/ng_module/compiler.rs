@@ -39,14 +39,16 @@ pub struct NgModuleCompileResult<'a> {
 /// This is the main entry point for NgModule compilation.
 pub fn compile_ng_module<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3NgModuleMetadata<'a>,
 ) -> NgModuleCompileResult<'a> {
-    compile_ng_module_from_metadata(allocator, metadata)
+    compile_ng_module_from_metadata(allocator, core_namespace, metadata)
 }
 
 /// Internal implementation of NgModule compilation.
 pub fn compile_ng_module_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3NgModuleMetadata<'a>,
 ) -> NgModuleCompileResult<'a> {
     let mut statements = Vec::new_in(&allocator);
@@ -55,18 +57,20 @@ pub fn compile_ng_module_from_metadata<'a>(
     let definition_map = build_definition_map(allocator, metadata);
 
     // Create the expression: ɵɵdefineNgModule(definitionMap)
-    let expression = create_define_ng_module_call(allocator, definition_map);
+    let expression = create_define_ng_module_call(allocator, core_namespace, definition_map);
 
     // Add scope side effect if needed
     if metadata.should_set_scope_side_effect() {
-        if let Some(scope_stmt) = create_set_scope_side_effect(allocator, metadata) {
+        if let Some(scope_stmt) = create_set_scope_side_effect(allocator, core_namespace, metadata)
+        {
             statements.push(scope_stmt);
         }
     }
 
     // Add module ID registration if needed
     if let Some(id) = &metadata.id {
-        let register_stmt = create_register_ng_module_type(allocator, &metadata.r#type.value, id);
+        let register_stmt =
+            create_register_ng_module_type(allocator, core_namespace, &metadata.r#type.value, id);
         statements.push(register_stmt);
     }
 
@@ -184,14 +188,15 @@ fn create_reference_array<'a>(
 /// Creates the `ɵɵdefineNgModule({...})` call expression.
 fn create_define_ng_module_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
-    // Create i0.ɵɵdefineNgModule
+    // Create ns.ɵɵdefineNgModule
     let define_ng_module_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -240,6 +245,7 @@ fn create_define_ng_module_call<'a>(
 /// ```
 fn create_set_scope_side_effect<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3NgModuleMetadata<'a>,
 ) -> Option<OutputStatement<'a>> {
     // Only create if there's something to set
@@ -281,7 +287,7 @@ fn create_set_scope_side_effect<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -392,6 +398,7 @@ fn create_set_scope_side_effect<'a>(
 /// Creates the ɵɵregisterNgModuleType call for module ID registration.
 fn create_register_ng_module_type<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     module_type: &OutputExpression<'a>,
     id: &OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -399,7 +406,7 @@ fn create_register_ng_module_type<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -451,7 +458,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_ng_module(&allocator, &metadata);
+        let result = compile_ng_module(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
@@ -479,7 +486,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_ng_module(&allocator, &metadata);
+        let result = compile_ng_module(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -512,7 +519,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_ng_module(&allocator, &metadata);
+        let result = compile_ng_module(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -541,7 +548,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_ng_module(&allocator, &metadata);
+        let result = compile_ng_module(&allocator, "i0", &metadata);
 
         // Should have side effect statement
         assert_eq!(result.statements.len(), 1);
@@ -567,7 +574,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_ng_module(&allocator, &metadata);
+        let result = compile_ng_module(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 

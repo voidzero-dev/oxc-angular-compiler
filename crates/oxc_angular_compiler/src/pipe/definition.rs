@@ -97,9 +97,10 @@ pub struct FullPipeDefinition<'a> {
 /// ```
 pub fn generate_pipe_definition<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3PipeMetadata<'a>,
 ) -> PipeDefinition<'a> {
-    let result = compile_pipe(allocator, metadata);
+    let result = compile_pipe(allocator, core_namespace, metadata);
     PipeDefinition { pipe_definition: result.expression }
 }
 
@@ -119,10 +120,11 @@ pub fn generate_pipe_definition<'a>(
 /// `None` if the metadata couldn't be converted to R3 format.
 pub fn generate_pipe_definition_from_decorator<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &PipeMetadata<'a>,
 ) -> Option<PipeDefinition<'a>> {
     let r3_metadata = metadata.to_r3_metadata(allocator)?;
-    Some(generate_pipe_definition(allocator, &r3_metadata))
+    Some(generate_pipe_definition(allocator, core_namespace, &r3_metadata))
 }
 
 /// Generate both ɵpipe and ɵfac definitions from pipe decorator metadata.
@@ -142,6 +144,7 @@ pub fn generate_pipe_definition_from_decorator<'a>(
 /// `None` if the metadata couldn't be converted to R3 format.
 pub fn generate_full_pipe_definition_from_decorator<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &PipeMetadata<'a>,
     compilation_mode: CompilationMode,
 ) -> Option<FullPipeDefinition<'a>> {
@@ -153,13 +156,15 @@ pub fn generate_full_pipe_definition_from_decorator<'a>(
     // This ensures namespace indices (i0, i1, i2, ...) are assigned in the same order.
     match compilation_mode {
         CompilationMode::Full => {
-            let fac_definition = generate_pipe_fac(allocator, metadata);
-            let pipe_result = compile_pipe(allocator, &r3_metadata);
+            let fac_definition = generate_pipe_fac(allocator, core_namespace, metadata);
+            let pipe_result = compile_pipe(allocator, core_namespace, &r3_metadata);
             Some(FullPipeDefinition { pipe_definition: pipe_result.expression, fac_definition })
         }
         CompilationMode::Partial => {
-            let fac_definition = compile_declare_factory_for_pipe(allocator, &r3_metadata);
-            let pipe_definition = compile_declare_pipe_from_metadata(allocator, &r3_metadata);
+            let fac_definition =
+                compile_declare_factory_for_pipe(allocator, core_namespace, &r3_metadata);
+            let pipe_definition =
+                compile_declare_pipe_from_metadata(allocator, core_namespace, &r3_metadata);
             Some(FullPipeDefinition { pipe_definition, fac_definition })
         }
     }
@@ -168,6 +173,7 @@ pub fn generate_full_pipe_definition_from_decorator<'a>(
 /// Generate ɵfac factory function for a pipe.
 fn generate_pipe_fac<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &PipeMetadata<'a>,
 ) -> OutputExpression<'a> {
     let factory_name = allocator.alloc_str(&format!("{}_Factory", metadata.class_name));
@@ -210,7 +216,7 @@ fn generate_pipe_fac<'a>(
         target: FactoryTarget::Pipe,
     });
 
-    let result = compile_factory_function(allocator, &factory_meta, factory_name);
+    let result = compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
     result.expression
 }
 
@@ -237,7 +243,7 @@ mod tests {
             .is_standalone(true)
             .build();
 
-        let definition = generate_pipe_definition(&allocator, &metadata);
+        let definition = generate_pipe_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.pipe_definition);
@@ -270,7 +276,7 @@ mod tests {
             .is_standalone(true)
             .build();
 
-        let definition = generate_pipe_definition(&allocator, &metadata);
+        let definition = generate_pipe_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.pipe_definition);
@@ -294,7 +300,7 @@ mod tests {
             .is_standalone(false)
             .build();
 
-        let definition = generate_pipe_definition(&allocator, &metadata);
+        let definition = generate_pipe_definition(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let js = emitter.emit_expression(&definition.pipe_definition);
@@ -320,7 +326,7 @@ mod tests {
             .is_standalone(true)
             .build();
 
-        let definition = generate_pipe_definition(&allocator, &metadata);
+        let definition = generate_pipe_definition(&allocator, "i0", &metadata);
 
         // The pipe_definition should be an InvokeFunction with pure=true
         match &definition.pipe_definition {

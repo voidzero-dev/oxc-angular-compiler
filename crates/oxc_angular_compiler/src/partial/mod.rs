@@ -74,6 +74,7 @@ use crate::r3::Identifiers;
 /// exact shape and unwraps it before forwarding to the full-mode emitter.
 pub(crate) fn wrap_forward_ref<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     expr: OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     let mut body: Vec<'a, OutputStatement<'a>> = Vec::new_in(&allocator);
@@ -93,7 +94,7 @@ pub(crate) fn wrap_forward_ref<'a>(
     ));
 
     let i0 = OutputExpression::ReadVar(Box::new_in(
-        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
         &allocator,
     ));
     let forward_ref_fn = OutputExpression::ReadProp(Box::new_in(

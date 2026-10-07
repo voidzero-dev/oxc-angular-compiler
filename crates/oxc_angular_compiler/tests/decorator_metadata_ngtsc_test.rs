@@ -272,7 +272,24 @@ fn decorator_metadata_matches_ngtsc() {
         if !expected.is_empty() {
             continue;
         }
-        let oxc = oxc_classes(&result.code, &result.dts_declarations);
+        // oxc reuses a file's existing `import * as X from '@angular/core'`
+        // instead of emitting a fresh `i0` namespace; both are the same
+        // binding, so compare with the alias renamed back to `i0`.
+        let mut code = result.code.clone();
+        for (at, _) in source.match_indices("import * as ") {
+            let rest = &source[at + "import * as ".len()..];
+            let end =
+                rest.find(|c: char| !c.is_alphanumeric() && c != '_' && c != '$').unwrap_or(0);
+            let alias = &rest[..end];
+            let tail = rest[end..].trim_start();
+            if !alias.is_empty()
+                && (tail.starts_with("from '@angular/core'")
+                    || tail.starts_with("from \"@angular/core\""))
+            {
+                code = code.replace(&format!("{alias}.ɵɵ"), "i0.ɵɵ");
+            }
+        }
+        let oxc = oxc_classes(&code, &result.dts_declarations);
         for (class, members) in fixture["classes"].as_object().unwrap() {
             for (key, value) in members.as_object().unwrap() {
                 // A `static ngAcceptInputType_*` the class declares itself comes

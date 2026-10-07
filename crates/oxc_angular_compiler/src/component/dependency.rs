@@ -304,14 +304,16 @@ fn compile_inject_dependency<'a>(
     index: usize,
     namespace_registry: &mut NamespaceRegistry<'a>,
 ) -> OutputExpression<'a> {
+    let core_namespace = namespace_registry.angular_core_ns();
+
     // Case 1: Invalid dependency - token is None
     let Some(ref token_name) = dep.token else {
-        return create_invalid_factory_dep_call(allocator, index);
+        return create_invalid_factory_dep_call(allocator, core_namespace, index);
     };
 
     // Case 2: @Attribute() dependency
     if let Some(ref attr_name) = dep.attribute_name {
-        return create_inject_attribute_call(allocator, attr_name.clone());
+        return create_inject_attribute_call(allocator, core_namespace, attr_name.clone());
     }
 
     // Case 3: Regular token injection
@@ -343,9 +345,15 @@ fn compile_inject_dependency<'a>(
     // Only include flags if they are non-default OR if optional is true
     // (Angular special-cases optional to always include the flags param)
     if flags.is_default() && !dep.optional {
-        create_inject_call_with_expr(allocator, inject_fn_name, token_expr, None)
+        create_inject_call_with_expr(allocator, core_namespace, inject_fn_name, token_expr, None)
     } else {
-        create_inject_call_with_expr(allocator, inject_fn_name, token_expr, Some(flags.value()))
+        create_inject_call_with_expr(
+            allocator,
+            core_namespace,
+            inject_fn_name,
+            token_expr,
+            Some(flags.value()),
+        )
     }
 }
 
@@ -404,12 +412,14 @@ fn create_token_expression<'a>(
     }
 }
 
-/// Create an `i0.ɵɵinvalidFactoryDep(index)` call.
+/// Create an `ns.ɵɵinvalidFactoryDep(index)` call.
 fn create_invalid_factory_dep_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: Ident<'a>,
     index: usize,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::INVALID_FACTORY_DEP);
+    let fn_expr =
+        create_angular_fn_ref(allocator, core_namespace, Identifiers::INVALID_FACTORY_DEP);
 
     let mut args = OxcVec::with_capacity_in(1, &allocator);
     args.push(OutputExpression::Literal(Box::new_in(
@@ -429,12 +439,13 @@ fn create_invalid_factory_dep_call<'a>(
     ))
 }
 
-/// Create an `i0.ɵɵinjectAttribute(attrName)` call.
+/// Create an `ns.ɵɵinjectAttribute(attrName)` call.
 fn create_inject_attribute_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: Ident<'a>,
     attr_name: Ident<'a>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, Identifiers::INJECT_ATTRIBUTE);
+    let fn_expr = create_angular_fn_ref(allocator, core_namespace, Identifiers::INJECT_ATTRIBUTE);
 
     let mut args = OxcVec::with_capacity_in(1, &allocator);
     // Attribute name is passed as a string literal
@@ -461,11 +472,12 @@ fn create_inject_attribute_call<'a>(
 /// The token expression can be either a bare variable or a namespaced reference.
 fn create_inject_call_with_expr<'a>(
     allocator: &'a Allocator,
+    core_namespace: Ident<'a>,
     fn_name: &'static str,
     token_expr: OutputExpression<'a>,
     flags: Option<u8>,
 ) -> OutputExpression<'a> {
-    let fn_expr = create_angular_fn_ref(allocator, fn_name);
+    let fn_expr = create_angular_fn_ref(allocator, core_namespace, fn_name);
 
     let capacity = if flags.is_some() { 2 } else { 1 };
     let mut args = OxcVec::with_capacity_in(capacity, &allocator);
@@ -492,16 +504,17 @@ fn create_inject_call_with_expr<'a>(
     ))
 }
 
-/// Create an `i0.functionName` reference expression.
+/// Create an `ns.functionName` reference expression.
 fn create_angular_fn_ref<'a>(
     allocator: &'a Allocator,
+    core_namespace: Ident<'a>,
     fn_name: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: core_namespace, source_span: None },
                     &allocator,
                 )),
                 &allocator,

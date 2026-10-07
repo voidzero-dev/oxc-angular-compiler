@@ -33,7 +33,7 @@ fn empty_module_emits_only_type() {
         .selector_scope_mode(R3SelectorScopeMode::Omit)
         .build()
         .unwrap();
-    let expr = compile_declare_ng_module_from_metadata(&allocator, &meta);
+    let expr = compile_declare_ng_module_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("type:EmptyModule"), "expected type:EmptyModule, got: {js}");
@@ -62,7 +62,7 @@ fn module_with_declarations_and_imports() {
         .add_import(R3Reference::value_only(read_var(&allocator, "CommonModule")))
         .build()
         .unwrap();
-    let expr = compile_declare_ng_module_from_metadata(&allocator, &meta);
+    let expr = compile_declare_ng_module_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("declarations:[MyComp,MyDir]"), "expected plain array, got: {js}");
@@ -84,7 +84,7 @@ fn module_with_forward_decls_wraps_lists_in_arrow() {
         .add_export(R3Reference::value_only(read_var(&allocator, "LaterComp")))
         .build()
         .unwrap();
-    let expr = compile_declare_ng_module_from_metadata(&allocator, &meta);
+    let expr = compile_declare_ng_module_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     // Normalize whitespace and search — emitter wraps lines and adjusts
@@ -108,7 +108,7 @@ fn module_with_bootstrap_and_schemas() {
         .add_schema(R3Reference::value_only(read_var(&allocator, "CUSTOM_ELEMENTS_SCHEMA")))
         .build()
         .unwrap();
-    let expr = compile_declare_ng_module_from_metadata(&allocator, &meta);
+    let expr = compile_declare_ng_module_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("bootstrap:[AppComponent]"), "expected bootstrap, got: {js}");
@@ -125,7 +125,7 @@ fn injector_with_providers_only() {
         .providers(providers)
         .build()
         .unwrap();
-    let expr = compile_declare_injector_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injector_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("providers:MY_PROVIDERS"), "expected providers expr, got: {js}");
@@ -145,7 +145,7 @@ fn injector_without_providers_omits_field() {
         .r#type(read_var(&allocator, "EmptyModule"))
         .build()
         .unwrap();
-    let expr = compile_declare_injector_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injector_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(!js.contains("providers"), "providers field should be omitted entirely, got: {js}");
@@ -161,7 +161,7 @@ fn injector_with_imports_array() {
         .add_import(read_var(&allocator, "HttpClientModule"))
         .build()
         .unwrap();
-    let expr = compile_declare_injector_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injector_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(
@@ -186,7 +186,7 @@ fn injector_raw_imports_preserved_over_per_element_imports() {
         .raw_imports(raw_imports)
         .build()
         .unwrap();
-    let expr = compile_declare_injector_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injector_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("imports:EXTERNAL_IMPORTS_ARRAY"), "expected raw imports, got: {js}");

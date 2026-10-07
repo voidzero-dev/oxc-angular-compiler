@@ -36,21 +36,23 @@ pub struct PipeCompileResult<'a> {
 /// ```
 pub fn compile_pipe<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3PipeMetadata<'a>,
 ) -> PipeCompileResult<'a> {
-    compile_pipe_from_metadata(allocator, metadata)
+    compile_pipe_from_metadata(allocator, core_namespace, metadata)
 }
 
 /// Internal implementation of pipe compilation.
 pub fn compile_pipe_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3PipeMetadata<'a>,
 ) -> PipeCompileResult<'a> {
     // Build the definition map
     let definition_map = build_definition_map(allocator, metadata);
 
     // Create the expression: ɵɵdefinePipe(definitionMap)
-    let expression = create_define_pipe_call(allocator, definition_map);
+    let expression = create_define_pipe_call(allocator, core_namespace, definition_map);
 
     PipeCompileResult { expression, statements: Vec::new_in(&allocator) }
 }
@@ -108,14 +110,15 @@ fn build_definition_map<'a>(
 /// Creates the `ɵɵdefinePipe({...})` call expression.
 fn create_define_pipe_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
-    // Create i0.ɵɵdefinePipe
+    // Create ns.ɵɵdefinePipe
     let define_pipe_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -173,7 +176,7 @@ mod tests {
             is_standalone: false,
         };
 
-        let result = compile_pipe(&allocator, &metadata);
+        let result = compile_pipe(&allocator, "i0", &metadata);
 
         // Emit to string to verify output
         let emitter = JsEmitter::new();
@@ -203,7 +206,7 @@ mod tests {
             is_standalone: false,
         };
 
-        let result = compile_pipe(&allocator, &metadata);
+        let result = compile_pipe(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -231,7 +234,7 @@ mod tests {
             is_standalone: true,
         };
 
-        let result = compile_pipe(&allocator, &metadata);
+        let result = compile_pipe(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -259,7 +262,7 @@ mod tests {
             is_standalone: false,
         };
 
-        let result = compile_pipe(&allocator, &metadata);
+        let result = compile_pipe(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 

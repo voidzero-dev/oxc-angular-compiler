@@ -45,13 +45,18 @@ use crate::r3::Identifiers;
 /// Emits the `i0.ɵɵngDeclareClassMetadata({...})` call.
 pub fn compile_declare_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3ClassMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_CLASS_METADATA));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(Ident::from("type"), meta.r#type.clone_in(allocator), false));
     entries.push(LiteralMapEntry::new(
         Ident::from("decorators"),
@@ -83,7 +88,7 @@ pub fn compile_declare_class_metadata<'a>(
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
-                namespaced_prop(allocator, "i0", Identifiers::DECLARE_CLASS_METADATA),
+                namespaced_prop(allocator, core_namespace, Identifiers::DECLARE_CLASS_METADATA),
                 &allocator,
             ),
             args,
@@ -128,6 +133,7 @@ pub fn compile_declare_class_metadata<'a>(
 ///   support.
 pub fn compile_declare_class_metadata_async<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3ClassMetadata<'a>,
     dependencies: &[R3DeferPerComponentDependency<'a>],
 ) -> OutputExpression<'a> {
@@ -182,7 +188,11 @@ pub fn compile_declare_class_metadata_async<'a>(
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_CLASS_METADATA_ASYNC));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(Ident::from("type"), meta.r#type.clone_in(allocator), false));
     entries.push(LiteralMapEntry::new(
         Ident::from("resolveDeferredDeps"),
@@ -201,7 +211,11 @@ pub fn compile_declare_class_metadata_async<'a>(
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
-                namespaced_prop(allocator, "i0", Identifiers::DECLARE_CLASS_METADATA_ASYNC),
+                namespaced_prop(
+                    allocator,
+                    core_namespace,
+                    Identifiers::DECLARE_CLASS_METADATA_ASYNC,
+                ),
                 &allocator,
             ),
             args,
@@ -218,19 +232,20 @@ pub fn compile_declare_class_metadata_async<'a>(
 /// no deferred deps → sync form; one or more → async form.
 pub fn compile_component_declare_class_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3ClassMetadata<'a>,
     dependencies: &[R3DeferPerComponentDependency<'a>],
 ) -> OutputExpression<'a> {
     if dependencies.is_empty() {
-        compile_declare_class_metadata(allocator, meta)
+        compile_declare_class_metadata(allocator, core_namespace, meta)
     } else {
-        compile_declare_class_metadata_async(allocator, meta, dependencies)
+        compile_declare_class_metadata_async(allocator, core_namespace, meta, dependencies)
     }
 }
 
 // ---- helpers ---------------------------------------------------------------
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -239,7 +254,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(

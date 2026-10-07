@@ -191,6 +191,7 @@ pub fn collect_i18n_consts(job: &mut ComponentCompilationJob<'_>) {
         // Collect messages recursively and generate statements
         let (main_var_name, statements) = collect_message(
             &allocator,
+            job.core_namespace.as_str(),
             &messages,
             &params_by_context,
             &postprocessing_params_by_context,
@@ -465,6 +466,7 @@ struct I18nExpressionInfo {
 /// Collects a message and its sub-messages, returning the main variable name and statements.
 fn collect_message<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     messages: &FxHashMap<XrefId, MessageInfo>,
     params_by_context: &FxHashMap<XrefId, Vec<(String, I18nParamExpr)>>,
     postprocessing_params_by_context: &FxHashMap<XrefId, FxHashMap<String, String>>,
@@ -483,6 +485,7 @@ fn collect_message<'a>(
         if let Some(sub_msg) = messages.get(&sub_msg_xref) {
             let (sub_var_name, sub_statements) = collect_message(
                 &allocator,
+                core_namespace,
                 messages,
                 params_by_context,
                 postprocessing_params_by_context,
@@ -594,7 +597,8 @@ fn collect_message<'a>(
                 &allocator,
             ))
         };
-        let postprocess = wrap_with_postprocess(allocator, read_var(), &postprocessing_params);
+        let postprocess =
+            wrap_with_postprocess(allocator, core_namespace, read_var(), &postprocessing_params);
         let assignment = OutputExpression::BinaryOperator(oxc_allocator::Box::new_in(
             crate::output::ast::BinaryOperatorExpr {
                 operator: crate::output::ast::BinaryOperator::Assign,
@@ -877,6 +881,7 @@ fn find_param_value(
 /// Wrap an i18n expression with i18nPostprocess for ICU message handling.
 fn wrap_with_postprocess<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     expr: OutputExpression<'a>,
     postprocessing_params: &[(String, I18nParamExpr)],
 ) -> OutputExpression<'a> {
@@ -887,7 +892,7 @@ fn wrap_with_postprocess<'a>(
         crate::output::ast::ReadPropExpr {
             receiver: oxc_allocator::Box::new_in(
                 OutputExpression::ReadVar(oxc_allocator::Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -962,7 +967,7 @@ mod tests {
         ));
 
         // Call wrap_with_postprocess with no extra params
-        let result = wrap_with_postprocess(&allocator, input_expr, &[]);
+        let result = wrap_with_postprocess(&allocator, "i0", input_expr, &[]);
 
         // Emit the result to a string and verify
         let emitter = JsEmitter::new();
@@ -992,7 +997,7 @@ mod tests {
             I18nParamExpr::Vars(vec!["i18n_1".to_string(), "i18n_2".to_string()]),
         )];
 
-        let result = wrap_with_postprocess(&allocator, input_expr, &params);
+        let result = wrap_with_postprocess(&allocator, "i0", input_expr, &params);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result);

@@ -46,6 +46,7 @@ fn remap_dom_property<'a>(name: &Ident<'a>) -> Ident<'a> {
 /// This creates an expression like `i0.ɵɵsanitizeHtml`.
 fn create_sanitizer_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     sanitizer: &Ident<'a>,
 ) -> OutputExpression<'a> {
     // Create: i0.ɵɵsanitize* expression
@@ -53,7 +54,7 @@ fn create_sanitizer_expr<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -69,6 +70,7 @@ fn create_sanitizer_expr<'a>(
 /// Creates an ɵɵproperty() call statement with expression value.
 pub fn create_property_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
@@ -80,9 +82,9 @@ pub fn create_property_stmt_with_expr<'a>(
     )));
     args.push(value);
     if let Some(san) = sanitizer {
-        args.push(create_sanitizer_expr(allocator, san));
+        args.push(create_sanitizer_expr(allocator, core_namespace, san));
     }
-    create_instruction_call_stmt(allocator, Identifiers::PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::PROPERTY, args)
 }
 
 /// Creates an ɵɵariaProperty() call statement for ARIA property binding.
@@ -91,6 +93,7 @@ pub fn create_property_stmt_with_expr<'a>(
 /// that sets the ARIA attribute rather than a DOM property.
 pub fn create_aria_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -100,12 +103,13 @@ pub fn create_aria_property_stmt<'a>(
         &allocator,
     )));
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::ARIA_PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ARIA_PROPERTY, args)
 }
 
 /// Creates a generic binding statement with expression value.
 pub fn create_binding_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -116,12 +120,13 @@ pub fn create_binding_stmt_with_expr<'a>(
     )));
     args.push(value);
     // This should be specialized by binding_specialization phase
-    create_instruction_call_stmt(allocator, Identifiers::PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::PROPERTY, args)
 }
 
 /// Creates an ɵɵstyleProp() call statement with expression.
 pub fn create_style_prop_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     unit: Option<&Ident<'a>>,
@@ -139,12 +144,13 @@ pub fn create_style_prop_stmt_with_expr<'a>(
             &allocator,
         )));
     }
-    create_instruction_call_stmt(allocator, Identifiers::STYLE_PROP, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::STYLE_PROP, args)
 }
 
 /// Creates an ɵɵclassProp() call statement with expression.
 pub fn create_class_prop_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -154,7 +160,7 @@ pub fn create_class_prop_stmt_with_expr<'a>(
         &allocator,
     )));
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::CLASS_PROP, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::CLASS_PROP, args)
 }
 
 /// Creates an ɵɵattribute() call statement with expression.
@@ -163,6 +169,7 @@ pub fn create_class_prop_stmt_with_expr<'a>(
 /// If sanitizer is None but namespace is Some, emits null for sanitizer.
 pub fn create_attribute_stmt_with_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
@@ -177,7 +184,7 @@ pub fn create_attribute_stmt_with_expr<'a>(
     // Add sanitizer if present, or null if namespace is present
     if sanitizer.is_some() || namespace.is_some() {
         if let Some(san) = sanitizer {
-            args.push(create_sanitizer_expr(allocator, san));
+            args.push(create_sanitizer_expr(allocator, core_namespace, san));
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
@@ -192,12 +199,13 @@ pub fn create_attribute_stmt_with_expr<'a>(
             &allocator,
         )));
     }
-    create_instruction_call_stmt(allocator, Identifiers::ATTRIBUTE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::ATTRIBUTE, args)
 }
 
 /// Creates an ɵɵtwoWayProperty() call statement.
 pub fn create_two_way_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
@@ -209,9 +217,9 @@ pub fn create_two_way_property_stmt<'a>(
     )));
     args.push(value);
     if let Some(san) = sanitizer {
-        args.push(create_sanitizer_expr(allocator, san));
+        args.push(create_sanitizer_expr(allocator, core_namespace, san));
     }
-    create_instruction_call_stmt(allocator, Identifiers::TWO_WAY_PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::TWO_WAY_PROPERTY, args)
 }
 
 /// Creates an ɵɵdomProperty() call statement for DOM property binding.
@@ -221,6 +229,7 @@ pub fn create_two_way_property_stmt<'a>(
 /// The property name is remapped if necessary (e.g., `for` -> `htmlFor`).
 pub fn create_dom_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
@@ -233,34 +242,37 @@ pub fn create_dom_property_stmt<'a>(
     )));
     args.push(value);
     if let Some(san) = sanitizer {
-        args.push(create_sanitizer_expr(allocator, san));
+        args.push(create_sanitizer_expr(allocator, core_namespace, san));
     }
-    create_instruction_call_stmt(allocator, Identifiers::DOM_PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DOM_PROPERTY, args)
 }
 
 /// Creates an ɵɵstyleMap() call statement.
 pub fn create_style_map_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::STYLE_MAP, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::STYLE_MAP, args)
 }
 
 /// Creates an ɵɵclassMap() call statement.
 pub fn create_class_map_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::CLASS_MAP, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::CLASS_MAP, args)
 }
 
 /// Creates an ɵɵtextInterpolate() call statement with arguments.
 pub fn create_text_interpolate_stmt_with_args<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
 ) -> OutputStatement<'a> {
@@ -272,7 +284,7 @@ pub fn create_text_interpolate_stmt_with_args<'a>(
     } else {
         get_text_interpolate_instruction(expr_count)
     };
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵpropertyInterpolate*() call statement (Angular 19).
@@ -284,6 +296,7 @@ pub fn create_text_interpolate_stmt_with_args<'a>(
 /// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer]
 pub fn create_property_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
@@ -306,7 +319,7 @@ pub fn create_property_interpolate_stmt<'a>(
     }
     // Optional sanitizer
     if let Some(san) = sanitizer {
-        args.push(create_sanitizer_expr(allocator, san));
+        args.push(create_sanitizer_expr(allocator, core_namespace, san));
     }
     let instruction = if expr_count == 1 && interp_args_len == 1 {
         // Simple case: just name + value (no surrounding strings)
@@ -315,7 +328,7 @@ pub fn create_property_interpolate_stmt<'a>(
     } else {
         get_property_interpolate_instruction(expr_count)
     };
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵattributeInterpolate*() call statement (Angular 19).
@@ -327,6 +340,7 @@ pub fn create_property_interpolate_stmt<'a>(
 /// Arguments: name, [s0, v0, s1, v1, ..., sN], [sanitizer], [namespace]
 pub fn create_attribute_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
@@ -348,7 +362,7 @@ pub fn create_attribute_interpolate_stmt<'a>(
     // Optional sanitizer, or null if namespace is present
     if sanitizer.is_some() || namespace.is_some() {
         if let Some(san) = sanitizer {
-            args.push(create_sanitizer_expr(allocator, san));
+            args.push(create_sanitizer_expr(allocator, core_namespace, san));
         } else {
             args.push(OutputExpression::Literal(Box::new_in(
                 LiteralExpr { value: LiteralValue::Null, source_span: None },
@@ -368,7 +382,7 @@ pub fn create_attribute_interpolate_stmt<'a>(
     } else {
         get_attribute_interpolate_instruction(expr_count)
     };
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵhostProperty() call statement (Angular 19).
@@ -376,6 +390,7 @@ pub fn create_attribute_interpolate_stmt<'a>(
 /// For Angular 19, host/DomOnly property bindings use `ɵɵhostProperty` instead of `ɵɵdomProperty`.
 pub fn create_host_property_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
     sanitizer: Option<&Ident<'a>>,
@@ -388,9 +403,9 @@ pub fn create_host_property_stmt<'a>(
     )));
     args.push(value);
     if let Some(san) = sanitizer {
-        args.push(create_sanitizer_expr(allocator, san));
+        args.push(create_sanitizer_expr(allocator, core_namespace, san));
     }
-    create_instruction_call_stmt(allocator, Identifiers::HOST_PROPERTY, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::HOST_PROPERTY, args)
 }
 
 /// Creates an ɵɵstylePropInterpolate*() call statement (Angular 19).
@@ -402,6 +417,7 @@ pub fn create_host_property_stmt<'a>(
 /// Signature: `ɵɵstylePropInterpolateN(prop, s0, v0, ..., [unit])`
 pub fn create_style_prop_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
@@ -425,7 +441,7 @@ pub fn create_style_prop_interpolate_stmt<'a>(
         )));
     }
     let instruction = get_style_prop_interpolate_instruction(expr_count);
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵstyleMapInterpolate*() call statement (Angular 19).
@@ -437,11 +453,12 @@ pub fn create_style_prop_interpolate_stmt<'a>(
 /// Signature: `ɵɵstyleMapInterpolateN(s0, v0, ...)`
 pub fn create_style_map_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
 ) -> OutputStatement<'a> {
     let instruction = get_style_map_interpolate_instruction(expr_count);
-    create_instruction_call_stmt(allocator, instruction, interp_args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, interp_args)
 }
 
 /// Creates an ɵɵclassMapInterpolate*() call statement (Angular 19).
@@ -453,9 +470,10 @@ pub fn create_style_map_interpolate_stmt<'a>(
 /// Signature: `ɵɵclassMapInterpolateN(s0, v0, ...)`
 pub fn create_class_map_interpolate_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     interp_args: OxcVec<'a, OutputExpression<'a>>,
     expr_count: usize,
 ) -> OutputStatement<'a> {
     let instruction = get_class_map_interpolate_instruction(expr_count);
-    create_instruction_call_stmt(allocator, instruction, interp_args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, interp_args)
 }

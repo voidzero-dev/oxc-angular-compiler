@@ -68,6 +68,9 @@ importers:
       obug:
         specifier: ^3.0.0
         version: 3.0.0
+      oxc-parser:
+        specifier: ^0.153.0
+        version: 0.153.0
     devDependencies:
       '@angular/compiler':
         specifier: ^22.0.0-rc.2

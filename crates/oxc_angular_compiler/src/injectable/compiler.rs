@@ -41,24 +41,26 @@ pub struct InjectableCompileResult<'a> {
 /// This is the main entry point for injectable compilation.
 pub fn compile_injectable<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectableMetadata<'a>,
 ) -> InjectableCompileResult<'a> {
-    compile_injectable_from_metadata(allocator, metadata)
+    compile_injectable_from_metadata(allocator, core_namespace, metadata)
 }
 
 /// Internal implementation of injectable compilation.
 pub fn compile_injectable_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectableMetadata<'a>,
 ) -> InjectableCompileResult<'a> {
     // Build the factory expression based on provider type
-    let factory_expr = build_factory_expression(allocator, metadata);
+    let factory_expr = build_factory_expression(allocator, core_namespace, metadata);
 
     // Build the definition map
     let definition_map = build_definition_map(allocator, metadata, factory_expr);
 
     // Create the expression: ɵɵdefineInjectable(definitionMap)
-    let expression = create_define_injectable_call(allocator, definition_map);
+    let expression = create_define_injectable_call(allocator, core_namespace, definition_map);
 
     InjectableCompileResult { expression, statements: Vec::new_in(&allocator) }
 }
@@ -74,6 +76,7 @@ pub fn compile_injectable_from_metadata<'a>(
 /// See: `packages/compiler/src/injectable_compiler_2.ts:53-121`
 fn build_factory_expression<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     metadata: &R3InjectableMetadata<'a>,
 ) -> OutputExpression<'a> {
     // Create base factory metadata (used for delegated/expression cases)
@@ -107,12 +110,17 @@ fn build_factory_expression<'a>(
                     });
                     let factory_name = format!("{}_Factory", metadata.name);
                     let factory_name = allocator.alloc_str(&factory_name);
-                    let result = compile_factory_function(allocator, &factory_meta, factory_name);
+                    let result = compile_factory_function(
+                        allocator,
+                        core_namespace,
+                        &factory_meta,
+                        factory_name,
+                    );
                     result.expression
                 }
                 _ if *is_forward_ref => {
                     // Forward reference: wrap in arrow function
-                    create_forward_ref_factory(allocator, class_expr)
+                    create_forward_ref_factory(allocator, core_namespace, class_expr)
                 }
                 _ => {
                     // useClass without deps: delegate to the alternative class's factory
@@ -135,7 +143,12 @@ fn build_factory_expression<'a>(
                     });
                     let factory_name = format!("{}_Factory", metadata.name);
                     let factory_name = allocator.alloc_str(&factory_name);
-                    let result = compile_factory_function(allocator, &factory_meta, factory_name);
+                    let result = compile_factory_function(
+                        allocator,
+                        core_namespace,
+                        &factory_meta,
+                        factory_name,
+                    );
                     result.expression
                 }
                 _ => {
@@ -154,21 +167,24 @@ fn build_factory_expression<'a>(
             });
             let factory_name = format!("{}_Factory", metadata.name);
             let factory_name = allocator.alloc_str(&factory_name);
-            let result = compile_factory_function(allocator, &factory_meta, factory_name);
+            let result =
+                compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
             result.expression
         }
 
         InjectableProvider::UseExisting { existing, is_forward_ref } => {
             // useExisting: use expression factory with inject() call
             // See: injectable_compiler_2.ts:107-112
-            let inject_expr = create_inject_call(allocator, existing, *is_forward_ref);
+            let inject_expr =
+                create_inject_call(allocator, core_namespace, existing, *is_forward_ref);
             let factory_meta = R3FactoryMetadata::Expression(R3ExpressionFactoryMetadata {
                 base: base_meta,
                 expression: inject_expr,
             });
             let factory_name = format!("{}_Factory", metadata.name);
             let factory_name = allocator.alloc_str(&factory_name);
-            let result = compile_factory_function(allocator, &factory_meta, factory_name);
+            let result =
+                compile_factory_function(allocator, core_namespace, &factory_meta, factory_name);
             result.expression
         }
     }
@@ -197,6 +213,7 @@ fn clone_deps_vec<'a>(
 /// Creates an inject() call expression for useExisting.
 fn create_inject_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     existing: &OutputExpression<'a>,
     is_forward_ref: bool,
 ) -> OutputExpression<'a> {
@@ -206,7 +223,7 @@ fn create_inject_call<'a>(
             ReadPropExpr {
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                        ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                         &allocator,
                     )),
                     &allocator,
@@ -240,7 +257,7 @@ fn create_inject_call<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -286,6 +303,7 @@ fn create_factory_delegation<'a>(
 /// Creates a forward reference factory: `(t) => resolveForwardRef(Type).ɵfac(t)`
 fn create_forward_ref_factory<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     type_expr: &OutputExpression<'a>,
 ) -> OutputExpression<'a> {
     let param_name = Ident::from("t");
@@ -297,7 +315,7 @@ fn create_forward_ref_factory<'a>(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -473,14 +491,15 @@ fn build_definition_map<'a>(
 /// Creates the `ɵɵdefineInjectable({...})` call expression.
 fn create_define_injectable_call<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     definition_map: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
-    // Create i0.ɵɵdefineInjectable
+    // Create ns.ɵɵdefineInjectable
     let define_injectable_fn = OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(
                 OutputExpression::ReadVar(Box::new_in(
-                    ReadVarExpr { name: Ident::from("i0"), source_span: None },
+                    ReadVarExpr { name: Ident::from(core_namespace), source_span: None },
                     &allocator,
                 )),
                 &allocator,
@@ -535,7 +554,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
 
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
@@ -568,7 +587,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -597,7 +616,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -619,7 +638,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -676,7 +695,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 
@@ -734,7 +753,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let result = compile_injectable(&allocator, &metadata);
+        let result = compile_injectable(&allocator, "i0", &metadata);
         let emitter = JsEmitter::new();
         let output = emitter.emit_expression(&result.expression);
 

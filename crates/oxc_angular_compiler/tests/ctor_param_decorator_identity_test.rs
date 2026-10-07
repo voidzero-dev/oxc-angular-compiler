@@ -75,11 +75,13 @@ fn bracketed(text: &str, open: usize) -> &str {
 
 /// The arguments `A`'s factory constructs it with. oxc reads an `@Inject`
 /// token imported from another file through its namespace import (`i1.TOKEN`),
-/// where ngtsc names the import (`TOKEN`); both are the same value.
+/// where ngtsc names the import (`TOKEN`); both are the same value. oxc also
+/// reuses a file's existing `import * as ng from '@angular/core'` instead of
+/// emitting a fresh `i0` namespace; both are the same binding.
 fn factory(js: &str) -> Option<String> {
     const NEW: &str = "(__ngFactoryType__ || A)";
     let at = js.find(&format!("{NEW}("))? + NEW.len();
-    Some(normalize(bracketed(js, at)).replace("i1.TOKEN", "TOKEN"))
+    Some(normalize(bracketed(js, at)).replace("i1.TOKEN", "TOKEN").replace("ng.ɵɵ", "i0.ɵɵ"))
 }
 
 /// The `ctorParameters` array of `setClassMetadata(A, ...)`.

@@ -24,6 +24,7 @@ use super::utils::{create_instruction_call_expr, create_value_interpolate_expr};
 /// to output expressions that will be emitted as JavaScript.
 pub fn convert_ir_expression<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     expr: &IrExpression<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
@@ -118,7 +119,7 @@ pub fn convert_ir_expression<'a>(
                     &allocator,
                 )));
             }
-            create_instruction_call_expr(allocator, Identifiers::NEXT_CONTEXT, args)
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::NEXT_CONTEXT, args)
         }
 
         IrExpression::Reference(ref_expr) => {
@@ -135,7 +136,7 @@ pub fn convert_ir_expression<'a>(
                     &allocator,
                 )));
             }
-            create_instruction_call_expr(allocator, Identifiers::REFERENCE, args)
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::REFERENCE, args)
         }
 
         IrExpression::RestoreView(rv) => {
@@ -145,7 +146,13 @@ pub fn convert_ir_expression<'a>(
             match &rv.view {
                 crate::ir::expression::RestoreViewTarget::Dynamic(inner_expr) => {
                     // The view was resolved to a variable reference
-                    args.push(convert_ir_expression(allocator, inner_expr, expressions, root_xref));
+                    args.push(convert_ir_expression(
+                        allocator,
+                        core_namespace,
+                        inner_expr,
+                        expressions,
+                        root_xref,
+                    ));
                 }
                 crate::ir::expression::RestoreViewTarget::Static(_) => {
                     // Fallback: use _r if not resolved (shouldn't happen in correct flow)
@@ -155,13 +162,14 @@ pub fn convert_ir_expression<'a>(
                     )));
                 }
             }
-            create_instruction_call_expr(allocator, Identifiers::RESTORE_VIEW, args)
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::RESTORE_VIEW, args)
         }
 
         IrExpression::GetCurrentView(_) => {
             // i0.ɵɵgetCurrentView()
             create_instruction_call_expr(
                 &allocator,
+                core_namespace,
                 Identifiers::GET_CURRENT_VIEW,
                 OxcVec::new_in(&allocator),
             )
@@ -170,8 +178,14 @@ pub fn convert_ir_expression<'a>(
         IrExpression::ResetView(rv) => {
             // i0.ɵɵresetView(expr)
             let mut args = OxcVec::new_in(&allocator);
-            args.push(convert_ir_expression(allocator, &rv.expr, expressions, root_xref));
-            create_instruction_call_expr(allocator, Identifiers::RESET_VIEW, args)
+            args.push(convert_ir_expression(
+                allocator,
+                core_namespace,
+                &rv.expr,
+                expressions,
+                root_xref,
+            ));
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::RESET_VIEW, args)
         }
 
         IrExpression::PipeBinding(pipe) => {
@@ -191,10 +205,16 @@ pub fn convert_ir_expression<'a>(
             )));
             // Add pipe arguments
             for arg in pipe.args.iter() {
-                args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
+                args.push(convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    arg,
+                    expressions,
+                    root_xref,
+                ));
             }
             let instruction = get_pipe_bind_instruction(pipe.args.len());
-            create_instruction_call_expr(allocator, instruction, args)
+            create_instruction_call_expr(allocator, core_namespace, instruction, args)
         }
 
         IrExpression::PipeBindingVariadic(pipe) => {
@@ -215,8 +235,14 @@ pub fn convert_ir_expression<'a>(
                 &allocator,
             )));
             // Add the pure function expression containing all arguments
-            args.push(convert_ir_expression(allocator, &pipe.args, expressions, root_xref));
-            create_instruction_call_expr(allocator, Identifiers::PIPE_BIND_V, args)
+            args.push(convert_ir_expression(
+                allocator,
+                core_namespace,
+                &pipe.args,
+                expressions,
+                root_xref,
+            ));
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::PIPE_BIND_V, args)
         }
 
         IrExpression::PureFunction(pf) => {
@@ -243,7 +269,13 @@ pub fn convert_ir_expression<'a>(
             // placeholder to avoid panicking (will cause runtime error instead).
             match &pf.fn_ref {
                 Some(fn_ref) => {
-                    args.push(convert_ir_expression(allocator, fn_ref, expressions, root_xref));
+                    args.push(convert_ir_expression(
+                        allocator,
+                        core_namespace,
+                        fn_ref,
+                        expressions,
+                        root_xref,
+                    ));
                 }
                 None => {
                     // fn_ref should have been set by pure_function_extraction phase
@@ -262,6 +294,7 @@ pub fn convert_ir_expression<'a>(
                 for arg in pf.args.iter() {
                     array_entries.push(convert_ir_expression(
                         &allocator,
+                        core_namespace,
                         arg,
                         expressions,
                         root_xref,
@@ -274,11 +307,17 @@ pub fn convert_ir_expression<'a>(
             } else {
                 // Constant calling pattern: pureFunction1/2/etc(offset, fn, arg1, arg2, ...)
                 for arg in pf.args.iter() {
-                    args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
+                    args.push(convert_ir_expression(
+                        allocator,
+                        core_namespace,
+                        arg,
+                        expressions,
+                        root_xref,
+                    ));
                 }
             }
             let instruction = get_pure_function_instruction(pf.args.len());
-            create_instruction_call_expr(allocator, instruction, args)
+            create_instruction_call_expr(allocator, core_namespace, instruction, args)
         }
 
         IrExpression::SlotLiteral(slot_lit) => {
@@ -296,8 +335,14 @@ pub fn convert_ir_expression<'a>(
         IrExpression::StoreLet(store) => {
             // i0.ɵɵstoreLet(value)
             let mut args = OxcVec::new_in(&allocator);
-            args.push(convert_ir_expression(allocator, &store.value, expressions, root_xref));
-            create_instruction_call_expr(allocator, Identifiers::STORE_LET, args)
+            args.push(convert_ir_expression(
+                allocator,
+                core_namespace,
+                &store.value,
+                expressions,
+                root_xref,
+            ));
+            create_instruction_call_expr(allocator, core_namespace, Identifiers::STORE_LET, args)
         }
 
         IrExpression::ContextLetReference(ctx_let) => {
@@ -309,7 +354,12 @@ pub fn convert_ir_expression<'a>(
                     &allocator,
                 )));
             }
-            create_instruction_call_expr(allocator, Identifiers::READ_CONTEXT_LET, args)
+            create_instruction_call_expr(
+                allocator,
+                core_namespace,
+                Identifiers::READ_CONTEXT_LET,
+                args,
+            )
         }
 
         IrExpression::TrackContext(_) => {
@@ -332,7 +382,13 @@ pub fn convert_ir_expression<'a>(
         IrExpression::AssignTemporary(assign) => {
             // Assign to a temporary variable: _tmp = expr
             let var_name = assign.name.clone().unwrap_or_else(|| Ident::from("_tmp"));
-            let value = convert_ir_expression(allocator, &assign.expr, expressions, root_xref);
+            let value = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &assign.expr,
+                expressions,
+                root_xref,
+            );
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Assign,
@@ -355,8 +411,10 @@ pub fn convert_ir_expression<'a>(
             // Angular uses the `== null` pattern for consistency with optional chaining.
             // The expression is wrapped in parentheses to ensure correct operator precedence
             // when used in a larger expression context.
-            let guard = convert_ir_expression(allocator, &st.guard, expressions, root_xref);
-            let true_case = convert_ir_expression(allocator, &st.expr, expressions, root_xref);
+            let guard =
+                convert_ir_expression(allocator, core_namespace, &st.guard, expressions, root_xref);
+            let true_case =
+                convert_ir_expression(allocator, core_namespace, &st.expr, expressions, root_xref);
             // Build: guard == null ? null : expr
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -413,12 +471,13 @@ pub fn convert_ir_expression<'a>(
             if expr_count == 1 && interp.strings.iter().all(|s| s.is_empty()) {
                 args.push(convert_ir_expression(
                     &allocator,
+                    core_namespace,
                     &interp.expressions[0],
                     expressions,
                     root_xref,
                 ));
                 // Pass 0 as expr_count to get ɵɵinterpolate (not ɵɵinterpolate1)
-                create_value_interpolate_expr(allocator, args, 0)
+                create_value_interpolate_expr(allocator, core_namespace, args, 0)
             } else {
                 // Build args: [s0, v0, s1, v1, s2, ...] (strings and expressions interleaved)
                 for (i, ir_expr) in interp.expressions.iter().enumerate() {
@@ -431,7 +490,13 @@ pub fn convert_ir_expression<'a>(
                             &allocator,
                         )));
                     }
-                    args.push(convert_ir_expression(allocator, ir_expr, expressions, root_xref));
+                    args.push(convert_ir_expression(
+                        allocator,
+                        core_namespace,
+                        ir_expr,
+                        expressions,
+                        root_xref,
+                    ));
                 }
                 // Add trailing string if present (and not empty)
                 // TypeScript drops trailing empty strings - the runtime handles it.
@@ -448,14 +513,14 @@ pub fn convert_ir_expression<'a>(
                         }
                     }
                 }
-                create_value_interpolate_expr(allocator, args, expr_count)
+                create_value_interpolate_expr(allocator, core_namespace, args, expr_count)
             }
         }
 
         IrExpression::TwoWayBindingSet(tbs) => {
             // Two-way binding: generate `i0.ɵɵtwoWayBindingSet(target, value) || (target = value)`
             // For ReadVariable targets, just generate `i0.ɵɵtwoWayBindingSet(target, value)`
-            convert_two_way_binding_set(allocator, tbs, expressions, root_xref)
+            convert_two_way_binding_set(allocator, core_namespace, tbs, expressions, root_xref)
         }
 
         IrExpression::ConstReference(cr) => {
@@ -469,8 +534,20 @@ pub fn convert_ir_expression<'a>(
         IrExpression::Binary(binary) => {
             // Convert binary expression for @for loop computed variables
             // and for expressions containing nested pipes like `a ?? (b | pipe)`
-            let lhs = convert_ir_expression(allocator, &binary.lhs, expressions, root_xref);
-            let rhs = convert_ir_expression(allocator, &binary.rhs, expressions, root_xref);
+            let lhs = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &binary.lhs,
+                expressions,
+                root_xref,
+            );
+            let rhs = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &binary.rhs,
+                expressions,
+                root_xref,
+            );
             let operator = convert_ir_binary_operator(binary.operator);
             OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -487,8 +564,13 @@ pub fn convert_ir_expression<'a>(
             // Property read where the receiver was resolved during name resolution
             // Convert: ResolvedPropertyRead { receiver: ReadVariable(item), name: "title" }
             // To: item_i4.title
-            let receiver =
-                convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.receiver,
+                expressions,
+                root_xref,
+            );
             OutputExpression::ReadProp(Box::new_in(
                 ReadPropExpr {
                     receiver: Box::new_in(receiver, &allocator),
@@ -504,8 +586,20 @@ pub fn convert_ir_expression<'a>(
             // Binary expression where sub-expressions were resolved during name resolution
             // Convert: ResolvedBinary { operator: Assign, left: ResolvedPropertyRead(...), right: Ast($event) }
             // To: todo_i7.done = $event
-            let left = convert_ir_expression(allocator, &resolved.left, expressions, root_xref);
-            let right = convert_ir_expression(allocator, &resolved.right, expressions, root_xref);
+            let left = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.left,
+                expressions,
+                root_xref,
+            );
+            let right = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.right,
+                expressions,
+                root_xref,
+            );
 
             // Map Angular binary operator to output binary operator
             use crate::ast::expression::BinaryOperator as AngularOp;
@@ -560,11 +654,22 @@ pub fn convert_ir_expression<'a>(
             // Function call where receiver and/or arguments were resolved during name resolution
             // Convert: ResolvedCall { receiver: Ast(ctx.removeTodo), args: [ReadVariable(todo_i8)] }
             // To: ctx.removeTodo(todo_i8)
-            let receiver =
-                convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.receiver,
+                expressions,
+                root_xref,
+            );
             let mut args = OxcVec::new_in(&allocator);
             for arg in resolved.args.iter() {
-                args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
+                args.push(convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    arg,
+                    expressions,
+                    root_xref,
+                ));
             }
             OutputExpression::InvokeFunction(Box::new_in(
                 InvokeFunctionExpr {
@@ -582,9 +687,20 @@ pub fn convert_ir_expression<'a>(
             // Keyed read where the receiver was resolved during name resolution
             // Convert: ResolvedKeyedRead { receiver: ReadVariable(item), key: Ast(0) }
             // To: item_i4[0]
-            let receiver =
-                convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
-            let index = convert_ir_expression(allocator, &resolved.key, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.receiver,
+                expressions,
+                root_xref,
+            );
+            let index = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.key,
+                expressions,
+                root_xref,
+            );
             OutputExpression::ReadKey(Box::new_in(
                 ReadKeyExpr {
                     receiver: Box::new_in(receiver, &allocator),
@@ -602,8 +718,13 @@ pub fn convert_ir_expression<'a>(
             // This should be handled by the expand_safe_reads phase before reification,
             // but we handle it here as a fallback to avoid errors.
             // Output: receiver?.name (using conditional access pattern)
-            let receiver =
-                convert_ir_expression(allocator, &resolved.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &resolved.receiver,
+                expressions,
+                root_xref,
+            );
             // For now, output as a regular property read - the expand_safe_reads phase
             // should have already transformed this into a safe ternary pattern
             OutputExpression::ReadProp(Box::new_in(
@@ -629,7 +750,13 @@ pub fn convert_ir_expression<'a>(
             // Note: This is a simplified fallback - the expand_safe_reads phase
             // should have already transformed this with proper temp handling
             let span = safe.source_span;
-            let receiver = convert_ir_expression(allocator, &safe.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &safe.receiver,
+                expressions,
+                root_xref,
+            );
             let receiver_clone = receiver.clone_in(allocator);
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -681,9 +808,21 @@ pub fn convert_ir_expression<'a>(
         IrExpression::SafeKeyedRead(safe) => {
             // Convert to: (receiver == null ? null : receiver[key])
             let span = safe.source_span;
-            let receiver = convert_ir_expression(allocator, &safe.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &safe.receiver,
+                expressions,
+                root_xref,
+            );
             let receiver_clone = receiver.clone_in(allocator);
-            let index = convert_ir_expression(allocator, &safe.index, expressions, root_xref);
+            let index = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &safe.index,
+                expressions,
+                root_xref,
+            );
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
                     operator: BinaryOperator::Equals,
@@ -734,11 +873,23 @@ pub fn convert_ir_expression<'a>(
         IrExpression::SafeInvokeFunction(safe) => {
             // Convert to: (receiver == null ? null : receiver())
             let span = safe.source_span;
-            let receiver = convert_ir_expression(allocator, &safe.receiver, expressions, root_xref);
+            let receiver = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &safe.receiver,
+                expressions,
+                root_xref,
+            );
             let receiver_clone = receiver.clone_in(allocator);
             let mut args = OxcVec::new_in(&allocator);
             for arg in safe.args.iter() {
-                args.push(convert_ir_expression(allocator, arg, expressions, root_xref));
+                args.push(convert_ir_expression(
+                    allocator,
+                    core_namespace,
+                    arg,
+                    expressions,
+                    root_xref,
+                ));
             }
             let null_check = OutputExpression::BinaryOperator(Box::new_in(
                 BinaryOperatorExpr {
@@ -789,12 +940,27 @@ pub fn convert_ir_expression<'a>(
 
         // Ternary expression - convert to conditional output expression
         IrExpression::Ternary(ternary) => {
-            let condition =
-                convert_ir_expression(allocator, &ternary.condition, expressions, root_xref);
-            let true_case =
-                convert_ir_expression(allocator, &ternary.true_expr, expressions, root_xref);
-            let false_case =
-                convert_ir_expression(allocator, &ternary.false_expr, expressions, root_xref);
+            let condition = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &ternary.condition,
+                expressions,
+                root_xref,
+            );
+            let true_case = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &ternary.true_expr,
+                expressions,
+                root_xref,
+            );
+            let false_case = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &ternary.false_expr,
+                expressions,
+                root_xref,
+            );
             OutputExpression::Conditional(Box::new_in(
                 ConditionalExpr {
                     condition: Box::new_in(condition, &allocator),
@@ -809,7 +975,8 @@ pub fn convert_ir_expression<'a>(
         IrExpression::LiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.elements.len(), &allocator);
             for (i, elem) in arr.elements.iter().enumerate() {
-                let converted = convert_ir_expression(allocator, elem, expressions, root_xref);
+                let converted =
+                    convert_ir_expression(allocator, core_namespace, elem, expressions, root_xref);
                 if arr.spreads.get(i).copied().unwrap_or(false) {
                     entries.push(OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
@@ -835,7 +1002,7 @@ pub fn convert_ir_expression<'a>(
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
-                    convert_ir_expression(allocator, value, expressions, root_xref);
+                    convert_ir_expression(allocator, core_namespace, value, expressions, root_xref);
                 entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
@@ -847,7 +1014,8 @@ pub fn convert_ir_expression<'a>(
         IrExpression::DerivedLiteralArray(arr) => {
             let mut entries = OxcVec::with_capacity_in(arr.entries.len(), &allocator);
             for (i, entry) in arr.entries.iter().enumerate() {
-                let converted = convert_ir_expression(allocator, entry, expressions, root_xref);
+                let converted =
+                    convert_ir_expression(allocator, core_namespace, entry, expressions, root_xref);
                 if arr.spreads.get(i).copied().unwrap_or(false) {
                     entries.push(OutputExpression::SpreadElement(Box::new_in(
                         SpreadElementExpr {
@@ -873,7 +1041,7 @@ pub fn convert_ir_expression<'a>(
                 let quoted = map.quoted.get(i).copied().unwrap_or(false);
                 let is_spread = map.spreads.get(i).copied().unwrap_or(false);
                 let converted_value =
-                    convert_ir_expression(allocator, value, expressions, root_xref);
+                    convert_ir_expression(allocator, core_namespace, value, expressions, root_xref);
                 entries.push(LiteralMapEntry { key, value: converted_value, quoted, is_spread });
             }
             OutputExpression::LiteralMap(Box::new_in(
@@ -884,7 +1052,8 @@ pub fn convert_ir_expression<'a>(
 
         // Logical NOT expression (!expr)
         IrExpression::Not(not) => {
-            let expr = convert_ir_expression(allocator, &not.expr, expressions, root_xref);
+            let expr =
+                convert_ir_expression(allocator, core_namespace, &not.expr, expressions, root_xref);
             OutputExpression::Not(Box::new_in(
                 crate::output::ast::NotExpr {
                     condition: Box::new_in(expr, &allocator),
@@ -896,7 +1065,13 @@ pub fn convert_ir_expression<'a>(
 
         // Unary expression (+expr or -expr)
         IrExpression::Unary(unary) => {
-            let expr = convert_ir_expression(allocator, &unary.expr, expressions, root_xref);
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &unary.expr,
+                expressions,
+                root_xref,
+            );
             let operator = match unary.operator {
                 crate::ir::expression::IrUnaryOperator::Plus => {
                     crate::output::ast::UnaryOperator::Plus
@@ -918,7 +1093,13 @@ pub fn convert_ir_expression<'a>(
 
         // Typeof expression (typeof expr)
         IrExpression::Typeof(typeof_expr) => {
-            let expr = convert_ir_expression(allocator, &typeof_expr.expr, expressions, root_xref);
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &typeof_expr.expr,
+                expressions,
+                root_xref,
+            );
             OutputExpression::Typeof(Box::new_in(
                 crate::output::ast::TypeofExpr {
                     expr: Box::new_in(expr, &allocator),
@@ -930,7 +1111,13 @@ pub fn convert_ir_expression<'a>(
 
         // Void expression (void expr)
         IrExpression::Void(void_expr) => {
-            let expr = convert_ir_expression(allocator, &void_expr.expr, expressions, root_xref);
+            let expr = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &void_expr.expr,
+                expressions,
+                root_xref,
+            );
             OutputExpression::Void(Box::new_in(
                 crate::output::ast::VoidExpr {
                     expr: Box::new_in(expr, &allocator),
@@ -957,6 +1144,7 @@ pub fn convert_ir_expression<'a>(
             for expr in rtl.expressions.iter() {
                 output_expressions.push(convert_ir_expression(
                     &allocator,
+                    core_namespace,
                     expr,
                     expressions,
                     root_xref,
@@ -974,7 +1162,13 @@ pub fn convert_ir_expression<'a>(
         }
 
         IrExpression::Parenthesized(paren) => {
-            let inner = convert_ir_expression(allocator, &paren.expr, expressions, root_xref);
+            let inner = convert_ir_expression(
+                allocator,
+                core_namespace,
+                &paren.expr,
+                expressions,
+                root_xref,
+            );
             OutputExpression::Parenthesized(Box::new_in(
                 ParenthesizedExpr {
                     expr: Box::new_in(inner, &allocator),
@@ -1001,12 +1195,15 @@ pub fn convert_ir_expression<'a>(
 ///   `i0.ɵɵtwoWayBindingSet(target, value)`
 fn convert_two_way_binding_set<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     tbs: &TwoWayBindingSetExpr<'a>,
     expressions: &ExpressionStore<'a>,
     root_xref: XrefId,
 ) -> OutputExpression<'a> {
-    let target = convert_ir_expression(allocator, &tbs.target, expressions, root_xref);
-    let value = convert_ir_expression(allocator, &tbs.value, expressions, root_xref);
+    let target =
+        convert_ir_expression(allocator, core_namespace, &tbs.target, expressions, root_xref);
+    let value =
+        convert_ir_expression(allocator, core_namespace, &tbs.value, expressions, root_xref);
 
     // Determine if target is a settable property/keyed expression or a variable
     let is_property_or_keyed = is_settable_property_target(&tbs.target);
@@ -1026,8 +1223,12 @@ fn convert_two_way_binding_set<'a>(
         let mut args = OxcVec::new_in(&allocator);
         args.push(target);
         args.push(value);
-        let instruction_call =
-            create_instruction_call_expr(allocator, Identifiers::TWO_WAY_BINDING_SET, args);
+        let instruction_call = create_instruction_call_expr(
+            allocator,
+            core_namespace,
+            Identifiers::TWO_WAY_BINDING_SET,
+            args,
+        );
 
         // Create the OR expression: instruction_call || (target = value)
         OutputExpression::BinaryOperator(Box::new_in(
@@ -1044,7 +1245,12 @@ fn convert_two_way_binding_set<'a>(
         let mut args = OxcVec::new_in(&allocator);
         args.push(target);
         args.push(value);
-        create_instruction_call_expr(allocator, Identifiers::TWO_WAY_BINDING_SET, args)
+        create_instruction_call_expr(
+            allocator,
+            core_namespace,
+            Identifiers::TWO_WAY_BINDING_SET,
+            args,
+        )
     }
 }
 

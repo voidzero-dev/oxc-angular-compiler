@@ -32,7 +32,7 @@ fn standalone_pure_named_pipe_omits_optional_fields() {
             .pure(true)
             .is_standalone(true)
             .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"name:"upper""#), "expected name:\"upper\", got: {js}");
@@ -50,7 +50,7 @@ fn impure_pipe_emits_pure_false() {
             .pure(false)
             .is_standalone(true)
             .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("pure:false"), "expected pure:false, got: {js}");
@@ -66,7 +66,7 @@ fn non_standalone_pipe_emits_isstandalone_false() {
             .pure(true)
             .is_standalone(false)
             .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("isStandalone:false"), "expected isStandalone:false, got: {js}");
@@ -86,7 +86,7 @@ fn pipe_uses_pipe_name_over_class_name() {
     .pure(true)
     .is_standalone(true)
     .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"name:"currency""#), "expected name:\"currency\", got: {js}");
@@ -100,7 +100,7 @@ fn pipe_falls_back_to_class_name_when_pipe_name_missing() {
         .pure(true)
         .is_standalone(true)
         .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"name:"MyPipe""#), "expected name:\"MyPipe\", got: {js}");
@@ -114,7 +114,7 @@ fn field_order_matches_upstream() {
         .pure(false)
         .is_standalone(false)
         .build();
-    let expr = compile_declare_pipe_from_metadata(&allocator, &meta);
+    let expr = compile_declare_pipe_from_metadata(&allocator, "i0", &meta);
     let js = emit(&expr);
 
     let min_idx = js.find("minVersion").unwrap();

@@ -74,6 +74,7 @@ pub struct PartialComponentInputs<'a, 'm> {
 /// Emits the `ɵɵngDeclareComponent` call for a component's `ɵcmp` static.
 pub fn compile_declare_component_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &ComponentMetadata<'a>,
     inputs: &PartialComponentInputs<'a, '_>,
 ) -> OutputExpression<'a> {
@@ -153,14 +154,18 @@ pub fn compile_declare_component_from_metadata<'a>(
     if !inputs.content_queries.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("queries"),
-            super::directive::compile_queries_array(allocator, inputs.content_queries),
+            super::directive::compile_queries_array(
+                allocator,
+                core_namespace,
+                inputs.content_queries,
+            ),
             false,
         ));
     }
     if !inputs.view_queries.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("viewQueries"),
-            super::directive::compile_queries_array(allocator, inputs.view_queries),
+            super::directive::compile_queries_array(allocator, core_namespace, inputs.view_queries),
             false,
         ));
     }
@@ -198,7 +203,7 @@ pub fn compile_declare_component_from_metadata<'a>(
     if !meta.host_directives.is_empty() {
         entries.push(LiteralMapEntry::new(
             Ident::from("hostDirectives"),
-            create_host_directives_array(allocator, &meta.host_directives),
+            create_host_directives_array(allocator, core_namespace, &meta.host_directives),
             false,
         ));
     }
@@ -207,7 +212,11 @@ pub fn compile_declare_component_from_metadata<'a>(
     // specific fields come AFTER ngImport — that's how upstream emits
     // them (createComponentDefinitionMap calls createDirectiveDefinitionMap
     // first, then appends).
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
 
     // ---- Component-specific fields ----
 
@@ -269,6 +278,7 @@ pub fn compile_declare_component_from_metadata<'a>(
             Ident::from("dependencies"),
             create_dependencies_array_from_slice(
                 &allocator,
+                core_namespace,
                 declarations_to_emit,
                 meta.declaration_list_emit_mode,
             ),
@@ -308,7 +318,7 @@ pub fn compile_declare_component_from_metadata<'a>(
         };
         entries.push(LiteralMapEntry::new(
             Ident::from("changeDetection"),
-            namespaced_enum_member(allocator, "ChangeDetectionStrategy", variant),
+            namespaced_enum_member(allocator, core_namespace, "ChangeDetectionStrategy", variant),
             false,
         ));
     }
@@ -322,7 +332,7 @@ pub fn compile_declare_component_from_metadata<'a>(
         };
         entries.push(LiteralMapEntry::new(
             Ident::from("encapsulation"),
-            namespaced_enum_member(allocator, "ViewEncapsulation", variant),
+            namespaced_enum_member(allocator, core_namespace, "ViewEncapsulation", variant),
             false,
         ));
     }
@@ -349,12 +359,13 @@ pub fn compile_declare_component_from_metadata<'a>(
     // to populate per-block resolvers — out of scope for the partial
     // emitter slice.
 
-    invoke_declare(allocator, Identifiers::DECLARE_COMPONENT, entries)
+    invoke_declare(allocator, core_namespace, Identifiers::DECLARE_COMPONENT, entries)
 }
 
 /// Builds the partial ɵfac factory paired with a Component.
 pub fn compile_declare_factory_for_component<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &ComponentMetadata<'a>,
 ) -> OutputExpression<'a> {
     let type_expr = OutputExpression::ReadVar(Box::new_in(
@@ -370,7 +381,7 @@ pub fn compile_declare_factory_for_component<'a>(
         deps: clone_factory_deps(allocator, &meta.constructor_deps, meta.uses_inheritance),
         target: FactoryTarget::Component,
     });
-    compile_declare_factory_function(allocator, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
 }
 
 // ---- min version ---------------------------------------------------------
@@ -611,6 +622,7 @@ fn ident_pairs_to_string_map<'a>(
 
 fn create_host_directives_array<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     host_directives: &Vec<'a, HostDirectiveMetadata<'a>>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, OutputExpression<'a>> =
@@ -622,7 +634,7 @@ fn create_host_directives_array<'a>(
             &allocator,
         ));
         let directive_expr = if hd.is_forward_reference {
-            wrap_forward_ref(allocator, directive_expr)
+            wrap_forward_ref(allocator, core_namespace, directive_expr)
         } else {
             directive_expr
         };
@@ -698,6 +710,7 @@ fn lower_imports_to_declarations<'a>(
 
 fn create_dependencies_array_from_slice<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     deps: &[TemplateDependency<'a>],
     emit_mode: DeclarationListEmitMode,
 ) -> OutputExpression<'a> {
@@ -731,7 +744,7 @@ fn create_dependencies_array_from_slice<'a>(
             &allocator,
         ));
         if wrap_in_forward_ref || dep.is_forward_reference {
-            type_expr = wrap_forward_ref(allocator, type_expr);
+            type_expr = wrap_forward_ref(allocator, core_namespace, type_expr);
         }
         dep_map.push(LiteralMapEntry::new(Ident::from("type"), type_expr, false));
 
@@ -861,6 +874,7 @@ fn is_unsafe_object_key(key: &str) -> bool {
 
 fn invoke_declare<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     name: &'static str,
     entries: Vec<'a, LiteralMapEntry<'a>>,
 ) -> OutputExpression<'a> {
@@ -872,7 +886,7 @@ fn invoke_declare<'a>(
     args.push(map_expr);
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
-            fn_expr: Box::new_in(namespaced_prop(allocator, "i0", name), &allocator),
+            fn_expr: Box::new_in(namespaced_prop(allocator, core_namespace, name), &allocator),
             args,
             pure: false,
             optional: false,
@@ -882,7 +896,7 @@ fn invoke_declare<'a>(
     ))
 }
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -891,7 +905,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
@@ -909,10 +923,11 @@ fn namespaced_prop<'a>(
 /// `i0.ChangeDetectionStrategy.OnPush`.
 fn namespaced_enum_member<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     enum_name: &'static str,
     variant: &'static str,
 ) -> OutputExpression<'a> {
-    let enum_ref = namespaced_prop(allocator, "i0", enum_name);
+    let enum_ref = namespaced_prop(allocator, core_namespace, enum_name);
     OutputExpression::ReadProp(Box::new_in(
         ReadPropExpr {
             receiver: Box::new_in(enum_ref, &allocator),

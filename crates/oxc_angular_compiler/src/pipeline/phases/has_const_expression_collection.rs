@@ -78,8 +78,13 @@ pub fn collect_const_expressions(job: &mut ComponentCompilationJob<'_>) {
 
     for (inner_expr, _index) in collected {
         // Convert IrExpression to OutputExpression
-        let output_expr =
-            convert_ir_expression(allocator, &inner_expr, &job.expressions, root_xref);
+        let output_expr = convert_ir_expression(
+            allocator,
+            job.core_namespace.as_str(),
+            &inner_expr,
+            &job.expressions,
+            root_xref,
+        );
 
         // Add to const pool - indices should match what we pre-allocated
         job.add_const(ConstValue::Expression(output_expr));

@@ -55,6 +55,7 @@ impl GlobalEventTarget {
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_listener_stmt_with_handler<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     event_target: Option<GlobalEventTarget>,
@@ -94,7 +95,7 @@ pub fn create_listener_stmt_with_handler<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         crate::output::ast::ReadVarExpr {
-                            name: Ident::from("i0"),
+                            name: Ident::from(core_namespace),
                             source_span: None,
                         },
                         &allocator,
@@ -123,7 +124,7 @@ pub fn create_listener_stmt_with_handler<'a>(
         )));
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::LISTENER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::LISTENER, args)
 }
 
 /// Creates an ɵɵdomListener() call statement with a handler function.
@@ -135,6 +136,7 @@ pub fn create_listener_stmt_with_handler<'a>(
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_dom_listener_stmt_with_handler<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     event_target: Option<GlobalEventTarget>,
@@ -173,7 +175,7 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
                 receiver: Box::new_in(
                     OutputExpression::ReadVar(Box::new_in(
                         crate::output::ast::ReadVarExpr {
-                            name: Ident::from("i0"),
+                            name: Ident::from(core_namespace),
                             source_span: None,
                         },
                         &allocator,
@@ -188,7 +190,7 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
         )));
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::DOM_LISTENER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::DOM_LISTENER, args)
 }
 
 /// Creates an ɵɵtwoWayListener() call statement with a handler function.
@@ -196,6 +198,7 @@ pub fn create_dom_listener_stmt_with_handler<'a>(
 /// The `handler_fn_name` parameter sets the name of the handler function expression.
 pub fn create_two_way_listener_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     handler_fn_name: Option<&Ident<'a>>,
@@ -223,7 +226,7 @@ pub fn create_two_way_listener_stmt<'a>(
     ));
     args.push(handler_fn);
 
-    create_instruction_call_stmt(allocator, Identifiers::TWO_WAY_LISTENER, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::TWO_WAY_LISTENER, args)
 }
 
 /// Creates an ɵɵsyntheticHostListener() call for a LegacyAnimation host listener.
@@ -233,6 +236,7 @@ pub fn create_two_way_listener_stmt<'a>(
 /// Matches TypeScript: `syntheticHost = op.hostListener && op.isLegacyAnimationListener`.
 pub fn create_synthetic_host_listener_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     handler_fn_name: Option<&Ident<'a>>,
@@ -257,7 +261,12 @@ pub fn create_synthetic_host_listener_stmt<'a>(
         &allocator,
     ));
     args.push(handler_fn);
-    create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_LISTENER, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::SYNTHETIC_HOST_LISTENER,
+        args,
+    )
 }
 
 /// Creates an ɵɵsyntheticHostListener() call statement for animation listeners.
@@ -270,6 +279,7 @@ pub fn create_synthetic_host_listener_stmt<'a>(
 /// The `consumes_dollar_event` parameter controls whether the `$event` parameter is included.
 pub fn create_animation_listener_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     phase: crate::ir::enums::AnimationKind,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
@@ -307,7 +317,12 @@ pub fn create_animation_listener_stmt<'a>(
     ));
     args.push(handler_fn);
 
-    create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_LISTENER, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::SYNTHETIC_HOST_LISTENER,
+        args,
+    )
 }
 
 /// Creates an ɵɵanimateEnter() or ɵɵanimateLeave() call statement for animation string bindings.
@@ -316,6 +331,7 @@ pub fn create_animation_listener_stmt<'a>(
 /// Example: `ɵɵanimateEnter("slide")` for `<div animate.enter="slide">`
 pub fn create_animation_string_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     animation_kind: AnimationKind,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -325,7 +341,7 @@ pub fn create_animation_string_stmt<'a>(
         AnimationKind::Enter => Identifiers::ANIMATION_ENTER,
         AnimationKind::Leave => Identifiers::ANIMATION_LEAVE,
     };
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an ɵɵsyntheticHostProperty() call statement for DomProperty animation bindings.
@@ -334,6 +350,7 @@ pub fn create_animation_string_stmt<'a>(
 /// It emits `syntheticHostProperty(name, value)`.
 pub fn create_animation_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -347,7 +364,12 @@ pub fn create_animation_stmt<'a>(
     )));
     args.push(value);
 
-    create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_PROPERTY, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::SYNTHETIC_HOST_PROPERTY,
+        args,
+    )
 }
 
 /// Creates an ɵɵanimateEnter() or ɵɵanimateLeave() call statement for animation CreateOp.
@@ -366,6 +388,7 @@ pub fn create_animation_stmt<'a>(
 /// - `Identifiers.animationLeave` for AnimationKind::LEAVE
 pub fn create_animation_op_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     animation_kind: AnimationKind,
     handler_stmts: OxcVec<'a, OutputStatement<'a>>,
     handler_fn_name: Option<&Ident<'a>>,
@@ -391,12 +414,13 @@ pub fn create_animation_op_stmt<'a>(
         AnimationKind::Enter => Identifiers::ANIMATION_ENTER,
         AnimationKind::Leave => Identifiers::ANIMATION_LEAVE,
     };
-    create_instruction_call_stmt(allocator, instruction, args)
+    create_instruction_call_stmt(allocator, core_namespace, instruction, args)
 }
 
 /// Creates an animation binding call statement.
 pub fn create_animation_binding_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     name: &Ident<'a>,
     value: OutputExpression<'a>,
 ) -> OutputStatement<'a> {
@@ -406,7 +430,12 @@ pub fn create_animation_binding_stmt<'a>(
         &allocator,
     )));
     args.push(value);
-    create_instruction_call_stmt(allocator, Identifiers::SYNTHETIC_HOST_PROPERTY, args)
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::SYNTHETIC_HOST_PROPERTY,
+        args,
+    )
 }
 
 /// Creates a control binding call statement (ɵɵcontrol).
@@ -414,8 +443,16 @@ pub fn create_animation_binding_stmt<'a>(
 /// Angular's control update instruction takes no arguments. The `[formField]`
 /// value is written through the regular property instruction, and `ɵɵcontrol()`
 /// performs the form-control synchronization work separately.
-pub fn create_control_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> OutputStatement<'a> {
-    create_instruction_call_stmt(allocator, Identifiers::CONTROL, OxcVec::new_in(&allocator))
+pub fn create_control_stmt<'a>(
+    allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
+) -> OutputStatement<'a> {
+    create_instruction_call_stmt(
+        allocator,
+        core_namespace,
+        Identifiers::CONTROL,
+        OxcVec::new_in(&allocator),
+    )
 }
 
 /// Creates an ɵɵprojectionDef() call statement from a pre-built R3 def expression.
@@ -424,6 +461,7 @@ pub fn create_control_stmt<'a>(allocator: &'a oxc_allocator::Allocator) -> Outpu
 /// If `def` is Some, it's passed as the selector array argument.
 pub fn create_projection_def_stmt_from_expr<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     def: Option<&OutputExpression<'a>>,
 ) -> OutputStatement<'a> {
     let mut args = OxcVec::new_in(&allocator);
@@ -432,15 +470,17 @@ pub fn create_projection_def_stmt_from_expr<'a>(
         args.push(def_expr.clone_in(allocator));
     }
 
-    create_instruction_call_stmt(allocator, Identifiers::PROJECTION_DEF, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::PROJECTION_DEF, args)
 }
 
 /// Creates an ɵɵdisableBindings() call statement.
 pub fn create_disable_bindings_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
         &allocator,
+        core_namespace,
         Identifiers::DISABLE_BINDINGS,
         OxcVec::new_in(&allocator),
     )
@@ -449,9 +489,11 @@ pub fn create_disable_bindings_stmt<'a>(
 /// Creates an ɵɵenableBindings() call statement.
 pub fn create_enable_bindings_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
 ) -> OutputStatement<'a> {
     create_instruction_call_stmt(
         allocator,
+        core_namespace,
         Identifiers::ENABLE_BINDINGS,
         OxcVec::new_in(&allocator),
     )
@@ -460,6 +502,7 @@ pub fn create_enable_bindings_stmt<'a>(
 /// Creates an ɵɵpipe() call statement.
 pub fn create_pipe_stmt<'a>(
     allocator: &'a oxc_allocator::Allocator,
+    core_namespace: &'a str,
     slot: u32,
     name: &Ident<'a>,
 ) -> OutputStatement<'a> {
@@ -472,5 +515,5 @@ pub fn create_pipe_stmt<'a>(
         LiteralExpr { value: LiteralValue::String(name.clone()), source_span: None },
         &allocator,
     )));
-    create_instruction_call_stmt(allocator, Identifiers::PIPE, args)
+    create_instruction_call_stmt(allocator, core_namespace, Identifiers::PIPE, args)
 }

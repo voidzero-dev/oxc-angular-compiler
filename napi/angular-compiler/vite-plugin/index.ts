@@ -404,7 +404,14 @@ export function angular(options: PluginOptions = {}): Plugin[] {
   // a decorator — which makes the quick decorator check early-return, skipping
   // the transform entirely — would leave the old `ɵfac`/`ɵcmp` entries in place
   // and `generateBundle` would re-inject Ivy metadata into a now-plain class.
-  const collectedDtsDeclarations = new Map<string, Array<{ className: string; members: string }>>()
+  const collectedDtsDeclarations = new Map<
+    string,
+    Array<{
+      className: string
+      members: string
+      namespaceImports: Record<string, string>
+    }>
+  >()
 
   function getMinifyComponentStyles(context?: {
     environment?: { config?: { build?: ResolvedConfig['build'] } }
@@ -1050,6 +1057,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               result.dtsDeclarations.map((decl) => ({
                 className: decl.className,
                 members: decl.members,
+                namespaceImports: decl.namespaceImports,
               })),
             )
           }
@@ -1425,20 +1433,29 @@ export function angular(options: PluginOptions = {}): Plugin[] {
         // Flatten every module's declarations into a class-name-keyed list.
         // A library publishes one class per name; if names ever collide the
         // last module wins, matching the previous (class-name-keyed) behavior.
-        const byClassName = new Map<string, string>()
-        for (const moduleDecls of collectedDtsDeclarations.values()) {
+        // Keep each declaration's source module id: relative specifiers in
+        // `namespaceImports` ("./dep") mean different modules under
+        // different directories, so canonicalization keys on the resolved
+        // identity, not the raw string.
+        const byClassName = new Map<
+          string,
+          {
+            className: string
+            members: string
+            namespaceImports: Record<string, string>
+            sourceFile: string
+          }
+        >()
+        for (const [moduleId, moduleDecls] of collectedDtsDeclarations) {
           for (const decl of moduleDecls) {
-            byClassName.set(decl.className, decl.members)
+            byClassName.set(decl.className, { ...decl, sourceFile: moduleId })
           }
         }
-        const declarations = Array.from(byClassName, ([className, members]) => ({
-          className,
-          members,
-        }))
+        const declarations = Array.from(byClassName.values())
 
         for (const file of Object.values(bundle)) {
           if (file.type !== 'asset') continue
-          if (!file.fileName.endsWith('.d.ts')) continue
+          if (!/\.d\.[cm]?ts$/.test(file.fileName)) continue
 
           const source =
             typeof file.source === 'string'

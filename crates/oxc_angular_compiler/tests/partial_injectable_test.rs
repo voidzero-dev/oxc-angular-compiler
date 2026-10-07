@@ -33,7 +33,7 @@ fn simple_root_injectable() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
     insta::assert_snapshot!(emit(&expr));
 }
 
@@ -47,7 +47,7 @@ fn injectable_with_use_class() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(
@@ -70,7 +70,7 @@ fn injectable_with_use_class_forward_ref_wraps() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(
@@ -90,7 +90,7 @@ fn injectable_with_use_existing() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("useExisting:RealToken"), "expected useExisting:RealToken, got: {js}");
@@ -107,7 +107,7 @@ fn injectable_with_use_value() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("useValue:configObject"), "expected useValue:configObject, got: {js}");
@@ -130,7 +130,7 @@ fn injectable_with_use_factory_and_deps() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains("useFactory:createService"), "useFactory should be raw, got: {js}");
@@ -150,7 +150,7 @@ fn provided_in_omitted_when_none() {
         .r#type(read_var(&allocator, "ScopedService"))
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(!js.contains("providedIn"), "providedIn should be omitted when None, got: {js}");
@@ -165,7 +165,7 @@ fn provided_in_platform() {
         .provided_in_platform()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"providedIn:"platform""#), "expected providedIn:\"platform\", got: {js}");
@@ -180,7 +180,7 @@ fn provided_in_any() {
         .provided_in_any()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(js.contains(r#"providedIn:"any""#), "expected providedIn:\"any\", got: {js}");
@@ -195,7 +195,7 @@ fn provided_in_module() {
         .provided_in_module(read_var(&allocator, "FeatureModule"))
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
 
     let js = emit(&expr);
     assert!(
@@ -213,7 +213,7 @@ fn injectable_field_order_matches_upstream() {
         .provided_in_root()
         .build()
         .unwrap();
-    let expr = compile_declare_injectable_from_metadata(&allocator, &meta);
+    let expr = compile_declare_injectable_from_metadata(&allocator, "i0", &meta);
     let js = emit(&expr);
 
     let min_idx = js.find("minVersion").unwrap();
@@ -248,7 +248,7 @@ fn round_trip_partial_injectable_and_factory_through_linker() {
         .provided_in_root()
         .build()
         .unwrap();
-    let prov_expr = compile_declare_injectable_from_metadata(&allocator, &injectable_meta);
+    let prov_expr = compile_declare_injectable_from_metadata(&allocator, "i0", &injectable_meta);
 
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
         name: Ident::from("ApiService"),
@@ -262,7 +262,7 @@ fn round_trip_partial_injectable_and_factory_through_linker() {
         },
         target: FactoryTarget::Injectable,
     });
-    let fac_expr = compile_declare_factory_function(&allocator, &factory_meta);
+    let fac_expr = compile_declare_factory_function(&allocator, "i0", &factory_meta);
 
     let source = format!(
         "import * as i0 from \"@angular/core\";\nexport class ApiService {{}}\nApiService.\u{0275}fac = {};\nApiService.\u{0275}prov = {};",

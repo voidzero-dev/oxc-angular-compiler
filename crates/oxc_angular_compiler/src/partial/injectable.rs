@@ -46,13 +46,18 @@ use crate::r3::Identifiers;
 /// See: upstream `packages/compiler/src/render3/partial/injectable.ts:29`.
 pub fn compile_declare_injectable_from_metadata<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3InjectableMetadata<'a>,
 ) -> OutputExpression<'a> {
     let mut entries: Vec<'a, LiteralMapEntry<'a>> = Vec::new_in(&allocator);
 
     entries.push(string_entry(allocator, "minVersion", MIN_VERSION_INJECTABLE));
     entries.push(string_entry(allocator, "version", PLACEHOLDER_VERSION));
-    entries.push(LiteralMapEntry::new(Ident::from("ngImport"), read_var(allocator, "i0"), false));
+    entries.push(LiteralMapEntry::new(
+        Ident::from("ngImport"),
+        read_var(allocator, core_namespace),
+        false,
+    ));
     entries.push(LiteralMapEntry::new(Ident::from("type"), meta.r#type.clone_in(allocator), false));
 
     // providedIn — only emit when set. ProvidedIn::None is the "omit" case.
@@ -65,14 +70,24 @@ pub fn compile_declare_injectable_from_metadata<'a>(
         InjectableProvider::UseClass { class_expr, is_forward_ref, .. } => {
             entries.push(LiteralMapEntry::new(
                 Ident::from("useClass"),
-                maybe_forward_ref(allocator, class_expr.clone_in(allocator), *is_forward_ref),
+                maybe_forward_ref(
+                    allocator,
+                    core_namespace,
+                    class_expr.clone_in(allocator),
+                    *is_forward_ref,
+                ),
                 false,
             ));
         }
         InjectableProvider::UseExisting { existing, is_forward_ref } => {
             entries.push(LiteralMapEntry::new(
                 Ident::from("useExisting"),
-                maybe_forward_ref(allocator, existing.clone_in(allocator), *is_forward_ref),
+                maybe_forward_ref(
+                    allocator,
+                    core_namespace,
+                    existing.clone_in(allocator),
+                    *is_forward_ref,
+                ),
                 false,
             ));
         }
@@ -118,7 +133,7 @@ pub fn compile_declare_injectable_from_metadata<'a>(
     OutputExpression::InvokeFunction(Box::new_in(
         InvokeFunctionExpr {
             fn_expr: Box::new_in(
-                namespaced_prop(allocator, "i0", Identifiers::DECLARE_INJECTABLE),
+                namespaced_prop(allocator, core_namespace, Identifiers::DECLARE_INJECTABLE),
                 &allocator,
             ),
             args,
@@ -137,6 +152,7 @@ pub fn compile_declare_injectable_from_metadata<'a>(
 /// the constructor deps) and delegates to `compile_declare_factory_function`.
 pub fn compile_declare_factory_for_injectable<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     meta: &R3InjectableMetadata<'a>,
 ) -> OutputExpression<'a> {
     let factory_meta = R3FactoryMetadata::Constructor(R3ConstructorFactoryMetadata {
@@ -148,7 +164,7 @@ pub fn compile_declare_factory_for_injectable<'a>(
         target: FactoryTarget::Injectable,
     });
 
-    compile_declare_factory_function(allocator, &factory_meta)
+    compile_declare_factory_function(allocator, core_namespace, &factory_meta)
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -203,10 +219,11 @@ fn clone_constructor_deps<'a>(
 
 fn maybe_forward_ref<'a>(
     allocator: &'a Allocator,
+    core_namespace: &'a str,
     expr: OutputExpression<'a>,
     is_forward_ref: bool,
 ) -> OutputExpression<'a> {
-    if is_forward_ref { wrap_forward_ref(allocator, expr) } else { expr }
+    if is_forward_ref { wrap_forward_ref(allocator, core_namespace, expr) } else { expr }
 }
 
 fn provided_in_expr<'a>(
@@ -276,7 +293,7 @@ fn compile_one_dependency<'a>(
     ))
 }
 
-fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpression<'a> {
+fn read_var<'a>(allocator: &'a Allocator, name: &'a str) -> OutputExpression<'a> {
     OutputExpression::ReadVar(Box::new_in(
         ReadVarExpr { name: Ident::from(name), source_span: None },
         &allocator,
@@ -285,7 +302,7 @@ fn read_var<'a>(allocator: &'a Allocator, name: &'static str) -> OutputExpressio
 
 fn namespaced_prop<'a>(
     allocator: &'a Allocator,
-    receiver: &'static str,
+    receiver: &'a str,
     prop: &'static str,
 ) -> OutputExpression<'a> {
     OutputExpression::ReadProp(Box::new_in(
