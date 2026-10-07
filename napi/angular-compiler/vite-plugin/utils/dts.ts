@@ -421,10 +421,7 @@ export function injectDtsDeclarations(
     splices.push({
       start: insertAt,
       end: insertAt,
-      text:
-        (needsLeadingNl ? '\n' : '') +
-        lines.map((line) => `    ${line}`).join('\n') +
-        '\n',
+      text: (needsLeadingNl ? '\n' : '') + lines.map((line) => `    ${line}`).join('\n') + '\n',
     })
   }
 

@@ -62,8 +62,7 @@ describe('injectDtsDeclarations', () => {
   it('appends members at the end of a class that already has members', () => {
     // Upstream adds the Ivy members after the existing ones
     // ([...members, ...newMembers]).
-    const source =
-      'export declare class Foo {\n  constructor(x: number);\n  field: string;\n}\n'
+    const source = 'export declare class Foo {\n  constructor(x: number);\n  field: string;\n}\n'
     const out = injectDtsDeclarations(source, [
       { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
     ])
@@ -216,8 +215,7 @@ describe('injectDtsDeclarations', () => {
   it('keeps a multiline trailing comment attached to the last import', () => {
     // The newline inside the block comment must not be chosen as the
     // insertion point — the import would land inside the comment.
-    const source =
-      'import type { A } from "./a"; /* keep\nme */\nexport declare class Foo {\n}\n'
+    const source = 'import type { A } from "./a"; /* keep\nme */\nexport declare class Foo {\n}\n'
     const out = injectDtsDeclarations(source, [
       { className: 'Foo', members: 'static ɵfac: i0.ɵɵFactoryDeclaration<Foo, never>;' },
     ])
