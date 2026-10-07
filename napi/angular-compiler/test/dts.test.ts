@@ -298,75 +298,40 @@ describe('injectDtsDeclarations', () => {
     expect(out).toContain('typeof i1_1.O')
   })
 
-  it('rebases relative specifiers to the output file directory', () => {
-    // `"./dep"` compiled under `src/a/` must not be emitted verbatim into
-    // `dist/index.d.ts` — from there it resolves to a module that does not
-    // exist. With `outputFile` known, the emitted specifier reaches back to
-    // the source-resolved target.
+  it('emits relative specifiers verbatim for structure-preserving emit', () => {
+    // ngtsc and structure-preserving declaration emit place the emitted
+    // `.d.ts` in the source's relative layout (`src/a/foo.ts` →
+    // `dist/a/foo.d.ts`), so `"./dep"` verbatim reaches `dist/a/dep.d.ts`.
+    // Rebasing to the source tree would point outside the published
+    // package; under fully-bundled declaration output two same-named
+    // relative modules can never both resolve regardless.
     const source = 'export declare class A {\n}\n'
-    const out = injectDtsDeclarations(
-      source,
-      [
-        {
-          className: 'A',
-          members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
-          namespaceImports: { i0: '@angular/core', i1: './dep' },
-          sourceFile: '/repo/src/a/foo.ts',
-        },
-      ],
-      'dist/index.d.ts',
-    )
-    expect(out).toContain('import * as i1 from "../repo/src/a/dep";')
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'A',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
+        namespaceImports: { i0: '@angular/core', i1: './dep' },
+        sourceFile: '/repo/src/a/foo.ts',
+      },
+    ])
+    expect(out).toContain('import * as i1 from "./dep";')
     expect(out).toContain('import * as i0 from "@angular/core";')
     expect(out).toContain('typeof i1.D')
   })
 
-  it('keeps distinct rebased specifiers for same-named relative modules', () => {
-    // Two source dirs, same raw specifier: two identities AND two emitted
-    // specifiers — `i1` → ../src/a/dep, `i1_1` → ../src/b/dep.
-    const source = 'export declare class A {\n}\nexport declare class B {\n}\n'
-    const out = injectDtsDeclarations(
-      source,
-      [
-        {
-          className: 'A',
-          members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
-          namespaceImports: { i0: '@angular/core', i1: './dep' },
-          sourceFile: '/repo/src/a/foo.ts',
-        },
-        {
-          className: 'B',
-          members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<B, [typeof i1.O], never, never>;',
-          namespaceImports: { i0: '@angular/core', i1: './dep' },
-          sourceFile: '/repo/src/b/foo.ts',
-        },
-      ],
-      'dist/index.d.ts',
-    )
-    expect(out).toContain('import * as i1 from "../repo/src/a/dep";')
-    expect(out).toContain('import * as i1_1 from "../repo/src/b/dep";')
-    expect(out).toContain('typeof i1.D')
-    expect(out).toContain('typeof i1_1.O')
-  })
-
-  it('reuses an existing import when the rebased specifier matches', () => {
-    // Reuse compares the EMITTED specifier: an existing `import * as i1
-    // from "../repo/src/a/dep"` already binds exactly what this member
-    // needs after rebasing, so no second import is added.
-    const source = 'import * as i1 from "../repo/src/a/dep";\nexport declare class A {\n}\n'
-    const out = injectDtsDeclarations(
-      source,
-      [
-        {
-          className: 'A',
-          members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
-          namespaceImports: { i0: '@angular/core', i1: './dep' },
-          sourceFile: '/repo/src/a/foo.ts',
-        },
-      ],
-      'dist/index.d.ts',
-    )
-    expect(out.match(/from "\.\.\/repo\/src\/a\/dep"/g)).toHaveLength(1)
+  it('reuses an existing import bound to the same verbatim specifier', () => {
+    // An existing `import * as i1 from "./dep"` already binds the specifier
+    // this member needs (verbatim emit), so no second import is added.
+    const source = 'import * as i1 from "./dep";\nexport declare class A {\n}\n'
+    const out = injectDtsDeclarations(source, [
+      {
+        className: 'A',
+        members: 'static ɵmod: i0.ɵɵNgModuleDeclaration<A, [typeof i1.D], never, never>;',
+        namespaceImports: { i0: '@angular/core', i1: './dep' },
+        sourceFile: '/repo/src/a/foo.ts',
+      },
+    ])
+    expect(out.match(/from "\.\/dep"/g)).toHaveLength(1)
     expect(out).toContain('typeof i1.D')
   })
 

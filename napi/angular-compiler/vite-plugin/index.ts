@@ -1427,6 +1427,11 @@ export function angular(options: PluginOptions = {}): Plugin[] {
       name: '@oxc-angular/vite-dts',
       enforce: 'post',
       generateBundle(_outputOptions, bundle) {
+        // `injectDtsDeclarations` emits relative specifiers verbatim — the
+        // right behavior under structure-preserving declaration emit (the
+        // dominant mode), where dist mirrors src. Bundled declarations that
+        // collapse directories can't represent two same-named relative
+        // modules regardless; that is a dts-generator limitation.
         if (pluginOptions.compilationMode !== 'partial') return
         if (collectedDtsDeclarations.size === 0) return
 
@@ -1462,14 +1467,7 @@ export function angular(options: PluginOptions = {}): Plugin[] {
               ? file.source
               : Buffer.from(file.source).toString('utf-8')
 
-          // The asset's own path lets `injectDtsDeclarations` rebase
-          // relative namespace specifiers ("./dep" collected under src/a/)
-          // so they resolve from wherever the .d.ts is emitted.
-          const outputFile = _outputOptions.dir
-            ? `${_outputOptions.dir}/${file.fileName}`
-            : _outputOptions.file
-
-          const augmented = injectDtsDeclarations(source, declarations, outputFile)
+          const augmented = injectDtsDeclarations(source, declarations)
           if (augmented !== source) {
             file.source = augmented
           }
