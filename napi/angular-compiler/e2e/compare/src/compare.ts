@@ -2301,7 +2301,9 @@ function metadataArgOrAbsent(arg: string | undefined): string {
   if (arg === undefined) return 'undefined'
   const trimmed = arg.trim()
   if (trimmed === 'null') return 'null'
-  if (trimmed === 'undefined' || /^void\b/.test(trimmed)) return 'undefined'
+  // `undefined`, `void 0` and `void(0)` are the inert spellings a compiler
+  // emits; any other `void expr` runs its operand and must stay distinct.
+  if (trimmed === 'undefined' || trimmed === 'void 0' || trimmed === 'void(0)') return 'undefined'
   return trimmed
 }
 
@@ -2385,13 +2387,194 @@ function normalizeWrapperAst(wrapper: NormAstNode): string {
       protect(node.property)
     }
   })
-  walkAst(cloned, (node) => {
-    if (node.type === 'Identifier' && !nonReference.has(node)) {
-      const index = paramNames.indexOf(node.name as string)
-      if (index >= 0) node.name = `p${index}`
-    }
-  })
+  // Rename the wrapper's own parameter declarations, then rename only the
+  // references actually bound to them — a nested scope re-declaring the same
+  // name shadows the parameter and must keep its spelling.
+  for (const [index, param] of ((cloned.params ?? []) as NormAstNode[]).entries()) {
+    if (param.type === 'Identifier') param.name = `p${index}`
+  }
+  const active = new Map(paramNames.map((name, index) => [name, `p${index}`]))
+  renameBoundIdentifiers(cloned, active, nonReference)
   return normalizeAst(cloned)
+}
+
+/**
+ * Collect names bound by a binding pattern — parameter lists, destructuring
+ * targets, variable declarator ids and catch params. Expression parts
+ * (default values, computed keys) are not bindings and are skipped.
+ */
+function boundNames(pattern: NormAstNode | null | undefined, out: Set<string>): void {
+  if (!pattern || typeof pattern !== 'object') return
+  switch (pattern.type) {
+    case 'Identifier':
+      out.add(pattern.name as string)
+      break
+    case 'ObjectPattern':
+      for (const prop of (pattern.properties ?? []) as NormAstNode[]) {
+        if (prop.type === 'Property') boundNames(prop.value as NormAstNode, out)
+        else if (prop.type === 'RestElement') boundNames(prop.argument as NormAstNode, out)
+      }
+      break
+    case 'ArrayPattern':
+      for (const el of (pattern.elements ?? []) as (NormAstNode | null)[]) boundNames(el, out)
+      break
+    case 'AssignmentPattern':
+      boundNames(pattern.left as NormAstNode, out)
+      break
+    case 'RestElement':
+      boundNames(pattern.argument as NormAstNode, out)
+      break
+    case 'TSParameterProperty':
+      boundNames(pattern.parameter as NormAstNode, out)
+      break
+  }
+}
+
+/**
+ * Names bound directly inside a block/program/statement list by `let`,
+ * `const`, `class` and `function` declarations. Only direct members are
+ * scanned — nested blocks manage their own scope.
+ */
+function blockDeclNames(stmts: NormAstNode[] | undefined, out: Set<string>): void {
+  for (const stmt of stmts ?? []) {
+    if (stmt.type === 'VariableDeclaration' && stmt.kind !== 'var') {
+      for (const decl of (stmt.declarations ?? []) as NormAstNode[]) {
+        boundNames(decl.id as NormAstNode, out)
+      }
+    } else if (stmt.type === 'FunctionDeclaration' || stmt.type === 'ClassDeclaration') {
+      const id = stmt.id as NormAstNode | undefined
+      if (id?.type === 'Identifier') out.add(id.name as string)
+    }
+  }
+}
+
+/**
+ * `var`-bound names anywhere inside a function body — they hoist to the
+ * function scope. Nested functions are not descended into.
+ */
+function varDeclNames(node: unknown, out: Set<string>): void {
+  if (node === null || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    for (const item of node) varDeclNames(item, out)
+    return
+  }
+  const obj = node as NormAstNode
+  if (
+    obj.type === 'FunctionDeclaration' ||
+    obj.type === 'FunctionExpression' ||
+    obj.type === 'ArrowFunctionExpression'
+  ) {
+    return
+  }
+  if (obj.type === 'VariableDeclaration' && obj.kind === 'var') {
+    for (const decl of (obj.declarations ?? []) as NormAstNode[]) {
+      boundNames(decl.id as NormAstNode, out)
+    }
+    return
+  }
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === 'object') varDeclNames(value, out)
+  }
+}
+
+/**
+ * Rename identifiers bound to names in `active` (param name → `p<i>`),
+ * respecting lexical scope: parameters, `let`/`const`/`class`/`function`
+ * declarations, hoisted `var`s, catch params and class names that re-declare
+ * an active name shadow it for their subtree, and identifiers in
+ * `nonReference` positions are never renamed.
+ */
+function renameBoundIdentifiers(
+  node: unknown,
+  active: ReadonlyMap<string, string>,
+  nonReference: ReadonlySet<NormAstNode>,
+): void {
+  if (node === null || typeof node !== 'object') return
+  if (Array.isArray(node)) {
+    for (const item of node) renameBoundIdentifiers(item, active, nonReference)
+    return
+  }
+  const obj = node as NormAstNode
+  if (obj.type === 'Identifier') {
+    if (!nonReference.has(obj)) {
+      const mapped = active.get(obj.name as string)
+      if (mapped) obj.name = mapped
+    }
+    return
+  }
+
+  // Narrow the active renames for this node's subtree when it introduces
+  // shadowing bindings.
+  let inner: Map<string, string> = new Map(active)
+  const type = obj.type
+  if (
+    type === 'FunctionDeclaration' ||
+    type === 'FunctionExpression' ||
+    type === 'ArrowFunctionExpression'
+  ) {
+    const shadowed = new Set<string>()
+    for (const param of (obj.params ?? []) as NormAstNode[]) boundNames(param, shadowed)
+    const id = obj.id as NormAstNode | undefined
+    if (id?.type === 'Identifier') shadowed.add(id.name as string)
+    varDeclNames(obj.body, shadowed)
+    const body = obj.body as NormAstNode | undefined
+    if (body?.type === 'BlockStatement') {
+      blockDeclNames(body.body as NormAstNode[], shadowed)
+    }
+    if (shadowed.size > 0) {
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+  } else if (
+    type === 'Program' ||
+    type === 'BlockStatement' ||
+    type === 'StaticBlock' ||
+    type === 'SwitchStatement'
+  ) {
+    const shadowed = new Set<string>()
+    if (type === 'SwitchStatement') {
+      // Case consequents share the switch's block scope.
+      for (const c of (obj.cases ?? []) as NormAstNode[]) {
+        blockDeclNames(c.consequent as NormAstNode[], shadowed)
+      }
+    } else {
+      blockDeclNames(obj.body as NormAstNode[], shadowed)
+    }
+    if (shadowed.size > 0) {
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+  } else if (type === 'CatchClause') {
+    const param = obj.param as NormAstNode | undefined
+    if (param) {
+      const shadowed = new Set<string>()
+      boundNames(param, shadowed)
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+  } else if (type === 'ClassExpression' || type === 'ClassDeclaration') {
+    const id = obj.id as NormAstNode | undefined
+    if (id?.type === 'Identifier' && active.has(id.name as string)) {
+      inner = new Map(active)
+      inner.delete(id.name as string)
+    }
+  } else if (type === 'ForStatement' || type === 'ForInStatement' || type === 'ForOfStatement') {
+    const decl = (type === 'ForStatement' ? obj.init : obj.left) as NormAstNode | undefined
+    if (decl?.type === 'VariableDeclaration' && decl.kind !== 'var') {
+      const shadowed = new Set<string>()
+      for (const d of (decl.declarations ?? []) as NormAstNode[]) {
+        boundNames(d.id as NormAstNode, shadowed)
+      }
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+  }
+
+  for (const value of Object.values(obj)) {
+    if (value !== null && typeof value === 'object') {
+      renameBoundIdentifiers(value, inner, nonReference)
+    }
+  }
 }
 
 /**
