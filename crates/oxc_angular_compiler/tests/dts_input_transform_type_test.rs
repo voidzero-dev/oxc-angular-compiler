@@ -23,6 +23,8 @@ export const val = {a: 1};
 export const kc = 'kc';
 export function gen<T>(x: T) { return x; }
 const re = /[/*]/;
+function f() { return /[/*]/; }
+const tpl = `${re}`;
 @Directive({selector: '[t]'})
 export class T {
   @Input({transform: (v: %TYPE%) => 1}) t: any;
@@ -117,8 +119,15 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     ("`${string}x\n`", "`${string}x\n`"),
     // A `//` on a `/*`'s continuation line is comment text.
     ("string | /* a\n // b */\n number", "string | /* a\n   // b */ number"),
-    // The `/*` inside the file's `/[/*]/` regex doesn't pair with this `*/`.
+    // The `/*` inside the file's `/[/*]/` regexes (after `=` and after the
+    // `return` keyword) doesn't pair with this `*/`.
     ("string | /* a\n b */ number", "string | /* a\n   b */ number"),
+    // A template ending in a hole (`${re}` in the file) doesn't hide later
+    // comments.
+    ("string | /* c */ number", "string | /* c */ number"),
+    ("[`${string}`, /** x */ number]", "[`${string}`, /** x */ number]"),
+    // `isWhiteSpaceSingleLine` covers U+200B: the JSDoc stays `number`'s.
+    ("string | /** doc */\u{200B} number", "string | /** doc */ number"),
     // An elision is zero-width right after its preceding comma: comments
     // before the comma stay with the previous element, comments after it
     // are the elision's intervening trivia.

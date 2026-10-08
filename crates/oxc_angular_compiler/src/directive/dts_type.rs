@@ -1836,15 +1836,20 @@ fn token_end_before(lexed: &Lexed, source: &str, start: usize) -> Option<usize> 
     let mut end = start;
     loop {
         let before = &source[..end];
-        let trimmed = before.trim_end();
-        if before[trimmed.len()..].contains(is_line_break) {
-            if let Some(slashes) = line_comment_start(lexed, trimmed) {
+        // TypeScript's trivia, not Rust's Unicode whitespace: the trim must
+        // take `isWhiteSpaceSingleLine` bytes like U+200B/U+FEFF and leave
+        // the line breaks (`\u{2028}` included — a `//` after one still
+        // counts for the same check above).
+        let trimmed_len = before.trim_end_matches(is_whitespace_like).len();
+        if before[trimmed_len..].contains(is_line_break) {
+            if let Some(slashes) = line_comment_start(lexed, &before[..trimmed_len]) {
                 // The line ends at the comment; keep looking before it.
                 end = slashes;
                 continue;
             }
         }
-        end = trimmed.len();
+        end = trimmed_len;
+        let trimmed = &before[..trimmed_len];
         match trimmed.strip_suffix("*/") {
             Some(inner) => end = block_comment_start(lexed, inner)?,
             None => return Some(end),
@@ -1866,32 +1871,47 @@ pub(crate) struct Lexed {
     block: Vec<(usize, usize)>,
 }
 
+/// The last non-trivia byte lexed and where it sits — `pos` lets
+/// [`slash_step`] pull the word a trailing identifier belongs to, since
+/// keywords like `return` also end in identifier bytes but a `/` after them
+/// opens a regex.
+struct Prev {
+    byte: u8,
+    pos: usize,
+}
+
+impl Prev {
+    fn set(&mut self, byte: u8, pos: usize) {
+        *self = Self { byte, pos };
+    }
+}
+
 fn lex_comments(source: &str) -> Lexed {
     let mut out = Lexed::default();
-    // The last non-trivia byte lexed; `/` after an operand-ish byte is
-    // division, anywhere else it can open a regex (the `}` case guesses
-    // "expression", so a `}` closing a block is a known miss).
-    let mut last = b';';
+    // `/` after an operand-ish byte is division, anywhere else it can open
+    // a regex (the `}` case guesses "expression", so a `}` closing a block
+    // is a known miss).
+    let mut prev = Prev { byte: b';', pos: 0 };
     let bytes = source.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         let b = bytes[i];
         match b {
             b'\'' | b'"' => {
-                last = b'"';
+                prev.set(b'"', i);
                 i = str_end(source, i);
             }
             b'`' => {
-                last = b'"';
-                i = template_end(source, i, &mut out, &mut last);
+                prev.set(b'"', i);
+                i = template_end(source, i, &mut out, &mut prev);
             }
-            b'/' => i = slash_step(source, i, &mut out, &mut last),
+            b'/' => i = slash_step(source, i, &mut out, &mut prev),
             _ => {
                 if b < 128 && !is_space(b as char) {
                     // Any non-whitespace ASCII byte counts as operand-ish.
-                    last = b;
+                    prev.set(b, i);
                 } else if b >= 128 {
-                    last = b'"';
+                    prev.set(b'"', i);
                 }
                 i += 1;
             }
@@ -1920,17 +1940,19 @@ fn str_end(code: &str, open: usize) -> usize {
 /// Skip a template literal starting at `open`: the index past its closing
 /// backtick, or the text's end. The text is trivia-less, but its `${ }`
 /// holes are lexed as code by [`hole_end`].
-fn template_end(code: &str, open: usize, out: &mut Lexed, last: &mut u8) -> usize {
+fn template_end(code: &str, open: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
     let bytes = code.as_bytes();
     let mut i = open + 1;
     while i < bytes.len() {
         match bytes[i] {
             b'\\' => i += 1,
             b'`' => return i + 1,
-            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, out, last),
-            _ => {}
+            // `hole_end` already returns past the `}` — resume there, or
+            // the closing backtick (`` `${string}` ``) is skipped and the
+            // template swallows the rest of the file.
+            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, out, prev),
+            _ => i += 1,
         }
-        i += 1;
     }
     bytes.len()
 }
@@ -1938,7 +1960,7 @@ fn template_end(code: &str, open: usize, out: &mut Lexed, last: &mut u8) -> usiz
 /// Lex a `${ }` hole's contents from `pos` to past the `}`: a `{`/`}` depth
 /// tracker, so `{ T: U }` members inside don't end the hole. Runs to the
 /// text's end when the hole never closes.
-fn hole_end(code: &str, pos: usize, out: &mut Lexed, last: &mut u8) -> usize {
+fn hole_end(code: &str, pos: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
     let bytes = code.as_bytes();
     let mut i = pos;
     let mut depth = 1usize;
@@ -1946,49 +1968,71 @@ fn hole_end(code: &str, pos: usize, out: &mut Lexed, last: &mut u8) -> usize {
         match bytes[i] {
             b'{' => {
                 depth += 1;
+                prev.set(b'{', i);
                 i += 1;
             }
             b'}' => {
                 depth -= 1;
+                prev.set(b'}', i);
                 i += 1;
                 if depth == 0 {
                     return i;
                 }
             }
-            b'/' => i = slash_step(code, i, out, last),
-            _ => i = lex_byte(code, i, out, last),
+            b'/' => i = slash_step(code, i, out, prev),
+            _ => i = lex_byte(code, i, out, prev),
         }
     }
     i
 }
 
 /// One non-`/`, non-`{}` byte inside a `${ }` hole.
-fn lex_byte(code: &str, i: usize, out: &mut Lexed, last: &mut u8) -> usize {
+fn lex_byte(code: &str, i: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
     let b = code.as_bytes()[i];
     match b {
         b'\'' | b'"' => {
-            *last = b'"';
+            prev.set(b'"', i);
             str_end(code, i)
         }
         b'`' => {
-            *last = b'"';
-            template_end(code, i, out, last)
+            prev.set(b'"', i);
+            template_end(code, i, out, prev)
         }
         _ => {
             if b < 128 && !is_space(b as char) {
-                *last = b;
+                prev.set(b, i);
             } else if b >= 128 {
-                *last = b'"';
+                prev.set(b'"', i);
             }
             i + 1
         }
     }
 }
 
+/// Keywords that start an expression: a `/` right after one opens a regex,
+/// which the last-byte-alone heuristic would call division (`return /x/`).
+const REGEX_CONTEXT_WORDS: &[&str] = &[
+    "return",
+    "throw",
+    "case",
+    "typeof",
+    "instanceof",
+    "new",
+    "delete",
+    "void",
+    "do",
+    "else",
+    "yield",
+    "await",
+    "default",
+    "in",
+    "of",
+];
+
 /// One `/` at `i`: `//` and `/* */` go into the comment table; a regex
 /// literal is skipped so its `*/`/`//`-looking bytes stay literal text;
 /// anything else is division and the byte advances one.
-fn slash_step(code: &str, i: usize, out: &mut Lexed, last: &mut u8) -> usize {
+fn slash_step(code: &str, i: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
     let bytes = code.as_bytes();
     if bytes.get(i + 1) == Some(&b'/') {
         let end = code[i + 2..].find(is_line_break).map(|e| i + 2 + e).unwrap_or(bytes.len());
@@ -1999,18 +2043,29 @@ fn slash_step(code: &str, i: usize, out: &mut Lexed, last: &mut u8) -> usize {
         out.block.push((i, end));
         end
     } else {
-        let next = if regex_can_start(*last) { regex_end(code, i) } else { None };
-        *last = b'/';
+        let next = if regex_can_start(code, prev) { regex_end(code, i) } else { None };
+        prev.set(b'/', i);
         next.unwrap_or(i + 1)
     }
 }
 
 /// Whether `/` can open a regex after `prev`, the last non-trivia byte.
-/// False after operands (identifier bytes, `)`, `]`, `}`, quotes), true
-/// after operators and at the start.
-fn regex_can_start(prev: u8) -> bool {
-    !matches!(prev, b')' | b']' | b'}' | b'_' | b'$' | b'\'' | b'"' | b'`' | b'/')
-        && !prev.is_ascii_alphanumeric()
+/// False after operands (identifier bytes, `)`, `]`, `}`, quotes) — unless
+/// the identifier is a keyword that starts an expression — true after
+/// operators and at the start.
+fn regex_can_start(code: &str, prev: &Prev) -> bool {
+    match prev.byte {
+        b')' | b']' | b'}' | b'_' | b'$' | b'\'' | b'"' | b'`' | b'/' => false,
+        b if b.is_ascii_alphanumeric() => {
+            // The identifier `prev` ends: a keyword takes a regex after it.
+            let word = &code[..prev.pos + 1];
+            let start = word
+                .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
+                .map_or(0, |p| p + 1);
+            REGEX_CONTEXT_WORDS.contains(&&word[start..])
+        }
+        _ => true,
+    }
 }
 
 /// The index past a regex literal opening at `open`, or `None` when it is
