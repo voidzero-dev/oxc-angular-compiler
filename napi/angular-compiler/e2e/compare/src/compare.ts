@@ -2290,14 +2290,18 @@ interface ClassMetadataInfo {
  */
 
 /**
- * `null` / `void 0` / `undefined` all mean "no value" in these slots.
+ * `null` and `undefined` are NOT interchangeable in these slots: the runtime
+ * `setClassMetadata` guards each field with `!== null`, so `undefined` (or a
+ * missing argument, which is `undefined` at the call site) assigns the field
+ * while `null` skips it. Keep the two spellings distinct so the comparator
+ * catches a regression between them. Returns the literal argument text, or
+ * `'null'` / `'undefined'` for the absent-value forms.
  */
-function metadataArgOrNull(arg: string | undefined): string | null {
-  if (arg === undefined) return null
+function metadataArgOrAbsent(arg: string | undefined): string {
+  if (arg === undefined) return 'undefined'
   const trimmed = arg.trim()
-  if (trimmed === 'null' || trimmed === 'undefined' || /^void\b/.test(trimmed)) {
-    return null
-  }
+  if (trimmed === 'null') return 'null'
+  if (trimmed === 'undefined' || /^void\b/.test(trimmed)) return 'undefined'
   return trimmed
 }
 
@@ -2398,7 +2402,7 @@ function extractClassMetadataCalls(program: unknown, code: string): ClassMetadat
         decorators: 'null',
         ctorParams: null,
         propDecorators: null,
-        resolver: metadataArgOrNull(slice(args[1])),
+        resolver: metadataArgOrAbsent(slice(args[1])),
         isAsync: true,
         wrapperNormalized:
           wrapper &&
@@ -2411,9 +2415,9 @@ function extractClassMetadataCalls(program: unknown, code: string): ClassMetadat
 
     results.push({
       className,
-      decorators: slice(args[1]) ?? 'null',
-      ctorParams: metadataArgOrNull(slice(args[2])),
-      propDecorators: metadataArgOrNull(slice(args[3])),
+      decorators: metadataArgOrAbsent(slice(args[1])),
+      ctorParams: metadataArgOrAbsent(slice(args[2])),
+      propDecorators: metadataArgOrAbsent(slice(args[3])),
     })
   })
 
@@ -2453,99 +2457,139 @@ function compareClassMetadata(
   const diffs: ClassMetadataDiff[] = []
   // Sync and async calls for the same class are separate entries — a class
   // reported under both names on one side and only sync on the other is a
-  // real difference (deferredImports metadata wrapper).
+  // real difference (deferredImports metadata wrapper). Each key maps to a
+  // LIST of calls: a source file can legitimately contain its own
+  // `ng.ɵsetClassMetadata(...)` call through the same Angular namespace
+  // binding, and keeping only the last call would let an identical user call
+  // mask a divergent generated one.
   const keyOf = (m: ClassMetadataInfo) => (m.isAsync ? `${m.className}#async` : m.className)
-  const tsMap = new Map(tsMetadata.map((m) => [keyOf(m), m]))
-  const oxcMap = new Map(oxcMetadata.map((m) => [keyOf(m), m]))
+  const signatureOf = (m: ClassMetadataInfo) =>
+    m.isAsync
+      ? `${normalizeMetadataString(m.resolver ?? 'null')}|${m.wrapperNormalized ?? ''}`
+      : `${normalizeMetadataString(m.decorators)}|${normalizeMetadataString(m.ctorParams)}|${normalizeMetadataString(m.propDecorators)}`
+  const groupByKey = (list: ClassMetadataInfo[]) => {
+    const map = new Map<string, ClassMetadataInfo[]>()
+    for (const m of list) {
+      const key = keyOf(m)
+      const group = map.get(key)
+      if (group) {
+        group.push(m)
+      } else {
+        map.set(key, [m])
+      }
+    }
+    // Sort each group by normalized signature so pairing is stable regardless
+    // of call ordering in the two outputs.
+    for (const group of map.values())
+      group.sort((a, b) => signatureOf(a).localeCompare(signatureOf(b)))
+    return map
+  }
+  const tsMap = groupByKey(tsMetadata)
+  const oxcMap = groupByKey(oxcMetadata)
 
   // Check for missing/different metadata (in TS but not matching in Oxc)
-  for (const [key, tsInfo] of tsMap) {
-    const className = tsInfo.className
-    const callName = tsInfo.isAsync ? 'setClassMetadataAsync' : 'setClassMetadata'
-    const oxcInfo = oxcMap.get(key)
-    if (!oxcInfo) {
+  for (const [key, tsGroup] of tsMap) {
+    const className = tsGroup[0].className
+    const callName = tsGroup[0].isAsync ? 'setClassMetadataAsync' : 'setClassMetadata'
+    const oxcGroup = oxcMap.get(key)
+    if (!oxcGroup) {
       diffs.push({
         type: 'missing',
         className,
         field: callName,
-        expected: `decorators: ${tsInfo.decorators.slice(0, 100)}...`,
+        expected: `decorators: ${tsGroup[0].decorators.slice(0, 100)}...`,
       })
-    } else if (tsInfo.isAsync) {
-      // Async entries: compare the deferred-imports resolver thunk AND the
-      // wrapper (alpha-renamed) — a swapped `(B, A)` wrapper is behaviorally
-      // wrong even though its nested sync call looks identical. The nested
-      // sync call itself is extracted as its own entry.
-      if (
-        normalizeMetadataString(tsInfo.resolver ?? null) !==
-        normalizeMetadataString(oxcInfo.resolver ?? null)
-      ) {
-        diffs.push({
-          type: 'different',
-          className,
-          field: 'setClassMetadataAsync.resolver',
-          expected: String(tsInfo.resolver).slice(0, 100),
-          actual: String(oxcInfo.resolver).slice(0, 100),
-        })
-      }
-      if ((tsInfo.wrapperNormalized ?? null) !== (oxcInfo.wrapperNormalized ?? null)) {
-        diffs.push({
-          type: 'different',
-          className,
-          field: 'setClassMetadataAsync.wrapper',
-          expected: '(normalized wrapper)',
-          actual: '(normalized wrapper)',
-        })
-      }
-    } else {
-      // Compare decorators (normalized)
-      const normalizedTsDecorators = normalizeMetadataString(tsInfo.decorators)
-      const normalizedOxcDecorators = normalizeMetadataString(oxcInfo.decorators)
-      if (normalizedTsDecorators !== normalizedOxcDecorators) {
-        diffs.push({
-          type: 'different',
-          className,
-          field: 'setClassMetadata.decorators',
-          expected: tsInfo.decorators.slice(0, 100),
-          actual: oxcInfo.decorators.slice(0, 100),
-        })
-      }
+      continue
+    }
+    if (oxcGroup.length !== tsGroup.length) {
+      diffs.push({
+        type: 'different',
+        className,
+        field: callName,
+        expected: `${tsGroup.length} call(s)`,
+        actual: `${oxcGroup.length} call(s)`,
+      })
+    }
+    for (let i = 0; i < Math.min(tsGroup.length, oxcGroup.length); i++) {
+      const tsInfo = tsGroup[i]
+      const oxcInfo = oxcGroup[i]
+      if (tsInfo.isAsync) {
+        // Async entries: compare the deferred-imports resolver thunk AND the
+        // wrapper (alpha-renamed) — a swapped `(B, A)` wrapper is behaviorally
+        // wrong even though its nested sync call looks identical. The nested
+        // sync call itself is extracted as its own entry.
+        if (
+          normalizeMetadataString(tsInfo.resolver ?? null) !==
+          normalizeMetadataString(oxcInfo.resolver ?? null)
+        ) {
+          diffs.push({
+            type: 'different',
+            className,
+            field: 'setClassMetadataAsync.resolver',
+            expected: String(tsInfo.resolver).slice(0, 100),
+            actual: String(oxcInfo.resolver).slice(0, 100),
+          })
+        }
+        if ((tsInfo.wrapperNormalized ?? null) !== (oxcInfo.wrapperNormalized ?? null)) {
+          diffs.push({
+            type: 'different',
+            className,
+            field: 'setClassMetadataAsync.wrapper',
+            expected: '(normalized wrapper)',
+            actual: '(normalized wrapper)',
+          })
+        }
+      } else {
+        // Compare decorators (normalized)
+        const normalizedTsDecorators = normalizeMetadataString(tsInfo.decorators)
+        const normalizedOxcDecorators = normalizeMetadataString(oxcInfo.decorators)
+        if (normalizedTsDecorators !== normalizedOxcDecorators) {
+          diffs.push({
+            type: 'different',
+            className,
+            field: 'setClassMetadata.decorators',
+            expected: tsInfo.decorators.slice(0, 100),
+            actual: oxcInfo.decorators.slice(0, 100),
+          })
+        }
 
-      // Compare ctorParams
-      if (
-        normalizeMetadataString(tsInfo.ctorParams) !== normalizeMetadataString(oxcInfo.ctorParams)
-      ) {
-        diffs.push({
-          type: 'different',
-          className,
-          field: 'setClassMetadata.ctorParams',
-          expected: String(tsInfo.ctorParams).slice(0, 100),
-          actual: String(oxcInfo.ctorParams).slice(0, 100),
-        })
-      }
+        // Compare ctorParams
+        if (
+          normalizeMetadataString(tsInfo.ctorParams) !== normalizeMetadataString(oxcInfo.ctorParams)
+        ) {
+          diffs.push({
+            type: 'different',
+            className,
+            field: 'setClassMetadata.ctorParams',
+            expected: String(tsInfo.ctorParams).slice(0, 100),
+            actual: String(oxcInfo.ctorParams).slice(0, 100),
+          })
+        }
 
-      // Compare propDecorators
-      if (
-        normalizeMetadataString(tsInfo.propDecorators) !==
-        normalizeMetadataString(oxcInfo.propDecorators)
-      ) {
-        diffs.push({
-          type: 'different',
-          className,
-          field: 'setClassMetadata.propDecorators',
-          expected: String(tsInfo.propDecorators).slice(0, 100),
-          actual: String(oxcInfo.propDecorators).slice(0, 100),
-        })
+        // Compare propDecorators
+        if (
+          normalizeMetadataString(tsInfo.propDecorators) !==
+          normalizeMetadataString(oxcInfo.propDecorators)
+        ) {
+          diffs.push({
+            type: 'different',
+            className,
+            field: 'setClassMetadata.propDecorators',
+            expected: String(tsInfo.propDecorators).slice(0, 100),
+            actual: String(oxcInfo.propDecorators).slice(0, 100),
+          })
+        }
       }
     }
   }
 
   // Check for extra metadata (in Oxc but not in TS)
-  for (const [key, oxcInfo] of oxcMap) {
+  for (const [key, oxcGroup] of oxcMap) {
     if (!tsMap.has(key)) {
       diffs.push({
         type: 'extra',
-        className: oxcInfo.className,
-        field: oxcInfo.isAsync ? 'setClassMetadataAsync' : 'setClassMetadata',
+        className: oxcGroup[0].className,
+        field: oxcGroup[0].isAsync ? 'setClassMetadataAsync' : 'setClassMetadata',
         actual: 'found in Oxc output but not in TS',
       })
     }
