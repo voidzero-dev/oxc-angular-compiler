@@ -136,6 +136,13 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     ("([a, /** j */,]: any[]) => void", "([a, /** j */ ,]: any[]) => void"),
     ("([a, , /** j */,]: any[]) => void", "([a, , /** j */ ,]: any[]) => void"),
     ("([a, , /** j */, b]: any[]) => void", "([a, , /** j */ , b]: any[]) => void"),
+    // Comments inside a template's `${}` holes count during the backward
+    // trivia scan — the hole is code; the opening backtick isn't an
+    // unterminated string.
+    ("`${ /** j */\n string}`", "`${ /** j */string}`"),
+    ("`${\n/** doc */\nstring}`", "`${\n    /** doc */\n    string}`"),
+    ("`x${string /** j */ }y`", "`x${string /** j */}y`"),
+    ("`${string}t${ /** k */ number}z`", "`${string}t${ /** k */number}z`"),
     // A `typeof` name's parts are emitted separately.
     ("typeof val.a.\n/** j */\nb", "typeof val.a.\n    /** j */\n    b"),
     // NEL (U+0085) is whitespace in TypeScript's trivia scans.

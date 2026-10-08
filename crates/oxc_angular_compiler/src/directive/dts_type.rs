@@ -1846,26 +1846,19 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
 /// sits on the last line and bounds the trivia — or `None`. Strings and
 /// `/* */` comments are skipped, so `//`s inside them don't count (a `/*`
 /// opened on an earlier line keeps its `//`s from counting; an unterminated
-/// one means the rest is comment text, and a `//` inside a template's `${}`
-/// hole is scanned as template text — types don't produce those).
+/// one means the rest is comment text). `${}` holes in a template literal
+/// are code, not string text, so comments inside them count normally.
 fn line_comment_start(code: &str) -> Option<usize> {
     let bytes = code.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'\'' | b'"' | b'`' => {
-                // Unterminated means the rest is string text: no `//` counts.
-                let quote = bytes[i];
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    } else if bytes[i] == quote {
-                        break;
-                    }
-                    i += 1;
-                }
-                i += 1;
+            b'\'' | b'"' => i = str_end(code, i),
+            b'`' => {
+                i = match template_end(code, i, CommentKind::Line) {
+                    Ok(i) => i,
+                    Err(hit) => return hit,
+                };
             }
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
                 match code[i + 2..].find(is_line_break) {
@@ -1896,18 +1889,12 @@ fn block_comment_start(inner: &str) -> Option<usize> {
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'\'' | b'"' | b'`' => {
-                let quote = bytes[i];
-                i += 1;
-                while i < bytes.len() {
-                    if bytes[i] == b'\\' {
-                        i += 1;
-                    } else if bytes[i] == quote {
-                        break;
-                    }
-                    i += 1;
-                }
-                i += 1;
+            b'\'' | b'"' => i = str_end(inner, i),
+            b'`' => {
+                i = match template_end(inner, i, CommentKind::Block) {
+                    Ok(i) => i,
+                    Err(hit) => return hit,
+                };
             }
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
                 // `//` runs to the next line break; `inner` may span lines.
@@ -1928,6 +1915,96 @@ fn block_comment_start(inner: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// What a comment found while skipping a lexeme means to the caller:
+/// `line_comment_start` wants the `//`, `block_comment_start` wants the `/*`.
+#[derive(Clone, Copy)]
+enum CommentKind {
+    /// `//` running to the window's end.
+    Line,
+    /// `/*` never closing inside the window — the rest is comment text.
+    Block,
+}
+
+/// The index past the `'`/`"` string starting at `open`. An unterminated
+/// string runs to the end — every byte after it is text, so nothing in this
+/// window counts.
+fn str_end(code: &str, open: usize) -> usize {
+    let bytes = code.as_bytes();
+    let quote = bytes[open];
+    let mut i = open + 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 1;
+        } else if bytes[i] == quote {
+            return i + 1;
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
+/// The index past the template literal starting at `open`, or `Err(None)`
+/// when it runs to the window's end. `${ }` holes are code — comments,
+/// strings, and nested templates inside them lex normally — and a comment
+/// `kind` finds inside a hole surfaces as `Err(Some(_))`, since the caller's
+/// wanted comment can sit between the `${` and the token after it.
+fn template_end(code: &str, open: usize, kind: CommentKind) -> Result<usize, Option<usize>> {
+    let bytes = code.as_bytes();
+    let mut i = open + 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 1,
+            b'`' => return Ok(i + 1),
+            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, kind)?,
+            _ => {}
+        }
+        i += 1;
+    }
+    Err(None)
+}
+
+/// The index past the `}` closing a `${` hole whose contents start at `pos`
+/// (a `{`-depth tracker: nested braces come from `{ T: U }` members). Same
+/// `Result` channels as [`template_end`].
+fn hole_end(code: &str, pos: usize, kind: CommentKind) -> Result<usize, Option<usize>> {
+    let bytes = code.as_bytes();
+    let mut i = pos;
+    let mut depth = 1usize;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    return Ok(i);
+                }
+            }
+            b'\'' | b'"' => i = str_end(code, i),
+            b'`' => i = template_end(code, i, kind)?,
+            b'/' if bytes.get(i + 1) == Some(&b'/') => match code[i + 2..].find(is_line_break) {
+                Some(end) => i += 2 + end,
+                None => match kind {
+                    CommentKind::Line => return Err(Some(i)),
+                    CommentKind::Block => return Err(None),
+                },
+            },
+            b'/' if bytes.get(i + 1) == Some(&b'*') => match code[i + 2..].find("*/") {
+                Some(end) => i += 2 + end + 2,
+                None => match kind {
+                    CommentKind::Line => return Err(None),
+                    CommentKind::Block => return Err(Some(i)),
+                },
+            },
+            _ => i += 1,
+        }
+    }
+    Err(None)
 }
 
 /// A comment's source range, as TypeScript's `iterateCommentRanges` reports
