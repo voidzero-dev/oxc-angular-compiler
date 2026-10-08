@@ -2828,6 +2828,32 @@ export function compareClassMetadata(
     }
   }
 
+  // Call order is observable across classes too: decorator arguments may run
+  // evaluated expressions, so emitting the same calls in a different sequence
+  // can change runtime behavior. When both outputs contain the same multiset
+  // of calls (keyed by class/kind) but in a different order, report it at the
+  // first divergent position. Same-multiset-only keeps the check meaningful:
+  // differing lengths are already covered by missing/extra diffs above.
+  const tsKeys = tsMetadata.map(keyOf)
+  const oxcKeys = oxcMetadata.map(keyOf)
+  const tsSorted = [...tsKeys].sort()
+  const oxcSorted = [...oxcKeys].sort()
+  if (tsSorted.length === oxcSorted.length && tsSorted.every((k, i) => k === oxcSorted[i])) {
+    const divergent = tsKeys.findIndex((k, i) => k !== oxcKeys[i])
+    if (divergent >= 0) {
+      const callName = tsKeys[divergent].endsWith('#async')
+        ? 'setClassMetadataAsync'
+        : 'setClassMetadata'
+      diffs.push({
+        type: 'different',
+        className: tsKeys[divergent].replace(/#async$/, ''),
+        field: `${callName}.order`,
+        expected: `call #${divergent + 1}: ${tsKeys[divergent].replace(/#async$/, '')}`,
+        actual: `call #${divergent + 1}: ${oxcKeys[divergent].replace(/#async$/, '')}`,
+      })
+    }
+  }
+
   return diffs
 }
 
