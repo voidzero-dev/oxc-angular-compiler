@@ -2454,7 +2454,9 @@ function blockDeclNames(stmts: NormAstNode[] | undefined, out: Set<string>): voi
 
 /**
  * `var`-bound names anywhere inside a function body — they hoist to the
- * function scope. Nested functions are not descended into.
+ * function scope. Nested functions, classes, and class static blocks are not
+ * descended into: a `var` in a static block scopes to the block itself, and
+ * class members can't contain `var` statements.
  */
 function varDeclNames(node: unknown, out: Set<string>): void {
   if (node === null || typeof node !== 'object') return
@@ -2466,7 +2468,10 @@ function varDeclNames(node: unknown, out: Set<string>): void {
   if (
     obj.type === 'FunctionDeclaration' ||
     obj.type === 'FunctionExpression' ||
-    obj.type === 'ArrowFunctionExpression'
+    obj.type === 'ArrowFunctionExpression' ||
+    obj.type === 'StaticBlock' ||
+    obj.type === 'ClassDeclaration' ||
+    obj.type === 'ClassExpression'
   ) {
     return
   }
@@ -2556,7 +2561,17 @@ function renameBoundIdentifiers(
     }
     renameBoundIdentifiers(obj.cases, inner, nonReference)
     return
-  } else if (type === 'Program' || type === 'BlockStatement' || type === 'StaticBlock') {
+  } else if (type === 'StaticBlock') {
+    // A static block is its own `var` scope — collect both its hoisted vars
+    // and its top-level lexical declarations.
+    const shadowed = new Set<string>()
+    varDeclNames(obj.body, shadowed)
+    blockDeclNames(obj.body as NormAstNode[], shadowed)
+    if (shadowed.size > 0) {
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+  } else if (type === 'Program' || type === 'BlockStatement') {
     const shadowed = new Set<string>()
     blockDeclNames(obj.body as NormAstNode[], shadowed)
     if (shadowed.size > 0) {
