@@ -71,51 +71,32 @@ fn matches_ngtsc() {
     check(MATCH);
 }
 
-/// Comments ngtsc keeps that oxc drops: `/** */` comments after a type or
-/// on their own line (TypeScript's printer keeps only those two kinds of
-/// comment around nodes), and comments spanning lines. Each row is the type,
-/// what ngtsc writes and what oxc writes; they differ only by the comment.
-const COMMENTS_NOT_KEPT: &[(&str, &str, &str)] = &[
-    ("{\n  /** doc */\n  a: 1\n}", "{ \n    /** doc */\n    a: 1; }", "{ a: 1; }"),
-    ("string | /* a\n b */ number", "string | /* a\n   b */ number", "string | number"),
-    ("string /** d */ | number", "string /** d */ | number", "string | number"),
-    ("{ a: 1 /** y */ }", "{ a: 1; /** y */ }", "{ a: 1; }"),
-    ("(x: string /** y */) => void", "(x: string /** y */) => void", "(x: string) => void"),
-    ("Array<string /** y */>", "Array<string /** y */>", "Array<string>"),
-    ("string |\n /** j */ number", "string | \n    /** j */ number", "string | number"),
+/// Comments ngtsc keeps around a type: `/** */` comments after a type or on
+/// their own line (TypeScript's printer keeps only those two kinds of comment
+/// around nodes), `/* */` comments a list scan picks up, and comments
+/// spanning lines. Each row is the type and what ngtsc writes.
+const COMMENTS_KEPT: &[(&str, &str)] = &[
+    ("string /** doc */", "string /** doc */"),
+    ("string | number /** doc */", "string | number /** doc */"),
+    ("\n/** doc */\nstring", "\n    /** doc */\n    string"),
+    ("Array</* a\n   b */ string>", "Array</* a\n     b */ string>"),
+    ("{\n  /** doc */\n  a: 1\n}", "{ \n    /** doc */\n    a: 1; }"),
+    ("string | /* a\n b */ number", "string | /* a\n   b */ number"),
+    ("string /** d */ | number", "string /** d */ | number"),
+    ("{ a: 1 /** y */ }", "{ a: 1; /** y */ }"),
+    ("(x: string /** y */) => void", "(x: string /** y */) => void"),
+    ("Array<string /** y */>", "Array<string /** y */>"),
+    ("string |\n /** j */ number", "string | \n    /** j */ number"),
     // TypeScript reads past a U+2028 / U+2029 for the comments after `<` (it
-    // only stops at `\n` and `\r`), and prints this one twice.
-    (
-        "Array<\u{2028}/* c */\nstring | number>",
-        "Array</* c */ /* c */ string | number>",
-        "Array<string | number>",
-    ),
-    (
-        "Array<\u{2029}/* c */\nstring | number>",
-        "Array</* c */ /* c */ string | number>",
-        "Array<string | number>",
-    ),
+    // only stops at `\n` and `\r`), and prints this one twice: once for the
+    // type-arguments list, once for the union's constituents list.
+    ("Array<\u{2028}/* c */\nstring | number>", "Array</* c */ /* c */ string | number>"),
+    ("Array<\u{2029}/* c */\nstring | number>", "Array</* c */ /* c */ string | number>"),
 ];
 
 #[test]
-fn comments_not_kept() {
-    // Without comments and whitespace, ngtsc's text is oxc's.
-    let bare = |text: &str| {
-        let mut out = String::new();
-        let mut rest = text;
-        while let Some(at) = rest.find("/*") {
-            out.push_str(&rest[..at]);
-            rest = &rest[at + rest[at..].find("*/").unwrap() + 2..];
-        }
-        out.push_str(rest);
-        out.split_whitespace().collect::<String>()
-    };
-    for (ty, ngtsc, oxc) in COMMENTS_NOT_KEPT {
-        assert_eq!(bare(ngtsc), bare(oxc), "{ty:?}");
-    }
-    let cases: Vec<(&str, &str)> =
-        COMMENTS_NOT_KEPT.iter().map(|(ty, _, oxc)| (*ty, *oxc)).collect();
-    check(&cases);
+fn comments_kept() {
+    check(COMMENTS_KEPT);
 }
 
 /// ngtsc adds `import * as i1 from './other'` and writes `i1.Other`; oxc

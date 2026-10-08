@@ -9,19 +9,86 @@
 //! Every part of the type is printed from the AST, never copied from the
 //! source, so no position can keep a name ngtsc would have rewritten. A form
 //! this printer doesn't cover makes the whole type `unknown`.
+//!
+//! Comments follow TypeScript's declaration emit (`onlyPrintJsDocStyle`):
+//! node-level leading/trailing comment scans keep `/**`-style (and `/*!`)
+//! comments only, while the intervening scan inside a list keeps every
+//! comment — which is also why a comment can print twice, once per enclosing
+//! list's intervening scan. Which trivia a scan sees comes from
+//! `iterateCommentRanges`: a trailing scan collects comments on `pos`'s
+//! line, a leading one everything after the first `\r`/`\n` — except that
+//! U+2028/U+2029 are whitespace for the scan while the line map counts them
+//! as line breaks.
+//!
+//! ngtsc's `markForEmitAsSingleLine` marks the whole translated type
+//! subtree, so under ngtsc 22.1.7 every list uses its single-line format.
+//! The comment paths still need the writer's line tracking: a `//` comment
+//! or a `/**` with `hasTrailingNewLine` ends the line, and the next write
+//! indents it.
 
 use oxc_ast::ast::{
-    BigIntLiteral, BindingPattern, Expression, FormalParameters, PropertyKey, StringLiteral,
-    TSLiteral, TSMappedTypeModifierOperator, TSMethodSignatureKind, TSSignature, TSThisParameter,
-    TSTupleElement, TSType, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator, TSTypeParameter,
-    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TSTypePredicateName,
-    TSTypeQueryExprName, UnaryOperator,
+    BigIntLiteral, BindingPattern, BindingProperty, BindingRestElement, Expression,
+    FormalParameter, FormalParameterRest, FormalParameters, PropertyKey, StringLiteral,
+    TSIndexSignatureName, TSLiteral, TSMappedTypeModifierOperator, TSMethodSignatureKind,
+    TSNamedTupleMember, TSSignature, TSThisParameter, TSTupleElement, TSType, TSTypeAnnotation,
+    TSTypeName, TSTypeOperatorOperator, TSTypeParameter, TSTypeParameterDeclaration,
+    TSTypeParameterInstantiation, TSTypePredicateName, TSTypeQueryExprName, UnaryOperator,
 };
-use oxc_span::GetSpan;
+use oxc_span::{GetSpan, Span};
 
 use super::evaluator::{AliasTarget, FileScope};
 use crate::output::emitter::format_number_like_js;
 use crate::r3::CORE;
+
+/// TypeScript's `ListFormat` bits (`emitter.ts`) for the lists this printer
+/// emits. ngtsc marks the type `EmitFlags.SingleLine`, so only the
+/// single-line formats are reachable: `MultiLine`/`Indented` are defined for
+/// completeness but never engage — which is also why `increaseIndent` never
+/// runs and the writer indent stays at one level (four spaces).
+mod fmt {
+    pub const BAR: u32 = 4;
+    pub const AMPERSAND: u32 = 8;
+    pub const COMMA: u32 = 16;
+    pub const INDENTED: u32 = 128;
+    pub const SPACE_BETWEEN_BRACES: u32 = 256;
+    pub const SPACE_BETWEEN_SIBLINGS: u32 = 512;
+    pub const PARENTHESIS: u32 = 1024;
+    pub const ANGLE: u32 = 2048;
+    pub const SQUARE: u32 = 8192;
+    pub const OPTIONAL_UNDEFINED: u32 = 16384;
+    pub const OPTIONAL_EMPTY: u32 = 32768;
+    pub const NO_INTERVENING: u32 = 262144;
+    pub const NO_SPACE_IF_EMPTY: u32 = 524288;
+    pub const SPACE_AFTER_LIST: u32 = 2097152;
+
+    pub const DELIMITERS: u32 = BAR | AMPERSAND | COMMA | 32; // DelimitersMask
+    pub const BRACKETS: u32 = PARENTHESIS | ANGLE | 4096 | SQUARE; // BracketsMask
+
+    /// `UnionTypeConstituents` / `IntersectionTypeConstituents`.
+    pub const UNION: u32 = BAR | SPACE_BETWEEN_SIBLINGS;
+    pub const INTERSECTION: u32 = AMPERSAND | SPACE_BETWEEN_SIBLINGS;
+    /// `TypeParameters` / `TypeArguments`.
+    pub const TYPE_ARGS: u32 =
+        OPTIONAL_UNDEFINED | OPTIONAL_EMPTY | ANGLE | COMMA | SPACE_BETWEEN_SIBLINGS;
+    /// `Parameters`.
+    pub const PARAMETERS: u32 = PARENTHESIS | COMMA | SPACE_BETWEEN_SIBLINGS;
+    /// `IndexSignatureParameters`.
+    pub const INDEX_PARAMETERS: u32 = SQUARE | INDENTED | COMMA | SPACE_BETWEEN_SIBLINGS;
+    /// `SingleLineTypeLiteralMembers` (`NoSpaceIfEmpty` is added at the site).
+    pub const TYPE_LITERAL_MEMBERS: u32 = SPACE_BETWEEN_BRACES | SPACE_BETWEEN_SIBLINGS;
+    /// `SingleLineTupleTypeElements` (`NoSpaceIfEmpty` is added at the site).
+    pub const TUPLE_ELEMENTS: u32 = COMMA | SPACE_BETWEEN_SIBLINGS;
+    /// `ObjectBindingPatternElements`.
+    pub const OBJECT_BINDING: u32 =
+        SPACE_BETWEEN_BRACES | COMMA | SPACE_BETWEEN_SIBLINGS | NO_SPACE_IF_EMPTY;
+    /// `ArrayBindingPatternElements`.
+    pub const ARRAY_BINDING: u32 = COMMA | SPACE_BETWEEN_SIBLINGS | NO_SPACE_IF_EMPTY;
+    /// `Modifiers`: a space-separated, comment-free list.
+    pub const MODIFIERS: u32 = SPACE_BETWEEN_SIBLINGS | NO_INTERVENING | SPACE_AFTER_LIST;
+}
+
+/// The writer indent (`getIndentString`): `static` members sit at one level.
+const INDENT: &str = "    ";
 
 pub(crate) struct TypePrinter<'s, 'a> {
     pub scope: &'s FileScope<'a>,
@@ -35,44 +102,333 @@ pub(crate) struct TypePrinter<'s, 'a> {
     /// since aliases numbered per source file can't be merged into bundled
     /// declaration files safely.
     pub other_module: bool,
+    /// TypeScript's printer dedupes comments through `containerPos` /
+    /// `containerEnd`: a node's leading comments are skipped when its `pos`
+    /// (trivia start) is the enclosing emitted node's, and its trailing
+    /// comments when its `end` is the enclosing node's. These hold the
+    /// enclosing node's range while [`Self::emit_node`] prints one.
+    pub container_pos: u32,
+    pub container_end: u32,
+}
+
+/// A list element for [`TypePrinter::emit_list`]: a node with a span plus the
+/// body that prints it, like `emitListItem` calling `emit` on a `TSSignature`,
+/// `Parameter`, `TypeNode`, …
+enum El<'n, 'a> {
+    Ty(&'n TSType<'a>),
+    /// A `TSTupleElement` (`TSOptionalType`/`TSRestType`/`TSType`).
+    TupleEl(&'n TSTupleElement<'a>),
+    /// A `TSSignature` member of a type literal.
+    Member(&'n TSSignature<'a>),
+    /// A `TSTypeParameter`.
+    TypeParam(&'n TSTypeParameter<'a>),
+    /// A `FormalParameter`.
+    Param(&'n FormalParameter<'a>),
+    /// The `this` parameter.
+    This(&'n TSThisParameter<'a>),
+    /// A `FormalParameterRest`.
+    Rest(&'n FormalParameterRest<'a>),
+    /// An index signature's `k: T` (`TSIndexSignatureName`, a `Parameter`).
+    IndexParam(&'n TSIndexSignatureName<'a>),
+    /// A `BindingPattern` (a `BindingElement`'s name).
+    Binding(&'n BindingPattern<'a>),
+    /// A `BindingProperty` (object-pattern `key: name` or shorthand `name`).
+    BindingProp(&'n BindingProperty<'a>),
+    /// A `BindingRestElement` (`...arg`).
+    BindingRest(&'n BindingRestElement<'a>),
+    /// A span-printed token: a modifier keyword, a `?`, or an omitted array
+    /// element (zero length at the comma).
+    Token {
+        span: Span,
+        text: &'static str,
+    },
+}
+
+impl El<'_, '_> {
+    fn span(&self) -> Span {
+        match self {
+            El::Ty(t) => t.span(),
+            El::TupleEl(e) => e.span(),
+            El::Member(m) => m.span(),
+            El::TypeParam(t) => t.span,
+            El::Param(p) => p.span,
+            El::This(t) => t.span,
+            El::Rest(r) => r.span,
+            El::IndexParam(p) => p.span,
+            El::Binding(b) => b.span(),
+            El::BindingProp(p) => p.span,
+            El::BindingRest(r) => r.span,
+            El::Token { span, .. } => *span,
+        }
+    }
 }
 
 impl<'a> TypePrinter<'_, 'a> {
     /// `unknown` when the type has a form ngtsc can't emit either (an
     /// `import('...')` type) or that isn't valid in a type annotation.
-    pub(crate) fn print(&mut self, ty: &TSType<'_>) -> String {
-        self.ty(ty).unwrap_or_else(|| "unknown".to_string())
+    pub(crate) fn print(&mut self, ty: &TSType<'a>) -> String {
+        let mut out = String::new();
+        match self.ty_node(&mut out, ty) {
+            Some(()) => out,
+            None => "unknown".to_string(),
+        }
     }
 
-    fn ty(&mut self, ty: &TSType<'_>) -> Option<String> {
-        Some(match ty {
-            TSType::TSAnyKeyword(_) => "any".into(),
-            TSType::TSBigIntKeyword(_) => "bigint".into(),
-            TSType::TSBooleanKeyword(_) => "boolean".into(),
-            TSType::TSIntrinsicKeyword(_) => "intrinsic".into(),
-            TSType::TSNeverKeyword(_) => "never".into(),
-            TSType::TSNullKeyword(_) => "null".into(),
-            TSType::TSNumberKeyword(_) => "number".into(),
-            TSType::TSObjectKeyword(_) => "object".into(),
-            TSType::TSStringKeyword(_) => "string".into(),
-            TSType::TSSymbolKeyword(_) => "symbol".into(),
-            TSType::TSUndefinedKeyword(_) => "undefined".into(),
-            TSType::TSUnknownKeyword(_) => "unknown".into(),
-            TSType::TSVoidKeyword(_) => "void".into(),
-            TSType::TSThisType(_) => "this".into(),
-            TSType::TSTypeReference(r) => {
-                let mut out = self.type_name(&r.type_name)?;
-                if let Some(args) = &r.type_arguments {
-                    out.push_str(&self.type_args(args)?);
-                }
-                out
+    /// A node's `pos` (start of its leading trivia): the end of the previous
+    /// token.
+    fn pos_of(&self, start: u32) -> u32 {
+        token_end_before(self.source, start as usize).unwrap_or(start as usize) as u32
+    }
+
+    /// Emit a node like TypeScript's `emit(node)`: its leading comments, the
+    /// node body, then its trailing comments — `emitCommentsBeforeNode` /
+    /// `emitCommentsAfterNode` around every emitted node. `pos` is the trivia
+    /// start and `end` the token end; the scans dedupe against the enclosing
+    /// node through `container_pos` / `container_end`. With `pos == end` no
+    /// comments run (`emitComments*` skip that range) and nothing wraps
+    /// `body`.
+    fn emit_node(
+        &mut self,
+        out: &mut String,
+        pos: u32,
+        end: u32,
+        body: impl FnOnce(&mut Self, &mut String) -> Option<()>,
+    ) -> Option<()> {
+        if pos == end {
+            return body(self, out);
+        }
+        self.emit_leading_of_pos(out, pos as usize);
+        let (saved_pos, saved_end) = (self.container_pos, self.container_end);
+        self.container_pos = pos;
+        self.container_end = end;
+        let ok = body(self, out);
+        // Trailing comments compare against the *enclosing* node's range —
+        // the saved values are restored first, like `emitTrailingCommentsOfNode`.
+        self.container_pos = saved_pos;
+        self.container_end = saved_end;
+        self.emit_trailing(out, end as usize);
+        ok
+    }
+
+    /// [`Self::emit_node`] for a `TSType`.
+    fn ty_node(&mut self, out: &mut String, ty: &TSType<'a>) -> Option<()> {
+        let pos = self.pos_of(ty.span().start);
+        self.emit_node(out, pos, ty.span().end, |s, o| s.ty_body(o, ty))
+    }
+
+    /// `write`/`writeComment`/`writeSpace`/`writePunctuation`: the text, with
+    /// the writer indent prepended at a line start (after a `writeLine`,
+    /// which comments emit).
+    fn write(&self, out: &mut String, s: &str) {
+        if out.ends_with('\n') {
+            out.push_str(INDENT);
+        }
+        out.push_str(s);
+    }
+
+    /// `emitNodeList` + `emitNodeListItems`.
+    ///
+    /// `items` are the list's children; `list_pos`/`list_end` are the
+    /// `NodeArray`'s trivia range (inside the brackets — used only for the
+    /// empty-list comment scans); `parent_end` is the enclosing node's `end`
+    /// — the gate that keeps the comments after the last element out when the
+    /// parent ends there too. `open`/`close` are the bracket texts for
+    /// `BracketsMask` formats.
+    fn emit_list(
+        &mut self,
+        out: &mut String,
+        items: &[El<'_, 'a>],
+        format: u32,
+        parent_end: u32,
+        list_pos: usize,
+        list_end: usize,
+        open: Option<&'static str>,
+        close: Option<&'static str>,
+    ) -> Option<()> {
+        if items.is_empty() && format & fmt::OPTIONAL_EMPTY != 0 {
+            return Some(());
+        }
+        if format & fmt::BRACKETS != 0 {
+            self.write(out, open.expect("bracketed format"));
+            if items.is_empty() {
+                // `emitTrailingCommentsOfPosition(children.pos, prefixSpace)`:
+                // JSDoc comments inside the empty brackets.
+                self.emit_trailing_filtered(out, list_pos);
             }
-            TSType::TSUnionType(u) => self.constituents(&u.types, u.span.start, "|")?,
-            TSType::TSIntersectionType(i) => self.constituents(&i.types, i.span.start, "&")?,
-            TSType::TSParenthesizedType(p) => format!("({})", self.ty(&p.type_annotation)?),
-            TSType::TSArrayType(a) => format!("{}[]", self.ty(&a.element_type)?),
+        }
+        if items.is_empty() {
+            // The MultiLine branch never runs (single-line formats only).
+            if format & fmt::SPACE_BETWEEN_BRACES != 0 && format & fmt::NO_SPACE_IF_EMPTY == 0 {
+                self.write(out, " ");
+            }
+        } else {
+            self.emit_list_items(out, items, format, parent_end)?;
+        }
+        if format & fmt::BRACKETS != 0 {
+            if items.is_empty() {
+                // `emitLeadingCommentsOfPosition(children.end)`.
+                self.emit_leading_of_pos(out, list_end);
+            }
+            self.write(out, close.expect("bracketed format"));
+        }
+        Some(())
+    }
+
+    /// `emitNodeListItems`, always on the single-line path: every list this
+    /// printer uses is `SingleLine`-flagged, so the leading, separating and
+    /// closing line-terminator counts are all `0` and `Indented` never runs.
+    fn emit_list_items(
+        &mut self,
+        out: &mut String,
+        items: &[El<'_, 'a>],
+        format: u32,
+        parent_end: u32,
+    ) -> Option<()> {
+        let may_intervene = format & fmt::NO_INTERVENING == 0;
+        let mut should_intervene = may_intervene;
+        if format & fmt::SPACE_BETWEEN_BRACES != 0 {
+            self.write(out, " ");
+        }
+        let mut prev_end: Option<u32> = None;
+        for item in items {
+            let span = item.span();
+            let pos = self.pos_of(span.start);
+            if prev_end.is_some() {
+                // The JSDoc comments between the previous element and the
+                // delimiter, then the delimiter, then the separator space
+                // (the separating-line-terminator branch never fires).
+                if format & fmt::DELIMITERS != 0 && prev_end != Some(parent_end) {
+                    self.emit_leading_of_pos(out, prev_end.unwrap() as usize);
+                }
+                self.write_delimiter(out, format);
+                if format & fmt::SPACE_BETWEEN_SIBLINGS != 0 {
+                    self.write(out, " ");
+                }
+            }
+            if should_intervene {
+                // `emitTrailingCommentsOfPosition(child.pos)`: the
+                // unfiltered same-line scan — this is what keeps `/* */`
+                // comments the node-level paths drop.
+                self.emit_intervening(out, pos as usize);
+            } else {
+                should_intervene = may_intervene;
+            }
+            self.emit_item(out, item, pos)?;
+            prev_end = Some(span.end);
+        }
+        // `emitTrailingComma`: no format here has both `AllowTrailingComma`
+        // and `CommaDelimited`, so it's never emitted.
+        if let Some(prev_end) = prev_end
+            && prev_end != parent_end
+            && format & fmt::DELIMITERS != 0
+        {
+            // The JSDoc comments after the last element, before the closing
+            // token.
+            self.emit_leading_of_pos(out, prev_end as usize);
+        }
+        if format & (fmt::SPACE_AFTER_LIST | fmt::SPACE_BETWEEN_BRACES) != 0 {
+            self.write(out, " ");
+        }
+        Some(())
+    }
+
+    /// `writeDelimiter`: the separator token and its leading space.
+    fn write_delimiter(&self, out: &mut String, format: u32) {
+        match format & fmt::DELIMITERS {
+            d if d == fmt::COMMA => self.write(out, ","),
+            d if d == fmt::BAR => {
+                self.write(out, " ");
+                self.write(out, "|");
+            }
+            d if d == fmt::AMPERSAND => {
+                self.write(out, " ");
+                self.write(out, "&");
+            }
+            _ => {}
+        }
+    }
+
+    /// `emitListItem` for one [`El`]: `emit(node)`, with the comment range of
+    /// the node itself.
+    fn emit_item(&mut self, out: &mut String, item: &El<'_, 'a>, pos: u32) -> Option<()> {
+        let end = item.span().end;
+        match item {
+            El::Ty(ty) => self.ty_node(out, ty),
+            El::TupleEl(e) => self.emit_node(out, pos, end, |s, o| s.tuple_element_body(o, e)),
+            El::Member(m) => self.emit_node(out, pos, end, |s, o| s.member_body(o, m)),
+            El::TypeParam(tp) => self.emit_node(out, pos, end, |s, o| s.type_param_body(o, tp)),
+            El::Param(p) => self.emit_node(out, pos, end, |s, o| s.param_body(o, p)),
+            El::This(t) => self.emit_node(out, pos, end, |s, o| s.this_body(o, t)),
+            El::Rest(r) => self.emit_node(out, pos, end, |s, o| s.rest_body(o, r)),
+            El::IndexParam(p) => self.emit_node(out, pos, end, |s, o| s.index_param_body(o, p)),
+            El::Binding(b) => self.emit_node(out, pos, end, |s, o| s.binding_body(o, b)),
+            El::BindingProp(p) => self.emit_node(out, pos, end, |s, o| s.binding_prop_body(o, p)),
+            El::BindingRest(r) => self.emit_node(out, pos, end, |s, o| s.binding_rest_body(o, r)),
+            El::Token { text, .. } => self.emit_node(out, pos, end, |s, o| {
+                s.write(o, text);
+                Some(())
+            }),
+        }
+    }
+
+    /// A type's body (`emit<Kind>` minus the comment pipeline, which
+    /// [`Self::emit_node`] supplies).
+    fn ty_body(&mut self, out: &mut String, ty: &TSType<'a>) -> Option<()> {
+        match ty {
+            TSType::TSAnyKeyword(_) => self.write(out, "any"),
+            TSType::TSBigIntKeyword(_) => self.write(out, "bigint"),
+            TSType::TSBooleanKeyword(_) => self.write(out, "boolean"),
+            TSType::TSIntrinsicKeyword(_) => self.write(out, "intrinsic"),
+            TSType::TSNeverKeyword(_) => self.write(out, "never"),
+            TSType::TSNullKeyword(_) => self.write(out, "null"),
+            TSType::TSNumberKeyword(_) => self.write(out, "number"),
+            TSType::TSObjectKeyword(_) => self.write(out, "object"),
+            TSType::TSStringKeyword(_) => self.write(out, "string"),
+            TSType::TSSymbolKeyword(_) => self.write(out, "symbol"),
+            TSType::TSUndefinedKeyword(_) => self.write(out, "undefined"),
+            TSType::TSUnknownKeyword(_) => self.write(out, "unknown"),
+            TSType::TSVoidKeyword(_) => self.write(out, "void"),
+            TSType::TSThisType(_) => self.write(out, "this"),
+            TSType::TSTypeReference(r) => {
+                // `emit(node.typeName)`: the whole entity name as one node —
+                // TypeScript emits qualified names part by part, but the
+                // comments each part would keep land the same either way.
+                let text = self.type_name(&r.type_name)?;
+                self.emit_node(
+                    out,
+                    self.pos_of(r.type_name.span().start),
+                    r.type_name.span().end,
+                    |s, o| {
+                        s.write(o, &text);
+                        Some(())
+                    },
+                )?;
+                if let Some(args) = &r.type_arguments {
+                    self.type_args(out, args)?;
+                }
+            }
+            TSType::TSUnionType(u) => {
+                let items: Vec<El> = u.types.iter().map(El::Ty).collect();
+                self.emit_list(out, &items, fmt::UNION, u.span.end, 0, 0, None, None)?;
+            }
+            TSType::TSIntersectionType(i) => {
+                let items: Vec<El> = i.types.iter().map(El::Ty).collect();
+                self.emit_list(out, &items, fmt::INTERSECTION, i.span.end, 0, 0, None, None)?;
+            }
+            TSType::TSParenthesizedType(p) => {
+                self.write(out, "(");
+                self.ty_node(out, &p.type_annotation)?;
+                self.write(out, ")");
+            }
+            TSType::TSArrayType(a) => {
+                self.ty_node(out, &a.element_type)?;
+                self.write(out, "[]");
+            }
             TSType::TSIndexedAccessType(i) => {
-                format!("{}[{}]", self.ty(&i.object_type)?, self.ty(&i.index_type)?)
+                self.ty_node(out, &i.object_type)?;
+                self.write(out, "[");
+                self.ty_node(out, &i.index_type)?;
+                self.write(out, "]");
             }
             TSType::TSTypeOperatorType(o) => {
                 let op = match o.operator {
@@ -80,121 +436,862 @@ impl<'a> TypePrinter<'_, 'a> {
                     TSTypeOperatorOperator::Unique => "unique",
                     TSTypeOperatorOperator::Readonly => "readonly",
                 };
-                format!("{op} {}", self.ty(&o.type_annotation)?)
+                self.write(out, op);
+                self.write(out, " ");
+                self.ty_node(out, &o.type_annotation)?;
             }
             TSType::TSTupleType(t) => {
-                let items =
-                    self.elements(Some(t.span.start), &t.element_types, Self::tuple_element)?;
-                format!("[{}]", items.join(", "))
+                // `emitTokenWithComment` for both brackets: `[` carries its
+                // trailing same-line comments, `]` the JSDoc ones before it.
+                self.token_with_comment(
+                    out,
+                    "[",
+                    self.pos_of(t.span.start),
+                    t.span.start + 1,
+                    t.span.end,
+                )?;
+                let items: Vec<El> = t.element_types.iter().map(El::TupleEl).collect();
+                let list_pos = t.span.start as usize + 1;
+                let list_end = t.element_types.last().map_or(list_pos, |e| e.span().end as usize);
+                self.emit_list(
+                    out,
+                    &items,
+                    fmt::TUPLE_ELEMENTS | fmt::NO_SPACE_IF_EMPTY,
+                    t.span.end,
+                    list_pos,
+                    list_end,
+                    None,
+                    None,
+                )?;
+                // `emitTokenWithComment(CloseBracket, elements.end, node)`:
+                // the leading scan runs at the last element's end; `]`'s own
+                // end is the tuple's, so no trailing scan.
+                self.token_with_comment(out, "]", list_end as u32, t.span.end - 1, t.span.end)?;
             }
-            TSType::TSNamedTupleMember(m) => format!(
-                "{}{}: {}",
-                m.label.name,
-                if m.optional { "?" } else { "" },
-                self.tuple_element(&m.element_type)?
-            ),
-            TSType::TSLiteralType(l) => self.literal(&l.literal)?,
+            TSType::TSNamedTupleMember(m) => self.named_tuple_member_body(out, m, None)?,
+            TSType::TSLiteralType(l) => self.literal_body(out, &l.literal)?,
             TSType::TSTemplateLiteralType(t) => {
-                let mut out = String::from("`");
+                self.write(out, "`");
                 for (i, quasi) in t.quasis.iter().enumerate() {
-                    out.push_str(quasi.value.raw.as_str());
+                    self.write(out, quasi.value.raw.as_str());
                     if let Some(ty) = t.types.get(i) {
-                        out.push_str("${");
-                        out.push_str(&self.ty(ty)?);
-                        out.push('}');
+                        self.write(out, "${");
+                        self.ty_node(out, ty)?;
+                        self.write(out, "}");
                     }
                 }
-                out.push('`');
-                out
+                self.write(out, "`");
             }
             TSType::TSTypeQuery(q) => {
                 // `typeof x` names a value; ngtsc leaves it as written.
-                let mut out = match &q.expr_name {
-                    TSTypeQueryExprName::IdentifierReference(id) => format!("typeof {}", id.name),
+                self.write(out, "typeof ");
+                let (span, text) = match &q.expr_name {
+                    TSTypeQueryExprName::IdentifierReference(id) => (id.span, id.name.to_string()),
                     TSTypeQueryExprName::QualifiedName(name) => {
-                        format!("typeof {}.{}", entity_name(&name.left)?, name.right.name)
+                        (name.span, format!("{}.{}", entity_name(&name.left)?, name.right.name))
                     }
-                    TSTypeQueryExprName::ThisExpression(_) => "typeof this".into(),
+                    TSTypeQueryExprName::ThisExpression(e) => (e.span, "this".to_string()),
                     TSTypeQueryExprName::TSImportType(_) => return None,
                 };
+                self.emit_node(out, self.pos_of(span.start), span.end, |s, o| {
+                    s.write(o, &text);
+                    Some(())
+                })?;
                 if let Some(args) = &q.type_arguments {
-                    out.push_str(&self.type_args(args)?);
+                    self.type_args(out, args)?;
                 }
-                out
             }
-            TSType::TSTypeLiteral(l) if l.members.is_empty() => "{}".into(),
             TSType::TSTypeLiteral(l) => {
-                let members = self.elements(Some(l.span.start), &l.members, Self::member)?;
-                format!("{{ {} }}", members.join(" "))
+                self.write(out, "{");
+                let items: Vec<El> = l.members.iter().map(El::Member).collect();
+                self.emit_list(
+                    out,
+                    &items,
+                    fmt::TYPE_LITERAL_MEMBERS | fmt::NO_SPACE_IF_EMPTY,
+                    l.span.end,
+                    l.span.start as usize + 1,
+                    l.span.end as usize - 1,
+                    None,
+                    None,
+                )?;
+                self.write(out, "}");
             }
             TSType::TSMappedType(m) => {
-                let readonly = match m.readonly {
-                    None => "",
-                    Some(TSMappedTypeModifierOperator::True) => "readonly ",
-                    Some(TSMappedTypeModifierOperator::Plus) => "+readonly ",
-                    Some(TSMappedTypeModifierOperator::Minus) => "-readonly ",
-                };
-                let optional = match m.optional {
-                    None => "",
-                    Some(TSMappedTypeModifierOperator::True) => "?",
-                    Some(TSMappedTypeModifierOperator::Plus) => "+?",
-                    Some(TSMappedTypeModifierOperator::Minus) => "-?",
-                };
-                let name_type = match &m.name_type {
-                    Some(t) => format!(" as {}", self.ty(t)?),
-                    None => String::new(),
-                };
-                let value = match &m.type_annotation {
-                    Some(t) => self.ty(t)?,
-                    None => String::new(),
-                };
-                format!(
-                    "{{ {readonly}[{} in {}{name_type}]{optional}: {value}; }}",
-                    m.key.name,
-                    self.ty(&m.constraint)?
-                )
-            }
-            TSType::TSFunctionType(f) => format!(
-                "{}{} => {}",
-                self.type_params(f.type_parameters.as_deref())?,
-                self.params(f.this_param.as_deref(), &f.params)?,
-                self.ty(&f.return_type.type_annotation)?
-            ),
-            TSType::TSConstructorType(c) => format!(
-                "{}new {}{} => {}",
-                if c.r#abstract { "abstract " } else { "" },
-                self.type_params(c.type_parameters.as_deref())?,
-                self.params(None, &c.params)?,
-                self.ty(&c.return_type.type_annotation)?
-            ),
-            TSType::TSConditionalType(c) => format!(
-                "{} extends {} ? {} : {}",
-                self.ty(&c.check_type)?,
-                self.ty(&c.extends_type)?,
-                self.ty(&c.true_type)?,
-                self.ty(&c.false_type)?
-            ),
-            TSType::TSInferType(i) => format!("infer {}", self.type_param(&i.type_parameter)?),
-            TSType::TSTypePredicate(p) => {
-                let name = match &p.parameter_name {
-                    TSTypePredicateName::Identifier(id) => id.name.as_str(),
-                    TSTypePredicateName::This(_) => "this",
-                };
-                let mut out = if p.asserts { format!("asserts {name}") } else { name.to_string() };
-                if let Some(t) = &p.type_annotation {
-                    out.push_str(" is ");
-                    out.push_str(&self.ty(&t.type_annotation)?);
+                // `SingleLine` is always set: `{ ...; }` on one line.
+                self.write(out, "{ ");
+                if let Some(readonly) = &m.readonly {
+                    let (sign, len) = match readonly {
+                        TSMappedTypeModifierOperator::True => ("", "readonly".len()),
+                        TSMappedTypeModifierOperator::Plus => ("+", "+readonly".len()),
+                        TSMappedTypeModifierOperator::Minus => ("-", "-readonly".len()),
+                    };
+                    // `emit(node.readonlyToken)` + `writeSpace`.
+                    let start = skip_trivia(self.source, m.span.start as usize + 1);
+                    self.emit_node(
+                        out,
+                        self.pos_of(start as u32),
+                        (start + len) as u32,
+                        |s, o| {
+                            s.write(o, sign);
+                            s.write(o, "readonly");
+                            Some(())
+                        },
+                    )?;
+                    self.write(out, " ");
                 }
-                out
+                self.write(out, "[");
+                // `emitMappedTypeParameter`: `K in T` (the mapped modifiers
+                // live outside this node in TypeScript's AST too).
+                self.emit_node(
+                    out,
+                    self.pos_of(m.key.span.start),
+                    m.constraint.span().end,
+                    |s, o| {
+                        s.emit_node(o, s.pos_of(m.key.span.start), m.key.span.end, |s2, o2| {
+                            s2.write(o2, &m.key.name);
+                            Some(())
+                        })?;
+                        s.write(o, " in ");
+                        s.ty_node(o, &m.constraint)
+                    },
+                )?;
+                let mut after = m.constraint.span().end;
+                if let Some(name_type) = &m.name_type {
+                    self.write(out, " as ");
+                    self.ty_node(out, name_type)?;
+                    after = name_type.span().end;
+                }
+                self.write(out, "]");
+                if m.optional.is_some() {
+                    let (sign, len) = match m.optional.unwrap() {
+                        TSMappedTypeModifierOperator::True => ("", 1),
+                        TSMappedTypeModifierOperator::Plus
+                        | TSMappedTypeModifierOperator::Minus => (
+                            if m.optional == Some(TSMappedTypeModifierOperator::Plus) {
+                                "+"
+                            } else {
+                                "-"
+                            },
+                            2,
+                        ),
+                    };
+                    // `emit(node.questionToken)`: the `?`/`+?`/`-?` after `]`.
+                    let start =
+                        skip_trivia(self.source, skip_trivia(self.source, after as usize) + 1);
+                    self.emit_node(
+                        out,
+                        self.pos_of(start as u32),
+                        (start + len) as u32,
+                        |s, o| {
+                            s.write(o, sign);
+                            s.write(o, "?");
+                            Some(())
+                        },
+                    )?;
+                }
+                self.write(out, ": ");
+                if let Some(value) = &m.type_annotation {
+                    self.ty_node(out, value)?;
+                }
+                self.write(out, "; }");
+            }
+            TSType::TSFunctionType(f) => {
+                // `emitFunctionTypeHead` + `emitFunctionTypeBody`.
+                self.type_params(out, f.type_parameters.as_deref())?;
+                self.params(out, f.this_param.as_deref(), &f.params, f.span.end)?;
+                self.write(out, " => ");
+                self.ty_node(out, &f.return_type.type_annotation)?;
+            }
+            TSType::TSConstructorType(c) => {
+                // `emitModifierList` (`abstract`), then `new `.
+                if c.r#abstract {
+                    let start = skip_trivia(self.source, c.span.start as usize);
+                    let mods = [El::Token {
+                        span: Span::new(start as u32, start as u32 + 8),
+                        text: "abstract",
+                    }];
+                    self.emit_list(
+                        out,
+                        &mods,
+                        fmt::MODIFIERS,
+                        c.span.end,
+                        start + 8,
+                        start + 8,
+                        None,
+                        None,
+                    )?;
+                }
+                self.write(out, "new ");
+                self.type_params(out, c.type_parameters.as_deref())?;
+                self.params(out, None, &c.params, c.span.end)?;
+                self.write(out, " => ");
+                self.ty_node(out, &c.return_type.type_annotation)?;
+            }
+            TSType::TSConditionalType(c) => {
+                self.ty_node(out, &c.check_type)?;
+                self.write(out, " extends ");
+                self.ty_node(out, &c.extends_type)?;
+                self.write(out, " ? ");
+                self.ty_node(out, &c.true_type)?;
+                self.write(out, " : ");
+                self.ty_node(out, &c.false_type)?;
+            }
+            TSType::TSInferType(i) => {
+                self.write(out, "infer ");
+                self.type_param_body(out, &i.type_parameter)?;
+            }
+            TSType::TSTypePredicate(p) => {
+                if p.asserts {
+                    // `emit(node.assertsModifier)` + `writeSpace`.
+                    let start = skip_trivia(self.source, p.span.start as usize);
+                    self.emit_node(out, self.pos_of(start as u32), (start + 7) as u32, |s, o| {
+                        s.write(o, "asserts");
+                        Some(())
+                    })?;
+                    self.write(out, " ");
+                }
+                let (span, text) = match &p.parameter_name {
+                    TSTypePredicateName::Identifier(id) => (id.span, id.name.to_string()),
+                    TSTypePredicateName::This(t) => (t.span, "this".to_string()),
+                };
+                self.emit_node(out, self.pos_of(span.start), span.end, |s, o| {
+                    s.write(o, &text);
+                    Some(())
+                })?;
+                if let Some(t) = &p.type_annotation {
+                    self.write(out, " is ");
+                    self.ty_node(out, &t.type_annotation)?;
+                }
             }
             // TypeScript reports these as errors but prints them, with the
             // `?`/`!` in front even when it was written after the type.
-            TSType::JSDocNullableType(t) => format!("?{}", self.ty(&t.type_annotation)?),
-            TSType::JSDocNonNullableType(t) => format!("!{}", self.ty(&t.type_annotation)?),
-            TSType::JSDocUnknownType(_) => "?".into(),
+            TSType::JSDocNullableType(t) => {
+                self.write(out, "?");
+                self.ty_node(out, &t.type_annotation)?;
+            }
+            TSType::JSDocNonNullableType(t) => {
+                self.write(out, "!");
+                self.ty_node(out, &t.type_annotation)?;
+            }
+            TSType::JSDocUnknownType(_) => self.write(out, "?"),
             // ngtsc throws "Unable to emit import type" on `import('...')`.
             TSType::TSImportType(_) => return None,
+        }
+        Some(())
+    }
+
+    /// `emitTokenWithComment`: the JSDoc leading comments at `pos` (skipped
+    /// when the enclosing node starts there), the token, then its same-line
+    /// JSDoc comments (skipped when the enclosing node ends at `context_end`
+    /// — TypeScript compares against `contextNode.end`).
+    fn token_with_comment(
+        &mut self,
+        out: &mut String,
+        token: &'static str,
+        pos: u32,
+        end: u32,
+        context_end: u32,
+    ) -> Option<()> {
+        self.emit_leading_of_pos(out, pos as usize);
+        self.write(out, token);
+        if end != context_end {
+            self.emit_trailing_filtered(out, end as usize);
+        }
+        Some(())
+    }
+
+    /// `emitNamedTupleMember`: `[...]name[?]: type`, where the colon goes
+    /// through `emitTokenWithComment` — which is how `lbl: /** c */ T` keeps
+    /// its comment. `rest` is the `TSRestType` span when the member is
+    /// `...name: type` (its `...` is `emit`ted, not punctuation).
+    fn named_tuple_member_body(
+        &mut self,
+        out: &mut String,
+        m: &TSNamedTupleMember<'a>,
+        rest: Option<Span>,
+    ) -> Option<()> {
+        if let Some(rest) = rest {
+            self.emit_node(out, self.pos_of(rest.start), rest.start + 3, |s, o| {
+                s.write(o, "...");
+                Some(())
+            })?;
+        }
+        // `emit(node.name)`.
+        self.emit_node(out, self.pos_of(m.label.span.start), m.label.span.end, |s, o| {
+            s.write(o, &m.label.name);
+            Some(())
+        })?;
+        if m.optional {
+            // `emit(node.questionToken)`.
+            let q = skip_trivia(self.source, m.label.span.end as usize);
+            self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
+                s.write(o, "?");
+                Some(())
+            })?;
+        }
+        // `emitTokenWithComment(ColonToken, node.name.end, ...)`: the `:` is
+        // written where trivia after the name lands — on the `?` when
+        // optional — and its trailing scan runs right after that position.
+        let colon_end = skip_trivia(self.source, m.label.span.end as usize) + 1;
+        self.token_with_comment(out, ":", m.label.span.end, colon_end as u32, m.span.end)?;
+        self.write(out, " ");
+        self.tuple_element_body(out, &m.element_type)
+    }
+
+    /// A tuple element (`emit` on `TSOptionalType`/`TSRestType`/`TSType`; a
+    /// named member is a `TSType` variant).
+    fn tuple_element_body(&mut self, out: &mut String, element: &TSTupleElement<'a>) -> Option<()> {
+        match element {
+            TSTupleElement::TSOptionalType(o) => {
+                self.ty_node(out, &o.type_annotation)?;
+                self.write(out, "?");
+                Some(())
+            }
+            TSTupleElement::TSRestType(r) => {
+                // A labeled rest (`...c: T[]`) is a named tuple member whose
+                // `...` is an emitted token; an unlabeled one prints `...`
+                // as punctuation (`emitRestOrJSDocVariadicType`).
+                if let TSType::TSNamedTupleMember(m) = &r.type_annotation {
+                    self.named_tuple_member_body(out, m, Some(r.span))
+                } else {
+                    self.write(out, "...");
+                    self.ty_node(out, &r.type_annotation)
+                }
+            }
+            other => self.ty_node(out, other.to_ts_type()),
+        }
+    }
+
+    /// `emitLiteralType` → `emitExpression`: the literal as one node, so a
+    /// `/** */` on its trailing edge prints.
+    fn literal_body(&mut self, out: &mut String, literal: &TSLiteral<'a>) -> Option<()> {
+        let (span, text) = match literal {
+            TSLiteral::BooleanLiteral(b) => (b.span, b.value.to_string()),
+            TSLiteral::NumericLiteral(n) => (n.span, format_number_like_js(n.value)),
+            TSLiteral::BigIntLiteral(b) => (b.span, self.bigint(b)),
+            TSLiteral::StringLiteral(s) => (s.span, quote_literal(s)),
+            TSLiteral::TemplateLiteral(t) if t.expressions.is_empty() => {
+                (t.span, self.slice(t.span))
+            }
+            TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => (
+                u.span,
+                match &u.argument {
+                    Expression::NumericLiteral(n) => format!("-{}", format_number_like_js(n.value)),
+                    Expression::BigIntLiteral(b) => format!("-{}", self.bigint(b)),
+                    _ => return None,
+                },
+            ),
+            _ => return None,
+        };
+        self.emit_node(out, self.pos_of(span.start), span.end, |s, o| {
+            s.write(o, &text);
+            Some(())
         })
+    }
+
+    /// TypeScript's scanner keeps hexadecimal bigints in hex (lowercased) and
+    /// turns the other bases into decimal, without separators.
+    fn bigint(&self, literal: &BigIntLiteral<'_>) -> String {
+        let raw = self.slice(literal.span);
+        match raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
+            Some(hex) => format!("0x{}", hex.replace('_', "").to_ascii_lowercase()),
+            None => format!("{}n", literal.value),
+        }
+    }
+
+    /// `emitTypeArguments` / `emitTypeParameters`: a `<…>` list.
+    fn type_args(
+        &mut self,
+        out: &mut String,
+        args: &TSTypeParameterInstantiation<'a>,
+    ) -> Option<()> {
+        let items: Vec<El> = args.params.iter().map(El::Ty).collect();
+        self.emit_list(
+            out,
+            &items,
+            fmt::TYPE_ARGS,
+            args.span.end,
+            args.span.start as usize + 1,
+            args.span.end as usize - 1,
+            Some("<"),
+            Some(">"),
+        )
+    }
+
+    fn type_params(
+        &mut self,
+        out: &mut String,
+        params: Option<&TSTypeParameterDeclaration<'a>>,
+    ) -> Option<()> {
+        let Some(params) = params else { return Some(()) };
+        let items: Vec<El> = params.params.iter().map(El::TypeParam).collect();
+        self.emit_list(
+            out,
+            &items,
+            fmt::TYPE_ARGS,
+            params.span.end,
+            params.span.start as usize + 1,
+            params.span.end as usize - 1,
+            Some("<"),
+            Some(">"),
+        )
+    }
+
+    /// `emitTypeParameter`: modifiers, the name, `extends`, `=`.
+    fn type_param_body(&mut self, out: &mut String, param: &TSTypeParameter<'a>) -> Option<()> {
+        // The modifiers (`const`/`in`/`out`) are a `Modifiers` list in
+        // TypeScript's AST; oxc gives flags, so the spans come from the text
+        // in order.
+        let mut mods: Vec<El> = Vec::new();
+        let mut at = param.span.start as usize;
+        for (set, word) in [(param.r#const, "const"), (param.r#in, "in"), (param.out, "out")] {
+            if set {
+                let start = skip_trivia(self.source, at);
+                mods.push(El::Token {
+                    span: Span::new(start as u32, start as u32 + word.len() as u32),
+                    text: word,
+                });
+                at = start + word.len();
+            }
+        }
+        if !mods.is_empty() {
+            self.emit_list(out, &mods, fmt::MODIFIERS, param.span.end, at, at, None, None)?;
+        }
+        self.emit_node(out, self.pos_of(param.name.span.start), param.name.span.end, |s, o| {
+            s.write(o, &param.name.name);
+            Some(())
+        })?;
+        if let Some(constraint) = &param.constraint {
+            self.write(out, " extends ");
+            self.ty_node(out, constraint)?;
+        }
+        if let Some(default) = &param.default {
+            self.write(out, " = ");
+            self.ty_node(out, default)?;
+        }
+        Some(())
+    }
+
+    /// `emitParameters`: a `(…)` list of parameters.
+    fn params(
+        &mut self,
+        out: &mut String,
+        this: Option<&TSThisParameter<'a>>,
+        params: &FormalParameters<'a>,
+        parent_end: u32,
+    ) -> Option<()> {
+        let mut items: Vec<El> = Vec::new();
+        if let Some(this) = this {
+            items.push(El::This(this));
+        }
+        for param in &params.items {
+            if param.initializer.is_some() {
+                return None;
+            }
+            items.push(El::Param(param));
+        }
+        if let Some(rest) = &params.rest {
+            items.push(El::Rest(rest));
+        }
+        self.emit_list(
+            out,
+            &items,
+            fmt::PARAMETERS,
+            parent_end,
+            params.span.start as usize + 1,
+            params.span.end as usize - 1,
+            Some("("),
+            Some(")"),
+        )
+    }
+
+    /// `emitParameter`: modifiers, `...`, the name, `?`, `: type`.
+    fn param_body(&mut self, out: &mut String, param: &FormalParameter<'a>) -> Option<()> {
+        if param.readonly {
+            let start = skip_trivia(self.source, param.span.start as usize);
+            let mods =
+                [El::Token { span: Span::new(start as u32, start as u32 + 8), text: "readonly" }];
+            self.emit_list(
+                out,
+                &mods,
+                fmt::MODIFIERS,
+                param.span.end,
+                start + 8,
+                start + 8,
+                None,
+                None,
+            )?;
+        }
+        self.emit_node(
+            out,
+            self.pos_of(param.pattern.span().start),
+            param.pattern.span().end,
+            |s, o| s.binding_body(o, &param.pattern),
+        )?;
+        if param.optional {
+            let q = skip_trivia(self.source, param.pattern.span().end as usize);
+            self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
+                s.write(o, "?");
+                Some(())
+            })?;
+        }
+        self.annotation(out, param.type_annotation.as_deref())
+    }
+
+    /// The `this` parameter: `this` (`emitNodeWithWriter`) then `: type`.
+    fn this_body(&mut self, out: &mut String, this: &TSThisParameter<'a>) -> Option<()> {
+        self.emit_node(out, self.pos_of(this.this_span.start), this.this_span.end, |s, o| {
+            s.write(o, "this");
+            Some(())
+        })?;
+        self.annotation(out, this.type_annotation.as_deref())
+    }
+
+    /// A `FormalParameterRest` (`emitParameter` with a `...` token).
+    fn rest_body(&mut self, out: &mut String, rest: &FormalParameterRest<'a>) -> Option<()> {
+        // `emit(node.dotDotDotToken)`.
+        self.emit_node(
+            out,
+            self.pos_of(rest.rest.span.start),
+            rest.rest.span.start + 3,
+            |s, o| {
+                s.write(o, "...");
+                Some(())
+            },
+        )?;
+        self.emit_node(
+            out,
+            self.pos_of(rest.rest.argument.span().start),
+            rest.rest.argument.span().end,
+            |s, o| s.binding_body(o, &rest.rest.argument),
+        )?;
+        self.annotation(out, rest.type_annotation.as_deref())
+    }
+
+    /// An index signature's parameter (`emitParameter`): `name: type`. The
+    /// name ends where `:` starts, so comments between them are trivia of
+    /// the annotation — same as TypeScript's `Parameter`.
+    fn index_param_body(
+        &mut self,
+        out: &mut String,
+        param: &TSIndexSignatureName<'a>,
+    ) -> Option<()> {
+        let name_start = skip_trivia(self.source, param.span.start as usize);
+        let name_end = token_end_before(self.source, param.type_annotation.span.start as usize)
+            .unwrap_or(param.type_annotation.span.start as usize);
+        self.emit_node(out, self.pos_of(name_start as u32), name_end as u32, |s, o| {
+            s.write(o, param.name.as_str());
+            Some(())
+        })?;
+        self.annotation(out, Some(&param.type_annotation))
+    }
+
+    /// `emitParametersForIndexSignature`: a `[…]` list.
+    fn index_params(
+        &mut self,
+        out: &mut String,
+        param: &TSIndexSignatureName<'a>,
+        parent_end: u32,
+    ) -> Option<()> {
+        let items = [El::IndexParam(param)];
+        let list_pos = self.pos_of(param.span.start) as usize;
+        self.emit_list(
+            out,
+            &items,
+            fmt::INDEX_PARAMETERS,
+            parent_end,
+            list_pos,
+            param.span.end as usize,
+            Some("["),
+            Some("]"),
+        )
+    }
+
+    /// `: T`, or nothing — `emitTypeAnnotation`. The `:` is plain
+    /// punctuation; the type keeps its own comments (a same-line one after
+    /// `:` is trivia of the type and drops, like ngtsc).
+    fn annotation(
+        &mut self,
+        out: &mut String,
+        annotation: Option<&TSTypeAnnotation<'a>>,
+    ) -> Option<()> {
+        if let Some(a) = annotation {
+            self.write(out, ": ");
+            self.ty_node(out, &a.type_annotation)?;
+        }
+        Some(())
+    }
+
+    /// A member of a type literal (`emit<Kind>Signature`), ending in `;`.
+    fn member_body(&mut self, out: &mut String, member: &TSSignature<'a>) -> Option<()> {
+        match member {
+            TSSignature::TSPropertySignature(p) => {
+                if p.readonly {
+                    self.modifiers(
+                        out,
+                        p.span.start,
+                        p.span.end,
+                        &[(p.span.start, 8, "readonly")],
+                    )?;
+                }
+                self.key_node(out, &p.key, p.computed)?;
+                if p.optional {
+                    let q = skip_trivia(self.source, p.key.span().end as usize);
+                    self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
+                        s.write(o, "?");
+                        Some(())
+                    })?;
+                }
+                self.annotation(out, p.type_annotation.as_deref())?;
+                self.write(out, ";");
+            }
+            TSSignature::TSIndexSignature(s) => {
+                if s.readonly {
+                    self.modifiers(
+                        out,
+                        s.span.start,
+                        s.span.end,
+                        &[(s.span.start, 8, "readonly")],
+                    )?;
+                }
+                self.index_params(out, &s.parameter, s.span.end)?;
+                self.annotation(out, Some(&s.type_annotation))?;
+                self.write(out, ";");
+            }
+            TSSignature::TSCallSignatureDeclaration(c) => {
+                self.type_params(out, c.type_parameters.as_deref())?;
+                self.params(out, c.this_param.as_deref(), &c.params, c.span.end)?;
+                self.annotation(out, c.return_type.as_deref())?;
+                self.write(out, ";");
+            }
+            TSSignature::TSConstructSignatureDeclaration(c) => {
+                self.write(out, "new ");
+                self.type_params(out, c.type_parameters.as_deref())?;
+                self.params(out, None, &c.params, c.span.end)?;
+                self.annotation(out, c.return_type.as_deref())?;
+                self.write(out, ";");
+            }
+            TSSignature::TSMethodSignature(m) => {
+                // `get`/`set` are modifiers in TypeScript's AST.
+                if m.kind != TSMethodSignatureKind::Method {
+                    let (word, len) = match m.kind {
+                        TSMethodSignatureKind::Get => ("get", 3),
+                        TSMethodSignatureKind::Set => ("set", 3),
+                        TSMethodSignatureKind::Method => unreachable!(),
+                    };
+                    self.modifiers(out, m.span.start, m.span.end, &[(m.span.start, len, word)])?;
+                }
+                self.key_node(out, &m.key, m.computed)?;
+                if m.optional {
+                    let q = skip_trivia(self.source, m.key.span().end as usize);
+                    self.emit_node(out, self.pos_of(q as u32), q as u32 + 1, |s, o| {
+                        s.write(o, "?");
+                        Some(())
+                    })?;
+                }
+                // `emitSignatureHead` + `emitEmptyFunctionBody`.
+                self.type_params(out, m.type_parameters.as_deref())?;
+                self.params(out, m.this_param.as_deref(), &m.params, m.span.end)?;
+                self.annotation(out, m.return_type.as_deref())?;
+                self.write(out, ";");
+            }
+        }
+        Some(())
+    }
+
+    /// `emitModifierList` for keywords oxc exposes as flags. `from` is where
+    /// the modifier text is searched for (the node's trivia end), `end` the
+    /// owning node's `end`, and `mods` `(search-from, byte-len, text)` in
+    /// order.
+    fn modifiers(
+        &mut self,
+        out: &mut String,
+        from: u32,
+        end: u32,
+        mods: &[(u32, u32, &'static str)],
+    ) -> Option<()> {
+        let items: Vec<El> = mods
+            .iter()
+            .map(|&(_, len, text)| {
+                let start = skip_trivia(self.source, from as usize);
+                El::Token { span: Span::new(start as u32, start as u32 + len), text }
+            })
+            .collect();
+        self.emit_list(out, &items, fmt::MODIFIERS, end, 0, 0, None, None)
+    }
+
+    /// A property name as one node — `emitNodeWithWriter(node.name)` — or a
+    /// computed one (`emitComputedPropertyName`): `[`, the expression, `]`.
+    fn key_node(&mut self, out: &mut String, key: &PropertyKey<'a>, computed: bool) -> Option<()> {
+        if computed {
+            // `ComputedPropertyName`'s range: from the trivia before `[` to
+            // `]`'s end. oxc's key span covers the expression only.
+            let bracket_end = token_end_before(self.source, key.span().start as usize)
+                .unwrap_or(key.span().start as usize);
+            let pos = token_end_before(self.source, bracket_end - 1).unwrap_or(bracket_end - 1);
+            let end = skip_trivia(self.source, key.span().end as usize) + 1;
+            let text = self.key_text(key)?;
+            self.emit_node(out, pos as u32, end as u32, |s, o| {
+                s.write(o, "[");
+                s.emit_node(o, bracket_end as u32, key.span().end, |s2, o2| {
+                    s2.write(o2, &text);
+                    Some(())
+                })?;
+                s.write(o, "]");
+                Some(())
+            })
+        } else {
+            let pos = self.pos_of(key.span().start);
+            let end = key.span().end;
+            let text = self.key_text(key)?;
+            self.emit_node(out, pos, end, |s, o| {
+                s.write(o, &text);
+                Some(())
+            })
+        }
+    }
+
+    /// A property name's text, re-quoted like any other string literal. A
+    /// computed name (`[token]`, `[ns.token]`) follows the rules of a type
+    /// name: an `@angular/core` value becomes `i0.token`, another module's
+    /// makes the type `unknown`, and a local or global one stays as written
+    /// (ngtsc copies the expression, which doesn't resolve for an import).
+    ///
+    /// Through an import-equals alias too, although ngtsc copies those as
+    /// written: an alias of `@angular/core` gives `i0.token` and one of
+    /// another module `unknown`, where ngtsc's name doesn't resolve in the
+    /// `.d.ts`. An alias of a global is written as its target
+    /// (`[Symbol.iterator]` for `import S = Symbol`), and one of a name the
+    /// file declares stays as written, like ngtsc.
+    fn key_text(&mut self, key: &PropertyKey<'a>) -> Option<String> {
+        Some(match key {
+            PropertyKey::StaticIdentifier(id) => id.name.to_string(),
+            PropertyKey::StringLiteral(s) => quote_literal(s),
+            PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
+            PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
+            PropertyKey::Identifier(id) => self.computed_name(std::vec![id.name.as_str()])?,
+            PropertyKey::StaticMemberExpression(m) => {
+                let mut parts = std::vec::Vec::new();
+                member_parts(&m.object, &mut parts)?;
+                parts.push(m.property.name.as_str());
+                self.computed_name(parts)?
+            }
+            _ => return None,
+        })
+    }
+
+    /// A computed property name `a.b.c` (`parts`, head first), as
+    /// [`Self::key_text`] writes it.
+    fn computed_name(&mut self, parts: std::vec::Vec<&str>) -> Option<String> {
+        let written = parts.join(".");
+        Some(match self.resolve_aliases(parts)? {
+            Resolved::Core(rest) => format!("{}{rest}", self.core_ns),
+            Resolved::OtherModule(_) => {
+                self.other_module = true;
+                written
+            }
+            Resolved::Name(parts, aliased) => {
+                let (head, members) = (parts[0], &parts[1..]);
+                if aliased && self.scope.import(head).is_none() && self.scope.declares(head) {
+                    written
+                } else {
+                    let rest: String = members.iter().map(|m| format!(".{m}")).collect();
+                    self.value_name(head, &rest)
+                }
+            }
+        })
+    }
+
+    /// A `BindingPattern` node (`emit(name)` for a parameter's name).
+    fn binding_body(&mut self, out: &mut String, pattern: &BindingPattern<'a>) -> Option<()> {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => self.write(out, &id.name),
+            BindingPattern::ObjectPattern(o) => {
+                self.write(out, "{");
+                let mut items: Vec<El> = o.properties.iter().map(El::BindingProp).collect();
+                if let Some(rest) = &o.rest {
+                    items.push(El::BindingRest(rest));
+                }
+                self.emit_list(
+                    out,
+                    &items,
+                    fmt::OBJECT_BINDING,
+                    o.span.end,
+                    o.span.start as usize + 1,
+                    o.span.end as usize - 1,
+                    None,
+                    None,
+                )?;
+                self.write(out, "}");
+            }
+            BindingPattern::ArrayPattern(a) => {
+                self.write(out, "[");
+                let mut items: Vec<El> = Vec::new();
+                let mut prev_end = a.span.start;
+                for element in &a.elements {
+                    match element {
+                        Some(element) => {
+                            items.push(El::Binding(element));
+                            prev_end = element.span().end;
+                        }
+                        None => {
+                            // An elision is an `OmittedExpression`: zero
+                            // width at the comma after the previous element
+                            // (or after `[` when first).
+                            let at = if items.is_empty() { a.span.start + 1 } else { prev_end + 1 };
+                            items.push(El::Token { span: Span::new(at, at), text: "" });
+                        }
+                    }
+                }
+                if let Some(rest) = &a.rest {
+                    items.push(El::BindingRest(rest));
+                }
+                self.emit_list(
+                    out,
+                    &items,
+                    fmt::ARRAY_BINDING,
+                    a.span.end,
+                    a.span.start as usize + 1,
+                    a.span.end as usize - 1,
+                    None,
+                    None,
+                )?;
+                self.write(out, "]");
+            }
+            // Default values aren't allowed in a type.
+            BindingPattern::AssignmentPattern(_) => return None,
+        }
+        Some(())
+    }
+
+    /// A `BindingElement`: `propertyName: name`, or just `name` for
+    /// shorthand (`emitBindingElement`; initializers can't appear in a type).
+    fn binding_prop_body(
+        &mut self,
+        out: &mut String,
+        property: &BindingProperty<'a>,
+    ) -> Option<()> {
+        if !property.shorthand {
+            self.key_node(out, &property.key, property.computed)?;
+            self.write(out, ": ");
+        }
+        self.emit_node(
+            out,
+            self.pos_of(property.value.span().start),
+            property.value.span().end,
+            |s, o| s.binding_body(o, &property.value),
+        )
+    }
+
+    /// A `RestElement`: `...` then its argument.
+    fn binding_rest_body(&mut self, out: &mut String, rest: &BindingRestElement<'a>) -> Option<()> {
+        self.write(out, "...");
+        self.emit_node(
+            out,
+            self.pos_of(rest.argument.span().start),
+            rest.argument.span().end,
+            |s, o| s.binding_body(o, &rest.argument),
+        )
     }
 
     /// `@angular/core` names become `i0.Name`; local and global names stay as
@@ -299,327 +1396,171 @@ impl<'a> TypePrinter<'_, 'a> {
         }
     }
 
-    /// A union's or intersection's constituents, joined by ` | ` / ` & `.
-    fn constituents(&mut self, types: &[TSType<'_>], start: u32, op: &str) -> Option<String> {
-        // After a leading `|`/`&`, the first constituent follows that token;
-        // otherwise it shares the start of the union (see `leading_comments`).
-        let open = self.source[start as usize..].starts_with(op).then_some(start);
-        Some(self.elements(open, types, Self::ty)?.join(&format!(" {op} ")))
+    // ---- Comment emission (TypeScript's `onlyPrintJsDocStyle` paths) ----
+
+    /// `emitLeadingCommentsOfPosition(pos)` — the JSDoc-only leading scan,
+    /// gated on `containerPos` (`forEachLeadingCommentToEmit`).
+    fn emit_leading_of_pos(&self, out: &mut String, pos: usize) {
+        if pos as u32 == self.container_pos {
+            return;
+        }
+        self.emit_leading(out, pos);
     }
 
-    fn type_args(&mut self, args: &TSTypeParameterInstantiation<'_>) -> Option<String> {
-        Some(format!(
-            "<{}>",
-            self.elements(Some(args.span.start), &args.params, Self::ty)?.join(", ")
-        ))
-    }
-
-    fn type_params(&mut self, params: Option<&TSTypeParameterDeclaration<'_>>) -> Option<String> {
-        let Some(params) = params else { return Some(String::new()) };
-        let items = self.elements(Some(params.span.start), &params.params, Self::type_param)?;
-        Some(format!("<{}>", items.join(", ")))
-    }
-
-    fn type_param(&mut self, param: &TSTypeParameter<'_>) -> Option<String> {
-        let mut out = String::new();
-        if param.r#const {
-            out.push_str("const ");
-        }
-        if param.r#in {
-            out.push_str("in ");
-        }
-        if param.out {
-            out.push_str("out ");
-        }
-        out.push_str(&param.name.name);
-        if let Some(constraint) = &param.constraint {
-            out.push_str(" extends ");
-            out.push_str(&self.ty(constraint)?);
-        }
-        if let Some(default) = &param.default {
-            out.push_str(" = ");
-            out.push_str(&self.ty(default)?);
-        }
-        Some(out)
-    }
-
-    fn tuple_element(&mut self, element: &TSTupleElement<'_>) -> Option<String> {
-        match element {
-            TSTupleElement::TSOptionalType(o) => Some(format!("{}?", self.ty(&o.type_annotation)?)),
-            TSTupleElement::TSRestType(r) => Some(format!("...{}", self.ty(&r.type_annotation)?)),
-            other => self.ty(other.to_ts_type()),
-        }
-    }
-
-    fn literal(&self, literal: &TSLiteral<'_>) -> Option<String> {
-        Some(match literal {
-            TSLiteral::BooleanLiteral(b) => b.value.to_string(),
-            TSLiteral::NumericLiteral(n) => format_number_like_js(n.value),
-            TSLiteral::BigIntLiteral(b) => self.bigint(b),
-            TSLiteral::StringLiteral(s) => quote_literal(s),
-            TSLiteral::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
-            TSLiteral::UnaryExpression(u) if u.operator == UnaryOperator::UnaryNegation => {
-                match &u.argument {
-                    Expression::NumericLiteral(n) => format!("-{}", format_number_like_js(n.value)),
-                    Expression::BigIntLiteral(b) => format!("-{}", self.bigint(b)),
-                    _ => return None,
+    /// `emitLeadingComments(pos)` — comments after the first line break in
+    /// the trivia at `pos`, JSDoc-style only. The first one gets a preceding
+    /// newline when it starts on a different line than `pos`
+    /// (`emitNewLineBeforeLeadingCommentOfPosition`), and each is followed by
+    /// a newline when a line break follows it (`hasTrailingNewLine`), else a
+    /// space for `/* */`.
+    fn emit_leading(&self, out: &mut String, pos: usize) {
+        let mut first = true;
+        for c in comment_ranges(self.source, pos, false) {
+            if !self.is_jsdoc_comment(c.pos) {
+                continue;
+            }
+            if first && line_of(self.source, c.pos) != line_of(self.source, pos) {
+                if !out.ends_with('\n') {
+                    out.push('\n');
                 }
             }
-            _ => return None,
-        })
-    }
-
-    /// TypeScript's scanner keeps hexadecimal bigints in hex (lowercased) and
-    /// turns the other bases into decimal, without separators.
-    fn bigint(&self, literal: &BigIntLiteral<'_>) -> String {
-        let raw = self.slice(literal.span);
-        match raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
-            Some(hex) => format!("0x{}", hex.replace('_', "").to_ascii_lowercase()),
-            None => format!("{}n", literal.value),
+            first = false;
+            self.emit_comment_text(out, &c);
+            if c.trailing_newline {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            } else if !c.line {
+                out.push(' ');
+            }
         }
     }
 
-    fn member(&mut self, member: &TSSignature<'_>) -> Option<String> {
-        Some(match member {
-            TSSignature::TSPropertySignature(p) => format!(
-                "{}{}{}{};",
-                if p.readonly { "readonly " } else { "" },
-                self.key(&p.key, p.computed)?,
-                if p.optional { "?" } else { "" },
-                self.annotation(p.type_annotation.as_deref())?
-            ),
-            TSSignature::TSIndexSignature(s) => {
-                let param = &s.parameter;
-                format!(
-                    "{}[{}{}: {}]: {};",
-                    if s.readonly { "readonly " } else { "" },
-                    self.leading_comments(None, param.span.start),
-                    param.name,
-                    self.ty(&param.type_annotation.type_annotation)?,
-                    self.ty(&s.type_annotation.type_annotation)?
-                )
+    /// `emitTrailingComments(end)` — comments on `end`'s line, JSDoc-style
+    /// only, each preceded by a space unless at a line start; gated on
+    /// `containerEnd` like `forEachTrailingCommentToEmit`.
+    fn emit_trailing(&self, out: &mut String, end: usize) {
+        if end as u32 == self.container_end {
+            return;
+        }
+        for c in comment_ranges(self.source, end, true) {
+            if !self.is_jsdoc_comment(c.pos) {
+                continue;
             }
-            TSSignature::TSCallSignatureDeclaration(c) => format!(
-                "{}{}{};",
-                self.type_params(c.type_parameters.as_deref())?,
-                self.params(c.this_param.as_deref(), &c.params)?,
-                self.annotation(c.return_type.as_deref())?
-            ),
-            TSSignature::TSConstructSignatureDeclaration(c) => format!(
-                "new {}{}{};",
-                self.type_params(c.type_parameters.as_deref())?,
-                self.params(None, &c.params)?,
-                self.annotation(c.return_type.as_deref())?
-            ),
-            TSSignature::TSMethodSignature(m) => format!(
-                "{}{}{}{}{}{};",
-                match m.kind {
-                    TSMethodSignatureKind::Method => "",
-                    TSMethodSignatureKind::Get => "get ",
-                    TSMethodSignatureKind::Set => "set ",
-                },
-                self.key(&m.key, m.computed)?,
-                if m.optional { "?" } else { "" },
-                self.type_params(m.type_parameters.as_deref())?,
-                self.params(m.this_param.as_deref(), &m.params)?,
-                self.annotation(m.return_type.as_deref())?
-            ),
-        })
-    }
-
-    /// `: T`, or nothing when there's no annotation.
-    fn annotation(&mut self, annotation: Option<&TSTypeAnnotation<'_>>) -> Option<String> {
-        match annotation {
-            Some(t) => Some(format!(": {}", self.ty(&t.type_annotation)?)),
-            None => Some(String::new()),
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push(' ');
+            }
+            self.emit_comment_text(out, &c);
+            if c.trailing_newline && !out.ends_with('\n') {
+                out.push('\n');
+            }
         }
     }
 
-    /// A property name, re-quoted like any other string literal. A computed
-    /// name (`[token]`, `[ns.token]`) follows the rules of a type name: an
-    /// `@angular/core` value becomes `i0.token`, another module's makes the
-    /// type `unknown`, and a local or global one stays as written (ngtsc copies
-    /// the expression, which doesn't resolve for an import).
-    ///
-    /// Through an import-equals alias too, although ngtsc copies those as
-    /// written: an alias of `@angular/core` gives `i0.token` and one of another
-    /// module `unknown`, where ngtsc's name doesn't resolve in the `.d.ts`. An
-    /// alias of a global is written as its target (`[Symbol.iterator]` for
-    /// `import S = Symbol`), and one of a name the file declares stays as
-    /// written, like ngtsc.
-    fn key(&mut self, key: &PropertyKey<'_>, computed: bool) -> Option<String> {
-        let text = match key {
-            PropertyKey::StaticIdentifier(id) => id.name.to_string(),
-            PropertyKey::StringLiteral(s) => quote_literal(s),
-            PropertyKey::NumericLiteral(n) => format_number_like_js(n.value),
-            PropertyKey::TemplateLiteral(t) if t.expressions.is_empty() => self.slice(t.span),
-            PropertyKey::Identifier(id) => self.computed_name(std::vec![id.name.as_str()])?,
-            PropertyKey::StaticMemberExpression(m) => {
-                let mut parts = std::vec::Vec::new();
-                member_parts(&m.object, &mut parts)?;
-                parts.push(m.property.name.as_str());
-                self.computed_name(parts)?
+    /// `emitTrailingCommentsOfPosition(pos, prefixSpace: true)` — the
+    /// JSDoc-filtered same-line scan `emitTokenWithComment` and the
+    /// empty-brackets path use. Ungated (the position paths don't check
+    /// `containerEnd`).
+    fn emit_trailing_filtered(&self, out: &mut String, pos: usize) {
+        for c in comment_ranges(self.source, pos, true) {
+            if !self.is_jsdoc_comment(c.pos) {
+                continue;
             }
-            _ => return None,
+            if !out.is_empty() && !out.ends_with('\n') {
+                out.push(' ');
+            }
+            self.emit_comment_text(out, &c);
+            if c.trailing_newline && !out.ends_with('\n') {
+                out.push('\n');
+            }
+        }
+    }
+
+    /// `emitTrailingCommentsOfPosition(pos)` with the default callback —
+    /// comments on `pos`'s line, unfiltered, each followed by a space (or a
+    /// newline for `hasTrailingNewLine`, which `//` and U+2028-following
+    /// `/* */` have). This is what prints `/* */` comments the JSDoc-filtered
+    /// paths drop — and prints them again for each enclosing list.
+    fn emit_intervening(&self, out: &mut String, pos: usize) {
+        for c in comment_ranges(self.source, pos, true) {
+            self.emit_comment_text(out, &c);
+            if c.trailing_newline {
+                if !out.ends_with('\n') {
+                    out.push('\n');
+                }
+            } else {
+                out.push(' ');
+            }
+        }
+    }
+
+    /// The declaration printer's `shouldWriteComment`: `/**`-style or `/*!`
+    /// (pinned) comments only — `/*` and `//` are dropped on node-level
+    /// leading/trailing paths.
+    fn is_jsdoc_comment(&self, pos: usize) -> bool {
+        let b = self.source.as_bytes();
+        b.get(pos + 1) == Some(&b'*')
+            && (b.get(pos + 2) == Some(&b'!')
+                || (b.get(pos + 2) == Some(&b'*') && b.get(pos + 3) != Some(&b'/')))
+    }
+
+    /// `writeCommentRange`: a `//` comment verbatim; a `/* */` with each line
+    /// trimmed, continuation lines re-indented relative to the line the
+    /// comment starts on, rebased to the writer's indent (one level here).
+    fn emit_comment_text(&self, out: &mut String, comment: &Comment) {
+        // `writeComment` goes through `writeText`, which indents a line
+        // started by a `writeLine`.
+        if out.ends_with('\n') {
+            out.push_str(INDENT);
+        }
+        let text = &self.source[comment.pos..comment.end];
+        if comment.line {
+            out.push_str(text);
+            return;
+        }
+        let Some(first_break) = text.find(is_line_break) else {
+            out.push_str(text);
+            return;
         };
-        Some(if computed { format!("[{text}]") } else { text })
-    }
-
-    /// A computed property name `a.b.c` (`parts`, head first), as [`Self::key`]
-    /// writes it.
-    fn computed_name(&mut self, parts: std::vec::Vec<&str>) -> Option<String> {
-        let written = parts.join(".");
-        Some(match self.resolve_aliases(parts)? {
-            Resolved::Core(rest) => format!("{}{rest}", self.core_ns),
-            Resolved::OtherModule(_) => {
-                self.other_module = true;
-                written
-            }
-            Resolved::Name(parts, aliased) => {
-                let (head, members) = (parts[0], &parts[1..]);
-                if aliased && self.scope.import(head).is_none() && self.scope.declares(head) {
-                    written
-                } else {
-                    let rest: String = members.iter().map(|m| format!(".{m}")).collect();
-                    self.value_name(head, &rest)
+        // The first line, trimmed; `writeTrimmedCurrentLine` writes a
+        // `writeLine` after it when the comment continues.
+        out.push_str(text[..first_break].trim());
+        out.push('\n');
+        // `calculateIndent` of the line the comment starts on (the whitespace
+        // before `/*`), then each continuation line's indent minus that,
+        // rebased to the writer's four spaces.
+        let first_indent =
+            indent_of(&self.source[line_start_of(self.source, comment.pos)..comment.pos]);
+        let mut rest = &text[first_break..];
+        loop {
+            rest = &rest[line_break_width(rest)..];
+            let (line, next) = match rest.find(is_line_break) {
+                Some(i) => (&rest[..i], &rest[i..]),
+                None => (rest, ""),
+            };
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                // `writeTrimmedCurrentLine` writes a bare newline for an
+                // all-whitespace continuation.
+                out.push('\n');
+            } else {
+                let spaces = 4isize - first_indent as isize + indent_of(line) as isize;
+                for _ in 0..spaces.max(0) {
+                    out.push(' ');
+                }
+                out.push_str(trimmed);
+                if !next.is_empty() {
+                    out.push('\n');
                 }
             }
-        })
-    }
-
-    fn params(
-        &mut self,
-        this: Option<&TSThisParameter<'_>>,
-        params: &FormalParameters<'_>,
-    ) -> Option<String> {
-        let mut out = Vec::new();
-        let mut prev = params.span.start;
-        if let Some(this) = this {
-            let comments = self.leading_comments(Some(prev), this.span.start);
-            out.push(format!(
-                "{comments}this{}",
-                self.annotation(this.type_annotation.as_deref())?
-            ));
-            prev = this.span.end;
-        }
-        for param in &params.items {
-            if param.initializer.is_some() {
-                return None;
+            if next.is_empty() {
+                break;
             }
-            let comments = self.leading_comments(Some(prev), param.span.start);
-            out.push(format!(
-                "{comments}{}{}{}",
-                self.binding(&param.pattern)?,
-                if param.optional { "?" } else { "" },
-                self.annotation(param.type_annotation.as_deref())?
-            ));
-            prev = param.span.end;
-        }
-        if let Some(rest) = &params.rest {
-            let comments = self.leading_comments(Some(prev), rest.span.start);
-            out.push(format!(
-                "{comments}...{}{}",
-                self.binding(&rest.rest.argument)?,
-                self.annotation(rest.type_annotation.as_deref())?
-            ));
-        }
-        Some(format!("({})", out.join(", ")))
-    }
-
-    /// A parameter name or destructuring pattern.
-    fn binding(&mut self, pattern: &BindingPattern<'_>) -> Option<String> {
-        match pattern {
-            BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
-            BindingPattern::ObjectPattern(o) if o.properties.is_empty() && o.rest.is_none() => {
-                Some("{}".into())
-            }
-            BindingPattern::ObjectPattern(o) => {
-                let mut items = Vec::new();
-                let mut prev = o.span.start;
-                for property in &o.properties {
-                    let value = self.binding(&property.value)?;
-                    let item = if property.shorthand {
-                        value
-                    } else {
-                        format!("{}: {value}", self.key(&property.key, property.computed)?)
-                    };
-                    items.push(self.leading_comments(Some(prev), property.span.start) + &item);
-                    prev = property.span.end;
-                }
-                if let Some(rest) = &o.rest {
-                    let comments = self.leading_comments(Some(prev), rest.span.start);
-                    items.push(format!("{comments}...{}", self.binding(&rest.argument)?));
-                }
-                Some(format!("{{ {} }}", items.join(", ")))
-            }
-            BindingPattern::ArrayPattern(a) => {
-                let mut items = Vec::new();
-                let mut prev = a.span.start;
-                for element in &a.elements {
-                    let Some(element) = element else {
-                        items.push(String::new());
-                        continue;
-                    };
-                    let comments = self.leading_comments(Some(prev), element.span().start);
-                    items.push(comments + &self.binding(element)?);
-                    prev = element.span().end;
-                }
-                if let Some(rest) = &a.rest {
-                    let comments = self.leading_comments(Some(prev), rest.span.start);
-                    items.push(format!("{comments}...{}", self.binding(&rest.argument)?));
-                }
-                Some(format!("[{}]", items.join(", ")))
-            }
-            // Default values aren't allowed in a type.
-            BindingPattern::AssignmentPattern(_) => None,
+            rest = next;
         }
     }
 
-    /// Prints each element of a list, with the comments TypeScript keeps in
-    /// front of it. `open` is where the list's opening token (`<`, `(`, `{`,
-    /// `[`, a leading `|`) starts; `None` when the list has none, so the token
-    /// before the first element is looked for backwards.
-    fn elements<T: GetSpan>(
-        &mut self,
-        open: Option<u32>,
-        items: &[T],
-        mut print: impl FnMut(&mut Self, &T) -> Option<String>,
-    ) -> Option<Vec<String>> {
-        let mut prev = open;
-        items
-            .iter()
-            .map(|item| {
-                let span = item.span();
-                let comments = self.leading_comments(prev, span.start);
-                prev = Some(span.end);
-                Some(comments + &print(self, item)?)
-            })
-            .collect()
-    }
-
-    /// The comments TypeScript's printer keeps in front of a list element:
-    /// those right after the token before it, on that token's line (it emits
-    /// them as trailing comments of that position). Other comments in the type
-    /// are dropped, as ngtsc does, except `/** */` ones after a type or on
-    /// their own line, which ngtsc keeps and oxc doesn't.
-    ///
-    /// `prev` is where to look for that token from: the end of the previous
-    /// element (the token is the delimiter, if any) or the opening bracket.
-    /// Without it the token is searched for backwards from `start`, which is
-    /// how a union's first constituent finds the token before the union.
-    fn leading_comments(&self, prev: Option<u32>, start: u32) -> String {
-        let start = start as usize;
-        let pos = match prev {
-            Some(prev) => after_token(self.source, prev as usize, start),
-            None => match token_end_before(self.source, start) {
-                Some(pos) => pos,
-                None => return String::new(),
-            },
-        };
-        same_line_comments(&self.source[pos..start])
-    }
-
-    fn slice(&self, span: oxc_span::Span) -> String {
+    fn slice(&self, span: Span) -> String {
         span.source_text(self.source).to_string()
     }
 }
@@ -636,7 +1577,7 @@ fn entity_name(name: &TSTypeName<'_>) -> Option<String> {
 
 /// A type name's parts, head first (`["A", "B", "T"]` for `A.B.T`). `None`
 /// for one starting with `this`.
-fn entity_parts<'n>(name: &'n TSTypeName<'_>, out: &mut Vec<&'n str>) -> Option<()> {
+fn entity_parts<'a, 'n>(name: &'n TSTypeName<'a>, out: &mut Vec<&'n str>) -> Option<()> {
     match name {
         TSTypeName::IdentifierReference(id) => out.push(id.name.as_str()),
         TSTypeName::QualifiedName(q) => {
@@ -671,43 +1612,45 @@ enum Resolved<'p> {
     Name(std::vec::Vec<&'p str>, bool),
 }
 
+/// TypeScript's `isLineBreak`: `\r`, `\n`, U+2028, U+2029.
 fn is_line_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
+/// TypeScript's `isWhiteSpaceSingleLine`: space, tab, VT, FF, NBSP, the
+/// Unicode space separators and the BOM — but not U+0085 (NEL), which
+/// TypeScript doesn't treat as whitespace (Rust's `is_whitespace` does).
 fn is_space(c: char) -> bool {
-    c.is_whitespace() && !is_line_break(c)
+    (c.is_whitespace() && c != '\u{85}' && !is_line_break(c)) || c == '\u{FEFF}'
 }
 
-/// The end of the first token at or after `from`, when one comes before
-/// `start`; `from` itself otherwise.
-fn after_token(source: &str, from: usize, start: usize) -> usize {
-    let text = &source[from..start];
-    let mut rest = text;
+/// `skipTrivia`: the position of the first token character at or after
+/// `pos`, past whitespace and comments.
+fn skip_trivia(source: &str, mut pos: usize) -> usize {
     loop {
-        rest = rest.trim_start();
-        if let Some(body) = rest.strip_prefix("/*") {
-            match body.find("*/") {
-                Some(end) => rest = &body[end + 2..],
-                None => return from,
+        let Some(c) = char_at(source, pos) else { return pos };
+        if is_whitespace_like(c) {
+            pos += c.len_utf8();
+        } else if source[pos..].starts_with("/*") {
+            match source[pos + 2..].find("*/") {
+                Some(end) => pos += 2 + end + 2,
+                None => return source.len(),
             }
-        } else if rest.starts_with("//") {
-            match rest.find(is_line_break) {
-                Some(end) => rest = &rest[end..],
-                None => return from,
+        } else if source[pos..].starts_with("//") {
+            match source[pos..].find(is_line_break) {
+                Some(end) => pos += end,
+                None => return source.len(),
             }
         } else {
-            return match rest.chars().next() {
-                Some(c) => from + (text.len() - rest.len()) + c.len_utf8(),
-                None => from,
-            };
+            return pos;
         }
     }
 }
 
 /// Where the token before `start` ends, skipping whitespace and comments
-/// backwards. `None` when that crosses a line with `//` on it: a line comment
-/// can't be told apart from code when reading backwards.
+/// backwards. A `//` on the line above makes that line end at the `//` —
+/// anything after it is comment — so the token ends at the `//` (or earlier,
+/// on the line before it).
 fn token_end_before(source: &str, start: usize) -> Option<usize> {
     let mut end = start;
     loop {
@@ -719,8 +1662,10 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
                 .char_indices()
                 .rfind(|&(_, c)| is_line_break(c))
                 .map_or(0, |(i, c)| i + c.len_utf8());
-            if trimmed[line_start..].contains("//") {
-                return None;
+            if let Some(slashes) = trimmed[line_start..].find("//") {
+                // The line ends at the comment; keep looking before it.
+                end = line_start + slashes;
+                continue;
             }
         }
         end = trimmed.len();
@@ -731,34 +1676,163 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
     }
 }
 
-/// The comments at the start of `text`, up to the first line break, as
-/// TypeScript prints them there: `/* */` followed by a space, `//` by a new
-/// line (indented like the `.d.ts` class members). Comments spanning lines,
-/// which TypeScript re-indents, are dropped with the rest.
-fn same_line_comments(text: &str) -> String {
-    let mut out = String::new();
-    let mut rest = text;
-    loop {
-        rest = rest.trim_start_matches(is_space);
-        if let Some(body) = rest.strip_prefix("/*") {
-            let Some(end) = body.find("*/") else { break };
-            let comment = &rest[..end + 4];
-            if comment.contains(is_line_break) {
-                return String::new();
+/// A comment's source range, as TypeScript's `iterateCommentRanges` reports
+/// it.
+struct Comment {
+    pos: usize,
+    end: usize,
+    /// `//`: the comment ends at a line break.
+    line: bool,
+    /// A line break follows the comment (`hasTrailingNewLine`): always true
+    /// for `//`, true for `/* */` when a `\r`, `\n`, U+2028 or U+2029
+    /// follows while the scan collects it.
+    trailing_newline: bool,
+}
+
+/// `getLeadingCommentRanges` / `getTrailingCommentRanges` (`scanner.ts`
+/// `iterateCommentRanges`): the comments in the trivia starting at `pos`.
+///
+/// A trailing scan collects comments up to the first `\r`/`\n` — those on
+/// `pos`'s line. A leading scan skips that same-line prefix and collects
+/// everything after it. The quirk ngtsc's doubled comments ride on:
+/// U+2028/U+2029 are whitespace here (a trailing scan crosses them, and they
+/// don't start collecting for a leading one), while the line map counts them
+/// as line breaks.
+fn comment_ranges(source: &str, start: usize, trailing: bool) -> Vec<Comment> {
+    let mut out = Vec::new();
+    // Pending = a comment seen while collecting; flushed when the next
+    // comment starts or the scan ends.
+    let mut pending: Option<Comment> = None;
+    let mut collecting = trailing || start == 0;
+    let bytes = source.as_bytes();
+    let mut pos = start;
+    while pos < bytes.len() {
+        let b = bytes[pos];
+        match b {
+            b'\r' | b'\n' => {
+                if b == b'\r' && bytes.get(pos + 1) == Some(&b'\n') {
+                    pos += 1;
+                }
+                pos += 1;
+                if trailing {
+                    break;
+                }
+                collecting = true;
+                if let Some(c) = &mut pending {
+                    c.trailing_newline = true;
+                }
             }
-            out.push_str(comment);
-            out.push(' ');
-            rest = &rest[comment.len()..];
+            b' ' | b'\t' | 0x0B | 0x0C => pos += 1,
+            b'/' => {
+                let next = bytes.get(pos + 1);
+                let is_line = next == Some(&b'/');
+                if next != Some(&b'/') && next != Some(&b'*') {
+                    break;
+                }
+                let comment_start = pos;
+                pos += 2;
+                let mut trailing_newline = false;
+                if is_line {
+                    while let Some(c) = char_at(source, pos) {
+                        if is_line_break(c) {
+                            trailing_newline = true;
+                            break;
+                        }
+                        pos += c.len_utf8();
+                    }
+                } else {
+                    while pos < bytes.len() {
+                        if bytes[pos] == b'*' && bytes.get(pos + 1) == Some(&b'/') {
+                            pos += 2;
+                            break;
+                        }
+                        pos += 1;
+                    }
+                }
+                if collecting {
+                    if let Some(c) = pending.take() {
+                        out.push(c);
+                    }
+                    pending = Some(Comment {
+                        pos: comment_start,
+                        end: pos,
+                        line: is_line,
+                        trailing_newline,
+                    });
+                }
+            }
+            _ => {
+                // Non-ASCII whitespace — including U+2028/U+2029, which are
+                // whitespace here (a trailing scan crosses them; they don't
+                // start a leading scan collecting) while the line map still
+                // counts them as line breaks.
+                match char_at(source, pos) {
+                    Some(c) if (c as u32) > 0x7F && is_whitespace_like(c) => {
+                        if is_line_break(c)
+                            && let Some(p) = &mut pending
+                        {
+                            p.trailing_newline = true;
+                        }
+                        pos += c.len_utf8();
+                    }
+                    _ => break,
+                }
+            }
+        }
+    }
+    if let Some(c) = pending {
+        out.push(c);
+    }
+    out
+}
+
+/// TypeScript's `isWhiteSpaceLike`: single-line whitespace or a line break.
+fn is_whitespace_like(c: char) -> bool {
+    is_space(c) || is_line_break(c)
+}
+
+/// The character at byte `pos`, or `None` mid-character/past the end.
+fn char_at(source: &str, pos: usize) -> Option<char> {
+    source.get(pos..)?.chars().next()
+}
+
+/// The 1-based-agnostic line index of `pos` (number of line breaks before
+/// it), where U+2028/U+2029 count — matching TypeScript's line map.
+fn line_of(source: &str, pos: usize) -> usize {
+    source[..pos].chars().filter(|&c| is_line_break(c)).count()
+}
+
+/// Byte index where `pos`'s line starts (just past the last line break).
+fn line_start_of(source: &str, pos: usize) -> usize {
+    source[..pos]
+        .char_indices()
+        .rfind(|&(_, c)| is_line_break(c))
+        .map_or(0, |(i, c)| i + c.len_utf8())
+}
+
+/// `calculateIndent`: the width of `text`'s leading whitespace, tabs rounded
+/// to the next multiple of 4.
+fn indent_of(text: &str) -> usize {
+    let mut indent = 0;
+    for c in text.chars() {
+        if c == '\t' {
+            indent += 4 - indent % 4;
+        } else if is_space(c) {
+            indent += 1;
         } else {
-            if rest.starts_with("//") {
-                let end = rest.find(is_line_break).unwrap_or(rest.len());
-                out.push_str(&rest[..end]);
-                out.push_str("\n    ");
-            }
             break;
         }
     }
-    out
+    indent
+}
+
+/// Width in bytes of the line break `text` starts with.
+fn line_break_width(text: &str) -> usize {
+    match text.as_bytes().first() {
+        Some(b'\r') if text.as_bytes().get(1) == Some(&b'\n') => 2,
+        Some(b'\r') | Some(b'\n') => 1,
+        _ => text.chars().next().map_or(0, char::len_utf8),
+    }
 }
 
 /// A string literal as TypeScript prints a synthesized one: double quotes,

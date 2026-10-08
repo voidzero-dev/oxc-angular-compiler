@@ -3571,6 +3571,8 @@ pub fn input_transform_types<'a>(
                         source,
                         core_ns: core_namespace,
                         other_module: false,
+                        container_pos: u32::MAX,
+                        container_end: u32::MAX,
                     };
                     let ty = printer.print(ty);
                     if printer.other_module {
