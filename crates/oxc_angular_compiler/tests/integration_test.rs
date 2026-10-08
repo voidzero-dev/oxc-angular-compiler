@@ -17460,3 +17460,36 @@ fn test_unnameable_members_are_silent() {
         );
     }
 }
+
+#[test]
+fn test_unnameable_members_emit_nothing() {
+    // The same reflectClassMember drop applies to the emit paths: a
+    // computed-key member can't produce an input, output or query — not just
+    // no diagnostics.
+    for (member, meta) in [
+        ("@ViewChild('x') ['q'] = null;", "viewQueries"),
+        ("@ContentChild('x') ['q'] = null;", "queries"),
+        ("static ['q'] = viewChild('x');", "viewQueries"),
+        ("['q'] = contentChild('x');", "queries"),
+        ("@Output() set ['o'](v: any) {}", "outputs"),
+        ("@Output() ['o']() {}", "outputs"),
+    ] {
+        let source = format!(
+            "import {{ Directive, Output, ViewChild, ContentChild, viewChild, contentChild }} \
+             from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let result = expect_result(&source);
+        assert!(
+            result.diagnostics.is_empty(),
+            "`{member}` should raise no diagnostics. Got: {:?}",
+            result.diagnostics
+        );
+        assert!(
+            !result.code.contains(&format!("{meta}:")),
+            "`{member}` should emit no `{meta}` entry. Got:\n{}",
+            result.code
+        );
+    }
+}

@@ -1413,10 +1413,10 @@ pub(crate) fn extract_view_queries_in<'a>(
             }
             _ => None,
         };
-        if let Some((decorators, key, value)) = prop_like {
+        if let Some((decorators, _key, value)) = prop_like {
             // Check for signal-based view queries first (viewChild(), viewChildren())
             if let Some(value) = value {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     if let Some((query_type, metadata)) =
                         try_parse_signal_query(allocator, value, property_name, source_text, consts)
                     {
@@ -1430,7 +1430,7 @@ pub(crate) fn extract_view_queries_in<'a>(
 
             // Check for decorator-based queries (@ViewChild, @ViewChildren)
             if let Some(decorator) = find_decorator_by_name(decorators, "ViewChild", consts) {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     let config =
                         parse_query_config(allocator, decorator, "ViewChild", source_text, consts);
                     if let Some(predicate) = config.predicate {
@@ -1450,7 +1450,7 @@ pub(crate) fn extract_view_queries_in<'a>(
             } else if let Some(decorator) =
                 find_decorator_by_name(decorators, "ViewChildren", consts)
             {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     let config = parse_query_config(
                         allocator,
                         decorator,
@@ -1482,7 +1482,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                 if let Some(decorator) =
                     find_decorator_by_name(&method.decorators, "ViewChild", consts)
                 {
-                    if let Some(property_name) = get_property_key_name(&method.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         let config = parse_query_config(
                             allocator,
                             decorator,
@@ -1507,7 +1507,7 @@ pub(crate) fn extract_view_queries_in<'a>(
                 } else if let Some(decorator) =
                     find_decorator_by_name(&method.decorators, "ViewChildren", consts)
                 {
-                    if let Some(property_name) = get_property_key_name(&method.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         let config = parse_query_config(
                             allocator,
                             decorator,
@@ -1600,10 +1600,10 @@ pub(crate) fn extract_content_queries_in<'a>(
             }
             _ => None,
         };
-        if let Some((decorators, key, value)) = prop_like {
+        if let Some((decorators, _key, value)) = prop_like {
             // Check for signal-based content queries first (contentChild(), contentChildren())
             if let Some(value) = value {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     if let Some((query_type, metadata)) =
                         try_parse_signal_query(allocator, value, property_name, source_text, consts)
                     {
@@ -1617,7 +1617,7 @@ pub(crate) fn extract_content_queries_in<'a>(
 
             // Check for decorator-based queries (@ContentChild, @ContentChildren)
             if let Some(decorator) = find_decorator_by_name(decorators, "ContentChild", consts) {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     let config = parse_query_config(
                         allocator,
                         decorator,
@@ -1642,7 +1642,7 @@ pub(crate) fn extract_content_queries_in<'a>(
             } else if let Some(decorator) =
                 find_decorator_by_name(decorators, "ContentChildren", consts)
             {
-                if let Some(property_name) = get_property_key_name(key) {
+                if let Some(property_name) = member_name_ident(allocator, element) {
                     let config = parse_query_config(
                         &allocator,
                         decorator,
@@ -1674,7 +1674,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                 if let Some(decorator) =
                     find_decorator_by_name(&method.decorators, "ContentChild", consts)
                 {
-                    if let Some(property_name) = get_property_key_name(&method.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         let config = parse_query_config(
                             allocator,
                             decorator,
@@ -1699,7 +1699,7 @@ pub(crate) fn extract_content_queries_in<'a>(
                 } else if let Some(decorator) =
                     find_decorator_by_name(&method.decorators, "ContentChildren", consts)
                 {
-                    if let Some(property_name) = get_property_key_name(&method.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         let config = parse_query_config(
                             &allocator,
                             decorator,
