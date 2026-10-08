@@ -2344,6 +2344,12 @@ function angularCoreNamespaces(program: unknown): Set<string> {
 /**
  * Alpha-rename an arrow/function's parameters to `p0`, `p1`, ... so equivalent
  * wrappers compare equal while a swapped parameter usage order still differs.
+ *
+ * Only identifier *references* are renamed. Identifier nodes in positions that
+ * are not variable references — non-computed member properties (`registry.X`),
+ * non-computed object keys (`{X: ...}`, including the key of a shorthand
+ * `{X}`), class member keys, labels, and `import.meta` — keep their names so
+ * observable names stay in the normalized form.
  */
 function normalizeWrapperAst(wrapper: NormAstNode): string {
   const cloned = JSON.parse(JSON.stringify(wrapper)) as NormAstNode
@@ -2351,8 +2357,36 @@ function normalizeWrapperAst(wrapper: NormAstNode): string {
   for (const param of (cloned.params ?? []) as NormAstNode[]) {
     if (param.type === 'Identifier') paramNames.push(param.name as string)
   }
+  const nonReference = new Set<NormAstNode>()
+  const protect = (node: unknown) => {
+    const ident = node as NormAstNode | undefined
+    if (ident?.type === 'Identifier') nonReference.add(ident)
+  }
   walkAst(cloned, (node) => {
-    if (node.type === 'Identifier') {
+    if (
+      (node.type === 'MemberExpression' || node.type === 'OptionalMemberExpression') &&
+      node.computed !== true
+    ) {
+      protect(node.property)
+    } else if (
+      (node.type === 'Property' ||
+        node.type === 'PropertyDefinition' ||
+        node.type === 'MethodDefinition' ||
+        node.type === 'AccessorProperty') &&
+      node.computed !== true
+    ) {
+      protect(node.key)
+    } else if (node.type === 'LabeledStatement') {
+      protect(node.label)
+    } else if (node.type === 'BreakStatement' || node.type === 'ContinueStatement') {
+      protect(node.label)
+    } else if (node.type === 'MetaProperty') {
+      protect(node.meta)
+      protect(node.property)
+    }
+  })
+  walkAst(cloned, (node) => {
+    if (node.type === 'Identifier' && !nonReference.has(node)) {
       const index = paramNames.indexOf(node.name as string)
       if (index >= 0) node.name = `p${index}`
     }
@@ -2366,7 +2400,7 @@ function normalizeWrapperAst(wrapper: NormAstNode): string {
  * comments, nested calls and `$`-or-unicode identifiers are all handled by
  * the parser.
  */
-function extractClassMetadataCalls(program: unknown, code: string): ClassMetadataInfo[] {
+export function extractClassMetadataCalls(program: unknown, code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
   const coreNamespaces = angularCoreNamespaces(program)
 
@@ -2450,7 +2484,7 @@ function normalizeMetadataString(s: string | null): string {
  * @param tsMetadata - Class metadata extracted from TS output
  * @returns Array of differences found
  */
-function compareClassMetadata(
+export function compareClassMetadata(
   oxcMetadata: ClassMetadataInfo[],
   tsMetadata: ClassMetadataInfo[],
 ): ClassMetadataDiff[] {
@@ -2463,10 +2497,6 @@ function compareClassMetadata(
   // binding, and keeping only the last call would let an identical user call
   // mask a divergent generated one.
   const keyOf = (m: ClassMetadataInfo) => (m.isAsync ? `${m.className}#async` : m.className)
-  const signatureOf = (m: ClassMetadataInfo) =>
-    m.isAsync
-      ? `${normalizeMetadataString(m.resolver ?? 'null')}|${m.wrapperNormalized ?? ''}`
-      : `${normalizeMetadataString(m.decorators)}|${normalizeMetadataString(m.ctorParams)}|${normalizeMetadataString(m.propDecorators)}`
   const groupByKey = (list: ClassMetadataInfo[]) => {
     const map = new Map<string, ClassMetadataInfo[]>()
     for (const m of list) {
@@ -2478,10 +2508,9 @@ function compareClassMetadata(
         map.set(key, [m])
       }
     }
-    // Sort each group by normalized signature so pairing is stable regardless
-    // of call ordering in the two outputs.
-    for (const group of map.values())
-      group.sort((a, b) => signatureOf(a).localeCompare(signatureOf(b)))
+    // Calls stay in execution order: repeated setClassMetadata calls overwrite
+    // fields, so the same calls in a different order produce different runtime
+    // metadata and must not compare equal.
     return map
   }
   const tsMap = groupByKey(tsMetadata)
