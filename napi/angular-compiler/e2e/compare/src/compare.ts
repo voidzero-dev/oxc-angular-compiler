@@ -2525,21 +2525,23 @@ function renameBoundIdentifiers(
       inner = new Map(active)
       for (const name of shadowed) inner.delete(name)
     }
-  } else if (
-    type === 'Program' ||
-    type === 'BlockStatement' ||
-    type === 'StaticBlock' ||
-    type === 'SwitchStatement'
-  ) {
+  } else if (type === 'SwitchStatement') {
+    // The discriminant is evaluated in the enclosing scope, before the
+    // case-block bindings exist — only the cases see the shadowed names.
     const shadowed = new Set<string>()
-    if (type === 'SwitchStatement') {
-      // Case consequents share the switch's block scope.
-      for (const c of (obj.cases ?? []) as NormAstNode[]) {
-        blockDeclNames(c.consequent as NormAstNode[], shadowed)
-      }
-    } else {
-      blockDeclNames(obj.body as NormAstNode[], shadowed)
+    for (const c of (obj.cases ?? []) as NormAstNode[]) {
+      blockDeclNames(c.consequent as NormAstNode[], shadowed)
     }
+    renameBoundIdentifiers(obj.discriminant, active, nonReference)
+    if (shadowed.size > 0) {
+      inner = new Map(active)
+      for (const name of shadowed) inner.delete(name)
+    }
+    renameBoundIdentifiers(obj.cases, inner, nonReference)
+    return
+  } else if (type === 'Program' || type === 'BlockStatement' || type === 'StaticBlock') {
+    const shadowed = new Set<string>()
+    blockDeclNames(obj.body as NormAstNode[], shadowed)
     if (shadowed.size > 0) {
       inner = new Map(active)
       for (const name of shadowed) inner.delete(name)

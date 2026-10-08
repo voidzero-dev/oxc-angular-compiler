@@ -159,12 +159,29 @@ async function testFixture(fixture: Fixture, verbose?: boolean): Promise<Fixture
     const undocumentedMetadata = (result.classMetadataDiffs ?? [])
       .map((diff) => `${diff.className}.${diff.field}`)
       .filter((field) => !(known.metadataDiffs ?? []).includes(field))
+    const observedMetadata = new Set(
+      (result.classMetadataDiffs ?? []).map((diff) => `${diff.className}.${diff.field}`),
+    )
+    const unobservedMetadata = (known.metadataDiffs ?? []).filter(
+      (field) => !observedMetadata.has(field),
+    )
     const allUndocumented = [...undocumented, ...undocumentedImports, ...undocumentedMetadata]
     if (allUndocumented.length > 0) {
       return {
         ...result,
         knownDifferences,
         undocumentedFields: [...new Set(allUndocumented)],
+      }
+    }
+    // A declared metadata diff that was not observed means the bug was fixed
+    // (or moved) — surface it like a stale entry so the exemption cannot
+    // silently re-allow a regression.
+    if (unobservedMetadata.length > 0) {
+      return {
+        ...result,
+        status: 'mismatch',
+        knownDifferences,
+        staleMetadataFields: unobservedMetadata,
       }
     }
     return { ...result, status: 'known-difference', knownDifferences }
@@ -995,6 +1012,18 @@ export function printFixtureSummary(report: FixtureReport): void {
     console.log('-'.repeat(50))
     for (const result of staleFixtures) {
       console.log(`  ${result.fixture.category}/${result.fixture.name}`)
+    }
+  }
+  const staleMetadataFixtures = report.fixtures.filter((r) => r.staleMetadataFields)
+  if (staleMetadataFixtures.length > 0) {
+    console.log(
+      '\nStale Metadata Allowlist Entries (declared in known-differences.ts but no longer observed):',
+    )
+    console.log('-'.repeat(50))
+    for (const result of staleMetadataFixtures) {
+      console.log(
+        `  ${result.fixture.category}/${result.fixture.name}: ${result.staleMetadataFields!.join(', ')}`,
+      )
     }
   }
 

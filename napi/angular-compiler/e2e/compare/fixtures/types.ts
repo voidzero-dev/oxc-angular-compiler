@@ -288,6 +288,9 @@ export interface FixtureResult {
   /** Fields that differ in a fixture listed in known-differences.ts but are not documented there */
   undocumentedFields?: string[]
 
+  /** `metadataDiffs` entries declared in known-differences.ts that no longer occur */
+  staleMetadataFields?: string[]
+
   /** Oxc compiler output */
   oxcOutput?: FixtureCompilerOutput
 
