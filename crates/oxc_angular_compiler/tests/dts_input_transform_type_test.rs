@@ -92,6 +92,26 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     // type-arguments list, once for the union's constituents list.
     ("Array<\u{2028}/* c */\nstring | number>", "Array</* c */ /* c */ string | number>"),
     ("Array<\u{2029}/* c */\nstring | number>", "Array</* c */ /* c */ string | number>"),
+    // `//` and `/*` inside strings and comments are comment text, not trivia.
+    ("{ a: 'x//y'\n b: 1 }", "{ a: \"x//y\"; b: 1; }"),
+    ("string | /* a // b */\n number", "string | /* a // b */ number"),
+    ("string | /** a /** b */\nnumber", "string | /** a /** b */ number"),
+    // ngtsc synthesizes the type name of a reference (its `pos`/`end` are -1),
+    // so a comment between the name and the type arguments is dropped.
+    ("Signal /** j */ <number>", "i0.Signal<number>"),
+    // `]` after a trailing comma scans from the list's end (past the comma).
+    ("[a: string,\n /** j */]", "[a: string\n    /** j */ ]"),
+    // Mapped-type `±readonly` and `±?` are two tokens each.
+    ("{ - /** j */ readonly [K in string]: 1 }", "{ - /** j */readonly [K in string]: 1; }"),
+    ("{ [K in string] - /** j */ ?: 1 }", "{ [K in string]- /** j */?: 1; }"),
+    // The `...` of a binding rest and the `${` of a template literal are
+    // emitted tokens too.
+    ("({ ... /** j */ rest }: Box) => void", "({ ... /** j */rest }: Box) => void"),
+    ("`${ /** j */ string}`", "`${ /** j */string}`"),
+    // A `typeof` name's parts are emitted separately.
+    ("typeof val.a.\n/** j */\nb", "typeof val.a.\n    /** j */\n    b"),
+    // NEL (U+0085) is whitespace in TypeScript's trivia scans.
+    ("(/* a */\u{85}/** b */ x: string) => void", "(/* a */ /** b */ x: string) => void"),
 ];
 
 #[test]

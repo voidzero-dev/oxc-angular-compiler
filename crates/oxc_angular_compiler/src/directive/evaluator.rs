@@ -3573,6 +3573,7 @@ pub fn input_transform_types<'a>(
                         other_module: false,
                         container_pos: u32::MAX,
                         container_end: u32::MAX,
+                        indent: 1,
                     };
                     let ty = printer.print(ty);
                     if printer.other_module {

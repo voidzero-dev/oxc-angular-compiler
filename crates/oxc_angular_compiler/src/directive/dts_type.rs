@@ -21,10 +21,16 @@
 //! as line breaks.
 //!
 //! ngtsc's `markForEmitAsSingleLine` marks the whole translated type
-//! subtree, so under ngtsc 22.1.7 every list uses its single-line format.
-//! The comment paths still need the writer's line tracking: a `//` comment
-//! or a `/**` with `hasTrailingNewLine` ends the line, and the next write
-//! indents it.
+//! subtree. This printer always uses the single-line formats — but ngtsc's
+//! `ts.transform` calls `disposeEmitNodes`, which wipes the marks on nodes
+//! visited before the last `emitType` run, so in real ngtsc output a field
+//! whose type is a bare tuple, type literal or mapped type can print
+//! multi-line (while `i0.Foo<…>` references stay single-line via the
+//! checker's reuse path). That divergence predates the comment support and
+//! needs the field-order mechanism to fix; the single-line path is what the
+//! fixtures exercise. Either way the comment paths need the writer's line
+//! tracking: a `//` comment or a `/**` with `hasTrailingNewLine` ends the
+//! line, and the next write indents it.
 
 use oxc_ast::ast::{
     BigIntLiteral, BindingPattern, BindingProperty, BindingRestElement, Expression,
@@ -109,6 +115,10 @@ pub(crate) struct TypePrinter<'s, 'a> {
     /// enclosing node's range while [`Self::emit_node`] prints one.
     pub container_pos: u32,
     pub container_end: u32,
+    /// The writer's indent level (`createTextWriter`'s `indent`): `static`
+    /// members sit at one level, and a `ListFormat.Indented` list adds one
+    /// more while its items print.
+    pub indent: u32,
 }
 
 /// A list element for [`TypePrinter::emit_list`]: a node with a span plus the
@@ -221,7 +231,9 @@ impl<'a> TypePrinter<'_, 'a> {
     /// which comments emit).
     fn write(&self, out: &mut String, s: &str) {
         if out.ends_with('\n') {
-            out.push_str(INDENT);
+            for _ in 0..self.indent {
+                out.push_str(INDENT);
+            }
         }
         out.push_str(s);
     }
@@ -276,7 +288,8 @@ impl<'a> TypePrinter<'_, 'a> {
 
     /// `emitNodeListItems`, always on the single-line path: every list this
     /// printer uses is `SingleLine`-flagged, so the leading, separating and
-    /// closing line-terminator counts are all `0` and `Indented` never runs.
+    /// closing line-terminator counts are all `0`. `Indented` still applies —
+    /// it's unconditional in TypeScript (index-signature parameters carry it).
     fn emit_list_items(
         &mut self,
         out: &mut String,
@@ -288,6 +301,12 @@ impl<'a> TypePrinter<'_, 'a> {
         let mut should_intervene = may_intervene;
         if format & fmt::SPACE_BETWEEN_BRACES != 0 {
             self.write(out, " ");
+        }
+        // `Indented` applies unconditionally (index-signature parameters
+        // carry it), unlike the line-terminator counts that only exist for
+        // multi-line formats.
+        if format & fmt::INDENTED != 0 {
+            self.indent += 1;
         }
         let mut prev_end: Option<u32> = None;
         for item in items {
@@ -325,6 +344,9 @@ impl<'a> TypePrinter<'_, 'a> {
             // The JSDoc comments after the last element, before the closing
             // token.
             self.emit_leading_of_pos(out, prev_end as usize);
+        }
+        if format & fmt::INDENTED != 0 {
+            self.indent -= 1;
         }
         if format & (fmt::SPACE_AFTER_LIST | fmt::SPACE_BETWEEN_BRACES) != 0 {
             self.write(out, " ");
@@ -390,19 +412,17 @@ impl<'a> TypePrinter<'_, 'a> {
             TSType::TSVoidKeyword(_) => self.write(out, "void"),
             TSType::TSThisType(_) => self.write(out, "this"),
             TSType::TSTypeReference(r) => {
-                // `emit(node.typeName)`: the whole entity name as one node —
-                // TypeScript emits qualified names part by part, but the
-                // comments each part would keep land the same either way.
+                // ngtsc synthesizes the name (`createTypeReferenceNode`):
+                // a synthesized node's `pos`/`end` are -1, so it keeps no
+                // comments of its own — `Signal /** j */ <number>` prints
+                // `i0.Signal<number>`. (Upstream may reuse a declaration's
+                // identifier and leak *its* trivia; a reference only knows
+                // the use site, so comments it would carry are dropped.)
                 let text = self.type_name(&r.type_name)?;
-                self.emit_node(
-                    out,
-                    self.pos_of(r.type_name.span().start),
-                    r.type_name.span().end,
-                    |s, o| {
-                        s.write(o, &text);
-                        Some(())
-                    },
-                )?;
+                self.emit_node(out, 0, 0, |s, o| {
+                    s.write(o, &text);
+                    Some(())
+                })?;
                 if let Some(args) = &r.type_arguments {
                     self.type_args(out, args)?;
                 }
@@ -452,7 +472,15 @@ impl<'a> TypePrinter<'_, 'a> {
                 )?;
                 let items: Vec<El> = t.element_types.iter().map(El::TupleEl).collect();
                 let list_pos = t.span.start as usize + 1;
-                let list_end = t.element_types.last().map_or(list_pos, |e| e.span().end as usize);
+                // A `NodeArray`'s `end` is past a trailing comma.
+                let list_end = t
+                    .element_types
+                    .last()
+                    .map(|e| {
+                        let after = skip_trivia(self.source, e.span().end as usize);
+                        if self.source[after..].starts_with(',') { after + 1 } else { after }
+                    })
+                    .unwrap_or(list_pos);
                 self.emit_list(
                     out,
                     &items,
@@ -464,8 +492,9 @@ impl<'a> TypePrinter<'_, 'a> {
                     None,
                 )?;
                 // `emitTokenWithComment(CloseBracket, elements.end, node)`:
-                // the leading scan runs at the last element's end; `]`'s own
-                // end is the tuple's, so no trailing scan.
+                // the leading scan runs at the element list's end — past a
+                // trailing comma, so `[a: string,\n /** j */]` keeps the
+                // comment; `]`'s own end is the tuple's, so no trailing scan.
                 self.token_with_comment(out, "]", list_end as u32, t.span.end - 1, t.span.end)?;
             }
             TSType::TSNamedTupleMember(m) => self.named_tuple_member_body(out, m, None)?,
@@ -475,7 +504,17 @@ impl<'a> TypePrinter<'_, 'a> {
                 for (i, quasi) in t.quasis.iter().enumerate() {
                     self.write(out, quasi.value.raw.as_str());
                     if let Some(ty) = t.types.get(i) {
-                        self.write(out, "${");
+                        // `${` sits right after the quasi's cooked text and
+                        // keeps its same-line JSDoc comments:
+                        // `` `${ /** j */ string}` `` prints as written.
+                        let dollar = quasi.span.end;
+                        self.token_with_comment(
+                            out,
+                            "${",
+                            self.pos_of(dollar),
+                            dollar + 2,
+                            t.span.end,
+                        )?;
                         self.ty_node(out, ty)?;
                         self.write(out, "}");
                     }
@@ -483,20 +522,11 @@ impl<'a> TypePrinter<'_, 'a> {
                 self.write(out, "`");
             }
             TSType::TSTypeQuery(q) => {
-                // `typeof x` names a value; ngtsc leaves it as written.
+                // `typeof x` names a value; ngtsc emits the entity name part
+                // by part (`emitEntityName`), so comments inside the name are
+                // kept (`typeof val.a.\n/** j */\nb`).
                 self.write(out, "typeof ");
-                let (span, text) = match &q.expr_name {
-                    TSTypeQueryExprName::IdentifierReference(id) => (id.span, id.name.to_string()),
-                    TSTypeQueryExprName::QualifiedName(name) => {
-                        (name.span, format!("{}.{}", entity_name(&name.left)?, name.right.name))
-                    }
-                    TSTypeQueryExprName::ThisExpression(e) => (e.span, "this".to_string()),
-                    TSTypeQueryExprName::TSImportType(_) => return None,
-                };
-                self.emit_node(out, self.pos_of(span.start), span.end, |s, o| {
-                    s.write(o, &text);
-                    Some(())
-                })?;
+                self.emit_query_name(out, &q.expr_name)?;
                 if let Some(args) = &q.type_arguments {
                     self.type_args(out, args)?;
                 }
@@ -520,19 +550,31 @@ impl<'a> TypePrinter<'_, 'a> {
                 // `SingleLine` is always set: `{ ...; }` on one line.
                 self.write(out, "{ ");
                 if let Some(readonly) = &m.readonly {
-                    let (sign, len) = match readonly {
-                        TSMappedTypeModifierOperator::True => ("", "readonly".len()),
-                        TSMappedTypeModifierOperator::Plus => ("+", "+readonly".len()),
-                        TSMappedTypeModifierOperator::Minus => ("-", "-readonly".len()),
-                    };
+                    // `readonlyToken` is `ReadonlyKeyword | PlusToken
+                    // ReadonlyKeyword | MinusToken ReadonlyKeyword` — the sign
+                    // and `readonly` are separate tokens (`{ - /** j */
+                    // readonly … }` prints `- /** j */readonly`).
+                    let mut start = skip_trivia(self.source, m.span.start as usize + 1);
+                    if readonly != &TSMappedTypeModifierOperator::True {
+                        let sign =
+                            if readonly == &TSMappedTypeModifierOperator::Plus { "+" } else { "-" };
+                        self.emit_node(
+                            out,
+                            self.pos_of(start as u32),
+                            start as u32 + 1,
+                            |s, o| {
+                                s.write(o, sign);
+                                Some(())
+                            },
+                        )?;
+                        start = skip_trivia(self.source, start + 1);
+                    }
                     // `emit(node.readonlyToken)` + `writeSpace`.
-                    let start = skip_trivia(self.source, m.span.start as usize + 1);
                     self.emit_node(
                         out,
                         self.pos_of(start as u32),
-                        (start + len) as u32,
+                        (start + "readonly".len()) as u32,
                         |s, o| {
-                            s.write(o, sign);
                             s.write(o, "readonly");
                             Some(())
                         },
@@ -562,32 +604,31 @@ impl<'a> TypePrinter<'_, 'a> {
                     after = name_type.span().end;
                 }
                 self.write(out, "]");
-                if m.optional.is_some() {
-                    let (sign, len) = match m.optional.unwrap() {
-                        TSMappedTypeModifierOperator::True => ("", 1),
-                        TSMappedTypeModifierOperator::Plus
-                        | TSMappedTypeModifierOperator::Minus => (
-                            if m.optional == Some(TSMappedTypeModifierOperator::Plus) {
-                                "+"
-                            } else {
-                                "-"
-                            },
-                            2,
-                        ),
-                    };
-                    // `emit(node.questionToken)`: the `?`/`+?`/`-?` after `]`.
-                    let start =
+                if let Some(optional) = &m.optional {
+                    // `questionToken` is `QuestionToken | PlusToken
+                    // QuestionToken | MinusToken QuestionToken` — separate
+                    // tokens, like `readonlyToken` above.
+                    let mut start =
                         skip_trivia(self.source, skip_trivia(self.source, after as usize) + 1);
-                    self.emit_node(
-                        out,
-                        self.pos_of(start as u32),
-                        (start + len) as u32,
-                        |s, o| {
-                            s.write(o, sign);
-                            s.write(o, "?");
-                            Some(())
-                        },
-                    )?;
+                    if optional != &TSMappedTypeModifierOperator::True {
+                        let sign =
+                            if optional == &TSMappedTypeModifierOperator::Plus { "+" } else { "-" };
+                        self.emit_node(
+                            out,
+                            self.pos_of(start as u32),
+                            start as u32 + 1,
+                            |s, o| {
+                                s.write(o, sign);
+                                Some(())
+                            },
+                        )?;
+                        start = skip_trivia(self.source, start + 1);
+                    }
+                    // `emit(node.questionToken)`: the `?` after `]`.
+                    self.emit_node(out, self.pos_of(start as u32), start as u32 + 1, |s, o| {
+                        s.write(o, "?");
+                        Some(())
+                    })?;
                 }
                 self.write(out, ": ");
                 if let Some(value) = &m.type_annotation {
@@ -1283,15 +1324,70 @@ impl<'a> TypePrinter<'_, 'a> {
         )
     }
 
-    /// A `RestElement`: `...` then its argument.
+    /// A `RestElement`: `...` then its argument (`emitRestElement` emits the
+    /// `dotDotDotToken` with its comments).
     fn binding_rest_body(&mut self, out: &mut String, rest: &BindingRestElement<'a>) -> Option<()> {
-        self.write(out, "...");
+        self.token_with_comment(out, "...", rest.span.start, rest.span.start + 3, rest.span.end)?;
         self.emit_node(
             out,
             self.pos_of(rest.argument.span().start),
             rest.argument.span().end,
             |s, o| s.binding_body(o, &rest.argument),
         )
+    }
+
+    /// `emitEntityName` for a `typeof` operand: each part is `emit`ted (so
+    /// comments between parts survive), `.` between them.
+    fn emit_query_name(&mut self, out: &mut String, name: &TSTypeQueryExprName<'a>) -> Option<()> {
+        match name {
+            TSTypeQueryExprName::IdentifierReference(id) => {
+                self.emit_node(out, self.pos_of(id.span.start), id.span.end, |s, o| {
+                    s.write(o, id.name.as_str());
+                    Some(())
+                })
+            }
+            TSTypeQueryExprName::QualifiedName(q) => {
+                self.emit_name_left(out, &q.left)?;
+                self.write(out, ".");
+                self.emit_node(out, self.pos_of(q.right.span.start), q.right.span.end, |s, o| {
+                    s.write(o, q.right.name.as_str());
+                    Some(())
+                })
+            }
+            TSTypeQueryExprName::ThisExpression(e) => {
+                self.emit_node(out, self.pos_of(e.span.start), e.span.end, |s, o| {
+                    s.write(o, "this");
+                    Some(())
+                })
+            }
+            TSTypeQueryExprName::TSImportType(_) => None,
+        }
+    }
+
+    /// `emitEntityName`'s `left` recursion.
+    fn emit_name_left(&mut self, out: &mut String, name: &TSTypeName<'a>) -> Option<()> {
+        match name {
+            TSTypeName::IdentifierReference(id) => {
+                self.emit_node(out, self.pos_of(id.span.start), id.span.end, |s, o| {
+                    s.write(o, id.name.as_str());
+                    Some(())
+                })
+            }
+            TSTypeName::QualifiedName(q) => {
+                self.emit_name_left(out, &q.left)?;
+                self.write(out, ".");
+                self.emit_node(out, self.pos_of(q.right.span.start), q.right.span.end, |s, o| {
+                    s.write(o, q.right.name.as_str());
+                    Some(())
+                })
+            }
+            TSTypeName::ThisExpression(e) => {
+                self.emit_node(out, self.pos_of(e.span.start), e.span.end, |s, o| {
+                    s.write(o, "this");
+                    Some(())
+                })
+            }
+        }
     }
 
     /// `@angular/core` names become `i0.Name`; local and global names stay as
@@ -1506,12 +1602,14 @@ impl<'a> TypePrinter<'_, 'a> {
 
     /// `writeCommentRange`: a `//` comment verbatim; a `/* */` with each line
     /// trimmed, continuation lines re-indented relative to the line the
-    /// comment starts on, rebased to the writer's indent (one level here).
+    /// comment starts on, rebased to the writer's indent.
     fn emit_comment_text(&self, out: &mut String, comment: &Comment) {
         // `writeComment` goes through `writeText`, which indents a line
         // started by a `writeLine`.
         if out.ends_with('\n') {
-            out.push_str(INDENT);
+            for _ in 0..self.indent {
+                out.push_str(INDENT);
+            }
         }
         let text = &self.source[comment.pos..comment.end];
         if comment.line {
@@ -1528,7 +1626,7 @@ impl<'a> TypePrinter<'_, 'a> {
         out.push('\n');
         // `calculateIndent` of the line the comment starts on (the whitespace
         // before `/*`), then each continuation line's indent minus that,
-        // rebased to the writer's four spaces.
+        // rebased to the writer's indent.
         let first_indent =
             indent_of(&self.source[line_start_of(self.source, comment.pos)..comment.pos]);
         let mut rest = &text[first_break..];
@@ -1544,7 +1642,8 @@ impl<'a> TypePrinter<'_, 'a> {
                 // all-whitespace continuation.
                 out.push('\n');
             } else {
-                let spaces = 4isize - first_indent as isize + indent_of(line) as isize;
+                let spaces =
+                    4 * self.indent as isize - first_indent as isize + indent_of(line) as isize;
                 for _ in 0..spaces.max(0) {
                     out.push(' ');
                 }
@@ -1562,16 +1661,6 @@ impl<'a> TypePrinter<'_, 'a> {
 
     fn slice(&self, span: Span) -> String {
         span.source_text(self.source).to_string()
-    }
-}
-
-/// A `typeof` operand or computed key: `a.b.c`, as ngtsc prints it (without
-/// the source's spacing).
-fn entity_name(name: &TSTypeName<'_>) -> Option<String> {
-    match name {
-        TSTypeName::IdentifierReference(id) => Some(id.name.to_string()),
-        TSTypeName::QualifiedName(q) => Some(format!("{}.{}", entity_name(&q.left)?, q.right.name)),
-        TSTypeName::ThisExpression(_) => Some("this".into()),
     }
 }
 
@@ -1617,11 +1706,17 @@ fn is_line_break(c: char) -> bool {
     matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
 }
 
-/// TypeScript's `isWhiteSpaceSingleLine`: space, tab, VT, FF, NBSP, the
-/// Unicode space separators and the BOM — but not U+0085 (NEL), which
-/// TypeScript doesn't treat as whitespace (Rust's `is_whitespace` does).
+/// TypeScript's `isWhiteSpaceSingleLine`: a fixed list — space, tab, VT, FF,
+/// NBSP, NEL, ogham, the U+2000–U+200B range (enQuad through zeroWidthSpace),
+/// narrow NBSP, mathematical space, ideographic space and the BOM. Rust's
+/// `is_whitespace` differs on both ends (it lacks NEL and ZWSP and has
+/// U+001C–U+001F), so the list is spelled out.
 fn is_space(c: char) -> bool {
-    (c.is_whitespace() && c != '\u{85}' && !is_line_break(c)) || c == '\u{FEFF}'
+    matches!(
+        c,
+        ' ' | '\t' | '\u{B}' | '\u{C}' | '\u{A0}' | '\u{85}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200B}' | '\u{202F}' | '\u{205F}' | '\u{3000}' | '\u{FEFF}'
+    )
 }
 
 /// `skipTrivia`: the position of the first token character at or after
@@ -1650,7 +1745,9 @@ fn skip_trivia(source: &str, mut pos: usize) -> usize {
 /// Where the token before `start` ends, skipping whitespace and comments
 /// backwards. A `//` on the line above makes that line end at the `//` —
 /// anything after it is comment — so the token ends at the `//` (or earlier,
-/// on the line before it).
+/// on the line before it). `//` inside a string or a `/* */` doesn't count,
+/// and the `/*` a trailing `*/` pairs with is the first one after the
+/// previous `*/`, not the last.
 fn token_end_before(source: &str, start: usize) -> Option<usize> {
     let mut end = start;
     loop {
@@ -1662,7 +1759,7 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
                 .char_indices()
                 .rfind(|&(_, c)| is_line_break(c))
                 .map_or(0, |(i, c)| i + c.len_utf8());
-            if let Some(slashes) = trimmed[line_start..].find("//") {
+            if let Some(slashes) = line_comment_start(&trimmed[line_start..]) {
                 // The line ends at the comment; keep looking before it.
                 end = line_start + slashes;
                 continue;
@@ -1670,10 +1767,88 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
         }
         end = trimmed.len();
         match trimmed.strip_suffix("*/") {
-            Some(inner) => end = inner.rfind("/*")?,
+            Some(inner) => end = block_comment_start(inner)?,
             None => return Some(end),
         }
     }
+}
+
+/// The `//` starting a line comment in `line`, or `None` when the only `//`s
+/// are inside strings or `/* */` comments. (A `//` inside a `${}` of a
+/// template spanning lines can slip through; types don't produce those.)
+fn line_comment_start(line: &str) -> Option<usize> {
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' | b'"' | b'`' => {
+                let quote = bytes[i];
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    } else if bytes[i] == quote {
+                        break;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => return Some(i),
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                // Unterminated on this line means the rest is comment.
+                match line[i + 2..].find("*/") {
+                    Some(end) => i += 2 + end + 2,
+                    None => return None,
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The `/*` that opens the comment closed by the `*/` just cut off `inner`:
+/// the first `/*` whose own `*/` isn't inside `inner` (a `/*` with one is a
+/// comment of its own — or comment text — and is skipped whole). Strings and
+/// `//` are skipped so their bytes don't count.
+fn block_comment_start(inner: &str) -> Option<usize> {
+    let bytes = inner.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' | b'"' | b'`' => {
+                let quote = bytes[i];
+                i += 1;
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' {
+                        i += 1;
+                    } else if bytes[i] == quote {
+                        break;
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                // `//` runs to the next line break; `inner` may span lines.
+                match inner[i + 2..].find(is_line_break) {
+                    Some(end) => i += 2 + end,
+                    None => return None,
+                }
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                match inner[i + 2..].find("*/") {
+                    // A `/*` that closes inside `inner` isn't the one the
+                    // stripped `*/` pairs with.
+                    Some(end) => i += 2 + end + 2,
+                    None => return Some(i),
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// A comment's source range, as TypeScript's `iterateCommentRanges` reports
