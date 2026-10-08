@@ -2387,14 +2387,18 @@ function normalizeWrapperAst(wrapper: NormAstNode): string {
       protect(node.property)
     }
   })
-  // Rename the wrapper's own parameter declarations, then rename only the
-  // references actually bound to them — a nested scope re-declaring the same
-  // name shadows the parameter and must keep its spelling.
+  // Rename references bound to the wrapper's parameters before the parameter
+  // declarations: scope tracking must see the ORIGINAL names, and renaming
+  // declarations first would let a canonical name (`#p1`) collide with an
+  // original parameter and corrupt the shadow set. The canonical spellings
+  // `#p0`, `#p1`, ... can never be real identifiers, so a free `p1` in the
+  // body cannot collide with a renamed parameter either.
+  const canonical = (index: number) => `#p${index}`
+  const active = new Map(paramNames.map((name, index) => [name, canonical(index)]))
+  if (cloned.body) renameBoundIdentifiers(cloned.body, active, nonReference)
   for (const [index, param] of ((cloned.params ?? []) as NormAstNode[]).entries()) {
-    if (param.type === 'Identifier') param.name = `p${index}`
+    if (param.type === 'Identifier') param.name = canonical(index)
   }
-  const active = new Map(paramNames.map((name, index) => [name, `p${index}`]))
-  renameBoundIdentifiers(cloned, active, nonReference)
   return normalizeAst(cloned)
 }
 
