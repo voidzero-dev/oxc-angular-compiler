@@ -2516,19 +2516,32 @@ function renameBoundIdentifiers(
     type === 'FunctionExpression' ||
     type === 'ArrowFunctionExpression'
   ) {
-    const shadowed = new Set<string>()
-    for (const param of (obj.params ?? []) as NormAstNode[]) boundNames(param, shadowed)
+    // Parameter initializers evaluate in the parameter scope — only the
+    // function's own params/id shadow there. Body bindings (vars and the
+    // body's top-level let/const/class/function decls) apply to the body
+    // only; otherwise a `let A` in the body would hide the outer mapping
+    // for a default `(x = A)`.
+    const paramInner = new Map(active)
+    for (const param of (obj.params ?? []) as NormAstNode[]) {
+      const names = new Set<string>()
+      boundNames(param, names)
+      for (const name of names) paramInner.delete(name)
+    }
     const id = obj.id as NormAstNode | undefined
-    if (id?.type === 'Identifier') shadowed.add(id.name as string)
-    varDeclNames(obj.body, shadowed)
+    if (id?.type === 'Identifier') paramInner.delete(id.name as string)
+
+    renameBoundIdentifiers(obj.params, paramInner, nonReference)
+
+    const bodyShadowed = new Set<string>()
+    varDeclNames(obj.body, bodyShadowed)
     const body = obj.body as NormAstNode | undefined
     if (body?.type === 'BlockStatement') {
-      blockDeclNames(body.body as NormAstNode[], shadowed)
+      blockDeclNames(body.body as NormAstNode[], bodyShadowed)
     }
-    if (shadowed.size > 0) {
-      inner = new Map(active)
-      for (const name of shadowed) inner.delete(name)
-    }
+    const bodyInner = new Map(paramInner)
+    for (const name of bodyShadowed) bodyInner.delete(name)
+    renameBoundIdentifiers(obj.body, bodyInner, nonReference)
+    return
   } else if (type === 'SwitchStatement') {
     // The discriminant is evaluated in the enclosing scope, before the
     // case-block bindings exist — only the cases see the shadowed names.
