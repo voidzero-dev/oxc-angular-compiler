@@ -2269,6 +2269,10 @@ interface ClassMetadataInfo {
   ctorParams: string | null
   /** Property decorators (fourth argument, null if none) */
   propDecorators: string | null
+  /** `ɵsetClassMetadataAsync` call: resolver thunk (second argument). */
+  resolver?: string | null
+  /** Whether this entry came from `ɵsetClassMetadataAsync` (deferred imports). */
+  isAsync?: boolean
 }
 
 /**
@@ -2365,25 +2369,56 @@ function metadataArgOrNull(arg: string | undefined): string | null {
   return trimmed
 }
 
+/**
+ * Namespace bindings (`import * as X` / `const X = require(...)`) for
+ * '@angular/core' in the emitted code — the callee of a metadata call must be
+ * one of these so a user-defined `debug.ɵsetClassMetadata` isn't picked up.
+ */
+function angularCoreNamespaces(code: string): Set<string> {
+  const namespaces = new Set<string>()
+  const nsPattern = /import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"]@angular\/core['"]/g
+  const reqPattern = /const\s+([A-Za-z_$][\w$]*)\s*=\s*require\(['"]@angular\/core['"]\)/g
+  for (const m of code.matchAll(nsPattern)) namespaces.add(m[1])
+  for (const m of code.matchAll(reqPattern)) namespaces.add(m[1])
+  return namespaces
+}
+
 function extractClassMetadataCalls(code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
+  const coreNamespaces = angularCoreNamespaces(code)
 
-  // `i0.ɵsetClassMetadata(ClassName, decorators, ctorParams, propDecorators)`
-  // — or `ɵsetClassMetadataAsync`, or under a reused namespace import
-  // (`ng.ɵsetClassMetadata`), so the callee is any identifier.
-  const startPattern = /[A-Za-z_$][\w$]*\.ɵsetClassMetadata(?:Async)?\(\s*(\w+)\s*/g
+  // `ns.ɵsetClassMetadata(ClassName, decorators, ctorParams, propDecorators)`
+  // and the async form `ns.ɵsetClassMetadataAsync(ClassName, resolver, wrapper)`
+  // (wrapper contains a nested sync call, extracted on its own pass). Class
+  // names accept `$` — `Foo$` is a valid identifier.
+  const startPattern = /([A-Za-z_$][\w$]*)\.ɵsetClassMetadata(Async)?\(\s*([A-Za-z_$][\w$]*)\s*/g
   let match
 
   while ((match = startPattern.exec(code)) !== null) {
-    const className = match[1]
+    const [, callee, asyncMarker, className] = match
+    if (!coreNamespaces.has(callee)) continue
     const parenIdx = match.index + match[0].indexOf('(')
     const callEnd = findMatchingBracket(code, parenIdx, '(', ')')
     if (callEnd === -1) continue
 
-    // args[0] is the class name; the rest are the metadata arguments of any
-    // shape — `ctorParams` is an arrow `() => [...]` when present.
     const args = splitTopLevelArguments(code.slice(parenIdx + 1, callEnd)).slice(1)
     if (args.length === 0) continue
+
+    if (asyncMarker) {
+      // Async call: arg2 is the resolver thunk, arg3 the wrapper (which the
+      // pattern above also extracts as a nested sync call). The resolver is
+      // the distinguishing payload.
+      results.push({
+        className,
+        decorators: 'null',
+        ctorParams: null,
+        propDecorators: null,
+        resolver: metadataArgOrNull(args[0]),
+        isAsync: true,
+      })
+      continue
+    }
+
     const [decorators, ctorParams, propDecorators] = args
     results.push({
       className,
@@ -2427,19 +2462,40 @@ function compareClassMetadata(
   tsMetadata: ClassMetadataInfo[],
 ): ClassMetadataDiff[] {
   const diffs: ClassMetadataDiff[] = []
-  const tsMap = new Map(tsMetadata.map((m) => [m.className, m]))
-  const oxcMap = new Map(oxcMetadata.map((m) => [m.className, m]))
+  // Sync and async calls for the same class are separate entries — a class
+  // reported under both names on one side and only sync on the other is a
+  // real difference (deferredImports metadata wrapper).
+  const keyOf = (m: ClassMetadataInfo) => (m.isAsync ? `${m.className}#async` : m.className)
+  const tsMap = new Map(tsMetadata.map((m) => [keyOf(m), m]))
+  const oxcMap = new Map(oxcMetadata.map((m) => [keyOf(m), m]))
 
   // Check for missing/different metadata (in TS but not matching in Oxc)
-  for (const [className, tsInfo] of tsMap) {
-    const oxcInfo = oxcMap.get(className)
+  for (const [key, tsInfo] of tsMap) {
+    const className = tsInfo.className
+    const callName = tsInfo.isAsync ? 'setClassMetadataAsync' : 'setClassMetadata'
+    const oxcInfo = oxcMap.get(key)
     if (!oxcInfo) {
       diffs.push({
         type: 'missing',
         className,
-        field: 'setClassMetadata',
+        field: callName,
         expected: `decorators: ${tsInfo.decorators.slice(0, 100)}...`,
       })
+    } else if (tsInfo.isAsync) {
+      // Async entries: compare the deferred-imports resolver thunk. The
+      // wrapper's nested sync call is extracted as its own entry.
+      if (
+        normalizeMetadataString(tsInfo.resolver ?? null) !==
+        normalizeMetadataString(oxcInfo.resolver ?? null)
+      ) {
+        diffs.push({
+          type: 'different',
+          className,
+          field: 'setClassMetadataAsync.resolver',
+          expected: String(tsInfo.resolver).slice(0, 100),
+          actual: String(oxcInfo.resolver).slice(0, 100),
+        })
+      }
     } else {
       // Compare decorators (normalized)
       const normalizedTsDecorators = normalizeMetadataString(tsInfo.decorators)
@@ -2484,12 +2540,12 @@ function compareClassMetadata(
   }
 
   // Check for extra metadata (in Oxc but not in TS)
-  for (const className of oxcMap.keys()) {
-    if (!tsMap.has(className)) {
+  for (const [key, oxcInfo] of oxcMap) {
+    if (!tsMap.has(key)) {
       diffs.push({
         type: 'extra',
-        className,
-        field: 'setClassMetadata',
+        className: oxcInfo.className,
+        field: oxcInfo.isAsync ? 'setClassMetadataAsync' : 'setClassMetadata',
         actual: 'found in Oxc output but not in TS',
       })
     }
