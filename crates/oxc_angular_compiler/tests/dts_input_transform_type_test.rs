@@ -22,6 +22,7 @@ export interface Gen<T> { v: T }
 export const val = {a: 1};
 export const kc = 'kc';
 export function gen<T>(x: T) { return x; }
+const re = /[/*]/;
 @Directive({selector: '[t]'})
 export class T {
   @Input({transform: (v: %TYPE%) => 1}) t: any;
@@ -116,6 +117,8 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     ("`${string}x\n`", "`${string}x\n`"),
     // A `//` on a `/*`'s continuation line is comment text.
     ("string | /* a\n // b */\n number", "string | /* a\n   // b */ number"),
+    // The `/*` inside the file's `/[/*]/` regex doesn't pair with this `*/`.
+    ("string | /* a\n b */ number", "string | /* a\n   b */ number"),
     // An elision is zero-width right after its preceding comma: comments
     // before the comma stay with the previous element, comments after it
     // are the elision's intervening trivia.

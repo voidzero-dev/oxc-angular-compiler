@@ -124,6 +124,9 @@ pub(crate) struct TypePrinter<'s, 'a> {
     /// members sit at one level, and a `ListFormat.Indented` list adds one
     /// more while its items print.
     pub indent: u32,
+    /// The source's comment table, lexed on first use: the backward trivia
+    /// scan queries it instead of reparsing the whole prefix per node.
+    pub(crate) lexed: std::cell::OnceCell<Lexed>,
 }
 
 /// A list element for [`TypePrinter::emit_list`]: a node with a span plus the
@@ -191,8 +194,12 @@ impl<'a> TypePrinter<'_, 'a> {
 
     /// A node's `pos` (start of its leading trivia): the end of the previous
     /// token.
+    fn lexed(&self) -> &Lexed {
+        self.lexed.get_or_init(|| lex_comments(self.source))
+    }
+
     fn pos_of(&self, start: u32) -> u32 {
-        token_end_before(self.source, start as usize).unwrap_or(start as usize) as u32
+        token_end_before(self.lexed(), self.source, start as usize).unwrap_or(start as usize) as u32
     }
 
     /// Emit a node like TypeScript's `emit(node)`: its leading comments, the
@@ -1070,8 +1077,9 @@ impl<'a> TypePrinter<'_, 'a> {
         param: &TSIndexSignatureName<'a>,
     ) -> Option<()> {
         let name_start = skip_trivia(self.source, param.span.start as usize);
-        let name_end = token_end_before(self.source, param.type_annotation.span.start as usize)
-            .unwrap_or(param.type_annotation.span.start as usize);
+        let name_end =
+            token_end_before(self.lexed(), self.source, param.type_annotation.span.start as usize)
+                .unwrap_or(param.type_annotation.span.start as usize);
         self.emit_node(out, self.pos_of(name_start as u32), name_end as u32, |s, o| {
             s.write(o, param.name.as_str());
             Some(())
@@ -1220,9 +1228,11 @@ impl<'a> TypePrinter<'_, 'a> {
         if computed {
             // `ComputedPropertyName`'s range: from the trivia before `[` to
             // `]`'s end. oxc's key span covers the expression only.
-            let bracket_end = token_end_before(self.source, key.span().start as usize)
-                .unwrap_or(key.span().start as usize);
-            let pos = token_end_before(self.source, bracket_end - 1).unwrap_or(bracket_end - 1);
+            let bracket_end =
+                token_end_before(self.lexed(), self.source, key.span().start as usize)
+                    .unwrap_or(key.span().start as usize);
+            let pos = token_end_before(self.lexed(), self.source, bracket_end - 1)
+                .unwrap_or(bracket_end - 1);
             let end = skip_trivia(self.source, key.span().end as usize) + 1;
             let text = self.key_text(key)?;
             self.emit_node(out, pos as u32, end as u32, |s, o| {
@@ -1822,13 +1832,13 @@ fn skip_trivia(source: &str, mut pos: usize) -> usize {
 /// on the line before it). `//` inside a string or a `/* */` doesn't count,
 /// and the `/*` a trailing `*/` pairs with is the first one after the
 /// previous `*/`, not the last.
-fn token_end_before(source: &str, start: usize) -> Option<usize> {
+fn token_end_before(lexed: &Lexed, source: &str, start: usize) -> Option<usize> {
     let mut end = start;
     loop {
         let before = &source[..end];
         let trimmed = before.trim_end();
         if before[trimmed.len()..].contains(is_line_break) {
-            if let Some(slashes) = line_comment_start(trimmed) {
+            if let Some(slashes) = line_comment_start(lexed, trimmed) {
                 // The line ends at the comment; keep looking before it.
                 end = slashes;
                 continue;
@@ -1836,100 +1846,62 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
         }
         end = trimmed.len();
         match trimmed.strip_suffix("*/") {
-            Some(inner) => end = block_comment_start(inner)?,
+            Some(inner) => end = block_comment_start(lexed, inner)?,
             None => return Some(end),
         }
     }
 }
 
-/// The `//` opening a line comment that runs to the end of `code` — so it
-/// sits on the last line and bounds the trivia — or `None`. Strings and
-/// `/* */` comments are skipped, so `//`s inside them don't count (a `/*`
-/// opened on an earlier line keeps its `//`s from counting; an unterminated
-/// one means the rest is comment text). `${}` holes in a template literal
-/// are code, not string text, so comments inside them count normally.
-fn line_comment_start(code: &str) -> Option<usize> {
-    let bytes = code.as_bytes();
+/// The source's comments, once: sorted `(start, end)` ranges of every `//`
+/// and `/* */` — `end` of a `//` is the next line break (or the file's end),
+/// of `/* */` past the closer. Lexing once keeps the backward trivia scan
+/// from reparsing the whole prefix for every node, and skipping strings,
+/// template text, and regexes keeps their bytes from pairing as comments —
+/// a `/[/*]/` earlier in the file would otherwise swallow a real `/*` in
+/// the type. `${ }` holes lex as code (the comments inside them count) and
+/// nested templates recurse.
+#[derive(Default)]
+pub(crate) struct Lexed {
+    line: Vec<(usize, usize)>,
+    block: Vec<(usize, usize)>,
+}
+
+fn lex_comments(source: &str) -> Lexed {
+    let mut out = Lexed::default();
+    // The last non-trivia byte lexed; `/` after an operand-ish byte is
+    // division, anywhere else it can open a regex (the `}` case guesses
+    // "expression", so a `}` closing a block is a known miss).
+    let mut last = b';';
+    let bytes = source.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        match bytes[i] {
-            b'\'' | b'"' => i = str_end(code, i),
+        let b = bytes[i];
+        match b {
+            b'\'' | b'"' => {
+                last = b'"';
+                i = str_end(source, i);
+            }
             b'`' => {
-                i = match template_end(code, i, CommentKind::Line) {
-                    Ok(i) => i,
-                    Err(hit) => return hit,
-                };
+                last = b'"';
+                i = template_end(source, i, &mut out, &mut last);
             }
-            b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                match code[i + 2..].find(is_line_break) {
-                    // On an earlier line: skip it and keep looking.
-                    Some(end) => i += 2 + end,
-                    None => return Some(i),
+            b'/' => i = slash_step(source, i, &mut out, &mut last),
+            _ => {
+                if b < 128 && !is_space(b as char) {
+                    // Any non-whitespace ASCII byte counts as operand-ish.
+                    last = b;
+                } else if b >= 128 {
+                    last = b'"';
                 }
+                i += 1;
             }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                match code[i + 2..].find("*/") {
-                    Some(end) => i += 2 + end + 2,
-                    // Unterminated: the rest is comment text.
-                    None => return None,
-                }
-            }
-            _ => i += 1,
         }
     }
-    None
+    out
 }
 
-/// The `/*` that opens the comment closed by the `*/` just cut off `inner`:
-/// the first `/*` whose own `*/` isn't inside `inner` (a `/*` with one is a
-/// comment of its own — or comment text — and is skipped whole). Strings and
-/// `//` are skipped so their bytes don't count.
-fn block_comment_start(inner: &str) -> Option<usize> {
-    let bytes = inner.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\'' | b'"' => i = str_end(inner, i),
-            b'`' => {
-                i = match template_end(inner, i, CommentKind::Block) {
-                    Ok(i) => i,
-                    Err(hit) => return hit,
-                };
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                // `//` runs to the next line break; `inner` may span lines.
-                match inner[i + 2..].find(is_line_break) {
-                    Some(end) => i += 2 + end,
-                    None => return None,
-                }
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                match inner[i + 2..].find("*/") {
-                    // A `/*` that closes inside `inner` isn't the one the
-                    // stripped `*/` pairs with.
-                    Some(end) => i += 2 + end + 2,
-                    None => return Some(i),
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    None
-}
-
-/// What a comment found while skipping a lexeme means to the caller:
-/// `line_comment_start` wants the `//`, `block_comment_start` wants the `/*`.
-#[derive(Clone, Copy)]
-enum CommentKind {
-    /// `//` running to the window's end.
-    Line,
-    /// `/*` never closing inside the window — the rest is comment text.
-    Block,
-}
-
-/// The index past the `'`/`"` string starting at `open`. An unterminated
-/// string runs to the end — every byte after it is text, so nothing in this
-/// window counts.
+/// Skip a `'`/`"` string starting at `open`: the index past its closer, or
+/// the text's end when unterminated.
 fn str_end(code: &str, open: usize) -> usize {
     let bytes = code.as_bytes();
     let quote = bytes[open];
@@ -1945,30 +1917,28 @@ fn str_end(code: &str, open: usize) -> usize {
     bytes.len()
 }
 
-/// The index past the template literal starting at `open`, or `Err(None)`
-/// when it runs to the window's end. `${ }` holes are code — comments,
-/// strings, and nested templates inside them lex normally — and a comment
-/// `kind` finds inside a hole surfaces as `Err(Some(_))`, since the caller's
-/// wanted comment can sit between the `${` and the token after it.
-fn template_end(code: &str, open: usize, kind: CommentKind) -> Result<usize, Option<usize>> {
+/// Skip a template literal starting at `open`: the index past its closing
+/// backtick, or the text's end. The text is trivia-less, but its `${ }`
+/// holes are lexed as code by [`hole_end`].
+fn template_end(code: &str, open: usize, out: &mut Lexed, last: &mut u8) -> usize {
     let bytes = code.as_bytes();
     let mut i = open + 1;
     while i < bytes.len() {
         match bytes[i] {
             b'\\' => i += 1,
-            b'`' => return Ok(i + 1),
-            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, kind)?,
+            b'`' => return i + 1,
+            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, out, last),
             _ => {}
         }
         i += 1;
     }
-    Err(None)
+    bytes.len()
 }
 
-/// The index past the `}` closing a `${` hole whose contents start at `pos`
-/// (a `{`-depth tracker: nested braces come from `{ T: U }` members). Same
-/// `Result` channels as [`template_end`].
-fn hole_end(code: &str, pos: usize, kind: CommentKind) -> Result<usize, Option<usize>> {
+/// Lex a `${ }` hole's contents from `pos` to past the `}`: a `{`/`}` depth
+/// tracker, so `{ T: U }` members inside don't end the hole. Runs to the
+/// text's end when the hole never closes.
+fn hole_end(code: &str, pos: usize, out: &mut Lexed, last: &mut u8) -> usize {
     let bytes = code.as_bytes();
     let mut i = pos;
     let mut depth = 1usize;
@@ -1982,29 +1952,107 @@ fn hole_end(code: &str, pos: usize, kind: CommentKind) -> Result<usize, Option<u
                 depth -= 1;
                 i += 1;
                 if depth == 0 {
-                    return Ok(i);
+                    return i;
                 }
             }
-            b'\'' | b'"' => i = str_end(code, i),
-            b'`' => i = template_end(code, i, kind)?,
-            b'/' if bytes.get(i + 1) == Some(&b'/') => match code[i + 2..].find(is_line_break) {
-                Some(end) => i += 2 + end,
-                None => match kind {
-                    CommentKind::Line => return Err(Some(i)),
-                    CommentKind::Block => return Err(None),
-                },
-            },
-            b'/' if bytes.get(i + 1) == Some(&b'*') => match code[i + 2..].find("*/") {
-                Some(end) => i += 2 + end + 2,
-                None => match kind {
-                    CommentKind::Line => return Err(None),
-                    CommentKind::Block => return Err(Some(i)),
-                },
-            },
-            _ => i += 1,
+            b'/' => i = slash_step(code, i, out, last),
+            _ => i = lex_byte(code, i, out, last),
         }
     }
-    Err(None)
+    i
+}
+
+/// One non-`/`, non-`{}` byte inside a `${ }` hole.
+fn lex_byte(code: &str, i: usize, out: &mut Lexed, last: &mut u8) -> usize {
+    let b = code.as_bytes()[i];
+    match b {
+        b'\'' | b'"' => {
+            *last = b'"';
+            str_end(code, i)
+        }
+        b'`' => {
+            *last = b'"';
+            template_end(code, i, out, last)
+        }
+        _ => {
+            if b < 128 && !is_space(b as char) {
+                *last = b;
+            } else if b >= 128 {
+                *last = b'"';
+            }
+            i + 1
+        }
+    }
+}
+
+/// One `/` at `i`: `//` and `/* */` go into the comment table; a regex
+/// literal is skipped so its `*/`/`//`-looking bytes stay literal text;
+/// anything else is division and the byte advances one.
+fn slash_step(code: &str, i: usize, out: &mut Lexed, last: &mut u8) -> usize {
+    let bytes = code.as_bytes();
+    if bytes.get(i + 1) == Some(&b'/') {
+        let end = code[i + 2..].find(is_line_break).map(|e| i + 2 + e).unwrap_or(bytes.len());
+        out.line.push((i, end));
+        end
+    } else if bytes.get(i + 1) == Some(&b'*') {
+        let end = code[i + 2..].find("*/").map(|e| i + 2 + e + 2).unwrap_or(bytes.len());
+        out.block.push((i, end));
+        end
+    } else {
+        let next = if regex_can_start(*last) { regex_end(code, i) } else { None };
+        *last = b'/';
+        next.unwrap_or(i + 1)
+    }
+}
+
+/// Whether `/` can open a regex after `prev`, the last non-trivia byte.
+/// False after operands (identifier bytes, `)`, `]`, `}`, quotes), true
+/// after operators and at the start.
+fn regex_can_start(prev: u8) -> bool {
+    !matches!(prev, b')' | b']' | b'}' | b'_' | b'$' | b'\'' | b'"' | b'`' | b'/')
+        && !prev.is_ascii_alphanumeric()
+}
+
+/// The index past a regex literal opening at `open`, or `None` when it is
+/// really division — no closing `/` before a line break (classes can hold
+/// `//` and `*/`, escapes can hold `]` and `/`).
+fn regex_end(code: &str, open: usize) -> Option<usize> {
+    let bytes = code.as_bytes();
+    let mut i = open + 1;
+    let mut class = false;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => i += 1,
+            b'[' => class = true,
+            b']' => class = false,
+            b'/' if !class => return Some(i + 1),
+            b'\n' | b'\r' => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The `//` opening a line comment that runs to the end of `code` — so it
+/// sits on the last line and bounds the trivia — or `None`.
+fn line_comment_start(lexed: &Lexed, code: &str) -> Option<usize> {
+    lexed
+        .line
+        .iter()
+        .find(|(start, end)| *start < code.len() && *end >= code.len())
+        .map(|(start, _)| *start)
+}
+
+/// The `/*` that opens the comment closed by the `*/` just cut off `inner`:
+/// the first `/*` whose own `*/` isn't inside `inner` (a `/*` with one is a
+/// comment of its own — or comment text — and is skipped whole).
+fn block_comment_start(lexed: &Lexed, inner: &str) -> Option<usize> {
+    lexed
+        .block
+        .iter()
+        .find(|(start, end)| *start < inner.len() && *end > inner.len())
+        .map(|(start, _)| *start)
 }
 
 /// A comment's source range, as TypeScript's `iterateCommentRanges` reports
