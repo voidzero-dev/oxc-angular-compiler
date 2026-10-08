@@ -544,6 +544,11 @@ impl<'a> StringConsts<'a> {
     pub(crate) fn scope(&self) -> &FileScope<'a> {
         self.scope.get_or_init(|| self.program.map(FileScope::collect).unwrap_or_default())
     }
+
+    /// The program these consts were collected from, when available.
+    pub(crate) fn program(&self) -> Option<&'a Program<'a>> {
+        self.program
+    }
 }
 
 /// Walk the top-level statements of a program and collect string-valued `const`

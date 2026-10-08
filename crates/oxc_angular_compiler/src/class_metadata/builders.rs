@@ -5,11 +5,13 @@
 
 use oxc_allocator::{Allocator, Box, Vec as AllocVec};
 use oxc_ast::ast::{
-    Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind,
-    ObjectPropertyKind, PropertyKey, TSType, TSTypeName,
+    BindingPattern, Class, ClassElement, Declaration, Decorator, Expression, FormalParameter,
+    MethodDefinitionKind, ObjectPropertyKind, PropertyKey, Statement, TSNamespaceDeclarationBody,
+    TSType, TSTypeName, VariableDeclaration,
 };
 use oxc_span::GetSpan;
 use oxc_str::Ident;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
 use crate::directive::{
@@ -430,6 +432,9 @@ pub fn build_ctor_params_metadata_in<'a>(
     source_text: Option<&'a str>,
     consts: Option<&StringConsts<'a>>,
 ) -> Option<OutputExpression<'a>> {
+    // The DI dependencies are intentionally unused: upstream `type:` derives
+    // purely from the type annotation (`typeToValue`), never the DI token.
+    let _ = constructor_deps;
     // Find constructor
     let constructor = class.body.body.iter().find_map(|element| {
         if let ClassElement::MethodDefinition(method) = element
@@ -440,9 +445,18 @@ pub fn build_ctor_params_metadata_in<'a>(
         None
     })?;
 
+    // Names the type annotation may resolve to locally but not in value space:
+    // interfaces, type aliases, `const enum`s, and the class's type parameters —
+    // the `UNAVAILABLE` cases of ngtsc's `typeToValue` that file scope can prove
+    // (issue #563). `consts` carries the program for every in-file call site;
+    // without it these checks are skipped.
+    let class_type_params = type_param_names_of(class);
+    let local_decls =
+        consts.and_then(StringConsts::program).map(|program| LocalDecls::collect(&program.body));
+
     let mut param_entries = AllocVec::new_in(&allocator);
 
-    for (i, param) in constructor.iter().enumerate() {
+    for param in constructor {
         let mut map_entries = AllocVec::new_in(&allocator);
 
         // Extract type from TypeScript type annotation, using namespace-prefixed
@@ -450,9 +464,10 @@ pub fn build_ctor_params_metadata_in<'a>(
         let type_expr = build_param_type_expression(
             &allocator,
             param,
-            constructor_deps.and_then(|deps| deps.get(i)),
             namespace_registry,
             import_map,
+            &class_type_params,
+            local_decls.as_ref(),
         )
         .unwrap_or_else(|| {
             OutputExpression::Literal(Box::new_in(
@@ -871,161 +886,451 @@ fn string_literal<'a>(allocator: &'a Allocator, value: Ident<'a>) -> OutputExpre
 // Internal helper functions
 // ============================================================================
 
-/// Build the type expression for a constructor parameter, using namespace-prefixed
-/// references for imported types.
-///
-/// TypeScript type annotations are erased at runtime, so imported types need namespace
-/// imports (e.g., `i1.SomeService`) to be available as runtime values.
-///
-/// When the type annotation name matches the dep token name, the dep's `token_source_module`
-/// is used directly. When they differ (e.g., `@Inject(DARK_THEME) theme$: Observable<boolean>`),
-/// we look up the type annotation name in the `import_map` to find its source module
-/// independently. This matches Angular's behavior where type references in `setClassMetadata`
-/// always use namespace-prefixed imports regardless of whether `@Inject` is used.
+/// Build the `type:` expression for one constructor parameter, mirroring
+/// ngtsc's `typeToValue` (`type_to_value.ts`) in local-compilation mode — the
+/// mode single-file OXC compilation corresponds to (the e2e oracle runs
+/// `experimental-local`). `None` — emitted as `undefined` — when the
+/// reference is `UNAVAILABLE` upstream: the annotation isn't a bare
+/// `TSTypeReference` after `T | null` narrowing (parens, other unions,
+/// `typeof`, primitives, `this`), it's a bare class type parameter, a
+/// type-only or bare namespace import, or it ends at an interface or type
+/// alias declared in the file. In local mode other value-less names (const
+/// enums, vars, bare namespaces, missing members, undeclared names) emit as
+/// written — upstream wraps them in `/* @ts-ignore */` rather than emitting
+/// `undefined`. The DI dependency is not consulted: upstream derives `type:`
+/// purely from the type annotation.
 fn build_param_type_expression<'a>(
     allocator: &'a Allocator,
     param: &FormalParameter<'a>,
-    dep: Option<&R3DependencyMetadata<'a>>,
     namespace_registry: &mut NamespaceRegistry<'a>,
     import_map: &ImportMap<'a>,
+    type_params: &FxHashSet<Ident<'a>>,
+    local_decls: Option<&LocalDecls<'a>>,
 ) -> Option<OutputExpression<'a>> {
-    // Extract the type name from the type annotation
-    let type_name = extract_param_type_name(param);
+    // Upstream's getConstructorParameters first narrows `T | null` to `T`
+    // (typescript.ts); `typeToValue` then requires a bare `TypeReferenceNode`
+    // — `(X)`, `X | undefined`, `X | Y`, `typeof`, `this`, primitives are
+    // `unsupportedType` → `undefined`.
+    let type_annotation = param.type_annotation.as_ref()?;
+    let type_ref = param_type_reference(&type_annotation.type_annotation)?;
 
-    // Use namespace prefix when the type annotation matches the dep token name
-    // and the dep has a source module (imported type).
-    if let Some(dep) = dep {
-        // Type-only imports cannot be referenced at runtime — emit `undefined`
-        // in the metadata, matching the behaviour Angular's `typeToValue()`
-        // uses for `ValueUnavailableKind.TYPE_ONLY_IMPORT`. See issue #288.
-        if dep.type_only_invalid {
+    // The entity path: `Foo` → ["Foo"], `ns.Foo` → ["ns", "Foo"]. `this` is
+    // not expressible in metadata — `undefined`.
+    let path = entity_path(&type_ref.type_name)?;
+    let leftmost = *path.first().unwrap();
+
+    // A class type parameter is type-only (`TypeParameter`) — `undefined`.
+    // Only for a bare reference: `T.Inner` resolves to a member symbol with no
+    // type-only declaration and emits `T.Inner` in local compilation.
+    if path.len() == 1 && type_params.contains(&leftmost) {
+        return None;
+    }
+
+    // The leftmost name imported: `import type`/`import { type X }` cannot be
+    // referenced (`undefined`); a namespace import as the whole reference
+    // (`x: ns`) likewise; anything else emits `i{reg}.<path>` — including a
+    // namespace import's members (`x: ns.Foo` → `i1.Foo`) and named-import
+    // member paths (`x: mod.Foo` → `i1.mod.Foo`), mirroring `typeToValue`'s
+    // ImportedTypeValueReference nestedPath handling.
+    if let Some(import_info) = import_map.get(&leftmost) {
+        if import_info.is_type_only || path.len() == 1 && !import_info.is_named_import {
             return None;
         }
-
-        if let Some(ref source_module) = dep.token_source_module {
-            if let Some(ref token) = dep.token {
-                let type_matches_token =
-                    type_name.as_ref().is_some_and(|tn| tn.as_str() == token.as_str());
-
-                if type_matches_token {
-                    // `import { Foo as Bar }` + `constructor(x: Bar)` → `i1.Foo`.
-                    let local_name = type_name.unwrap_or_else(|| token.clone());
-                    let name = dep.token_imported_name.clone().unwrap_or_else(|| local_name);
-                    let namespace = namespace_registry.get_or_assign(source_module);
-                    return Some(OutputExpression::ReadProp(Box::new_in(
-                        ReadPropExpr {
-                            receiver: Box::new_in(
-                                OutputExpression::ReadVar(Box::new_in(
-                                    ReadVarExpr { name: namespace, source_span: None },
-                                    &allocator,
-                                )),
-                                &allocator,
-                            ),
-                            name,
-                            optional: false,
-                            source_span: None,
-                        },
-                        &allocator,
-                    )));
-                }
-            }
+        // `import Foo from 'm'`: upstream emits the local name itself (LOCAL
+        // with a `defaultImportStatement`), never `i1.default`. The specifier
+        // kind matters — `import { default as Foo }` is IMPORTED and emits
+        // `i1.default`, which the named-import path below produces.
+        if import_info.is_default_import {
+            return Some(read_prop_path(
+                allocator,
+                OutputExpression::ReadVar(Box::new_in(
+                    ReadVarExpr { name: leftmost, source_span: None },
+                    &allocator,
+                )),
+                &path[1..],
+            ));
         }
+        let namespace = namespace_registry.get_or_assign(&import_info.source_module);
+        let mut segments: std::vec::Vec<Ident<'a>> = std::vec::Vec::with_capacity(path.len());
+        if import_info.is_named_import {
+            // Prefer the export name over the local alias (`Foo as Bar` → `i1.Foo`).
+            segments.push(import_info.imported_name.unwrap_or(leftmost));
+        }
+        // The leftmost name is consumed by the import in both cases: a named
+        // import resolves to the export name just pushed, and for a namespace
+        // import the emitted `i{reg}` IS the namespace.
+        segments.extend_from_slice(&path[1..]);
+        return Some(read_prop_path(
+            allocator,
+            OutputExpression::ReadVar(Box::new_in(
+                ReadVarExpr { name: namespace, source_span: None },
+                &allocator,
+            )),
+            &segments,
+        ));
     }
 
-    // When the type annotation differs from the dep token (e.g., @Inject(TOKEN) param: SomeType),
-    // look up the type annotation name in the import_map to find its source module independently.
-    // Only generate namespace-prefixed references for non-type-only imports, since type-only
-    // imports (`import type { X }` / `import { type X }`) are erased at runtime and don't
-    // resolve to values. Angular's compiler uses typeToValue() which skips interfaces and
-    // type aliases; checking is_type_only is the closest heuristic without a full type checker.
-    if let Some(ref tn) = type_name {
-        if let Some(import_info) = import_map.get(tn) {
-            if import_info.is_type_only {
-                // Type-only imports are erased at runtime — emit undefined.
+    // A local reference: `undefined` only when the path ends at an interface
+    // or type alias — the type-only declarations local `typeToValue` still
+    // rejects (`isLocalCompilation` keeps only those three SyntaxKinds
+    // unavailable). Everything else — const enums, vars, functions, bare
+    // namespace names, missing members, undeclared or global names — emits
+    // as written, matching the upstream `/* @ts-ignore */ type: X` fallback.
+    if let Some(decls) = local_decls
+        && decls.is_type_only(&path)
+    {
+        return None;
+    }
+    Some(read_prop_path(
+        allocator,
+        OutputExpression::ReadVar(Box::new_in(
+            ReadVarExpr { name: leftmost, source_span: None },
+            &allocator,
+        )),
+        &path[1..],
+    ))
+}
+
+/// The `TSTypeReference` a ctor-param annotation narrows to, mirroring
+/// `getConstructorParameters` (`typescript.ts`): `T | null` unions keep the
+/// single non-`null` member. Unlike `resolve_di_token_type` (DI tokens), this
+/// does NOT unwrap `TSParenthesizedType` — `typeToValue` sees the parenthesized
+/// node and rejects it, so `(X | null)` and `(X) | null` are `UNAVAILABLE`.
+/// Also `pub(crate)` for import elision, which needs the same narrowing to
+/// keep default imports that metadata `type:` emits by local name.
+pub fn param_type_reference<'t, 'a>(
+    ts_type: &'t TSType<'a>,
+) -> Option<&'t oxc_ast::ast::TSTypeReference<'a>> {
+    let narrowed = match ts_type {
+        TSType::TSUnionType(union) => {
+            // Filter only `null` literal members (upstream checks
+            // `LiteralTypeNode` with a `NullKeyword` literal — oxc's
+            // `TSNullKeyword`); `undefined` members are not filtered.
+            let mut non_null =
+                union.types.iter().filter(|t| !matches!(t, TSType::TSNullKeyword(_)));
+            let first = non_null.next()?;
+            if non_null.next().is_some() {
+                // `T | undefined`, `A | B`, etc. stay unions → UNAVAILABLE.
                 return None;
             }
-            let namespace = namespace_registry.get_or_assign(&import_info.source_module);
-            // Prefer export name over local alias for namespace property access.
-            let name = import_info.imported_name.clone().unwrap_or_else(|| tn.clone());
-            return Some(OutputExpression::ReadProp(Box::new_in(
-                ReadPropExpr {
-                    receiver: Box::new_in(
-                        OutputExpression::ReadVar(Box::new_in(
-                            ReadVarExpr { name: namespace, source_span: None },
-                            &allocator,
-                        )),
-                        &allocator,
-                    ),
-                    name,
-                    optional: false,
-                    source_span: None,
-                },
-                &allocator,
-            )));
+            first
         }
-    }
-
-    // Fall back to extracting the bare type name from the type annotation
-    // (for local/global types not in the import_map)
-    extract_param_type_expression(allocator, param)
-}
-
-/// Extract the type name (as an Atom) from a constructor parameter's type annotation.
-///
-/// Returns the simple type name from the annotation, if present.
-/// Used to get the type name for namespace-prefixed references in metadata.
-fn extract_param_type_name<'a>(param: &FormalParameter<'a>) -> Option<Ident<'a>> {
-    let type_annotation = param.type_annotation.as_ref()?;
-    // Narrow `T | null` unions to `T` so optional-DI patterns expose the type.
-    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
-    match ts_type {
-        TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-            TSTypeName::IdentifierReference(id) => Some(id.name.into()),
-            TSTypeName::QualifiedName(qualified) => Some(qualified.right.name.into()),
-            TSTypeName::ThisExpression(_) => None,
-        },
+        other => other,
+    };
+    match narrowed {
+        TSType::TSTypeReference(type_ref) => Some(type_ref),
         _ => None,
     }
 }
 
-/// Extract the type expression from a constructor parameter's type annotation.
-///
-/// This is the fallback path for local types that don't need namespace prefixes.
-fn extract_param_type_expression<'a>(
+/// The dotted path of a `TSTypeName`: `Foo` → `["Foo"]`, `ns.X.Y` → `["ns","X","Y"]`.
+/// `this` (and anything else) yields `None` — it cannot be a value reference.
+pub fn entity_path<'a>(name: &TSTypeName<'a>) -> Option<std::vec::Vec<Ident<'a>>> {
+    let mut path = std::vec::Vec::new();
+    let mut current = name;
+    loop {
+        match current {
+            TSTypeName::IdentifierReference(id) => {
+                path.push(id.name);
+                break;
+            }
+            TSTypeName::QualifiedName(qualified) => {
+                path.push(qualified.right.name);
+                current = &qualified.left;
+            }
+            TSTypeName::ThisExpression(_) => return None,
+        }
+    }
+    path.reverse();
+    Some(path)
+}
+
+/// Fold a base expression and property names into `base.a.b.c`.
+fn read_prop_path<'a>(
     allocator: &'a Allocator,
-    param: &FormalParameter<'a>,
-) -> Option<OutputExpression<'a>> {
-    // Get the type annotation from the formal parameter
-    let type_annotation = param.type_annotation.as_ref()?;
+    base: OutputExpression<'a>,
+    props: &[Ident<'a>],
+) -> OutputExpression<'a> {
+    props.iter().copied().fold(base, |receiver, name| {
+        OutputExpression::ReadProp(Box::new_in(
+            ReadPropExpr {
+                receiver: Box::new_in(receiver, &allocator),
+                name,
+                optional: false,
+                source_span: None,
+            },
+            &allocator,
+        ))
+    })
+}
 
-    // Narrow `T | null` unions to `T` so optional-DI patterns expose the type.
-    let ts_type = crate::util::resolve_di_token_type(&type_annotation.type_annotation)?;
+/// The class's type parameter names — type-only bindings upstream
+/// (`TypeParameter`) even though they resolve inside the class.
+pub fn type_param_names_of<'a>(class: &Class<'a>) -> FxHashSet<Ident<'a>> {
+    class
+        .type_parameters
+        .as_ref()
+        .map(|tp| tp.params.iter().map(|param| Ident::from(param.name.name.as_str())).collect())
+        .unwrap_or_default()
+}
 
-    // Extract the type name from the annotation
-    match ts_type {
-        TSType::TSTypeReference(type_ref) => {
-            // Handle simple type references like SomeService
-            match &type_ref.type_name {
-                TSTypeName::IdentifierReference(id) => {
-                    Some(OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: id.name.into(), source_span: None },
-                        &allocator,
-                    )))
-                }
-                TSTypeName::QualifiedName(qualified) => {
-                    // Handle qualified names like ns.SomeType
-                    Some(OutputExpression::ReadVar(Box::new_in(
-                        ReadVarExpr { name: qualified.right.name.into(), source_span: None },
-                        &allocator,
-                    )))
-                }
-                TSTypeName::ThisExpression(_) => {
-                    // this type annotation is not useful for metadata
-                    None
+/// Names declared in the file, nested under their namespaces.
+///
+/// This models the local-compilation `typeToValue` (the mode the e2e
+/// comparison and single-file transform target — `experimental-local`, which
+/// matches what OXC can know from one file): only `TypeParameter`,
+/// `TypeAliasDeclaration`, and `InterfaceDeclaration` are `UNAVAILABLE`;
+/// everything else — vars, functions, const enums, bare namespace names,
+/// missing members, undeclared names — is emitted as written with an
+/// upstream `/* @ts-ignore */` (comparisons ignore the comment, and `Ident`
+/// output can't carry one anyway). `type_decls` holds interfaces and type
+/// aliases; `namespaces` records namespace bodies recursively, needed for
+/// `ns.Interface` lookups and for the merged `interface I` + `namespace I`
+/// case — the merged symbol's valueDeclaration is the namespace, so it emits.
+#[derive(Default)]
+struct LocalDecls<'a> {
+    type_decls: FxHashSet<&'a str>,
+    /// Names with a runtime declaration — classes, enums, functions, vars,
+    /// `import X =` aliases. An interface or alias merged with one of these
+    /// resolves to a symbol whose valueDeclaration is the value declaration,
+    /// so `type:` emits it (ngtsc: `class Foo` + `interface Foo` → `Foo`).
+    value_decls: FxHashSet<&'a str>,
+    namespaces: FxHashMap<&'a str, LocalDecls<'a>>,
+}
+
+impl<'a> LocalDecls<'a> {
+    /// Collect declarations from a statement list, unwrapping `export` and
+    /// hoisting `declare global` bodies to file scope like ngtsc's program
+    /// scope — wherever the `declare global` block is nested.
+    fn collect(stmts: &'a [Statement<'a>]) -> Self {
+        let mut decls = LocalDecls::default();
+        // `declare global` inners bind at file scope, so they are queued and
+        // inserted into the root `decls` rather than whichever namespace-level
+        // LocalDecls discovered them.
+        let mut globals: std::vec::Vec<&'a Statement<'a>> = std::vec::Vec::new();
+        decls.insert_all(stmts, &mut globals);
+        let mut i = 0;
+        while i < globals.len() {
+            let stmt = globals[i];
+            i += 1;
+            decls.insert_statement(stmt, &mut globals);
+        }
+        decls
+    }
+
+    fn insert_all(
+        &mut self,
+        stmts: &'a [Statement<'a>],
+        globals: &mut std::vec::Vec<&'a Statement<'a>>,
+    ) {
+        for stmt in stmts {
+            self.insert_statement(stmt, globals);
+        }
+    }
+
+    fn insert_statement(
+        &mut self,
+        stmt: &'a Statement<'a>,
+        globals: &mut std::vec::Vec<&'a Statement<'a>>,
+    ) {
+        match stmt {
+            Statement::TSInterfaceDeclaration(decl) => {
+                self.type_decls.insert(decl.id.name.as_str());
+            }
+            Statement::TSTypeAliasDeclaration(decl) => {
+                self.type_decls.insert(decl.id.name.as_str());
+            }
+            Statement::TSNamespaceDeclaration(decl) => self.insert_namespace(decl, globals),
+            Statement::ExportDeclaration(export) => {
+                self.insert_declaration(&export.declaration, globals);
+            }
+            Statement::ExportDefaultDeclaration(export) => {
+                match &export.declaration {
+                    oxc_ast::ast::ExportDefaultDeclarationKind::TSInterfaceDeclaration(iface) => {
+                        self.type_decls.insert(iface.id.name.as_str());
+                    }
+                    // `export default class Foo {}` / `function Foo` bind `Foo`
+                    // as a value.
+                    oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) => {
+                        if let Some(id) = &class.id {
+                            self.value_decls.insert(id.name.as_str());
+                        }
+                    }
+                    oxc_ast::ast::ExportDefaultDeclarationKind::FunctionDeclaration(func) => {
+                        if let Some(id) = &func.id {
+                            self.value_decls.insert(id.name.as_str());
+                        }
+                    }
+                    _ => {}
                 }
             }
+            Statement::VariableDeclaration(decl) => self.insert_var_names(decl),
+            Statement::FunctionDeclaration(func) => {
+                if let Some(id) = &func.id {
+                    self.value_decls.insert(id.name.as_str());
+                }
+            }
+            Statement::ClassDeclaration(class) => {
+                if let Some(id) = &class.id {
+                    self.value_decls.insert(id.name.as_str());
+                }
+            }
+            Statement::TSEnumDeclaration(decl) => {
+                self.value_decls.insert(decl.id.name.as_str());
+            }
+            Statement::TSImportEqualsDeclaration(decl) => {
+                if decl.import_kind.is_type() {
+                    self.type_decls.insert(decl.id.name.as_str());
+                } else {
+                    self.value_decls.insert(decl.id.name.as_str());
+                }
+            }
+            // `declare global { ... }` binds at file scope: queue its members
+            // for the root `LocalDecls` (`collect` drains `globals`).
+            Statement::TSGlobalDeclaration(global) => {
+                globals.extend(global.body.body.iter());
+            }
+            _ => {}
         }
-        _ => None,
+    }
+
+    fn insert_declaration(
+        &mut self,
+        decl: &'a Declaration<'a>,
+        globals: &mut std::vec::Vec<&'a Statement<'a>>,
+    ) {
+        match decl {
+            Declaration::TSInterfaceDeclaration(d) => {
+                self.type_decls.insert(d.id.name.as_str());
+            }
+            Declaration::TSTypeAliasDeclaration(d) => {
+                self.type_decls.insert(d.id.name.as_str());
+            }
+            Declaration::TSNamespaceDeclaration(d) => self.insert_namespace(d, globals),
+            Declaration::TSGlobalDeclaration(d) => {
+                globals.extend(d.body.body.iter());
+            }
+            Declaration::VariableDeclaration(d) => self.insert_var_names(d),
+            Declaration::FunctionDeclaration(func) => {
+                if let Some(id) = &func.id {
+                    self.value_decls.insert(id.name.as_str());
+                }
+            }
+            Declaration::ClassDeclaration(class) => {
+                if let Some(id) = &class.id {
+                    self.value_decls.insert(id.name.as_str());
+                }
+            }
+            Declaration::TSEnumDeclaration(d) => {
+                self.value_decls.insert(d.id.name.as_str());
+            }
+            Declaration::TSImportEqualsDeclaration(d) => {
+                if d.import_kind.is_type() {
+                    self.type_decls.insert(d.id.name.as_str());
+                } else {
+                    self.value_decls.insert(d.id.name.as_str());
+                }
+            }
+            // `declare module "x" {}` — ambient module, not a value.
+            Declaration::TSExternalModuleDeclaration(_) => {}
+        }
+    }
+
+    /// Every bound name of a `var`/`let`/`const` declaration is a value —
+    /// including destructured bindings (`const { X } = …`).
+    fn insert_var_names(&mut self, decl: &'a VariableDeclaration<'a>) {
+        for declarator in &decl.declarations {
+            Self::collect_binding_names(&declarator.id, &mut self.value_decls);
+        }
+    }
+
+    fn collect_binding_names(pattern: &'a BindingPattern<'a>, out: &mut FxHashSet<&'a str>) {
+        match pattern {
+            BindingPattern::BindingIdentifier(id) => {
+                out.insert(id.name.as_str());
+            }
+            BindingPattern::ObjectPattern(obj) => {
+                for prop in &obj.properties {
+                    Self::collect_binding_names(&prop.value, out);
+                }
+                if let Some(rest) = &obj.rest {
+                    Self::collect_binding_names(&rest.argument, out);
+                }
+            }
+            BindingPattern::ArrayPattern(arr) => {
+                for elem in arr.elements.iter().flatten() {
+                    Self::collect_binding_names(elem, out);
+                }
+                if let Some(rest) = &arr.rest {
+                    Self::collect_binding_names(&rest.argument, out);
+                }
+            }
+            BindingPattern::AssignmentPattern(assign) => {
+                Self::collect_binding_names(&assign.left, out);
+            }
+        }
+    }
+
+    fn insert_namespace(
+        &mut self,
+        decl: &'a oxc_ast::ast::TSNamespaceDeclaration<'a>,
+        globals: &mut std::vec::Vec<&'a Statement<'a>>,
+    ) {
+        self.namespaces
+            .entry(decl.id.name.as_str())
+            .or_default()
+            .merge(Self::from_namespace_body(&decl.body, globals));
+    }
+
+    fn from_namespace_body(
+        body: &'a TSNamespaceDeclarationBody<'a>,
+        globals: &mut std::vec::Vec<&'a Statement<'a>>,
+    ) -> Self {
+        match body {
+            TSNamespaceDeclarationBody::TSModuleBlock(block) => {
+                let mut decls = LocalDecls::default();
+                decls.insert_all(&block.body, globals);
+                decls
+            }
+            // `namespace Outer.Inner { ... }` nests by qualified name.
+            TSNamespaceDeclarationBody::TSNamespaceDeclaration(nested) => {
+                let mut decls = LocalDecls::default();
+                decls.namespaces.insert(
+                    nested.id.name.as_str(),
+                    Self::from_namespace_body(&nested.body, globals),
+                );
+                decls
+            }
+        }
+    }
+
+    fn merge(&mut self, other: LocalDecls<'a>) {
+        self.type_decls.extend(other.type_decls);
+        self.value_decls.extend(other.value_decls);
+        for (name, nested) in other.namespaces {
+            self.namespaces.entry(name).or_default().merge(nested);
+        }
+    }
+
+    /// Whether `path` — `["ns", ..., "Name"]` — ends at a type-only
+    /// declaration (interface or type alias) that no same-named namespace
+    /// or value declaration merges with. Only that case is `UNAVAILABLE` in
+    /// local compilation; everything else emits as written.
+    fn is_type_only(&self, path: &[Ident<'_>]) -> bool {
+        match path.split_first() {
+            None => false,
+            // A merged `interface I` + `namespace I` or `interface I` +
+            // `class I` resolves to a symbol whose valueDeclaration is the
+            // namespace or class → a value upstream.
+            Some((name, [])) => {
+                self.type_decls.contains(name.as_str())
+                    && !self.namespaces.contains_key(name.as_str())
+                    && !self.value_decls.contains(name.as_str())
+            }
+            Some((name, rest)) => {
+                self.namespaces.get(name.as_str()).is_some_and(|nested| nested.is_type_only(rest))
+            }
+        }
     }
 }
 

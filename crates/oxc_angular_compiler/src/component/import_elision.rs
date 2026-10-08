@@ -158,7 +158,140 @@ impl<'a> ImportElisionAnalyzer<'a> {
             type_only_specifiers.remove(name);
         }
 
+        // Post-pass: when class metadata is emitted, a default import used as a
+        // bare ctor-param type reference is emitted into the metadata's
+        // `ctorParameters` `type:` by its local name — ngtsc keeps the import
+        // via `defaultImportStatement` (`type_to_value.ts` +
+        // `attachDefaultImportDeclaration`). Keep it here too, or the emitted
+        // `type: Foo` would dangle.
+        if emit_metadata {
+            let ctor_type_names = Self::collect_ctor_param_type_leftmost_names(program, &consts);
+            for name in &ctor_type_names {
+                type_only_specifiers.remove(name);
+            }
+        }
+
         Self { type_only_specifiers }
+    }
+
+    /// Local names of **default imports** that a decorated class's constructor
+    /// parameter annotation references bare (`x: Foo` after `T | null`
+    /// narrowing, not shadowed by a class type parameter) — the names
+    /// `ɵsetClassMetadata`'s `type:` emits verbatim.
+    ///
+    /// Only default imports need this: named/namespace imports emit
+    /// `i{reg}.Export`, which re-anchors the module import, while a default
+    /// import emits its local name (upstream's LOCAL + defaultImportStatement).
+    fn collect_ctor_param_type_leftmost_names(
+        program: &'a Program<'a>,
+        consts: &crate::directive::StringConsts<'a>,
+    ) -> FxHashSet<Ident<'a>> {
+        let mut default_imports: FxHashSet<&'a str> = FxHashSet::default();
+        for stmt in &program.body {
+            let Statement::ImportDeclaration(import_decl) = stmt else {
+                continue;
+            };
+            // `import type Foo from 'm'` never becomes a value reference.
+            if import_decl.import_kind.is_type() {
+                continue;
+            }
+            if let Some(specifiers) = &import_decl.specifiers {
+                for specifier in specifiers {
+                    if let ImportDeclarationSpecifier::ImportDefaultSpecifier(spec) = specifier {
+                        default_imports.insert(spec.local.name.as_str());
+                    }
+                }
+            }
+        }
+        if default_imports.is_empty() {
+            return FxHashSet::default();
+        }
+
+        let mut names = FxHashSet::default();
+        for stmt in &program.body {
+            match stmt {
+                Statement::ClassDeclaration(class) => {
+                    Self::collect_ctor_type_uses_from_class(
+                        class,
+                        &default_imports,
+                        consts,
+                        &mut names,
+                    );
+                }
+                Statement::ExportDefaultDeclaration(export) => {
+                    if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
+                        &export.declaration
+                    {
+                        Self::collect_ctor_type_uses_from_class(
+                            class,
+                            &default_imports,
+                            consts,
+                            &mut names,
+                        );
+                    }
+                }
+                Statement::ExportDeclaration(export) => {
+                    if let oxc_ast::ast::Declaration::ClassDeclaration(class) = &export.declaration
+                    {
+                        Self::collect_ctor_type_uses_from_class(
+                            class,
+                            &default_imports,
+                            consts,
+                            &mut names,
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+        names
+    }
+
+    /// For a class with an `@angular/core` decorator (the only classes that
+    /// get `ɵsetClassMetadata`), collect ctor-param type names that hit a
+    /// default import — matching `build_param_type_expression`'s decision to
+    /// emit the local name.
+    fn collect_ctor_type_uses_from_class(
+        class: &'a oxc_ast::ast::Class<'a>,
+        default_imports: &FxHashSet<&'a str>,
+        consts: &crate::directive::StringConsts<'a>,
+        names: &mut FxHashSet<Ident<'a>>,
+    ) {
+        let has_angular_decorator = class
+            .decorators
+            .iter()
+            .any(|d| crate::directive::is_angular_core_decorator(d, Some(consts)));
+        if !has_angular_decorator {
+            return;
+        }
+        let type_params = crate::class_metadata::type_param_names_of(class);
+        for element in &class.body.body {
+            let ClassElement::MethodDefinition(method) = element else {
+                continue;
+            };
+            if method.kind != MethodDefinitionKind::Constructor {
+                continue;
+            }
+            for param in &method.value.params.items {
+                let Some(annotation) = &param.type_annotation else {
+                    continue;
+                };
+                let Some(type_ref) =
+                    crate::class_metadata::param_type_reference(&annotation.type_annotation)
+                else {
+                    continue;
+                };
+                let Some(path) = crate::class_metadata::entity_path(&type_ref.type_name) else {
+                    continue;
+                };
+                let Some(leftmost) = path.first() else {
+                    continue;
+                };
+                if !type_params.contains(leftmost) && default_imports.contains(leftmost.as_str()) {
+                    names.insert(*leftmost);
+                }
+            }
+        }
     }
 
     /// Collect identifiers used as computed property keys in type annotations.

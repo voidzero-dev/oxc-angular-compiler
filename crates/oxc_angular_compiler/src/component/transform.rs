@@ -473,6 +473,13 @@ pub struct ImportInfo<'a> {
     /// - `import Foo from "./mod"` → `Some("default")` (default export)
     /// - `import * as ns from "./mod"` → `None` (namespace, not deferrable)
     pub imported_name: Option<Ident<'a>>,
+    /// Whether this binding is a default import (`import Foo from "./mod"`),
+    /// as opposed to `import { default as Foo }`, which `imported_name` alone
+    /// cannot distinguish. ngtsc's `typeToValue` treats the two differently:
+    /// a default import resolves LOCAL (emits `Foo` and pins the import
+    /// declaration) while `{ default as Foo }` resolves IMPORTED
+    /// (`i1.default`).
+    pub is_default_import: bool,
 }
 
 /// Map from local identifier name to its import information.
@@ -565,6 +572,7 @@ pub fn build_import_map<'a>(
                             is_named_import: true,
                             is_type_only,
                             imported_name,
+                            is_default_import: false,
                         },
                     );
                 }
@@ -589,6 +597,7 @@ pub fn build_import_map<'a>(
                             // dynamic-import chains, regardless of the local
                             // binding name.
                             imported_name: Some(Ident::from("default")),
+                            is_default_import: true,
                         },
                     );
                 }
@@ -610,6 +619,7 @@ pub fn build_import_map<'a>(
                             is_named_import: false,
                             is_type_only: decl_is_type_only,
                             imported_name: None,
+                            is_default_import: false,
                         },
                     );
                 }
