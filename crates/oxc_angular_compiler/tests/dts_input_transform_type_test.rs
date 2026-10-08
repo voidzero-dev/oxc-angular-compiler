@@ -116,6 +116,26 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     ("`${string}x\n`", "`${string}x\n`"),
     // A `//` on a `/*`'s continuation line is comment text.
     ("string | /* a\n // b */\n number", "string | /* a\n   // b */ number"),
+    // An elision is zero-width right after its preceding comma: comments
+    // before the comma stay with the previous element, comments after it
+    // are the elision's intervening trivia.
+    ("([a /** j */, , b]: any[]) => void", "([a /** j */, , b]: any[]) => void"),
+    ("([a, , /* x */, , b]: any[]) => void", "([a, , /* x */ , , b]: any[]) => void"),
+    (
+        "([a /** j */, , /* x */, , b]: any[]) => void",
+        "([a /** j */, , /* x */ , , b]: any[]) => void",
+    ),
+    ("([, , a]: any[]) => void", "([, , a]: any[]) => void"),
+    // `AllowTrailingComma` is on both binding formats: `[a, ,]` keeps its
+    // trailing comma, and the comments around it are the elision's and the
+    // comma's own scans.
+    ("([a, ,]: any[]) => void", "([a, ,]: any[]) => void"),
+    ("([a,]: any[]) => void", "([a,]: any[]) => void"),
+    ("({a,}: any) => void", "({ a, }: any) => void"),
+    ("([a /** j */,]: any[]) => void", "([a /** j */,]: any[]) => void"),
+    ("([a, /** j */,]: any[]) => void", "([a, /** j */ ,]: any[]) => void"),
+    ("([a, , /** j */,]: any[]) => void", "([a, , /** j */ ,]: any[]) => void"),
+    ("([a, , /** j */, b]: any[]) => void", "([a, , /** j */ , b]: any[]) => void"),
     // A `typeof` name's parts are emitted separately.
     ("typeof val.a.\n/** j */\nb", "typeof val.a.\n    /** j */\n    b"),
     // NEL (U+0085) is whitespace in TypeScript's trivia scans.

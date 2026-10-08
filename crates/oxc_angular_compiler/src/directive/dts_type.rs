@@ -55,6 +55,7 @@ mod fmt {
     pub const BAR: u32 = 4;
     pub const AMPERSAND: u32 = 8;
     pub const COMMA: u32 = 16;
+    pub const ALLOW_TRAILING_COMMA: u32 = 64;
     pub const INDENTED: u32 = 128;
     pub const SPACE_BETWEEN_BRACES: u32 = 256;
     pub const SPACE_BETWEEN_SIBLINGS: u32 = 512;
@@ -85,10 +86,14 @@ mod fmt {
     /// `SingleLineTupleTypeElements` (`NoSpaceIfEmpty` is added at the site).
     pub const TUPLE_ELEMENTS: u32 = COMMA | SPACE_BETWEEN_SIBLINGS;
     /// `ObjectBindingPatternElements`.
-    pub const OBJECT_BINDING: u32 =
-        SPACE_BETWEEN_BRACES | COMMA | SPACE_BETWEEN_SIBLINGS | NO_SPACE_IF_EMPTY;
+    pub const OBJECT_BINDING: u32 = SPACE_BETWEEN_BRACES
+        | COMMA
+        | ALLOW_TRAILING_COMMA
+        | SPACE_BETWEEN_SIBLINGS
+        | NO_SPACE_IF_EMPTY;
     /// `ArrayBindingPatternElements`.
-    pub const ARRAY_BINDING: u32 = COMMA | SPACE_BETWEEN_SIBLINGS | NO_SPACE_IF_EMPTY;
+    pub const ARRAY_BINDING: u32 =
+        COMMA | ALLOW_TRAILING_COMMA | SPACE_BETWEEN_SIBLINGS | NO_SPACE_IF_EMPTY;
     /// `Modifiers`: a space-separated, comment-free list.
     pub const MODIFIERS: u32 = SPACE_BETWEEN_SIBLINGS | NO_INTERVENING | SPACE_AFTER_LIST;
 }
@@ -242,10 +247,12 @@ impl<'a> TypePrinter<'_, 'a> {
     ///
     /// `items` are the list's children; `list_pos`/`list_end` are the
     /// `NodeArray`'s trivia range (inside the brackets — used only for the
-    /// empty-list comment scans); `parent_end` is the enclosing node's `end`
+    /// empty-list comment scans, and `list_end` again for the closing scan
+    /// after a trailing comma); `parent_end` is the enclosing node's `end`
     /// — the gate that keeps the comments after the last element out when the
-    /// parent ends there too. `open`/`close` are the bracket texts for
-    /// `BracketsMask` formats.
+    /// parent ends there too. `trailing_comma` is the `NodeArray`'s
+    /// `hasTrailingComma` — written only when the format allows it.
+    /// `open`/`close` are the bracket texts for `BracketsMask` formats.
     fn emit_list(
         &mut self,
         out: &mut String,
@@ -254,6 +261,7 @@ impl<'a> TypePrinter<'_, 'a> {
         parent_end: u32,
         list_pos: usize,
         list_end: usize,
+        trailing_comma: bool,
         open: Option<&'static str>,
         close: Option<&'static str>,
     ) -> Option<()> {
@@ -274,7 +282,7 @@ impl<'a> TypePrinter<'_, 'a> {
                 self.write(out, " ");
             }
         } else {
-            self.emit_list_items(out, items, format, parent_end)?;
+            self.emit_list_items(out, items, format, parent_end, list_end, trailing_comma)?;
         }
         if format & fmt::BRACKETS != 0 {
             if items.is_empty() {
@@ -296,6 +304,8 @@ impl<'a> TypePrinter<'_, 'a> {
         items: &[El<'_, 'a>],
         format: u32,
         parent_end: u32,
+        list_end: usize,
+        trailing_comma: bool,
     ) -> Option<()> {
         let may_intervene = format & fmt::NO_INTERVENING == 0;
         let mut should_intervene = may_intervene;
@@ -335,15 +345,38 @@ impl<'a> TypePrinter<'_, 'a> {
             self.emit_item(out, item, pos)?;
             prev_end = Some(span.end);
         }
-        // `emitTrailingComma`: no format here has both `AllowTrailingComma`
-        // and `CommaDelimited`, so it's never emitted.
+        // `emitTrailingComma`: the comma itself goes through
+        // `emitTokenWithComment` on the last element — the comments before it
+        // run only when that element has a real range (a zero-width elision
+        // has `pos == end`, which suppresses the leading scan upstream), and
+        // the comments after it are the comma's same-line scan. With a
+        // trailing comma the closing scan runs at the list's own `end` (the
+        // `NodeArray` ends inside the brackets), not the last element's.
+        let emit_trailing_comma =
+            trailing_comma && format & fmt::ALLOW_TRAILING_COMMA != 0 && format & fmt::COMMA != 0;
+        if let Some(prev) = items.last()
+            && emit_trailing_comma
+            && let Some(prev_end) = prev_end
+        {
+            let comma = skip_trivia(self.source, prev_end as usize) + 1;
+            if prev.span().start != prev.span().end && prev_end != parent_end {
+                self.emit_leading_of_pos(out, prev_end as usize);
+            }
+            self.write(out, ",");
+            if prev_end != parent_end {
+                self.emit_trailing_filtered(out, comma);
+            }
+        }
         if let Some(prev_end) = prev_end
             && prev_end != parent_end
             && format & fmt::DELIMITERS != 0
         {
             // The JSDoc comments after the last element, before the closing
             // token.
-            self.emit_leading_of_pos(out, prev_end as usize);
+            self.emit_leading_of_pos(
+                out,
+                if emit_trailing_comma { list_end } else { prev_end as usize },
+            );
         }
         if format & fmt::INDENTED != 0 {
             self.indent -= 1;
@@ -429,11 +462,21 @@ impl<'a> TypePrinter<'_, 'a> {
             }
             TSType::TSUnionType(u) => {
                 let items: Vec<El> = u.types.iter().map(El::Ty).collect();
-                self.emit_list(out, &items, fmt::UNION, u.span.end, 0, 0, None, None)?;
+                self.emit_list(out, &items, fmt::UNION, u.span.end, 0, 0, false, None, None)?;
             }
             TSType::TSIntersectionType(i) => {
                 let items: Vec<El> = i.types.iter().map(El::Ty).collect();
-                self.emit_list(out, &items, fmt::INTERSECTION, i.span.end, 0, 0, None, None)?;
+                self.emit_list(
+                    out,
+                    &items,
+                    fmt::INTERSECTION,
+                    i.span.end,
+                    0,
+                    0,
+                    false,
+                    None,
+                    None,
+                )?;
             }
             TSType::TSParenthesizedType(p) => {
                 self.write(out, "(");
@@ -488,6 +531,7 @@ impl<'a> TypePrinter<'_, 'a> {
                     t.span.end,
                     list_pos,
                     list_end,
+                    false,
                     None,
                     None,
                 )?;
@@ -543,6 +587,7 @@ impl<'a> TypePrinter<'_, 'a> {
                     l.span.end,
                     l.span.start as usize + 1,
                     l.span.end as usize - 1,
+                    false,
                     None,
                     None,
                 )?;
@@ -660,6 +705,7 @@ impl<'a> TypePrinter<'_, 'a> {
                         c.span.end,
                         start + 8,
                         start + 8,
+                        false,
                         None,
                         None,
                     )?;
@@ -856,6 +902,7 @@ impl<'a> TypePrinter<'_, 'a> {
             args.span.end,
             args.span.start as usize + 1,
             args.span.end as usize - 1,
+            false,
             Some("<"),
             Some(">"),
         )
@@ -875,6 +922,7 @@ impl<'a> TypePrinter<'_, 'a> {
             params.span.end,
             params.span.start as usize + 1,
             params.span.end as usize - 1,
+            false,
             Some("<"),
             Some(">"),
         )
@@ -898,7 +946,7 @@ impl<'a> TypePrinter<'_, 'a> {
             }
         }
         if !mods.is_empty() {
-            self.emit_list(out, &mods, fmt::MODIFIERS, param.span.end, at, at, None, None)?;
+            self.emit_list(out, &mods, fmt::MODIFIERS, param.span.end, at, at, false, None, None)?;
         }
         self.emit_node(out, self.pos_of(param.name.span.start), param.name.span.end, |s, o| {
             s.write(o, &param.name.name);
@@ -943,6 +991,7 @@ impl<'a> TypePrinter<'_, 'a> {
             parent_end,
             params.span.start as usize + 1,
             params.span.end as usize - 1,
+            false,
             Some("("),
             Some(")"),
         )
@@ -961,6 +1010,7 @@ impl<'a> TypePrinter<'_, 'a> {
                 param.span.end,
                 start + 8,
                 start + 8,
+                false,
                 None,
                 None,
             )?;
@@ -1045,6 +1095,7 @@ impl<'a> TypePrinter<'_, 'a> {
             parent_end,
             list_pos,
             param.span.end as usize,
+            false,
             Some("["),
             Some("]"),
         )
@@ -1160,7 +1211,7 @@ impl<'a> TypePrinter<'_, 'a> {
                 El::Token { span: Span::new(start as u32, start as u32 + len), text }
             })
             .collect();
-        self.emit_list(out, &items, fmt::MODIFIERS, end, 0, 0, None, None)
+        self.emit_list(out, &items, fmt::MODIFIERS, end, 0, 0, false, None, None)
     }
 
     /// A property name as one node — `emitNodeWithWriter(node.name)` — or a
@@ -1255,6 +1306,11 @@ impl<'a> TypePrinter<'_, 'a> {
                 if let Some(rest) = &o.rest {
                     items.push(El::BindingRest(rest));
                 }
+                // `ObjectBindingPatternElements` allows a trailing comma:
+                // `{a,}` prints `{ a, }`.
+                let trailing = items
+                    .last()
+                    .is_some_and(|el| self.trailing_comma_after(el.span().end as usize));
                 self.emit_list(
                     out,
                     &items,
@@ -1262,6 +1318,7 @@ impl<'a> TypePrinter<'_, 'a> {
                     o.span.end,
                     o.span.start as usize + 1,
                     o.span.end as usize - 1,
+                    trailing,
                     None,
                     None,
                 )?;
@@ -1270,24 +1327,32 @@ impl<'a> TypePrinter<'_, 'a> {
             BindingPattern::ArrayPattern(a) => {
                 self.write(out, "[");
                 let mut items: Vec<El> = Vec::new();
-                let mut prev_end = a.span.start;
+                // Each element ends at a comma (or `]`). An elision is an
+                // `OmittedExpression`: zero width right after the comma that
+                // precedes it — trivia before that comma belongs to the
+                // previous element, trivia after it is the elision's own.
+                let mut cursor = a.span.start as usize + 1;
+                let mut trailing = false;
                 for element in &a.elements {
                     match element {
                         Some(element) => {
                             items.push(El::Binding(element));
-                            prev_end = element.span().end;
+                            cursor = element.span().end as usize;
                         }
                         None => {
-                            // An elision is an `OmittedExpression`: zero
-                            // width at the comma after the previous element
-                            // (or after `[` when first).
-                            let at = if items.is_empty() { a.span.start + 1 } else { prev_end + 1 };
-                            items.push(El::Token { span: Span::new(at, at), text: "" });
+                            items.push(El::Token {
+                                span: Span::new(cursor as u32, cursor as u32),
+                                text: "",
+                            });
                         }
                     }
+                    let after = skip_trivia(self.source, cursor);
+                    trailing = self.source[after..].starts_with(',');
+                    cursor = after + 1;
                 }
                 if let Some(rest) = &a.rest {
                     items.push(El::BindingRest(rest));
+                    trailing = self.trailing_comma_after(rest.span.end as usize);
                 }
                 self.emit_list(
                     out,
@@ -1296,6 +1361,7 @@ impl<'a> TypePrinter<'_, 'a> {
                     a.span.end,
                     a.span.start as usize + 1,
                     a.span.end as usize - 1,
+                    trailing,
                     None,
                     None,
                 )?;
@@ -1659,6 +1725,12 @@ impl<'a> TypePrinter<'_, 'a> {
             }
             rest = next;
         }
+    }
+
+    /// `NodeArray.hasTrailingComma`: a `,` between the last element's end
+    /// and the closing token.
+    fn trailing_comma_after(&self, end: usize) -> bool {
+        self.source[skip_trivia(self.source, end)..].starts_with(',')
     }
 
     fn slice(&self, span: Span) -> String {
