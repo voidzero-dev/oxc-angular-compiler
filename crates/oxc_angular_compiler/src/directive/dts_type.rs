@@ -33,12 +33,13 @@
 //! line, and the next write indents it.
 
 use oxc_ast::ast::{
-    BigIntLiteral, BindingPattern, BindingProperty, BindingRestElement, Expression,
-    FormalParameter, FormalParameterRest, FormalParameters, PropertyKey, StringLiteral,
-    TSIndexSignatureName, TSLiteral, TSMappedTypeModifierOperator, TSMethodSignatureKind,
-    TSNamedTupleMember, TSSignature, TSThisParameter, TSTupleElement, TSType, TSTypeAnnotation,
-    TSTypeName, TSTypeOperatorOperator, TSTypeParameter, TSTypeParameterDeclaration,
-    TSTypeParameterInstantiation, TSTypePredicateName, TSTypeQueryExprName, UnaryOperator,
+    BigIntLiteral, BindingPattern, BindingProperty, BindingRestElement, Comment as OxcComment,
+    CommentKind, Expression, FormalParameter, FormalParameterRest, FormalParameters, PropertyKey,
+    StringLiteral, TSIndexSignatureName, TSLiteral, TSMappedTypeModifierOperator,
+    TSMethodSignatureKind, TSNamedTupleMember, TSSignature, TSThisParameter, TSTupleElement,
+    TSType, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator, TSTypeParameter,
+    TSTypeParameterDeclaration, TSTypeParameterInstantiation, TSTypePredicateName,
+    TSTypeQueryExprName, UnaryOperator,
 };
 use oxc_span::{GetSpan, Span};
 
@@ -124,9 +125,10 @@ pub(crate) struct TypePrinter<'s, 'a> {
     /// members sit at one level, and a `ListFormat.Indented` list adds one
     /// more while its items print.
     pub indent: u32,
-    /// The source's comment table, lexed on first use: the backward trivia
-    /// scan queries it instead of reparsing the whole prefix per node.
-    pub(crate) lexed: std::cell::OnceCell<Lexed>,
+    /// The source's comment table, shared across the printers of one
+    /// class: the backward trivia scan queries it instead of reparsing the
+    /// whole prefix per node.
+    pub(crate) lexed: std::rc::Rc<Lexed>,
 }
 
 /// A list element for [`TypePrinter::emit_list`]: a node with a span plus the
@@ -194,12 +196,8 @@ impl<'a> TypePrinter<'_, 'a> {
 
     /// A node's `pos` (start of its leading trivia): the end of the previous
     /// token.
-    fn lexed(&self) -> &Lexed {
-        self.lexed.get_or_init(|| lex_comments(self.source))
-    }
-
     fn pos_of(&self, start: u32) -> u32 {
-        token_end_before(self.lexed(), self.source, start as usize).unwrap_or(start as usize) as u32
+        token_end_before(&self.lexed, self.source, start as usize).unwrap_or(start as usize) as u32
     }
 
     /// Emit a node like TypeScript's `emit(node)`: its leading comments, the
@@ -1078,7 +1076,7 @@ impl<'a> TypePrinter<'_, 'a> {
     ) -> Option<()> {
         let name_start = skip_trivia(self.source, param.span.start as usize);
         let name_end =
-            token_end_before(self.lexed(), self.source, param.type_annotation.span.start as usize)
+            token_end_before(&self.lexed, self.source, param.type_annotation.span.start as usize)
                 .unwrap_or(param.type_annotation.span.start as usize);
         self.emit_node(out, self.pos_of(name_start as u32), name_end as u32, |s, o| {
             s.write(o, param.name.as_str());
@@ -1228,10 +1226,9 @@ impl<'a> TypePrinter<'_, 'a> {
         if computed {
             // `ComputedPropertyName`'s range: from the trivia before `[` to
             // `]`'s end. oxc's key span covers the expression only.
-            let bracket_end =
-                token_end_before(self.lexed(), self.source, key.span().start as usize)
-                    .unwrap_or(key.span().start as usize);
-            let pos = token_end_before(self.lexed(), self.source, bracket_end - 1)
+            let bracket_end = token_end_before(&self.lexed, self.source, key.span().start as usize)
+                .unwrap_or(key.span().start as usize);
+            let pos = token_end_before(&self.lexed, self.source, bracket_end - 1)
                 .unwrap_or(bracket_end - 1);
             let end = skip_trivia(self.source, key.span().end as usize) + 1;
             let text = self.key_text(key)?;
@@ -1857,236 +1854,36 @@ fn token_end_before(lexed: &Lexed, source: &str, start: usize) -> Option<usize> 
     }
 }
 
-/// The source's comments, once: sorted `(start, end)` ranges of every `//`
-/// and `/* */` — `end` of a `//` is the next line break (or the file's end),
-/// of `/* */` past the closer. Lexing once keeps the backward trivia scan
-/// from reparsing the whole prefix for every node, and skipping strings,
-/// template text, and regexes keeps their bytes from pairing as comments —
-/// a `/[/*]/` earlier in the file would otherwise swallow a real `/*` in
-/// the type. `${ }` holes lex as code (the comments inside them count) and
-/// nested templates recurse.
+/// The source's comments: sorted `(start, end)` ranges of every `//` and
+/// `/* */`, with delimiters — `end` of a `//` is the line break (or the
+/// file's end), of `/* */` past the closer. Built from the parser's own
+/// comment list, so strings, template text, and regex literals are already
+/// skipped: a `/[/*]/` — after `=`, after `return`, after `)`, anywhere —
+/// can't pair its `/*` with a comment's `*/` inside the type, and the
+/// whole file is lexed once rather than re-scanned per `pos_of` call.
 #[derive(Default)]
 pub(crate) struct Lexed {
+    /// `//` comment ranges, sorted by start.
     line: Vec<(usize, usize)>,
+    /// `/* */` comment ranges, sorted by start.
     block: Vec<(usize, usize)>,
 }
 
-/// The last non-trivia byte lexed and where it sits — `pos` lets
-/// [`slash_step`] pull the word a trailing identifier belongs to, since
-/// keywords like `return` also end in identifier bytes but a `/` after them
-/// opens a regex.
-struct Prev {
-    byte: u8,
-    pos: usize,
-}
-
-impl Prev {
-    fn set(&mut self, byte: u8, pos: usize) {
-        *self = Self { byte, pos };
-    }
-}
-
-fn lex_comments(source: &str) -> Lexed {
-    let mut out = Lexed::default();
-    // `/` after an operand-ish byte is division, anywhere else it can open
-    // a regex (the `}` case guesses "expression", so a `}` closing a block
-    // is a known miss).
-    let mut prev = Prev { byte: b';', pos: 0 };
-    let bytes = source.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        match b {
-            b'\'' | b'"' => {
-                prev.set(b'"', i);
-                i = str_end(source, i);
-            }
-            b'`' => {
-                prev.set(b'"', i);
-                i = template_end(source, i, &mut out, &mut prev);
-            }
-            b'/' => i = slash_step(source, i, &mut out, &mut prev),
-            _ => {
-                if b < 128 && !is_space(b as char) {
-                    // Any non-whitespace ASCII byte counts as operand-ish.
-                    prev.set(b, i);
-                } else if b >= 128 {
-                    prev.set(b'"', i);
-                }
-                i += 1;
+impl Lexed {
+    /// Builds the table from the parser's comment list for one source file.
+    pub(crate) fn from_comments(comments: &[OxcComment]) -> Self {
+        let mut out = Self::default();
+        for c in comments {
+            let range = (c.span.start as usize, c.span.end as usize);
+            match c.kind {
+                CommentKind::Line => out.line.push(range),
+                _ => out.block.push(range),
             }
         }
+        out.line.sort_unstable();
+        out.block.sort_unstable();
+        out
     }
-    out
-}
-
-/// Skip a `'`/`"` string starting at `open`: the index past its closer, or
-/// the text's end when unterminated.
-fn str_end(code: &str, open: usize) -> usize {
-    let bytes = code.as_bytes();
-    let quote = bytes[open];
-    let mut i = open + 1;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 1;
-        } else if bytes[i] == quote {
-            return i + 1;
-        }
-        i += 1;
-    }
-    bytes.len()
-}
-
-/// Skip a template literal starting at `open`: the index past its closing
-/// backtick, or the text's end. The text is trivia-less, but its `${ }`
-/// holes are lexed as code by [`hole_end`].
-fn template_end(code: &str, open: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
-    let bytes = code.as_bytes();
-    let mut i = open + 1;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 1,
-            b'`' => return i + 1,
-            // `hole_end` already returns past the `}` — resume there, or
-            // the closing backtick (`` `${string}` ``) is skipped and the
-            // template swallows the rest of the file.
-            b'$' if bytes.get(i + 1) == Some(&b'{') => i = hole_end(code, i + 2, out, prev),
-            _ => i += 1,
-        }
-    }
-    bytes.len()
-}
-
-/// Lex a `${ }` hole's contents from `pos` to past the `}`: a `{`/`}` depth
-/// tracker, so `{ T: U }` members inside don't end the hole. Runs to the
-/// text's end when the hole never closes.
-fn hole_end(code: &str, pos: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
-    let bytes = code.as_bytes();
-    let mut i = pos;
-    let mut depth = 1usize;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => {
-                depth += 1;
-                prev.set(b'{', i);
-                i += 1;
-            }
-            b'}' => {
-                depth -= 1;
-                prev.set(b'}', i);
-                i += 1;
-                if depth == 0 {
-                    return i;
-                }
-            }
-            b'/' => i = slash_step(code, i, out, prev),
-            _ => i = lex_byte(code, i, out, prev),
-        }
-    }
-    i
-}
-
-/// One non-`/`, non-`{}` byte inside a `${ }` hole.
-fn lex_byte(code: &str, i: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
-    let b = code.as_bytes()[i];
-    match b {
-        b'\'' | b'"' => {
-            prev.set(b'"', i);
-            str_end(code, i)
-        }
-        b'`' => {
-            prev.set(b'"', i);
-            template_end(code, i, out, prev)
-        }
-        _ => {
-            if b < 128 && !is_space(b as char) {
-                prev.set(b, i);
-            } else if b >= 128 {
-                prev.set(b'"', i);
-            }
-            i + 1
-        }
-    }
-}
-
-/// Keywords that start an expression: a `/` right after one opens a regex,
-/// which the last-byte-alone heuristic would call division (`return /x/`).
-const REGEX_CONTEXT_WORDS: &[&str] = &[
-    "return",
-    "throw",
-    "case",
-    "typeof",
-    "instanceof",
-    "new",
-    "delete",
-    "void",
-    "do",
-    "else",
-    "yield",
-    "await",
-    "default",
-    "in",
-    "of",
-];
-
-/// One `/` at `i`: `//` and `/* */` go into the comment table; a regex
-/// literal is skipped so its `*/`/`//`-looking bytes stay literal text;
-/// anything else is division and the byte advances one.
-fn slash_step(code: &str, i: usize, out: &mut Lexed, prev: &mut Prev) -> usize {
-    let bytes = code.as_bytes();
-    if bytes.get(i + 1) == Some(&b'/') {
-        let end = code[i + 2..].find(is_line_break).map(|e| i + 2 + e).unwrap_or(bytes.len());
-        out.line.push((i, end));
-        end
-    } else if bytes.get(i + 1) == Some(&b'*') {
-        let end = code[i + 2..].find("*/").map(|e| i + 2 + e + 2).unwrap_or(bytes.len());
-        out.block.push((i, end));
-        end
-    } else {
-        let next = if regex_can_start(code, prev) { regex_end(code, i) } else { None };
-        prev.set(b'/', i);
-        next.unwrap_or(i + 1)
-    }
-}
-
-/// Whether `/` can open a regex after `prev`, the last non-trivia byte.
-/// False after operands (identifier bytes, `)`, `]`, `}`, quotes) — unless
-/// the identifier is a keyword that starts an expression — true after
-/// operators and at the start.
-fn regex_can_start(code: &str, prev: &Prev) -> bool {
-    match prev.byte {
-        b')' | b']' | b'}' | b'_' | b'$' | b'\'' | b'"' | b'`' | b'/' => false,
-        b if b.is_ascii_alphanumeric() => {
-            // The identifier `prev` ends: a keyword takes a regex after it.
-            let word = &code[..prev.pos + 1];
-            let start = word
-                .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '$'))
-                .map_or(0, |p| p + 1);
-            REGEX_CONTEXT_WORDS.contains(&&word[start..])
-        }
-        _ => true,
-    }
-}
-
-/// The index past a regex literal opening at `open`, or `None` when it is
-/// really division — no closing `/` before a line break (classes can hold
-/// `//` and `*/`, escapes can hold `]` and `/`).
-fn regex_end(code: &str, open: usize) -> Option<usize> {
-    let bytes = code.as_bytes();
-    let mut i = open + 1;
-    let mut class = false;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => i += 1,
-            b'[' => class = true,
-            b']' => class = false,
-            b'/' if !class => return Some(i + 1),
-            b'\n' | b'\r' => return None,
-            _ => {}
-        }
-        i += 1;
-    }
-    None
 }
 
 /// The `//` opening a line comment that runs to the end of `code` — so it
@@ -2109,7 +1906,6 @@ fn block_comment_start(lexed: &Lexed, inner: &str) -> Option<usize> {
         .find(|(start, end)| *start < inner.len() && *end > inner.len())
         .map(|(start, _)| *start)
 }
-
 /// A comment's source range, as TypeScript's `iterateCommentRanges` reports
 /// it.
 struct Comment {

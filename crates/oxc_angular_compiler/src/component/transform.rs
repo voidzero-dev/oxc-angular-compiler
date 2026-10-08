@@ -3725,6 +3725,7 @@ pub fn transform_angular_file(
                                 class,
                                 &string_consts,
                                 source,
+                                &parser_ret.program.comments,
                                 dts_core_namespace.as_str(),
                             );
                             result.dts_declarations.push(dts::generate_component_dts(
@@ -3875,6 +3876,7 @@ pub fn transform_angular_file(
                         class,
                         &string_consts,
                         source,
+                        &parser_ret.program.comments,
                         dts_core_namespace.as_str(),
                     );
                     result.dts_declarations.push(dts::generate_directive_dts(

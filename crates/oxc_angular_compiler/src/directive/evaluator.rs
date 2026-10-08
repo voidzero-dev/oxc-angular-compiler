@@ -3504,6 +3504,7 @@ pub fn input_transform_types<'a>(
     class: &'a Class<'a>,
     consts: &super::StringConsts<'a>,
     source: &'a str,
+    comments: &'a [oxc_ast::ast::Comment],
     core_namespace: &'a str,
 ) -> HashMap<String, String> {
     let evaluator = Evaluator::new(consts);
@@ -3557,6 +3558,7 @@ pub fn input_transform_types<'a>(
         }
     }
 
+    let lexed = std::rc::Rc::new(super::dts_type::Lexed::from_comments(comments));
     transforms
         .into_iter()
         .filter_map(|(name, transform)| {
@@ -3574,7 +3576,7 @@ pub fn input_transform_types<'a>(
                         container_pos: u32::MAX,
                         container_end: u32::MAX,
                         indent: 1,
-                        lexed: Default::default(),
+                        lexed: lexed.clone(),
                     };
                     let ty = printer.print(ty);
                     if printer.other_module {
