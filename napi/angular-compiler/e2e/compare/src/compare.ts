@@ -2271,46 +2271,10 @@ interface ClassMetadataInfo {
   propDecorators: string | null
   /** `ɵsetClassMetadataAsync` call: resolver thunk (second argument). */
   resolver?: string | null
+  /** `ɵsetClassMetadataAsync` call: wrapper with params alpha-renamed, normalized AST. */
+  wrapperNormalized?: string | null
   /** Whether this entry came from `ɵsetClassMetadataAsync` (deferred imports). */
   isAsync?: boolean
-}
-
-/**
- * Find matching closing bracket, handling nested structures and strings.
- *
- * @param code - The source code
- * @param startIdx - Index where to start looking (should be at or before the opening bracket)
- * @param open - Opening bracket character ('[', '{', or '(')
- * @param close - Closing bracket character (']', '}', or ')')
- * @returns Index of the matching closing bracket, or -1 if not found
- */
-function findMatchingBracket(code: string, startIdx: number, open: string, close: string): number {
-  let depth = 0
-  let inString: string | null = null
-
-  for (let i = startIdx; i < code.length; i++) {
-    const char = code[i]
-
-    if (inString) {
-      if (char === inString && code[i - 1] !== '\\') {
-        inString = null
-      }
-      continue
-    }
-
-    if (char === '"' || char === "'" || char === '`') {
-      inString = char
-      continue
-    }
-
-    if (char === open) depth++
-    else if (char === close) {
-      depth--
-      if (depth === 0) return i
-    }
-  }
-
-  return -1
 }
 
 /**
@@ -2324,38 +2288,6 @@ function findMatchingBracket(code: string, startIdx: number, open: string, close
  * @param code - The compiled JavaScript code
  * @returns Array of extracted class metadata info
  */
-/**
- * Split an argument list into its top-level arguments, tracking bracket and
- * paren depth and skipping over string/template literals. Any argument shape
- * counts — arrays, objects, `() => [...]` callbacks, `forwardRef(...)`.
- */
-function splitTopLevelArguments(argsText: string): string[] {
-  const args: string[] = []
-  let depth = 0
-  let inString: string | null = null
-  let argStart = 0
-
-  for (let i = 0; i < argsText.length; i++) {
-    const char = argsText[i]
-    if (inString) {
-      if (char === inString && argsText[i - 1] !== '\\') inString = null
-      continue
-    }
-    if (char === '"' || char === "'" || char === '`') {
-      inString = char
-      continue
-    }
-    if (char === '(' || char === '[' || char === '{') depth++
-    else if (char === ')' || char === ']' || char === '}') depth--
-    else if (char === ',' && depth === 0) {
-      args.push(argsText.slice(argStart, i).trim())
-      argStart = i + 1
-    }
-  }
-  const tail = argsText.slice(argStart).trim()
-  if (tail) args.push(tail)
-  return args
-}
 
 /**
  * `null` / `void 0` / `undefined` all mean "no value" in these slots.
@@ -2374,59 +2306,116 @@ function metadataArgOrNull(arg: string | undefined): string | null {
  * '@angular/core' in the emitted code — the callee of a metadata call must be
  * one of these so a user-defined `debug.ɵsetClassMetadata` isn't picked up.
  */
-function angularCoreNamespaces(code: string): Set<string> {
+function angularCoreNamespaces(program: unknown): Set<string> {
   const namespaces = new Set<string>()
-  const nsPattern = /import\s+\*\s+as\s+([A-Za-z_$][\w$]*)\s+from\s+['"]@angular\/core['"]/g
-  const reqPattern = /const\s+([A-Za-z_$][\w$]*)\s*=\s*require\(['"]@angular\/core['"]\)/g
-  for (const m of code.matchAll(nsPattern)) namespaces.add(m[1])
-  for (const m of code.matchAll(reqPattern)) namespaces.add(m[1])
+  walkAst(program, (node) => {
+    if (node.type === 'ImportDeclaration') {
+      const source = node.source as NormAstNode | undefined
+      if (source?.value !== '@angular/core') return
+      for (const spec of (node.specifiers ?? []) as NormAstNode[]) {
+        if (spec.type === 'ImportNamespaceSpecifier') {
+          namespaces.add((spec.local as NormAstNode).name as string)
+        }
+      }
+    } else if (node.type === 'VariableDeclaration') {
+      // `const i0 = require('@angular/core')`
+      for (const decl of (node.declarations ?? []) as NormAstNode[]) {
+        const init = decl.init as NormAstNode | undefined
+        const callee = init?.callee as NormAstNode | undefined
+        if (
+          init?.type === 'CallExpression' &&
+          callee?.type === 'Identifier' &&
+          callee.name === 'require' &&
+          (init.arguments as NormAstNode[])?.[0]?.value === '@angular/core'
+        ) {
+          const id = decl.id as NormAstNode
+          if (id?.type === 'Identifier') namespaces.add(id.name as string)
+        }
+      }
+    }
+  })
   return namespaces
 }
 
-function extractClassMetadataCalls(code: string): ClassMetadataInfo[] {
+/**
+ * Alpha-rename an arrow/function's parameters to `p0`, `p1`, ... so equivalent
+ * wrappers compare equal while a swapped parameter usage order still differs.
+ */
+function normalizeWrapperAst(wrapper: NormAstNode): string {
+  const cloned = JSON.parse(JSON.stringify(wrapper)) as NormAstNode
+  const paramNames: string[] = []
+  for (const param of (cloned.params ?? []) as NormAstNode[]) {
+    if (param.type === 'Identifier') paramNames.push(param.name as string)
+  }
+  walkAst(cloned, (node) => {
+    if (node.type === 'Identifier') {
+      const index = paramNames.indexOf(node.name as string)
+      if (index >= 0) node.name = `p${index}`
+    }
+  })
+  return normalizeAst(cloned)
+}
+
+/**
+ * Extract ɵsetClassMetadata/ɵsetClassMetadataAsync calls from the parsed AST.
+ * Working on the tree avoids every text-scanning edge case: regex literals,
+ * comments, nested calls and `$`-or-unicode identifiers are all handled by
+ * the parser.
+ */
+function extractClassMetadataCalls(program: unknown, code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
-  const coreNamespaces = angularCoreNamespaces(code)
+  const coreNamespaces = angularCoreNamespaces(program)
 
-  // `ns.ɵsetClassMetadata(ClassName, decorators, ctorParams, propDecorators)`
-  // and the async form `ns.ɵsetClassMetadataAsync(ClassName, resolver, wrapper)`
-  // (wrapper contains a nested sync call, extracted on its own pass). Class
-  // names accept `$` — `Foo$` is a valid identifier.
-  const startPattern = /([A-Za-z_$][\w$]*)\.ɵsetClassMetadata(Async)?\(\s*([A-Za-z_$][\w$]*)\s*/g
-  let match
+  const slice = (node: NormAstNode | undefined): string | undefined =>
+    node && typeof node.start === 'number' && typeof node.end === 'number'
+      ? code.slice(node.start, node.end)
+      : undefined
 
-  while ((match = startPattern.exec(code)) !== null) {
-    const [, callee, asyncMarker, className] = match
-    if (!coreNamespaces.has(callee)) continue
-    const parenIdx = match.index + match[0].indexOf('(')
-    const callEnd = findMatchingBracket(code, parenIdx, '(', ')')
-    if (callEnd === -1) continue
+  walkAst(program, (node) => {
+    if (node.type !== 'CallExpression') return
+    const callee = node.callee as NormAstNode | undefined
+    if (!callee || callee.type !== 'MemberExpression') return
+    const object = callee.object as NormAstNode | undefined
+    const property = callee.property as NormAstNode | undefined
+    if (object?.type !== 'Identifier' || property?.type !== 'Identifier') return
+    if (!coreNamespaces.has(object.name as string)) return
 
-    const args = splitTopLevelArguments(code.slice(parenIdx + 1, callEnd)).slice(1)
-    if (args.length === 0) continue
+    const isAsync = property.name === 'ɵsetClassMetadataAsync'
+    if (!isAsync && property.name !== 'ɵsetClassMetadata') return
 
-    if (asyncMarker) {
-      // Async call: arg2 is the resolver thunk, arg3 the wrapper (which the
-      // pattern above also extracts as a nested sync call). The resolver is
-      // the distinguishing payload.
+    const args = node.arguments as NormAstNode[] | undefined
+    const classArg = args?.[0]
+    if (!args || !classArg) return
+    const className =
+      classArg.type === 'Identifier' ? (classArg.name as string) : (slice(classArg) ?? '')
+
+    if (isAsync) {
+      // `ɵsetClassMetadataAsync(Class, resolver, wrapper)` — the wrapper's
+      // nested sync call is extracted on its own pass.
+      const wrapper = args[2]
       results.push({
         className,
         decorators: 'null',
         ctorParams: null,
         propDecorators: null,
-        resolver: metadataArgOrNull(args[0]),
+        resolver: metadataArgOrNull(slice(args[1])),
         isAsync: true,
+        wrapperNormalized:
+          wrapper &&
+          (wrapper.type === 'ArrowFunctionExpression' || wrapper.type === 'FunctionExpression')
+            ? normalizeWrapperAst(wrapper)
+            : (slice(wrapper) ?? null),
       })
-      continue
+      return
     }
 
-    const [decorators, ctorParams, propDecorators] = args
     results.push({
       className,
-      decorators,
-      ctorParams: metadataArgOrNull(ctorParams),
-      propDecorators: metadataArgOrNull(propDecorators),
+      decorators: slice(args[1]) ?? 'null',
+      ctorParams: metadataArgOrNull(slice(args[2])),
+      propDecorators: metadataArgOrNull(slice(args[3])),
     })
-  }
+  })
 
   return results
 }
@@ -2482,8 +2471,10 @@ function compareClassMetadata(
         expected: `decorators: ${tsInfo.decorators.slice(0, 100)}...`,
       })
     } else if (tsInfo.isAsync) {
-      // Async entries: compare the deferred-imports resolver thunk. The
-      // wrapper's nested sync call is extracted as its own entry.
+      // Async entries: compare the deferred-imports resolver thunk AND the
+      // wrapper (alpha-renamed) — a swapped `(B, A)` wrapper is behaviorally
+      // wrong even though its nested sync call looks identical. The nested
+      // sync call itself is extracted as its own entry.
       if (
         normalizeMetadataString(tsInfo.resolver ?? null) !==
         normalizeMetadataString(oxcInfo.resolver ?? null)
@@ -2494,6 +2485,15 @@ function compareClassMetadata(
           field: 'setClassMetadataAsync.resolver',
           expected: String(tsInfo.resolver).slice(0, 100),
           actual: String(oxcInfo.resolver).slice(0, 100),
+        })
+      }
+      if ((tsInfo.wrapperNormalized ?? null) !== (oxcInfo.wrapperNormalized ?? null)) {
+        diffs.push({
+          type: 'different',
+          className,
+          field: 'setClassMetadataAsync.wrapper',
+          expected: '(normalized wrapper)',
+          actual: '(normalized wrapper)',
         })
       }
     } else {
@@ -3253,8 +3253,8 @@ export async function compareFullFileSemantically(
     const staticFieldDiffs = compareStaticFields(oxcFields, tsFields, constMapping)
 
     // Extract and compare class metadata (setClassMetadata calls)
-    const oxcClassMetadata = extractClassMetadataCalls(normalizedOxcCode)
-    const tsClassMetadata = extractClassMetadataCalls(normalizedTsCode)
+    const oxcClassMetadata = extractClassMetadataCalls(oxcResult.program, normalizedOxcCode)
+    const tsClassMetadata = extractClassMetadataCalls(tsResult.program, normalizedTsCode)
     const classMetadataDiffs = compareClassMetadata(oxcClassMetadata, tsClassMetadata)
 
     // Extract and compare functions (template functions, etc.)
