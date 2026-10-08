@@ -619,18 +619,23 @@ impl<'a> TypePrinter<'_, 'a> {
                                 Some(())
                             },
                         )?;
-                        start = skip_trivia(self.source, start + 1);
+                        // `writeKeyword("readonly")`: a plain write — the
+                        // comments between sign and keyword are never
+                        // scanned (same-line ones are already the sign's
+                        // trailing comments).
+                        self.write(out, "readonly");
+                    } else {
+                        // `emit(node.readonlyToken)` + `writeSpace`.
+                        self.emit_node(
+                            out,
+                            self.pos_of(start as u32),
+                            (start + "readonly".len()) as u32,
+                            |s, o| {
+                                s.write(o, "readonly");
+                                Some(())
+                            },
+                        )?;
                     }
-                    // `emit(node.readonlyToken)` + `writeSpace`.
-                    self.emit_node(
-                        out,
-                        self.pos_of(start as u32),
-                        (start + "readonly".len()) as u32,
-                        |s, o| {
-                            s.write(o, "readonly");
-                            Some(())
-                        },
-                    )?;
                     self.write(out, " ");
                 }
                 self.write(out, "[");
@@ -674,13 +679,21 @@ impl<'a> TypePrinter<'_, 'a> {
                                 Some(())
                             },
                         )?;
-                        start = skip_trivia(self.source, start + 1);
+                        // `writePunctuation("?")`: a plain write — same
+                        // reason as `readonly` above.
+                        self.write(out, "?");
+                    } else {
+                        // `emit(node.questionToken)`: the `?` after `]`.
+                        self.emit_node(
+                            out,
+                            self.pos_of(start as u32),
+                            start as u32 + 1,
+                            |s, o| {
+                                s.write(o, "?");
+                                Some(())
+                            },
+                        )?;
                     }
-                    // `emit(node.questionToken)`: the `?` after `]`.
-                    self.emit_node(out, self.pos_of(start as u32), start as u32 + 1, |s, o| {
-                        s.write(o, "?");
-                        Some(())
-                    })?;
                 }
                 self.write(out, ": ");
                 if let Some(value) = &m.type_annotation {

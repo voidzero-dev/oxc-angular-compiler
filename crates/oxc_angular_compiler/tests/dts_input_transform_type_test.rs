@@ -104,8 +104,12 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     ("Signal /** j */ <number>", "i0.Signal<number>"),
     // `]` after a trailing comma scans from the list's end (past the comma).
     ("[a: string,\n /** j */]", "[a: string\n    /** j */ ]"),
-    // Mapped-type `±readonly` and `±?` are two tokens each.
+    // Mapped-type `±readonly` and `±?` are two tokens each. The keyword is
+    // a plain write after a sign — a comment after a line break is never
+    // scanned.
     ("{ - /** j */ readonly [K in string]: 1 }", "{ - /** j */readonly [K in string]: 1; }"),
+    ("{ -\n/** j */\nreadonly [K in string]: 1 }", "{ -readonly [K in string]: 1; }"),
+    ("{ [K in string]-\n/** j */\n?: 1 }", "{ [K in string]-?: 1; }"),
     ("{ [K in string] - /** j */ ?: 1 }", "{ [K in string]- /** j */?: 1; }"),
     // The `...` of a binding rest and the `${` of a template literal are
     // emitted tokens too.
