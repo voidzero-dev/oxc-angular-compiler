@@ -14,7 +14,7 @@ use oxc_semantic::{AstNode, Semantic, SemanticBuilder};
 
 use crate::directive::{
     INPUT_API, InitializerApi, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS,
-    StringConsts, decorator_written_name, initializer_api, is_angular_core_decorator,
+    StringConsts, decorator_written_name, initializer_api,
 };
 
 /// The APIs ngtsc's `InitializerApiUsageRule` checks (`APIS_TO_CHECK`).
@@ -190,9 +190,27 @@ impl<'a> InitializerApiUsage<'_, 'a> {
                 _ => None,
             });
             if let Some(class) = class {
+                // Upstream checks `decorator.import?.from === '@angular/core'`,
+                // resolved through the type checker — a shadowed `Directive`
+                // param doesn't count. Resolve through the semantic model like
+                // `is_api_reference` does for the call.
                 let is_component_or_directive = class.decorators.iter().any(|d| {
-                    matches!(decorator_written_name(d), "Component" | "Directive")
-                        && is_angular_core_decorator(d, Some(self.consts))
+                    if !matches!(decorator_written_name(d), "Component" | "Directive") {
+                        return false;
+                    }
+                    let callee = match &d.expression {
+                        Expression::CallExpression(call) => &call.callee,
+                        expr => expr,
+                    };
+                    match callee {
+                        Expression::Identifier(id) => direct_import_of(id, self.semantic)
+                            .is_some_and(|(module, _)| module == crate::r3::CORE),
+                        Expression::StaticMemberExpression(member) => {
+                            matches!(&member.object, Expression::Identifier(ns) if
+                                namespace_import_of(ns, self.semantic) == Some(crate::r3::CORE))
+                        }
+                        _ => false,
+                    }
                 });
                 if !is_component_or_directive {
                     self.diagnostics.push(

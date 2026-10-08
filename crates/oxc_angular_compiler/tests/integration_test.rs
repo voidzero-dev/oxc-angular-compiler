@@ -17258,6 +17258,28 @@ fn test_initializer_api_usage_shadowed_identifiers() {
         );
     }
 
+    // A class decorator bound to something else (here a parameter) isn't
+    // `@angular/core`'s, so `input()` in the class's member initializer is an
+    // error like on any undecorated class — upstream resolves the decorator's
+    // identifier through the type checker, `decorator.import?.from`.
+    for snippet in [
+        "function f(Directive: any) {\n    @Directive({ selector: '[d]' })\n    class D {\n        x = input(0);\n    }\n}",
+        "function f(ngc: any) {\n    @ngc.Directive({ selector: '[d]' })\n    class D {\n        x = input(0);\n    }\n}",
+    ] {
+        let source = format!(
+            "import {{ Directive, input }} from '@angular/core';\n\
+             import * as ngc from '@angular/core';\n\
+             {snippet}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.contains(
+                "can only be used as the initializer of a property on a @Component or @Directive class."
+            )),
+            "shadowed decorator in {snippet:?} must report NG8110. Got: {diagnostics:?}"
+        );
+    }
+
     // ...while the real imports still error, next to the shadowed uses.
     let diagnostics = expect_diagnostics(
         "import { Directive, input } from '@angular/core';\n\
