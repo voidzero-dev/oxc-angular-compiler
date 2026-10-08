@@ -108,6 +108,14 @@ const COMMENTS_KEPT: &[(&str, &str)] = &[
     // emitted tokens too.
     ("({ ... /** j */ rest }: Box) => void", "({ ... /** j */rest }: Box) => void"),
     ("`${ /** j */ string}`", "`${ /** j */string}`"),
+    // A quasi goes out as one literal write (TypeScript's `emitLiteral`), so
+    // line breaks inside its text never start a write: nothing is indented.
+    ("`a\n${string}`", "`a\n${string}`"),
+    ("`a\n${string}b\n${number}`", "`a\n${string}b\n${number}`"),
+    ("`a\n`", "`a\n`"),
+    ("`${string}x\n`", "`${string}x\n`"),
+    // A `//` on a `/*`'s continuation line is comment text.
+    ("string | /* a\n // b */\n number", "string | /* a\n   // b */ number"),
     // A `typeof` name's parts are emitted separately.
     ("typeof val.a.\n/** j */\nb", "typeof val.a.\n    /** j */\n    b"),
     // NEL (U+0085) is whitespace in TypeScript's trivia scans.

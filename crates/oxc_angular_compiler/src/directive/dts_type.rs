@@ -500,26 +500,28 @@ impl<'a> TypePrinter<'_, 'a> {
             TSType::TSNamedTupleMember(m) => self.named_tuple_member_body(out, m, None)?,
             TSType::TSLiteralType(l) => self.literal_body(out, &l.literal)?,
             TSType::TSTemplateLiteralType(t) => {
-                self.write(out, "`");
+                // `emitTemplateType` + `emitLiteral`: each quasi goes out as
+                // ONE `writeStringLiteral` — `` `text${` ``, `}text${`,
+                // `}text`` `` — so a line break inside the text never starts
+                // a write (no indent): `` `a\n${string}` `` prints `${` at
+                // column 0. `quasi.span` covers only the cooked text, so a
+                // chunk is the source slice from the `` ` ``/`}` before it
+                // to past the `${`/`` ` `` after it. Emitting each chunk as
+                // a node keeps the comment scans — the `/** j */` in
+                // `` `${ /** j */ string}` `` is the head's trailing
+                // comment.
                 for (i, quasi) in t.quasis.iter().enumerate() {
-                    self.write(out, quasi.value.raw.as_str());
+                    let start = quasi.span.start as usize - 1;
+                    let end = quasi.span.end as usize + if i + 1 == t.quasis.len() { 1 } else { 2 };
+                    let chunk = self.source[start..end].to_string();
+                    self.emit_node(out, self.pos_of(start as u32), end as u32, |s, o| {
+                        s.write(o, &chunk);
+                        Some(())
+                    })?;
                     if let Some(ty) = t.types.get(i) {
-                        // `${` sits right after the quasi's cooked text and
-                        // keeps its same-line JSDoc comments:
-                        // `` `${ /** j */ string}` `` prints as written.
-                        let dollar = quasi.span.end;
-                        self.token_with_comment(
-                            out,
-                            "${",
-                            self.pos_of(dollar),
-                            dollar + 2,
-                            t.span.end,
-                        )?;
                         self.ty_node(out, ty)?;
-                        self.write(out, "}");
                     }
                 }
-                self.write(out, "`");
             }
             TSType::TSTypeQuery(q) => {
                 // `typeof x` names a value; ngtsc emits the entity name part
@@ -1754,14 +1756,9 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
         let before = &source[..end];
         let trimmed = before.trim_end();
         if before[trimmed.len()..].contains(is_line_break) {
-            // After the line break, which can be more than one byte (U+2028).
-            let line_start = trimmed
-                .char_indices()
-                .rfind(|&(_, c)| is_line_break(c))
-                .map_or(0, |(i, c)| i + c.len_utf8());
-            if let Some(slashes) = line_comment_start(&trimmed[line_start..]) {
+            if let Some(slashes) = line_comment_start(trimmed) {
                 // The line ends at the comment; keep looking before it.
-                end = line_start + slashes;
+                end = slashes;
                 continue;
             }
         }
@@ -1773,15 +1770,19 @@ fn token_end_before(source: &str, start: usize) -> Option<usize> {
     }
 }
 
-/// The `//` starting a line comment in `line`, or `None` when the only `//`s
-/// are inside strings or `/* */` comments. (A `//` inside a `${}` of a
-/// template spanning lines can slip through; types don't produce those.)
-fn line_comment_start(line: &str) -> Option<usize> {
-    let bytes = line.as_bytes();
+/// The `//` opening a line comment that runs to the end of `code` — so it
+/// sits on the last line and bounds the trivia — or `None`. Strings and
+/// `/* */` comments are skipped, so `//`s inside them don't count (a `/*`
+/// opened on an earlier line keeps its `//`s from counting; an unterminated
+/// one means the rest is comment text, and a `//` inside a template's `${}`
+/// hole is scanned as template text — types don't produce those).
+fn line_comment_start(code: &str) -> Option<usize> {
+    let bytes = code.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
             b'\'' | b'"' | b'`' => {
+                // Unterminated means the rest is string text: no `//` counts.
                 let quote = bytes[i];
                 i += 1;
                 while i < bytes.len() {
@@ -1794,11 +1795,17 @@ fn line_comment_start(line: &str) -> Option<usize> {
                 }
                 i += 1;
             }
-            b'/' if bytes.get(i + 1) == Some(&b'/') => return Some(i),
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                match code[i + 2..].find(is_line_break) {
+                    // On an earlier line: skip it and keep looking.
+                    Some(end) => i += 2 + end,
+                    None => return Some(i),
+                }
+            }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                // Unterminated on this line means the rest is comment.
-                match line[i + 2..].find("*/") {
+                match code[i + 2..].find("*/") {
                     Some(end) => i += 2 + end + 2,
+                    // Unterminated: the rest is comment text.
                     None => return None,
                 }
             }
