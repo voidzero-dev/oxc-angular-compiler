@@ -28,8 +28,8 @@ pub use compiler::{
 };
 pub(crate) use decorator::find_directive_decorator;
 pub(crate) use decorator::{
-    INPUT_API, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS, initializer_api,
-    initializer_api_call,
+    INPUT_API, InitializerApi, MODEL_API, OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, QUERY_APIS,
+    initializer_api, initializer_api_call,
 };
 pub use decorator::{
     StringConsts, collect_string_consts, decorator_io_errors, extract_directive_metadata,
@@ -50,9 +50,9 @@ pub use metadata::{
 };
 pub(crate) use property_decorators::{
     angular_class_decorator, angular_member_decorator, angular_param_decorator,
-    extract_host_bindings_in, extract_host_listeners_in, is_angular_core_decorator,
-    parse_decorator_queries, try_parse_signal_input, try_parse_signal_model,
-    try_parse_signal_output, unwrap_initializer_api_expr,
+    decorator_written_name, extract_host_bindings_in, extract_host_listeners_in,
+    is_angular_core_decorator, parse_decorator_queries, try_parse_signal_input,
+    try_parse_signal_model, try_parse_signal_output, unwrap_initializer_api_expr,
 };
 pub use property_decorators::{
     extract_class_queries, extract_content_queries, extract_host_bindings, extract_host_listeners,

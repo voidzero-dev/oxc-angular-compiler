@@ -8,6 +8,7 @@ use oxc_ast::ast::{
     Class, ClassElement, Decorator, Expression, FormalParameter, MethodDefinitionKind,
     ObjectPropertyKind, PropertyKey, TSType, TSTypeName,
 };
+use oxc_span::GetSpan;
 use oxc_str::Ident;
 
 use crate::component::{ImportMap, NamespaceRegistry, R3DependencyMetadata};
@@ -20,7 +21,7 @@ use crate::output::ast::{
     LiteralMapExpr, LiteralValue, OutputExpression, ReadPropExpr, ReadVarExpr,
 };
 use crate::output::oxc_converter::{
-    convert_oxc_expression, convert_plain_properties, is_plain_property,
+    convert_oxc_expression, convert_plain_properties, is_plain_property, make_raw_source,
 };
 
 /// Build the decorators metadata array expression.
@@ -158,7 +159,14 @@ pub fn build_decorator_metadata_array<'a>(
 
         if !args_emitted && let Expression::CallExpression(call) = &decorator.expression {
             for (arg_idx, arg) in call.arguments.iter().enumerate() {
-                let expr = arg.to_expression();
+                // A `...args` spread isn't an `Expression`; its raw source
+                // (`...X`) emits the same spread upstream copies verbatim.
+                let Some(expr) = arg.as_expression() else {
+                    if let Some(raw) = make_raw_source(allocator, source_text, arg.span()) {
+                        args.push(raw);
+                    }
+                    continue;
+                };
                 let converted = convert_oxc_expression(allocator, expr, source_text);
                 if let Some(mut converted) = converted {
                     // Same template-literal drop as the transformed path, applied
@@ -752,9 +760,13 @@ fn build_signal_query_decorator<'a>(
 
     // Predicate: the first positional argument (required), reused as-is. A query with
     // no locator is invalid (ngc errors); skip synthesis rather than emit a malformed
-    // decorator.
-    let predicate =
-        convert_oxc_expression(allocator, call.arguments.first()?.to_expression(), source_text)?;
+    // decorator. A `...args` spread isn't an `Expression`; like the compiled
+    // query's `WrappedNodeExpr` fallback, only the raw source can stand in.
+    let first = call.arguments.first()?;
+    let predicate = match first.as_expression() {
+        Some(expr) => convert_oxc_expression(allocator, expr, source_text)?,
+        None => make_raw_source(allocator, source_text, first.span())?,
+    };
     let mut args = AllocVec::new_in(&allocator);
     args.push(predicate);
 
@@ -763,8 +775,8 @@ fn build_signal_query_decorator<'a>(
     // which preserves any options expression, object literal or not.
     let mut options = AllocVec::new_in(&allocator);
     if let Some(second) = call.arguments.get(1)
-        && let Some(source_options) =
-            convert_oxc_expression(allocator, second.to_expression(), source_text)
+        && let Some(expr) = second.as_expression()
+        && let Some(source_options) = convert_oxc_expression(allocator, expr, source_text)
     {
         options.push(LiteralMapEntry::spread(source_options));
     }

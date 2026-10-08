@@ -25,6 +25,7 @@
 #![warn(missing_docs)]
 
 mod util;
+mod validation;
 
 pub mod ast;
 pub mod class_debug_info;

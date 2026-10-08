@@ -12480,15 +12480,16 @@ export class AppComponent {}
     );
 }
 
-/// An interpolated `${...}` whose identifier is NOT a known const must NOT
-/// crash and must NOT produce a partial/garbage selector — the field is
-/// dropped (same fallback as today for any unresolvable identifier).
+/// An interpolated `${...}` whose identifier is NOT a known const is a
+/// non-string selector upstream (`createValueHasWrongTypeError`, shared.ts:
+/// `selector must be a string` for components too): the diagnostic is
+/// reported while the emitted `ɵcmp` still falls back to `ng-component`.
 ///
-/// Scope: this test asserts ONLY on the `ɵcmp` selectors field. Since #299
-/// turned `emit_class_metadata` on by default, the raw `${UNRESOLVED}-tag`
-/// template literal is intentionally preserved verbatim inside
-/// `ɵsetClassMetadata(..., [{ type: Component, args: [...] }], ...)` to
-/// mirror ngc's behavior — that's metadata for runtime tooling and is not
+/// Scope: this test asserts ONLY on the diagnostic and the `ɵcmp` selectors
+/// field. Since #299 turned `emit_class_metadata` on by default, the raw
+/// `${UNRESOLVED}-tag` template literal is intentionally preserved verbatim
+/// inside `ɵsetClassMetadata(..., [{ type: Component, args: [...] }], ...)`
+/// to mirror ngc's behavior — that's metadata for runtime tooling and is not
 /// the compiled selector itself.
 #[test]
 fn component_template_literal_unresolved_identifier_drops_field() {
@@ -12504,8 +12505,13 @@ import { Component } from '@angular/core';
 export class UnresolvedComponent {}
 "#;
     let result = transform_angular_file(&allocator, "u.component.ts", source, None, None);
-    // Must not crash.
-    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    // The unresolved interpolation is reported — but the pipeline still emits.
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}")
+            == "selector must be a string Value could not be determined statically."),
+        "non-string @Component selector should error. Got: {:?}",
+        result.diagnostics
+    );
 
     // The unresolved interpolation must not appear inside the `ɵcmp`'s
     // `selectors:` slot — that's the compiled selector that actually drives
@@ -12520,6 +12526,35 @@ export class UnresolvedComponent {}
     );
     // And the compiled selector must fall back to the default tag, matching
     // ngc's behavior when a metadata interpolation can't be resolved.
+    assert!(
+        cmp_def.contains(r#"selectors:[["ng-component"]]"#),
+        "Selector should fall back to `ng-component`.\nɵcmp:\n{cmp_def}"
+    );
+}
+
+/// The same `selector must be a string` check for a resolved non-string:
+/// `selector: 42` on @Component errors, and the `ɵcmp` still emits the
+/// `ng-component` fallback.
+#[test]
+fn component_non_string_selector_reports_error_and_falls_back() {
+    let allocator = Allocator::default();
+    let source = r#"
+import { Component } from '@angular/core';
+
+@Component({ selector: 42, template: '' })
+export class C {}
+"#;
+    let result = transform_angular_file(&allocator, "c.component.ts", source, None, None);
+    assert!(
+        result.diagnostics.iter().any(|d| format!("{d}").starts_with("selector must be a string")),
+        "@Component selector: 42 should error. Got: {:?}",
+        result.diagnostics
+    );
+
+    let cmp_start = result.code.find("ɵɵdefineComponent({").expect("ɵcmp missing");
+    let cmp_section = &result.code[cmp_start..];
+    let cmp_end = cmp_section.find("})").expect("ɵcmp not terminated");
+    let cmp_def = &cmp_section[..cmp_end];
     assert!(
         cmp_def.contains(r#"selectors:[["ng-component"]]"#),
         "Selector should fall back to `ng-component`.\nɵcmp:\n{cmp_def}"
@@ -12569,10 +12604,8 @@ export class C {}
 #[test]
 fn directive_empty_selector_emits_no_invalid_selectors() {
     // Upstream, `selector: ''` on @Directive resolves to the `null` default
-    // selector and raises NG2004. Until directive diagnostics land, the best
-    // OXC can do is not emit an invalid `selectors` array like `[[""]]` —
-    // and it must NOT fall back to `ng-component` (that fallback is
-    // component-only).
+    // selector and raises NG2004 (DIRECTIVE_MISSING_SELECTOR). It must NOT
+    // fall back to `ng-component` (that fallback is component-only).
     let allocator = Allocator::default();
     let source = r#"
 import { Directive } from '@angular/core';
@@ -12581,7 +12614,14 @@ import { Directive } from '@angular/core';
 export class D {}
 "#;
     let result = transform_angular_file(&allocator, "d.directive.ts", source, None, None);
-    assert!(!result.has_errors(), "Should not have errors: {:?}", result.diagnostics);
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|d| format!("{d}") == "Directive D has no selector, please add it!"),
+        "Empty @Directive selector should report NG2004. Got: {:?}",
+        result.diagnostics
+    );
 
     let dir_start = result.code.find("ɵɵdefineDirective({").expect("ɵdir missing");
     let dir_section = &result.code[dir_start..];
@@ -16635,4 +16675,766 @@ export class C {
         "instance members must not produce the static-member diagnostic: {:?}",
         result.diagnostics
     );
+}
+
+// ============================================================================
+// Issue #508: diagnostics ngtsc reports that were silently dropped
+// ============================================================================
+// DUPLICATE_BINDING_NAME (NG1054), DECORATOR_COLLISION on query members
+// (NG1006), INITIALIZER_API_DISALLOWED_MEMBER_VISIBILITY (NG1053), the
+// signal-options literal checks (NG1010), DIRECTIVE_MISSING_SELECTOR
+// (NG2004), @Output on any member kind, and UNSUPPORTED_INITIALIZER_API_USAGE
+// (NG8110).
+
+fn expect_result(source: &str) -> oxc_angular_compiler::TransformResult {
+    let allocator = Allocator::default();
+    transform_angular_file(&allocator, "test.ts", source, None, None)
+}
+
+#[test]
+fn test_duplicate_input_binding_name_is_diagnostic() {
+    // `parseInputFields` maps bindingPropertyName -> member; a second member
+    // for the same name is an error, named for both members.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Input('y') x: any;\n    @Input() y: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Input 'y' is bound to both 'x' and 'y'."),
+        "expected the duplicate-binding error. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_duplicate_input_binding_name_labels_first_binding() {
+    // ngtsc attaches `The first binding is declared here.` to the first
+    // member's node as related information — a second label on the diagnostic.
+    let result = expect_result(
+        "import { Directive, Input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Input('y') x: any;\n    @Input() y: any;\n}",
+    );
+    let diagnostic = result
+        .diagnostics
+        .iter()
+        .find(|d| format!("{d}") == "Input 'y' is bound to both 'x' and 'y'.")
+        .expect("duplicate-binding diagnostic missing");
+    assert_eq!(
+        diagnostic.labels.len(),
+        2,
+        "diagnostic should carry the primary and related labels: {diagnostic:?}"
+    );
+    assert_eq!(diagnostic.labels[1].label(), Some("The first binding is declared here."));
+}
+
+#[test]
+fn test_duplicate_signal_and_model_binding_names() {
+    // A signal input's literal alias joins the same binding map.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input, input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = input(0, { alias: 'y' });\n    @Input() y: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Input 'y' is bound to both 'x' and 'y'."),
+        "signal input alias should collide. Got: {diagnostics:?}"
+    );
+
+    // `a = model(0)` binds the output `aChange`, colliding with
+    // `@Output() aChange`.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Output, model } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    a = model(0);\n    @Output() aChange = null;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Output 'aChange' is bound to both 'a' and 'aChange'."),
+        "model output binding should collide. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_duplicate_output_binding_name_is_diagnostic() {
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Output('y') x = null;\n    @Output() y = null;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Output 'y' is bound to both 'x' and 'y'."),
+        "expected the duplicate-binding error. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_duplicate_binding_check_order_against_static() {
+    // `parseInputFields` checks the duplicate binding BEFORE the static
+    // check: a second member binding `y` errors first even when the member
+    // itself is also static.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Input() y: any;\n    @Input('y') static x: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Input 'y' is bound to both 'y' and 'x'."),
+        "inputs report the duplicate before the static error. Got: {diagnostics:?}"
+    );
+
+    // `parseOutputFields` checks static FIRST: a static member errors before
+    // a later duplicate is reached.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Output('y') static x = null;\n    @Output() y = null;\n}",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.contains("Output is incorrectly declared on a static class member.")),
+        "outputs report the static error before a later duplicate. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_multiple_query_decorators_on_member_is_diagnostic() {
+    // `tryGetQueryFromFieldDecorator` collects all query decorators; more
+    // than one is a DECORATOR_COLLISION (trailing period).
+    for member in [
+        "@ViewChild('a') @ViewChildren('b') x: any;",
+        "@ViewChild('a') @ViewChild('b') x: any;",
+        "@ContentChild('a') @ContentChildren('b') x: any;",
+    ] {
+        let source = format!(
+            "import {{ Directive, ViewChild, ViewChildren, ContentChild, ContentChildren }} \
+             from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d == "Cannot combine multiple query decorators."),
+            "`{member}` should report the multi-decorator collision. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_input_and_query_decorator_collision_is_diagnostic() {
+    // `@Input` combined with a query decorator is a DECORATOR_COLLISION, and
+    // the message has NO trailing period.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input, ViewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Input() @ViewChild('a') x: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Cannot combine @Input decorators with query decorators"),
+        "expected the @Input/query collision (no period). Got: {diagnostics:?}"
+    );
+
+    // The written name decides, not the resolved import: an aliased @In is
+    // not 'Input' upstream, so the member parses as both input and query.
+    let allocator = Allocator::default();
+    let result = transform_angular_file(
+        &allocator,
+        "test.ts",
+        "import { Directive, Input as In, ViewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @In() @ViewChild('a') x: any;\n}",
+        None,
+        None,
+    );
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains("Cannot combine")),
+        "aliased @In must not trigger the collision. Got: {:?}",
+        result.diagnostics
+    );
+
+    // `@core.Input` IS written 'Input' (the member-access tail).
+    let diagnostics = expect_diagnostics(
+        "import { Directive } from '@angular/core';\n\
+         import * as core from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @core.Input() @core.ViewChild('a') x: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Cannot combine @Input decorators with query decorators"),
+        "@core.Input should trigger the collision. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_initializer_api_disallowed_member_visibility() {
+    // INITIALIZER_API_DISALLOWED_MEMBER_VISIBILITY (NG1053): inputs, models
+    // and outputs disallow private / ES private members.
+    for (member, expected) in [
+        (
+            "private x = input(0);",
+            "Cannot use \"input\" on a class member that is declared as private.\nUpdate the class field to be either: public, public readonly, protected",
+        ),
+        (
+            "private x = input.required(0);",
+            "Cannot use \"input\" on a class member that is declared as private.\nUpdate the class field to be either: public, public readonly, protected",
+        ),
+        (
+            "#x = input(0);",
+            "Cannot use \"input\" on a class member that is declared as ES private.\nUpdate the class field to be either: public, public readonly, protected",
+        ),
+        (
+            "private x = output<number>();",
+            "Cannot use \"output\" on a class member that is declared as private.\nUpdate the class field to be either: public, public readonly, protected",
+        ),
+        // The input pass parses model() first and reports 'model'.
+        (
+            "private x = model(0);",
+            "Cannot use \"model\" on a class member that is declared as private.\nUpdate the class field to be either: public, public readonly, protected",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, input, model, output }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d == expected),
+            "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+
+    // Query functions additionally allow a TS `private` member — but not an
+    // ES private `#x`.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    #x = viewChild('a');\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            == "Cannot use \"viewChild\" on a class member that is declared as ES private.\nUpdate the class field to be either: public, public readonly, protected, private"),
+        "#x = viewChild should report ES private. Got: {diagnostics:?}"
+    );
+    // `private` is allowed for queries, so parsing reaches the locator check.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    private x = viewChild();\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "No locator specified."),
+        "private x = viewChild() should reach the locator check. Got: {diagnostics:?}"
+    );
+
+    // `protected` and `readonly` are allowed for inputs: no diagnostic.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    protected a = input(0);\n    readonly b = input(0);\n}",
+    );
+    assert!(
+        diagnostics.is_empty(),
+        "protected/readonly inputs should compile. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_initializer_api_options_must_be_literals() {
+    // NG1010: the options argument must be an object literal — a resolved
+    // const or import is not accepted — and `alias` must be a string literal.
+    for (member, import, expected) in [
+        (
+            "x = input(0, OPTS);",
+            "input",
+            "Argument needs to be an object literal that is statically analyzable.",
+        ),
+        (
+            "x = input(0, { alias: ALIAS });",
+            "input",
+            "Alias needs to be a string that is statically analyzable.",
+        ),
+        (
+            "x = output(OBJ);",
+            "output",
+            "Argument needs to be an object literal that is statically analyzable.",
+        ),
+        (
+            "x = outputFromObservable(s, OBJ);",
+            "output",
+            "Argument needs to be an object literal that is statically analyzable.",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, {import} }} from '@angular/core';\n\
+             import {{ outputFromObservable }} from '@angular/core/rxjs-interop';\n\
+             const OPTS = {{}};\nconst ALIAS = 'a';\nconst OBJ = {{}};\nconst s = null;\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d == expected),
+            "`{member}` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+
+    // A literal alias still binds — two members aliased to the same name
+    // collide, and input.required takes its options at index 0.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input, input } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = input.required({ alias: 'y' });\n    @Input() y: any;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Input 'y' is bound to both 'x' and 'y'."),
+        "literal alias on input.required should bind. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_directive_selector_diagnostics() {
+    // `selector: 42` on @Directive is not a string — `selector must be a
+    // string` with the wrong-type suffix.
+    let diagnostics = expect_diagnostics(
+        "import { Directive } from '@angular/core';\n\
+         @Directive({ selector: 42 })\n\
+         export class D {}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.starts_with("selector must be a string")),
+        "@Directive selector: 42 should error. Got: {diagnostics:?}"
+    );
+
+    // `extractDirectiveMetadata` runs the same check for @Component: an
+    // unresolved or non-string selector is an error there too (the emitted
+    // `ɵcmp` still falls back to `ng-component`).
+    for extra in ["selector: 42", "selector: `${UNRESOLVED}-tag`"] {
+        let source = format!(
+            "import {{ Component }} from '@angular/core';\n\
+             @Component({{ {extra}, template: '' }})\n\
+             export class C {{}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d.starts_with("selector must be a string")),
+            "@Component {extra} should report this diagnostic. Got: {diagnostics:?}"
+        );
+    }
+
+    // No `selector` key is fine on both.
+    let diagnostics = expect_diagnostics(
+        "import { Directive } from '@angular/core';\n\
+         @Directive({})\n\
+         export class D {}",
+    );
+    assert!(diagnostics.is_empty(), "missing selector is not an error: {diagnostics:?}");
+
+    // `selector: ''` is NG2004 on a directive but the default on a component.
+    let diagnostics = expect_diagnostics(
+        "import { Directive } from '@angular/core';\n\
+         @Directive({ selector: '' })\n\
+         export class D {}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "Directive D has no selector, please add it!"),
+        "empty directive selector should report NG2004. Got: {diagnostics:?}"
+    );
+    let diagnostics = expect_diagnostics(
+        "import { Component } from '@angular/core';\n\
+         @Component({ selector: '', template: '' })\n\
+         export class C {}",
+    );
+    assert!(
+        diagnostics.is_empty(),
+        "empty component selector falls back to the default. Got: {diagnostics:?}"
+    );
+
+    // An io error wins over the selector check, which is the last thing
+    // `extractDirectiveMetadata` reads.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, Input } from '@angular/core';\n\
+         @Directive({ selector: '' })\n\
+         export class D {\n    @Input() static x = 0;\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.contains("is incorrectly declared as static")),
+        "io error should precede the selector check. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_output_decorator_on_setter_emits_output() {
+    // `tryParseDecoratorOutput` accepts any member kind upstream: an @Output
+    // setter is an output, in the definition and the .d.ts.
+    let result = expect_result(
+        "import { Directive, Output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Output() set o(v: any) {}\n}",
+    );
+    assert!(!result.has_errors(), "@Output setter errored: {:?}", result.diagnostics);
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains("outputs:{o:\"o\"}"),
+        "@Output setter should emit outputs:{{o:\"o\"}}. Got:\n{}",
+        result.code
+    );
+    let decl =
+        result.dts_declarations.iter().find(|d| d.class_name == "D").expect("d.ts missing for D");
+    assert!(
+        decl.members.contains("\"o\": \"o\""),
+        "d.ts should include the output map. Members:\n{}",
+        decl.members
+    );
+}
+
+#[test]
+fn test_computed_output_member_emits_no_output() {
+    // `reflectClassMember` returns null for a computed name upstream — an
+    // `@Output` on `['o']` binds nothing.
+    for member in [
+        "@Output() set ['o'](v: any) {}",
+        "@Output() get ['o']() { return null; }",
+        "@Output() ['o']() {}",
+        "@Output() ['o'] = new EventEmitter<any>();",
+        "['o'] = output<any>();",
+    ] {
+        let result = expect_result(&format!(
+            "import {{ Directive, Output, output }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}",
+        ));
+        let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            !code.contains("outputs:{o:"),
+            "computed member `{member}` must emit no `o` output. Got:\n{}",
+            result.code
+        );
+    }
+
+    // A non-computed string key still emits, under its quoted name.
+    let result = expect_result(
+        "import { Directive, Output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    @Output() set 'o'(v: any) {}\n}",
+    );
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains("outputs:{o:\"o\"}"),
+        "'o' setter should emit outputs:{{o:\"o\"}}. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_computed_input_member_emits_no_input() {
+    // The same `reflectClassMember` null for input members.
+    for member in ["@Input() set ['i'](v: any) {}", "@Input() ['i'] = 0;", "['i'] = input(0);"] {
+        let result = expect_result(&format!(
+            "import {{ Directive, Input, input }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}",
+        ));
+        let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(
+            !code.contains("inputs:{i:"),
+            "computed member `{member}` must emit no `i` input. Got:\n{}",
+            result.code
+        );
+    }
+}
+
+#[test]
+fn test_initializer_api_usage_outside_class_member() {
+    // UNSUPPORTED_INITIALIZER_API_USAGE (NG8110): a call to an initializer
+    // API anywhere but a property initializer of an Angular class.
+    for (snippet, expected) in [
+        (
+            "export class C {\n    x = input(0)!;\n}",
+            "Unsupported call to the input function. This function can only be called in the initializer of a class member.",
+        ),
+        (
+            "export class C {\n    constructor() { const x = input(0); }\n}",
+            "Unsupported call to the input function. This function can only be called in the initializer of a class member.",
+        ),
+        (
+            "export class C {\n    x = input(0) satisfies any;\n}",
+            "Unsupported call to the input function. This function can only be called in the initializer of a class member.",
+        ),
+        (
+            "function f() { return input(0); }",
+            "Unsupported call to the input function. This function can only be called in the initializer of a class member.",
+        ),
+        (
+            "const c = class { x = input(0); };",
+            "Unsupported call to the input function. This function can only be called in the initializer of a class member.",
+        ),
+        (
+            "@Directive({ selector: '[d]' })\nclass C {}\nexport class D {\n    x = input(0);\n}",
+            "Unsupported call to the input function. This function can only be used as the initializer of a property on a @Component or @Directive class.",
+        ),
+        (
+            "@Injectable()\nexport class D {\n    x = input(0);\n}",
+            "Unsupported call to the input function. This function can only be used as the initializer of a property on a @Component or @Directive class.",
+        ),
+        // The written name decides: `@Cmp` is not `Component`/`Directive`.
+        (
+            "@Cmp({ selector: 'c', template: '' })\nexport class C {\n    x = input(0);\n}",
+            "Unsupported call to the input function. This function can only be used as the initializer of a property on a @Component or @Directive class.",
+        ),
+        (
+            "export class C {\n    x = input.required(0);\n}",
+            "Unsupported call to the input.required function. This function can only be used as the initializer of a property on a @Component or @Directive class.",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, Injectable, Component as Cmp, input }} from '@angular/core';\n\
+             {snippet}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d == expected),
+            "snippet {snippet:?} should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+
+    // Wrapped calls never produce the diagnostic: upstream's `node` is no
+    // longer the call once parens/`as` unwrap it.
+    for member in ["x = (input(0));", "x = input(0) as any;"] {
+        let source = format!(
+            "import {{ Directive, input }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("Unsupported call")),
+            "`{member}` must not report NG8110. Got: {diagnostics:?}"
+        );
+    }
+
+    // Without the Angular imports the rule doesn't run at all.
+    let diagnostics = expect_diagnostics(
+        "declare function input(v: number): number;\n\
+         export class C {\n    x = input(0);\n}",
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d.contains("Unsupported call")),
+        "no Angular import means no NG8110. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_initializer_api_usage_shadowed_identifiers() {
+    // `getSymbolAtLocation` upstream: a name lexically bound to a parameter
+    // or local isn't the import, however the file-level import map reads it.
+    for snippet in [
+        "function f(input: any) {\n    input();\n}",
+        "function f(input: any) {\n    input.required(0);\n}",
+        "function f() {\n    const input = () => 0;\n    input();\n}",
+        "const input = () => 0;\nfunction f() {\n    input();\n}",
+        "class C {\n    constructor(private input: any) {\n        input();\n    }\n}",
+        "function f(input: any) {\n    @Directive({ selector: '[d]' })\n    class D {\n        x = input();\n    }\n}",
+    ] {
+        let source = format!("import {{ Directive, input }} from '@angular/core';\n{snippet}");
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("Unsupported call")),
+            "shadowed `input` in {snippet:?} must not report NG8110. Got: {diagnostics:?}"
+        );
+    }
+
+    // A shadowed namespace import isn't one either.
+    for snippet in [
+        "function g(ngc: any) {\n    ngc.input(0);\n}",
+        "function g() {\n    const ngc = { input: (v: any) => v };\n    ngc.input(0);\n}",
+        "function g(ngc: any) {\n    ngc.input.required(0);\n}",
+    ] {
+        let source = format!("import * as ngc from '@angular/core';\n{snippet}");
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            !diagnostics.iter().any(|d| d.contains("Unsupported call")),
+            "shadowed `ngc` in {snippet:?} must not report NG8110. Got: {diagnostics:?}"
+        );
+    }
+
+    // ...while the real imports still error, next to the shadowed uses.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, input } from '@angular/core';\n\
+         function f(input: any) {\n    input();\n}\n\
+         const x = input(0);",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            == "Unsupported call to the input function. This function can only be called in the initializer of a class member."),
+        "top-level misuse must still report NG8110. Got: {diagnostics:?}"
+    );
+    let diagnostics = expect_diagnostics(
+        "import * as ngc from '@angular/core';\n\
+         function g(ngc: any) {\n    ngc.input(0);\n}\n\
+         const x = ngc.input(0);",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d
+            == "Unsupported call to the input function. This function can only be called in the initializer of a class member."),
+        "top-level namespaced misuse must still report NG8110. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_computed_alias_key_in_initializer_options_is_ignored() {
+    // `propertyNameToString` skips a ComputedPropertyName upstream: `{['alias']: ...}`
+    // is NOT an alias — the member keeps its own binding name and the value
+    // never hits the "statically analyzable" alias check.
+    let result = expect_result(
+        "import { Directive, input } from '@angular/core';\n\
+         const ALIAS = 'a';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = input(0, { ['alias']: ALIAS });\n}",
+    );
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}")
+            .contains("Alias needs to be a string that is statically analyzable.")),
+        "computed ['alias'] must not hit the alias check. Got: {:?}",
+        result.diagnostics
+    );
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains("inputs:{x:[1,\"x\"]}"),
+        "computed ['alias'] must not bind the input to another name. Got:\n{}",
+        result.code
+    );
+
+    // Same for a literal value — it binds `x`, not `y`.
+    let result = expect_result(
+        "import { Directive, output } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = output<number>({ ['alias']: 'y' });\n}",
+    );
+    assert!(
+        !result.diagnostics.iter().any(|d| format!("{d}").contains("Alias")),
+        "computed ['alias'] on output() must not hit the alias check. Got: {:?}",
+        result.diagnostics
+    );
+    let code: String = result.code.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(
+        code.contains("outputs:{x:\"x\"}"),
+        "computed ['alias'] must not bind the output to 'y'. Got:\n{}",
+        result.code
+    );
+}
+
+#[test]
+fn test_spread_locator_and_options_argument_diagnostics() {
+    // A spread locator is `arguments[0]` upstream, not `undefined`: no
+    // 'No locator specified.' — the predicate is emitted as written.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, viewChild } from '@angular/core';\n\
+         const ARGS: any[] = [];\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = viewChild(...ARGS);\n}",
+    );
+    assert!(
+        !diagnostics.iter().any(|d| d == "No locator specified."),
+        "viewChild(...ARGS) must not report a missing locator. Got: {diagnostics:?}"
+    );
+
+    // The no-argument call still reports it.
+    let diagnostics = expect_diagnostics(
+        "import { Directive, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]' })\n\
+         export class D {\n    x = viewChild();\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d == "No locator specified."),
+        "viewChild() should still report the missing locator. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_spread_decorator_argument_is_wrong_type() {
+    // `decorator.args[0]` evaluated upstream is a DynamicValue for a spread:
+    // the wrong-type error, not a silent no-argument decorator.
+    for (decorator, expected) in [
+        (
+            "Input",
+            "@Input decorator argument must resolve to a string or an object literal Value could not be determined statically.",
+        ),
+        (
+            "Output",
+            "@Output decorator argument must resolve to a string Value could not be determined statically.",
+        ),
+    ] {
+        let source = format!(
+            "import {{ Directive, {decorator} }} from '@angular/core';\n\
+             const X: any = null;\n\
+             @Directive({{ selector: '[d]' }})\n\
+             export class D {{\n    @{decorator}(...X) x: any;\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.iter().any(|d| d == expected),
+            "`@{decorator}(...X)` should report {expected:?}. Got: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn test_outputs_meta_collision_on_all_member_kinds() {
+    // `outputsFromMeta.hasOwnProperty(member.name)` runs for every reflected
+    // member kind — an auto-accessor with an output() initializer collides
+    // with `outputs:` too. (A `#x` member never reaches it: the ES-private
+    // visibility check fires first.)
+    let diagnostics = expect_diagnostics(
+        "import { Directive, output } from '@angular/core';\n\
+         @Directive({ selector: '[d]', outputs: ['x'] })\n\
+         export class D {\n    accessor x = output();\n}",
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d == "Output \"x\" is unexpectedly declared in @Directive as well."),
+        "`accessor x = output()` + `outputs: ['x']` should collide. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_queries_meta_collision_on_accessor_members() {
+    // `signalQueryFields` covers every member kind upstream — an auto-accessor
+    // holding a signal query collides with `queries:` naming it too. (A `#x`
+    // member never reaches it: the ES-private visibility check fires first.)
+    let diagnostics = expect_diagnostics(
+        "import { Directive, ViewChild, viewChild } from '@angular/core';\n\
+         @Directive({ selector: '[d]', queries: {x: new ViewChild('a')} })\n\
+         export class D {\n    accessor x = viewChild('a');\n}",
+    );
+    assert!(
+        diagnostics.iter().any(|d| d.contains("Query is declared multiple times.")),
+        "`accessor x = viewChild()` + `queries` naming x should collide. Got: {diagnostics:?}"
+    );
+}
+
+#[test]
+fn test_unnameable_members_are_silent() {
+    // `reflectClassMember` drops members whose name can't be reflected
+    // (computed `['k']`, numeric `0:` keys): no decorator, static, visibility
+    // or metadata-collision diagnostics for them.
+    for member in [
+        "@Input('y') ['k'] = 0;",
+        "@Input(5) ['k'] = 0;",
+        "@Output() ['k'] = null;",
+        "static ['k'] = output();",
+        "['k'] = viewChild('a');",
+    ] {
+        let source = format!(
+            "import {{ Directive, Input, Output, output, viewChild }} from '@angular/core';\n\
+             @Directive({{ selector: '[d]', outputs: ['k'] }})\n\
+             export class D {{\n    {member}\n}}"
+        );
+        let diagnostics = expect_diagnostics(&source);
+        assert!(
+            diagnostics.is_empty(),
+            "`{member}` should raise no diagnostics. Got: {diagnostics:?}"
+        );
+    }
 }

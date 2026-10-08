@@ -13,8 +13,8 @@
 
 use oxc_allocator::{Allocator, Vec};
 use oxc_ast::ast::{
-    Argument, ArrayExpressionElement, Class, ClassElement, Decorator, Expression,
-    MethodDefinitionKind, ObjectPropertyKind, PropertyKey,
+    Argument, ArrayExpressionElement, CallExpression, Class, ClassElement, Decorator, Expression,
+    MethodDefinitionKind, ObjectPropertyKind, PropertyKey, TSAccessibility,
 };
 use oxc_span::{GetSpan, Span};
 use oxc_str::Ident;
@@ -233,6 +233,162 @@ pub(crate) fn decorator_written_name<'a>(decorator: &'a Decorator<'a>) -> &'a st
         Expression::StaticMemberExpression(m) => m.property.name.as_str(),
         _ => "",
     }
+}
+
+/// ngtsc's `ClassMemberAccessLevel`: how visible a member is to code outside
+/// the class, which the initializer APIs restrict their use to.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AccessLevel {
+    PublicWritable,
+    PublicReadonly,
+    Protected,
+    Private,
+    EsPrivate,
+}
+
+impl AccessLevel {
+    /// ngtsc's `classMemberAccessLevelToString`.
+    fn name(self) -> &'static str {
+        match self {
+            Self::PublicWritable => "public",
+            Self::PublicReadonly => "public readonly",
+            Self::Protected => "protected",
+            Self::Private => "private",
+            Self::EsPrivate => "ES private",
+        }
+    }
+}
+
+/// ngtsc's `ClassMemberAccessLevel` for a class member: an ES private name
+/// (`#x`) is private whatever its modifiers; a modifier wins over `readonly`
+/// (`private readonly` is `private`); everything else is public.
+pub(crate) fn member_access_level(
+    key: &PropertyKey<'_>,
+    accessibility: Option<TSAccessibility>,
+    readonly: bool,
+) -> AccessLevel {
+    if key.is_private_identifier() {
+        AccessLevel::EsPrivate
+    } else {
+        match accessibility {
+            Some(TSAccessibility::Private) => AccessLevel::Private,
+            Some(TSAccessibility::Protected) => AccessLevel::Protected,
+            _ if readonly => AccessLevel::PublicReadonly,
+            _ => AccessLevel::PublicWritable,
+        }
+    }
+}
+
+/// ngtsc's `ClassMember.name`: the member name `reflectClassMember` reports —
+/// an identifier or string literal, and a `#x` private name *including* the
+/// '#'. `None` when the member has no reflectable name (a computed `['k']`,
+/// a numeric `0:` key, ...), which drops it from `getMembersOfClass`
+/// entirely: it can raise none of the member diagnostics.
+pub(crate) fn member_name(element: &ClassElement<'_>) -> Option<String> {
+    let (key, computed) = match element {
+        ClassElement::PropertyDefinition(p) => (&p.key, p.computed),
+        ClassElement::AccessorProperty(p) => (&p.key, p.computed),
+        ClassElement::MethodDefinition(m) => (&m.key, m.computed),
+        _ => return None,
+    };
+    if computed {
+        return None;
+    }
+    match key {
+        PropertyKey::StaticIdentifier(id) => Some(id.name.to_string()),
+        PropertyKey::StringLiteral(lit) => Some(lit.value.to_string()),
+        PropertyKey::PrivateIdentifier(id) => Some(format!("#{}", id.name)),
+        _ => None,
+    }
+}
+
+/// [`member_name`] as an `Ident`, for the extraction passes that emit the
+/// name: a member it can't name — a computed `['k']`, a numeric `0:` — isn't
+/// a member upstream, so no input/output/query is extracted from it.
+fn member_name_ident<'a>(
+    allocator: &'a Allocator,
+    element: &ClassElement<'a>,
+) -> Option<Ident<'a>> {
+    member_name(element).map(|name| Ident::from(allocator.alloc_str(&name)))
+}
+
+/// The `allowedAccessLevels` of ngtsc's `input` / `model` / `output` /
+/// `outputFromObservable` initializer functions.
+pub const IO_ACCESS: &[AccessLevel] =
+    &[AccessLevel::PublicWritable, AccessLevel::PublicReadonly, AccessLevel::Protected];
+
+/// The `allowedAccessLevels` of ngtsc's signal query initializer functions,
+/// which also allow a TS `private` member (unlike an ES private `#x`).
+pub const QUERY_ACCESS: &[AccessLevel] = &[
+    AccessLevel::PublicWritable,
+    AccessLevel::PublicReadonly,
+    AccessLevel::Protected,
+    AccessLevel::Private,
+];
+
+/// ngtsc's `validateAccessOfInitializerApiMember`
+/// (INITIALIZER_API_DISALLOWED_MEMBER_VISIBILITY): the diagnostic it throws
+/// when `api`'s call can't sit on a member of `level`, on the call.
+pub(crate) fn initializer_api_access_error(
+    api: super::decorator::InitializerApi,
+    level: AccessLevel,
+    allowed: &[AccessLevel],
+    call: &CallExpression<'_>,
+) -> Option<(String, Span)> {
+    if allowed.contains(&level) {
+        return None;
+    }
+    let allowed_names = allowed.iter().map(|l| l.name()).collect::<std::vec::Vec<_>>().join(", ");
+    Some((
+        format!(
+            "Cannot use \"{}\" on a class member that is declared as {}.\n\
+             Update the class field to be either: {allowed_names}",
+            api.0,
+            level.name(),
+        ),
+        call.span,
+    ))
+}
+
+/// The `alias` of an initializer API's options argument, read like ngtsc's
+/// `parseAndValidateInputAndOutputOptions`: the argument at `options_index`
+/// must be an object literal (an identifier doesn't count, however
+/// analyzable), and its `alias`, if given, must be a string or
+/// no-substitution template literal — a resolved `const` doesn't count.
+/// `Ok(None)` when there is no such argument or no `alias`.
+pub(crate) fn literal_alias_error<'a>(
+    call: &'a CallExpression<'a>,
+    options_index: usize,
+) -> Result<Option<Ident<'a>>, (String, Span)> {
+    let Some(argument) = call.arguments.get(options_index) else {
+        return Ok(None);
+    };
+    let Argument::ObjectExpression(options) = argument else {
+        return Err((
+            "Argument needs to be an object literal that is statically analyzable.".to_string(),
+            argument.span(),
+        ));
+    };
+    // `reflectObjectLiteral`: a repeated key's last property wins.
+    for prop in options.properties.iter().rev() {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else { continue };
+        // `propertyNameToString` skips a computed key, so `['alias']` is not
+        // an `alias` upstream.
+        if !is_metadata_property(prop)
+            || prop.computed
+            || !get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
+        {
+            continue;
+        }
+        return match extract_string_value(&prop.value) {
+            Some(alias) => Ok(Some(alias)),
+            None => Err((
+                "Alias needs to be a string that is statically analyzable.".to_string(),
+                prop.value.span(),
+            )),
+        };
+    }
+    Ok(None)
 }
 
 /// Get the property key name as an Atom.
@@ -501,8 +657,11 @@ fn options_alias<'a>(options: Option<&Argument<'a>>) -> Option<Ident<'a>> {
     let Some(Argument::ObjectExpression(obj)) = options else { return None };
     let mut alias = None;
     for prop in &obj.properties {
+        // `propertyNameToString` skips a computed key, so `['alias']` is not
+        // an `alias` upstream.
         if let ObjectPropertyKind::ObjectProperty(prop) = prop
             && is_metadata_property(prop)
+            && !prop.computed
             && get_property_key_name(&prop.key).is_some_and(|key| key == "alias")
         {
             alias = extract_string_value(&prop.value);
@@ -645,7 +804,7 @@ pub fn extract_input_metadata_in<'a>(
             ClassElement::PropertyDefinition(prop) => {
                 // First check for @Input decorator
                 if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Input", consts) {
-                    let Some(class_property_name) = get_property_key_name(&prop.key) else {
+                    let Some(class_property_name) = member_name_ident(allocator, element) else {
                         continue;
                     };
 
@@ -664,7 +823,7 @@ pub fn extract_input_metadata_in<'a>(
                 }
                 // Then check for signal-based input (input(), input.required(), model(), model.required())
                 else if let Some(value) = &prop.value {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         // Check for model() first since it also creates an input
                         if let Some(model_mapping) =
                             try_parse_signal_model(allocator, value, property_name.clone(), consts)
@@ -687,7 +846,7 @@ pub fn extract_input_metadata_in<'a>(
                     continue;
                 };
 
-                let Some(class_property_name) = get_property_key_name(&prop.key) else {
+                let Some(class_property_name) = member_name_ident(allocator, element) else {
                     continue;
                 };
 
@@ -712,7 +871,7 @@ pub fn extract_input_metadata_in<'a>(
                     continue;
                 };
 
-                let Some(class_property_name) = get_property_key_name(&method.key) else {
+                let Some(class_property_name) = member_name_ident(allocator, element) else {
                     continue;
                 };
 
@@ -826,7 +985,7 @@ pub fn extract_output_metadata_in<'a>(
                 // First check for @Output decorator
                 if let Some(decorator) = find_decorator_by_name(&prop.decorators, "Output", consts)
                 {
-                    let Some(class_property_name) = get_property_key_name(&prop.key) else {
+                    let Some(class_property_name) = member_name_ident(allocator, element) else {
                         continue;
                     };
 
@@ -839,7 +998,7 @@ pub fn extract_output_metadata_in<'a>(
                 }
                 // Then check for signal-based outputs (output(), model())
                 else if let Some(value) = &prop.value {
-                    if let Some(property_name) = get_property_key_name(&prop.key) {
+                    if let Some(property_name) = member_name_ident(allocator, element) {
                         // Check for output() signal first
                         if let Some(output_mapping) =
                             try_parse_signal_output(value, property_name.clone(), consts)
@@ -862,7 +1021,27 @@ pub fn extract_output_metadata_in<'a>(
                     continue;
                 };
 
-                let Some(class_property_name) = get_property_key_name(&prop.key) else {
+                let Some(class_property_name) = member_name_ident(allocator, element) else {
+                    continue;
+                };
+
+                let config = parse_output_config(allocator, decorator, evaluator.as_ref());
+
+                let binding_property_name =
+                    config.alias.unwrap_or_else(|| class_property_name.clone());
+
+                outputs.push((class_property_name, binding_property_name));
+            }
+
+            // `tryParseDecoratorOutput` accepts any member kind, so a
+            // decorated setter, getter or method is an output too.
+            ClassElement::MethodDefinition(method) => {
+                let Some(decorator) = find_decorator_by_name(&method.decorators, "Output", consts)
+                else {
+                    continue;
+                };
+
+                let Some(class_property_name) = member_name_ident(allocator, element) else {
                     continue;
                 };
 
@@ -1109,16 +1288,23 @@ fn try_parse_signal_query<'a>(
         }
         // Type predicate: viewChild(TemplateRef) or viewChild(forwardRef(() => MyClass))
         _ => {
-            let expr = predicate_arg.to_expression();
-            // Unwrap forwardRef for evaluation; `is_forward_ref` records it so
-            // the partial emitter can re-wrap the predicate.
-            let unwrapped = try_unwrap_forward_ref(expr, consts);
-            is_forward_ref = unwrapped.is_some();
-            let unwrapped_expr = unwrapped.unwrap_or(expr);
-            // ngtsc emits a non-string locator as written (`WrappedNodeExpr`),
-            // so fall back to the source text for what can't be converted.
-            let output_expr = convert_oxc_expression(allocator, unwrapped_expr, source_text)
-                .or_else(|| make_raw_source(allocator, source_text, unwrapped_expr.span()))?;
+            // ngtsc emits a non-string locator as written (`WrappedNodeExpr`);
+            // a spread (`viewChild(...args)`) isn't an `Expression`, so only
+            // the raw source can stand in for it.
+            let output_expr = match predicate_arg.as_expression() {
+                Some(expr) => {
+                    // Unwrap forwardRef for evaluation; `is_forward_ref`
+                    // records it so the partial emitter can re-wrap the
+                    // predicate.
+                    let unwrapped = try_unwrap_forward_ref(expr, consts);
+                    is_forward_ref = unwrapped.is_some();
+                    let unwrapped_expr = unwrapped.unwrap_or(expr);
+                    convert_oxc_expression(allocator, unwrapped_expr, source_text).or_else(
+                        || make_raw_source(allocator, source_text, unwrapped_expr.span()),
+                    )?
+                }
+                None => make_raw_source(allocator, source_text, predicate_arg.span())?,
+            };
             QueryPredicate::Type(output_expr)
         }
     };
@@ -1923,20 +2109,21 @@ pub(crate) fn parse_decorator_queries<'a>(
 
     // A signal query member for the same property is an error: one calling
     // Angular's `viewChild()`, `contentChildren()`, ... (not just any function
-    // named like them).
-    let signal_queries: std::vec::Vec<Ident<'a>> = class
+    // named like them). Any member kind with an initializer counts, and a
+    // `#x` member's name includes the '#'.
+    let signal_queries: std::vec::Vec<String> = class
         .body
         .body
         .iter()
         .filter_map(|element| {
-            let ClassElement::PropertyDefinition(prop) = element else { return None };
-            let name = get_property_key_name(&prop.key)?;
-            super::decorator::is_initializer_api_call(
-                prop.value.as_ref()?,
-                consts,
-                &super::decorator::QUERY_APIS,
-            )
-            .then_some(name)
+            let value = match element {
+                ClassElement::PropertyDefinition(prop) => prop.value.as_ref(),
+                ClassElement::AccessorProperty(accessor) => accessor.value.as_ref(),
+                _ => return None,
+            };
+            let name = member_name(element)?;
+            super::decorator::is_initializer_api_call(value?, consts, &super::decorator::QUERY_APIS)
+                .then_some(name)
         })
         .collect();
     // ngtsc checks the content queries first, and reports the `new` expression.
@@ -1945,7 +2132,7 @@ pub(crate) fn parse_decorator_queries<'a>(
         .iter()
         .zip(content_exprs)
         .chain(queries.view.iter().zip(view_exprs))
-        .find(|(q, _)| signal_queries.contains(&q.property_name));
+        .find(|(q, _)| signal_queries.iter().any(|name| name == q.property_name.as_str()));
     if let Some((_, span)) = collision {
         queries.error = Some((
             format!(
@@ -1993,29 +2180,67 @@ pub(crate) fn member_query_error<'a>(
     class.body.body.iter().find_map(|element| {
         // Upstream's `isPropertyTypeMember`: only getters, setters and
         // properties (incl. auto-accessors) may hold a query decorator.
-        let (decorators, value, is_static, span, is_property_type) = match element {
-            ClassElement::PropertyDefinition(prop) => {
-                (&prop.decorators, prop.value.as_ref(), prop.r#static, prop.span, true)
-            }
-            ClassElement::AccessorProperty(accessor) => (
-                &accessor.decorators,
-                accessor.value.as_ref(),
-                accessor.r#static,
-                accessor.span,
-                true,
-            ),
-            ClassElement::MethodDefinition(method) => (
-                &method.decorators,
-                None,
-                method.r#static,
-                method.span,
-                matches!(method.kind, MethodDefinitionKind::Get | MethodDefinitionKind::Set),
-            ),
-            _ => return None,
-        };
-        let decorator = QUERY_TYPES.iter().find_map(|name| {
-            find_decorator_by_name(decorators, name, Some(consts)).zip(Some(*name))
-        });
+        let (key, decorators, value, is_static, accessibility, readonly, span, is_property_type) =
+            match element {
+                ClassElement::PropertyDefinition(prop) => (
+                    &prop.key,
+                    &prop.decorators,
+                    prop.value.as_ref(),
+                    prop.r#static,
+                    prop.accessibility,
+                    prop.readonly,
+                    prop.span,
+                    true,
+                ),
+                ClassElement::AccessorProperty(accessor) => (
+                    &accessor.key,
+                    &accessor.decorators,
+                    accessor.value.as_ref(),
+                    accessor.r#static,
+                    accessor.accessibility,
+                    false,
+                    accessor.span,
+                    true,
+                ),
+                ClassElement::MethodDefinition(method) => (
+                    &method.key,
+                    &method.decorators,
+                    None,
+                    method.r#static,
+                    method.accessibility,
+                    false,
+                    method.span,
+                    matches!(method.kind, MethodDefinitionKind::Get | MethodDefinitionKind::Set),
+                ),
+                _ => return None,
+            };
+        // A member `reflectClassMember` can't name (`['k']`, `0:`) is not in
+        // `getMembersOfClass` upstream, so it raises no query diagnostics.
+        member_name(element)?;
+        // ngtsc's `getAngularDecorators` collects every query decorator, in
+        // member-decorator order.
+        let query_decorators: std::vec::Vec<(&Decorator<'_>, &'static str)> = decorators
+            .iter()
+            .filter_map(|d| {
+                angular_core_decorator(d, Some(consts), QUERY_TYPES).map(|name| (d, name))
+            })
+            .collect();
+        // `tryGetQueryFromFieldDecorator` reports these collisions first,
+        // before the member-kind and query metadata checks.
+        if query_decorators.len() > 1 {
+            return Some(("Cannot combine multiple query decorators.".to_string(), span));
+        }
+        // `@Input` as written (`decorators.some(v => v.name === 'Input')`):
+        // an aliased `@In` doesn't count, `@core.Input` does.
+        if !query_decorators.is_empty()
+            && decorators.iter().any(|d| decorator_written_name(d) == "Input")
+        {
+            return Some((
+                "Cannot combine @Input decorators with query decorators".to_string(),
+                span,
+            ));
+        }
+        let decorator = query_decorators.first().copied();
         // Its member-kind check (DECORATOR_UNEXPECTED) runs before the
         // decorator metadata is parsed upstream (`isPropertyTypeMember`
         // precedes `extractDecoratorQueryMetadata`).
@@ -2037,8 +2262,15 @@ pub(crate) fn member_query_error<'a>(
                 &super::decorator::QUERY_APIS,
             )
         });
-        if let Some((_, _, call)) = signal {
-            if call.arguments.first().and_then(Argument::as_expression).is_none() {
+        if let Some((api, _, call)) = signal {
+            // The member-visibility check runs before the locator/options are read.
+            let level = member_access_level(key, accessibility, readonly);
+            if let Some(error) = initializer_api_access_error(api, level, QUERY_ACCESS, call) {
+                return Some(error);
+            }
+            // `predicateNode === undefined`: only a call with NO first
+            // argument errors; a `...args` locator parses like any other.
+            if call.arguments.is_empty() {
                 return Some(("No locator specified.".to_string(), call.span));
             }
             if let Some(options) = call.arguments.get(1)

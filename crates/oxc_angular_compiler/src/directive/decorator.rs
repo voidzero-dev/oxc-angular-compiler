@@ -1091,11 +1091,11 @@ pub(crate) fn angular_decorator_config<'a>(
     Some((config, name))
 }
 
-/// The first error ngtsc raises for the inputs, outputs and queries of a
-/// `@Component` / `@Directive` on `class`, in the order it checks them
+/// The first error ngtsc raises for the inputs, outputs, queries and selector
+/// of a `@Component` / `@Directive` on `class`, in the order it checks them
 /// (`extractDirectiveMetadata`): `inputs:`, `@Input` members, `outputs:`,
-/// output members, query members (`@ViewChild`, ...), then `queries:`. ngtsc
-/// stops at the first one.
+/// output members, query members (`@ViewChild`, ...), then `queries:`, then
+/// `selector`. ngtsc stops at the first one.
 ///
 /// Each error points where ngtsc's does: the `inputs:` / `outputs:` value, the
 /// member, or the part of a query at fault. `source_text` is the file's, as
@@ -1106,6 +1106,13 @@ pub fn decorator_io_errors<'a>(
     source_text: Option<&'a str>,
     consts: &StringConsts<'a>,
 ) -> std::vec::Vec<OxcDiagnostic> {
+    use super::property_decorators::{
+        IO_ACCESS, decorator_argument, initializer_api_access_error, literal_alias_error,
+        member_access_level, member_name,
+    };
+
+    // (message, primary span, span of the first binding a duplicate points at).
+    let at = |(message, span): (String, Span)| (message, span, None);
     let Some((config, decorator_name)) = angular_decorator_config(class, consts) else {
         return std::vec::Vec::new();
     };
@@ -1120,153 +1127,292 @@ pub fn decorator_io_errors<'a>(
     let evaluator = Evaluator::new(consts);
 
     let class_name = class.id.as_ref().map_or(String::new(), |id| id.name.to_string());
+    // `parseInputFields`' `bindings` map: binding property name to the first
+    // member bound to it (its name and node), for DUPLICATE_BINDING_NAME.
+    let mut input_bindings = HashMap::<String, (String, Span)>::new();
     let input_members = || {
         class.body.body.iter().find_map(|element| {
-            let (key, decorators, value, is_static) = match element {
-                ClassElement::PropertyDefinition(p) => {
-                    (&p.key, &p.decorators, p.value.as_ref(), p.r#static)
-                }
+            let (key, decorators, value, is_static, accessibility, readonly) = match element {
+                ClassElement::PropertyDefinition(p) => (
+                    &p.key,
+                    &p.decorators,
+                    p.value.as_ref(),
+                    p.r#static,
+                    p.accessibility,
+                    p.readonly,
+                ),
                 ClassElement::AccessorProperty(p) => {
-                    (&p.key, &p.decorators, p.value.as_ref(), p.r#static)
+                    (&p.key, &p.decorators, p.value.as_ref(), p.r#static, p.accessibility, false)
                 }
-                ClassElement::MethodDefinition(m) => (&m.key, &m.decorators, None, m.r#static),
+                ClassElement::MethodDefinition(m) => {
+                    (&m.key, &m.decorators, None, m.r#static, m.accessibility, false)
+                }
                 _ => return None,
             };
-            let name = key.static_name()?;
+            // A member `reflectClassMember` can't name (`['k']`, `0:`) never
+            // reaches `tryParseInputFieldMapping`.
+            let member_name = member_name(element)?;
+            // ngtsc parses the signal mappings inside `tryParseInputFieldMapping`
+            // — input first, then model — before the `@Input` collision and the
+            // decorator itself, so their own errors (member visibility, then
+            // the options literal) come first.
+            let signal_input =
+                value.and_then(|value| initializer_api_call(value, Some(consts), &[INPUT_API]));
+            let mut signal_alias = None;
+            if let Some((api, is_required, call)) = signal_input {
+                let level = member_access_level(key, accessibility, readonly);
+                if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
+                    return Some(at(error));
+                }
+                match literal_alias_error(call, usize::from(!is_required)) {
+                    Ok(alias) => signal_alias = alias,
+                    Err(error) => return Some(at(error)),
+                }
+            }
+            let model_input =
+                value.and_then(|value| initializer_api_call(value, Some(consts), &[MODEL_API]));
+            let mut model_alias = None;
+            if let Some((api, is_required, call)) = model_input {
+                let level = member_access_level(key, accessibility, readonly);
+                if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
+                    return Some(at(error));
+                }
+                match literal_alias_error(call, usize::from(!is_required)) {
+                    Ok(alias) => model_alias = alias,
+                    Err(error) => return Some(at(error)),
+                }
+            }
             // `@Input(...)`, as ngtsc's `tryParseInputFieldMapping` reads it.
             let decorator =
                 super::property_decorators::member_decorator(decorators, "Input", consts);
             // ngtsc rejects `@Input` on a signal input or model before reading
             // the decorator.
-            if let (Some(decorator), Some(value)) = (decorator, value) {
-                let message = if is_initializer_api_call(value, consts, &[INPUT_API]) {
+            if let (Some(decorator), Some(_)) = (decorator, value) {
+                let message = if signal_input.is_some() {
                     Some("Using @Input with a signal input is not allowed.")
-                } else if is_initializer_api_call(value, consts, &[MODEL_API]) {
+                } else if model_input.is_some() {
                     Some("Using @Input with a model input is not allowed.")
                 } else {
                     None
                 };
                 if let Some(message) = message {
-                    return Some((message.to_string(), decorator.span));
+                    return Some((message.to_string(), decorator.span, None));
                 }
             }
-            let error =
-                decorator.and_then(|d| input_decorator_error(d, &name, class, consts, &evaluator));
-            if error.is_some() {
-                return error;
+            let error = decorator
+                .and_then(|d| input_decorator_error(d, &member_name, class, consts, &evaluator));
+            if let Some(error) = error {
+                return Some(at(error));
+            }
+            // With the member's mapping parsed, `parseInputFields` rejects a
+            // second member bound to the same name — before its static check.
+            let binding_name = if let Some(decorator) = decorator {
+                let options = decorator_argument(decorator).map(|arg| evaluator.evaluate(arg));
+                Some(match &options {
+                    Some(Value::String(alias)) => alias.clone(),
+                    Some(options) => options
+                        .prop("alias")
+                        .and_then(|prop| prop.value.as_str())
+                        .map_or_else(|| member_name.clone(), str::to_string),
+                    None => member_name.clone(),
+                })
+            } else if signal_input.is_some() {
+                Some(signal_alias.map_or_else(|| member_name.clone(), |a| a.to_string()))
+            } else if model_input.is_some() {
+                Some(model_alias.map_or_else(|| member_name.clone(), |a| a.to_string()))
+            } else {
+                None
+            };
+            if let Some(binding_name) = binding_name {
+                if let Some((first_name, first_span)) = input_bindings.get(&binding_name) {
+                    let message = format!(
+                        "Input '{binding_name}' is bound to both '{first_name}' and \
+                         '{member_name}'."
+                    );
+                    return Some((message, element.span(), Some(*first_span)));
+                }
+                input_bindings.insert(binding_name, (member_name.clone(), element.span()));
             }
             // ngtsc's `parseInputFields` rejects an input on a static member
             // once the mapping parsed (INCORRECTLY_DECLARED_ON_STATIC_MEMBER):
             // an `@Input` decorator or an `input()`/`model()` initializer.
             if is_static {
-                let mapped = decorator.is_some()
-                    || value.is_some_and(|value| {
-                        is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API])
-                    });
+                let mapped = decorator.is_some() || signal_input.is_some() || model_input.is_some();
                 if mapped {
                     let message = format!(
-                        "Input \"{name}\" is incorrectly declared as static member of \
+                        "Input \"{member_name}\" is incorrectly declared as static member of \
                          \"{class_name}\"."
                     );
-                    return Some((message, element.span()));
+                    return Some((message, element.span(), None));
                 }
             }
             // A signal input only collides with a metadata entry of the same name.
-            let value = value.filter(|_| meta_inputs.contains(&name.as_ref()))?;
-            let is_input = is_initializer_api_call(value, consts, &[INPUT_API, MODEL_API]);
-            is_input.then(|| {
+            if !meta_inputs.contains(&member_name.as_str()) {
+                return None;
+            }
+            (signal_input.is_some() || model_input.is_some()).then(|| {
                 let message = format!(
-                    "Input \"{name}\" is also declared as non-signal in @{decorator_name}."
+                    "Input \"{member_name}\" is also declared as non-signal in @{decorator_name}."
                 );
-                (message, element.span())
+                (message, element.span(), None)
             })
         })
     };
+    // `parseOutputFields`' `bindings` map, like `input_bindings` above.
+    let mut output_bindings = HashMap::<String, (String, Span)>::new();
     let output_members = || {
         class.body.body.iter().find_map(|element| {
             // `@Output(...)`, as ngtsc's `tryParseDecoratorOutput` reads it; it
             // accepts any member kind, so a decorated (static) method counts.
-            let (decorators, value, is_static) = match element {
-                ClassElement::PropertyDefinition(p) => {
-                    (Some(&p.decorators), p.value.as_ref(), p.r#static)
+            let (key, decorators, value, is_static, accessibility, readonly) = match element {
+                ClassElement::PropertyDefinition(p) => (
+                    &p.key,
+                    &p.decorators,
+                    p.value.as_ref(),
+                    p.r#static,
+                    p.accessibility,
+                    p.readonly,
+                ),
+                ClassElement::AccessorProperty(p) => (
+                    &p.key,
+                    &p.decorators,
+                    p.value.as_ref(),
+                    p.r#static,
+                    p.accessibility,
+                    false,
+                ),
+                ClassElement::MethodDefinition(m) => {
+                    (&m.key, &m.decorators, None, m.r#static, m.accessibility, false)
                 }
-                ClassElement::AccessorProperty(p) => {
-                    (Some(&p.decorators), p.value.as_ref(), p.r#static)
-                }
-                ClassElement::MethodDefinition(m) => (Some(&m.decorators), None, m.r#static),
-                _ => (None, None, false),
+                _ => return None,
             };
-            let decorator = decorators.and_then(|decorators| {
-                super::property_decorators::member_decorator(decorators, "Output", consts)
-            });
+            // A member `reflectClassMember` can't name (`['k']`, `0:`) never
+            // reaches `parseOutputFields`.
+            let member_name = member_name(element)?;
+            let decorator = super::property_decorators::member_decorator(
+                decorators, "Output", consts,
+            );
             if let Some(error) = decorator.and_then(|d| output_decorator_error(d, &evaluator)) {
-                return Some(error);
+                return Some(at(error));
             }
-            // ngtsc's `tryParseInitializerBasedOutput` rejects `output.required()`
-            // while parsing the member, before the checks below. Members
-            // without an initializer (incl. every method) fall through to the
-            // static-member and @Output-on-signal checks.
-            if let Some(value) = value
-                && let Some((_, true, call)) = initializer_api_call(
-                    value,
-                    Some(consts),
-                    &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API],
-                )
-            {
-                return Some(("Output does not support \".required()\".".to_string(), call.span));
+            // `tryParseInitializerBasedOutput`: `output.required()` is rejected
+            // first, then the member's visibility, then its options. Members
+            // without an initializer (incl. every method) fall through.
+            let signal_output = value.and_then(|value| {
+                initializer_api_call(value, Some(consts), &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API])
+            });
+            let mut output_alias = None;
+            if let Some((api, is_required, call)) = signal_output {
+                if is_required {
+                    return Some((
+                        "Output does not support \".required()\".".to_string(),
+                        call.span,
+                        None,
+                    ));
+                }
+                let level = member_access_level(key, accessibility, readonly);
+                if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
+                    return Some(at(error));
+                }
+                let options_index = usize::from(api == OUTPUT_FROM_OBSERVABLE_API);
+                match literal_alias_error(call, options_index) {
+                    Ok(alias) => output_alias = alias,
+                    Err(error) => return Some(at(error)),
+                }
+            }
+            // `parseOutputFields` parses a model here too; the input pass
+            // reports its errors first, so these are unreachable, mirrored
+            // anyway.
+            let model_mapping = value.and_then(|value| {
+                initializer_api_call(value, Some(consts), &[MODEL_API])
+            });
+            let mut model_alias = None;
+            if let Some((api, is_required, call)) = model_mapping {
+                let level = member_access_level(key, accessibility, readonly);
+                if let Some(error) = initializer_api_access_error(api, level, IO_ACCESS, call) {
+                    return Some(at(error));
+                }
+                match literal_alias_error(call, usize::from(!is_required)) {
+                    Ok(alias) => model_alias = alias,
+                    Err(error) => return Some(at(error)),
+                }
             }
             // Then `@Output` on an `output()` or a model, like ngtsc's
             // `parseOutputFields`.
-            if let (Some(decorator), Some(value)) = (decorator, value) {
-                let apis = [OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API];
-                let message = if is_initializer_api_call(value, consts, &apis) {
+            if let (Some(decorator), Some(_)) = (decorator, value) {
+                let message = if signal_output.is_some() {
                     Some("Using \"@Output\" with \"output()\" is not allowed.")
-                } else if is_initializer_api_call(value, consts, &[MODEL_API]) {
+                } else if model_mapping.is_some() {
                     Some("Using @Output with a model input is not allowed.")
                 } else {
                     None
                 };
                 if let Some(message) = message {
-                    return Some((message.to_string(), decorator.span));
+                    return Some((message.to_string(), decorator.span, None));
                 }
             }
             // ngtsc's `parseOutputFields` rejects an output on a static member
             // (INCORRECTLY_DECLARED_ON_STATIC_MEMBER): an `@Output` decorator
             // or an `output()`/`outputFromObservable()`/`model()` initializer,
-            // on the decorator or the call.
+            // on the decorator or the call — before the binding check.
             if is_static {
-                let apis = [OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, MODEL_API];
                 let node = decorator.map(|d| d.span).or_else(|| {
-                    value
-                        .and_then(|value| initializer_api_call(value, Some(consts), &apis))
-                        .map(|(_, _, call)| call.span)
+                    signal_output.map(|(_, _, call)| call.span)
+                }).or_else(|| {
+                    model_mapping.map(|(_, _, call)| call.span)
                 });
                 if let Some(span) = node {
                     let message =
                         "Output is incorrectly declared on a static class member.".to_string();
-                    return Some((message, span));
+                    return Some((message, span, None));
                 }
             }
-            let ClassElement::PropertyDefinition(prop) = element else { return None };
-            let (value, name) = (prop.value.as_ref()?, prop.key.static_name()?);
-            if !meta_outputs.contains(&name.as_ref()) {
+            // Then a second member bound to the same name
+            // (DUPLICATE_BINDING_NAME), before the metadata collision check.
+            let binding_name = if let Some(decorator) = decorator {
+                let alias = decorator_argument(decorator)
+                    .and_then(|arg| match evaluator.evaluate(arg) {
+                        Value::String(alias) => Some(alias),
+                        _ => None,
+                    });
+                Some(alias.unwrap_or_else(|| member_name.clone()))
+            } else if signal_output.is_some() {
+                Some(output_alias.map_or_else(|| member_name.clone(), |a| a.to_string()))
+            } else if model_mapping.is_some() {
+                let binding = model_alias.map_or_else(|| member_name.clone(), |a| a.to_string());
+                Some(format!("{binding}Change"))
+            } else {
+                None
+            };
+            if let Some(binding_name) = binding_name {
+                if let Some((first_name, first_span)) = output_bindings.get(&binding_name) {
+                    let message = format!(
+                        "Output '{binding_name}' is bound to both '{first_name}' and \
+                         '{member_name}'."
+                    );
+                    return Some((message, element.span(), Some(*first_span)));
+                }
+                output_bindings.insert(binding_name, (member_name.clone(), element.span()));
+            }
+            // `outputsFromMeta.hasOwnProperty(member.name)`: any member kind
+            // whose initializer is an output collides with `outputs:` naming
+            // it (`#x` members carry the '#' in their name).
+            if !meta_outputs.contains(&member_name.as_str()) {
                 return None;
             }
-            let is_output = is_initializer_api_call(
-                value,
-                consts,
-                &[OUTPUT_API, OUTPUT_FROM_OBSERVABLE_API, MODEL_API],
-            );
+            let is_output = signal_output.is_some() || model_mapping.is_some();
             is_output.then(|| {
                 let message = format!(
-                    "Output \"{name}\" is unexpectedly declared in @{decorator_name} as well."
+                    "Output \"{member_name}\" is unexpectedly declared in @{decorator_name} as well."
                 );
-                (message, prop.span)
+                (message, element.span(), None)
             })
         })
     };
-    let member_queries =
-        || super::property_decorators::member_query_error(allocator, class, source_text, consts);
+    let member_queries = || {
+        super::property_decorators::member_query_error(allocator, class, source_text, consts)
+            .map(at)
+    };
     // With the source text, like the compiled queries: a predicate is emitted
     // as written, which some expressions (functions) need it for.
     let queries = || {
@@ -1279,19 +1425,64 @@ pub fn decorator_io_errors<'a>(
             consts,
             decorator_name,
         );
-        queries.error
+        queries.error.map(at)
     };
+    // The selector is the last thing `extractDirectiveMetadata` reads.
+    let selector =
+        || directive_selector_error(config, decorator_name, &class_name, &evaluator, consts);
 
     io.as_ref()
         .and_then(|io| io.input_error.clone())
+        .map(at)
         .or_else(input_members)
-        .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()))
+        .or_else(|| io.as_ref().and_then(|io| io.output_error.clone()).map(at))
         .or_else(output_members)
         .or_else(member_queries)
         .or_else(queries)
-        .map(|(message, span)| OxcDiagnostic::error(message).with_label(span))
+        .or_else(selector)
+        .map(|(message, span, related)| {
+            let diagnostic = OxcDiagnostic::error(message).with_label(span);
+            match related {
+                Some(first) => {
+                    diagnostic.and_label(first.label("The first binding is declared here."))
+                }
+                None => diagnostic,
+            }
+        })
         .into_iter()
         .collect()
+}
+
+/// ngtsc's `selector` check at the end of `extractDirectiveMetadata`, which
+/// both `@Component` and `@Directive` run: a `selector` property that isn't
+/// a string (`createValueHasWrongTypeError`). An empty one errors only on a
+/// directive (DIRECTIVE_MISSING_SELECTOR) — a component's `defaultSelector`
+/// (its element name) fills in instead.
+fn directive_selector_error<'a>(
+    config: Option<&'a ObjectExpression<'a>>,
+    decorator_name: &str,
+    class_name: &str,
+    evaluator: &Evaluator<'_, 'a>,
+    consts: &StringConsts<'a>,
+) -> Option<(String, Span, Option<Span>)> {
+    let expr = config.and_then(|config| config_property(config, "selector", consts))?;
+    let resolved = evaluator.evaluate(expr);
+    let Value::String(selector) = &resolved else {
+        let message = value_error(
+            &format!("@{decorator_name}.selector"),
+            || "selector must be a string".to_string(),
+            &resolved,
+        );
+        return Some((message, expr.span(), None));
+    };
+    if selector.is_empty() && decorator_name == "Directive" {
+        return Some((
+            format!("Directive {class_name} has no selector, please add it!"),
+            expr.span(),
+            None,
+        ));
+    }
+    None
 }
 
 /// The name upstream sees for a `@angular/core` decorator (`dec.import?.name
@@ -1395,6 +1586,18 @@ fn input_decorator_error<'a>(
     if let Some(error) = decorator_arity_error(decorator, &subject) {
         return Some(error);
     }
+    // ngtsc evaluates `decorator.args[0]` as an expression; a `...args`
+    // spread isn't analyzable, so it hits the wrong-type error.
+    if has_spread_argument(decorator) {
+        return Some((
+            format!(
+                "{subject} decorator argument must resolve to a string or an \
+                 object literal{}",
+                Value::Dynamic.wrong_type_suffix()
+            ),
+            decorator.span,
+        ));
+    }
     let options = super::property_decorators::decorator_argument(decorator)?;
     let span = options.span();
     let options = evaluator.evaluate(options);
@@ -1428,6 +1631,15 @@ fn input_decorator_error<'a>(
     )
 }
 
+/// Whether a `@X(...)` decorator call's first argument is a spread — the one
+/// `Argument` kind that isn't an `Expression`.
+fn has_spread_argument(decorator: &Decorator<'_>) -> bool {
+    let Expression::CallExpression(call) = &decorator.expression else {
+        return false;
+    };
+    call.arguments.first().is_some_and(|arg| arg.as_expression().is_none())
+}
+
 /// ngtsc's error for a member decorator called with more than one argument,
 /// named `subject` (`@Input`, or `@In` for `import { Input as In }`).
 fn decorator_arity_error(decorator: &Decorator<'_>, subject: &str) -> Option<(String, Span)> {
@@ -1449,6 +1661,16 @@ fn output_decorator_error<'a>(
     // ngtsc names it `@Output` whatever it's imported as.
     if let Some(error) = decorator_arity_error(decorator, "@Output") {
         return Some(error);
+    }
+    // Like the `@Input` decorator: a `...args` spread is not analyzable.
+    if has_spread_argument(decorator) {
+        return Some((
+            format!(
+                "@Output decorator argument must resolve to a string{}",
+                Value::Dynamic.wrong_type_suffix()
+            ),
+            decorator.span,
+        ));
     }
     let argument = super::property_decorators::decorator_argument(decorator)?;
     match evaluator.evaluate(argument) {

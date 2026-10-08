@@ -2722,6 +2722,13 @@ fn transform_angular_file_jit(
     // / `styleUrls`, matching the AOT metadata extraction path.
     let string_consts = collect_string_consts(allocator, &parser_ret.program);
 
+    // ngtsc's source-file rules (validation/): initializer APIs used outside a
+    // class member initializer (UNSUPPORTED_INITIALIZER_API_USAGE).
+    result.diagnostics.extend(crate::validation::initializer_api_usage_errors(
+        &parser_ret.program,
+        &string_consts,
+    ));
+
     // Build an import map so `find_angular_decorator` can verify that a bare
     // `@Service()` is actually Angular's, not a same-named decorator from
     // another library.
@@ -3125,6 +3132,13 @@ pub fn transform_angular_file(
             analyzer.value_resolver(std::path::PathBuf::from(path)),
         ));
     }
+
+    // ngtsc's source-file rules (validation/): initializer APIs used outside a
+    // class member initializer (UNSUPPORTED_INITIALIZER_API_USAGE).
+    result.diagnostics.extend(crate::validation::initializer_api_usage_errors(
+        &parser_ret.program,
+        &string_consts,
+    ));
 
     #[cfg(feature = "cross_file_elision")]
     let mut import_map =
