@@ -2592,6 +2592,10 @@ function renameBoundIdentifiers(
 export function extractClassMetadataCalls(program: unknown, code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
   const coreNamespaces = angularCoreNamespaces(program)
+  // `ɵsetClassMetadata` calls nested inside an async wrapper are already
+  // covered by `wrapperNormalized` — extracting them again would compare the
+  // raw parameter spellings and produce spurious diffs (`A` vs `B`).
+  const callsInsideAsyncWrappers = new Set<NormAstNode>()
 
   const slice = (node: NormAstNode | undefined): string | undefined =>
     node && typeof node.start === 'number' && typeof node.end === 'number'
@@ -2613,13 +2617,24 @@ export function extractClassMetadataCalls(program: unknown, code: string): Class
     const args = node.arguments as NormAstNode[] | undefined
     const classArg = args?.[0]
     if (!args || !classArg) return
+
+    if (callsInsideAsyncWrappers.has(node)) return
+
     const className =
       classArg.type === 'Identifier' ? (classArg.name as string) : (slice(classArg) ?? '')
 
     if (isAsync) {
       // `ɵsetClassMetadataAsync(Class, resolver, wrapper)` — the wrapper's
-      // nested sync call is extracted on its own pass.
+      // nested calls are normalized with the parameter bindings, so mark every
+      // nested metadata call in the wrapper argument as covered.
       const wrapper = args[2]
+      if (wrapper) {
+        walkAst(wrapper, (nested) => {
+          if (nested !== wrapper && nested.type === 'CallExpression') {
+            callsInsideAsyncWrappers.add(nested)
+          }
+        })
+      }
       results.push({
         className,
         decorators: 'null',
