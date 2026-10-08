@@ -33,6 +33,8 @@ const INJECTABLE_FACTORY_WRAPPER =
   'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
 const SET_CLASS_METADATA_IMPORT =
   'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
+const ALIASED_INJECTABLE =
+  'an aliased @Injectable compiles to a broken ɵprov under ngtsc — its needsFactory check compares the written decorator name, so the factory (and setClassMetadata) are never emitted; Oxc emits a working ɵfac (issue #507, kept deliberately)'
 
 export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'animations/animation-metadata-with-change-detection': {
@@ -106,6 +108,10 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   'defer/defer-hydrate-viewport': {
     fields: ['DeferHydrateViewportComponent.ɵcmp'],
     reasons: [INCREMENTAL_HYDRATION],
+  },
+  'edge-cases/aliased-injectable': {
+    fields: ['AliasedService.ɵfac'],
+    reasons: [ALIASED_INJECTABLE],
   },
   'edge-cases/multiple-custom-decorators': {
     fields: ['MultiDecoratorComponent.ɵcmp', 'MultiDecoratorComponent.ɵfac'],
