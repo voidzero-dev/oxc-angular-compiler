@@ -2320,63 +2320,77 @@ function findMatchingBracket(code: string, startIdx: number, open: string, close
  * @param code - The compiled JavaScript code
  * @returns Array of extracted class metadata info
  */
+/**
+ * Split an argument list into its top-level arguments, tracking bracket and
+ * paren depth and skipping over string/template literals. Any argument shape
+ * counts — arrays, objects, `() => [...]` callbacks, `forwardRef(...)`.
+ */
+function splitTopLevelArguments(argsText: string): string[] {
+  const args: string[] = []
+  let depth = 0
+  let inString: string | null = null
+  let argStart = 0
+
+  for (let i = 0; i < argsText.length; i++) {
+    const char = argsText[i]
+    if (inString) {
+      if (char === inString && argsText[i - 1] !== '\\') inString = null
+      continue
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      inString = char
+      continue
+    }
+    if (char === '(' || char === '[' || char === '{') depth++
+    else if (char === ')' || char === ']' || char === '}') depth--
+    else if (char === ',' && depth === 0) {
+      args.push(argsText.slice(argStart, i).trim())
+      argStart = i + 1
+    }
+  }
+  const tail = argsText.slice(argStart).trim()
+  if (tail) args.push(tail)
+  return args
+}
+
+/**
+ * `null` / `void 0` / `undefined` all mean "no value" in these slots.
+ */
+function metadataArgOrNull(arg: string | undefined): string | null {
+  if (arg === undefined) return null
+  const trimmed = arg.trim()
+  if (trimmed === 'null' || trimmed === 'undefined' || /^void\b/.test(trimmed)) {
+    return null
+  }
+  return trimmed
+}
+
 function extractClassMetadataCalls(code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
 
-  // Pattern matches: i0.ɵsetClassMetadata(ClassName,
-  // (the runtime name uses a single ɵ; `ɵsetClassMetadataAsync` also exists)
-  // Need to handle nested brackets and multiline content
-  const startPattern = /i\d+\.ɵsetClassMetadata(?:Async)?\(\s*(\w+)\s*,\s*/g
+  // `i0.ɵsetClassMetadata(ClassName, decorators, ctorParams, propDecorators)`
+  // — or `ɵsetClassMetadataAsync`, or under a reused namespace import
+  // (`ng.ɵsetClassMetadata`), so the callee is any identifier.
+  const startPattern = /[A-Za-z_$][\w$]*\.ɵsetClassMetadata(?:Async)?\(\s*(\w+)\s*/g
   let match
 
   while ((match = startPattern.exec(code)) !== null) {
     const className = match[1]
-    const startIdx = match.index + match[0].length
+    const parenIdx = match.index + match[0].indexOf('(')
+    const callEnd = findMatchingBracket(code, parenIdx, '(', ')')
+    if (callEnd === -1) continue
 
-    // Extract the decorators array (first parameter after className)
-    const decoratorsEnd = findMatchingBracket(code, startIdx, '[', ']')
-    if (decoratorsEnd === -1) continue
-    const decorators = code.slice(startIdx, decoratorsEnd + 1)
-
-    // Skip comma and whitespace to get to ctorParams
-    let idx = decoratorsEnd + 1
-    while (idx < code.length && (code[idx] === ',' || code[idx] === ' ' || code[idx] === '\n'))
-      idx++
-
-    let ctorParams: string | null = null
-    if (code[idx] === '[') {
-      const ctorEnd = findMatchingBracket(code, idx, '[', ']')
-      if (ctorEnd !== -1) {
-        ctorParams = code.slice(idx, ctorEnd + 1)
-        idx = ctorEnd + 1
-      }
-    } else if (code.slice(idx, idx + 4) === 'null') {
-      ctorParams = null
-      idx += 4
-    } else if (code.slice(idx, idx + 4) === 'void') {
-      // Handle "void 0" which is equivalent to undefined/null
-      ctorParams = null
-      idx += 6 // Skip "void 0"
-    }
-
-    // Skip comma and whitespace to get to propDecorators
-    while (idx < code.length && (code[idx] === ',' || code[idx] === ' ' || code[idx] === '\n'))
-      idx++
-
-    let propDecorators: string | null = null
-    if (code[idx] === '{') {
-      const propEnd = findMatchingBracket(code, idx, '{', '}')
-      if (propEnd !== -1) {
-        propDecorators = code.slice(idx, propEnd + 1)
-      }
-    } else if (code.slice(idx, idx + 4) === 'null') {
-      propDecorators = null
-    } else if (code.slice(idx, idx + 4) === 'void') {
-      // Handle "void 0" which is equivalent to undefined/null
-      propDecorators = null
-    }
-
-    results.push({ className, decorators, ctorParams, propDecorators })
+    // args[0] is the class name; the rest are the metadata arguments of any
+    // shape — `ctorParams` is an arrow `() => [...]` when present.
+    const args = splitTopLevelArguments(code.slice(parenIdx + 1, callEnd)).slice(1)
+    if (args.length === 0) continue
+    const [decorators, ctorParams, propDecorators] = args
+    results.push({
+      className,
+      decorators,
+      ctorParams: metadataArgOrNull(ctorParams),
+      propDecorators: metadataArgOrNull(propDecorators),
+    })
   }
 
   return results

@@ -35,6 +35,8 @@ const INJECTABLE_FACTORY_WRAPPER =
   'an @Injectable useFactory is wrapped in a function expression where Angular emits an arrow function'
 const SET_CLASS_METADATA_IMPORT =
   'Oxc keeps the @Inject import because its setClassMetadata references it; ngtsc emits the same reference but TypeScript elision still drops the import (upstream emit bug)'
+const CTOR_PARAM_TYPE =
+  'ctorParams emits the parameter`s type name where ngtsc emits type: undefined for type-only annotations (Oxc emit bug, issue #563)'
 const ALIASED_INJECTABLE =
   'an aliased @Injectable compiles to a broken ɵprov under ngtsc — its needsFactory check compares the written decorator name, so the factory (and setClassMetadata) are never emitted; Oxc emits a working ɵfac (issue #507, kept deliberately)'
 
@@ -61,7 +63,8 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
         actual: ['Inject', 'Injectable', 'InjectionToken'],
       },
     ],
-    reasons: [SET_CLASS_METADATA_IMPORT],
+    metadataDiffs: ['TestableService.setClassMetadata.ctorParams'],
+    reasons: [SET_CLASS_METADATA_IMPORT, CTOR_PARAM_TYPE],
   },
   'class-metadata/class-metadata-with-inject': {
     fields: [],
@@ -73,7 +76,8 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
         actual: ['Component', 'Inject', 'InjectionToken'],
       },
     ],
-    reasons: [SET_CLASS_METADATA_IMPORT],
+    metadataDiffs: ['InjectMetaComponent.setClassMetadata.ctorParams'],
+    reasons: [SET_CLASS_METADATA_IMPORT, CTOR_PARAM_TYPE],
   },
   'full-file/component-with-services': {
     fields: [],
@@ -85,7 +89,8 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
         actual: ['Component', 'Inject', 'InjectionToken', 'inject'],
       },
     ],
-    reasons: [SET_CLASS_METADATA_IMPORT],
+    metadataDiffs: ['ComponentWithServices.setClassMetadata.ctorParams'],
+    reasons: [SET_CLASS_METADATA_IMPORT, CTOR_PARAM_TYPE],
   },
   'component-meta/change-detection-default': {
     fields: ['ChangeDetectionDefaultComponent.ɵcmp'],
