@@ -1887,24 +1887,27 @@ impl Lexed {
 }
 
 /// The `//` opening a line comment that runs to the end of `code` — so it
-/// sits on the last line and bounds the trivia — or `None`.
+/// sits on the last line and bounds the trivia — or `None`. The ranges are
+/// sorted and disjoint, so the only `//` that can cover `code.len()` is the
+/// last one starting before it.
 fn line_comment_start(lexed: &Lexed, code: &str) -> Option<usize> {
-    lexed
-        .line
-        .iter()
-        .find(|(start, end)| *start < code.len() && *end >= code.len())
-        .map(|(start, _)| *start)
+    let i = lexed.line.partition_point(|(start, _)| *start < code.len());
+    match lexed.line.get(i.wrapping_sub(1)) {
+        Some(&(start, end)) if i > 0 && end >= code.len() => Some(start),
+        _ => None,
+    }
 }
 
 /// The `/*` that opens the comment closed by the `*/` just cut off `inner`:
-/// the first `/*` whose own `*/` isn't inside `inner` (a `/*` with one is a
-/// comment of its own — or comment text — and is skipped whole).
+/// the `/*` whose own `*/` isn't inside `inner` (a `/*` with one is a
+/// comment of its own — or comment text — and is skipped whole). Same
+/// binary-search shape as [`line_comment_start`].
 fn block_comment_start(lexed: &Lexed, inner: &str) -> Option<usize> {
-    lexed
-        .block
-        .iter()
-        .find(|(start, end)| *start < inner.len() && *end > inner.len())
-        .map(|(start, _)| *start)
+    let i = lexed.block.partition_point(|(start, _)| *start < inner.len());
+    match lexed.block.get(i.wrapping_sub(1)) {
+        Some(&(start, end)) if i > 0 && end > inner.len() => Some(start),
+        _ => None,
+    }
 }
 /// A comment's source range, as TypeScript's `iterateCommentRanges` reports
 /// it.
