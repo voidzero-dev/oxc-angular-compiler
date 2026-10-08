@@ -13,6 +13,8 @@ interface KnownDifference {
   fields: string[]
   /** Every import difference, exactly as `compareImports` reports it. */
   importDiffs?: ImportDiff[]
+  /** Every setClassMetadata difference, as `Class.field`, e.g. `MyComponent.setClassMetadata`. */
+  metadataDiffs?: string[]
   /** Why each difference exists. */
   reasons: string[]
 }
@@ -111,14 +113,17 @@ export const KNOWN_DIFFERENCES: Record<string, KnownDifference> = {
   },
   'edge-cases/aliased-injectable': {
     fields: ['AliasedService.ɵfac'],
+    metadataDiffs: ['AliasedService.setClassMetadata'],
     reasons: [ALIASED_INJECTABLE],
   },
   'edge-cases/multiple-custom-decorators': {
     fields: ['MultiDecoratorComponent.ɵcmp', 'MultiDecoratorComponent.ɵfac'],
+    metadataDiffs: ['MultiDecoratorComponent.setClassMetadata'],
     reasons: [CUSTOM_DECORATOR],
   },
   'edge-cases/single-custom-decorator': {
     fields: ['MyComponent.ɵcmp', 'MyComponent.ɵfac'],
+    metadataDiffs: ['MyComponent.setClassMetadata'],
     reasons: [CUSTOM_DECORATOR],
   },
   'full-file/component-with-pipes': {

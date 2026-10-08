@@ -2323,9 +2323,10 @@ function findMatchingBracket(code: string, startIdx: number, open: string, close
 function extractClassMetadataCalls(code: string): ClassMetadataInfo[] {
   const results: ClassMetadataInfo[] = []
 
-  // Pattern matches: i0.ɵɵsetClassMetadata(ClassName,
+  // Pattern matches: i0.ɵsetClassMetadata(ClassName,
+  // (the runtime name uses a single ɵ; `ɵsetClassMetadataAsync` also exists)
   // Need to handle nested brackets and multiline content
-  const startPattern = /i\d+\.ɵɵsetClassMetadata\(\s*(\w+)\s*,\s*/g
+  const startPattern = /i\d+\.ɵsetClassMetadata(?:Async)?\(\s*(\w+)\s*,\s*/g
   let match
 
   while ((match = startPattern.exec(code)) !== null) {
@@ -2382,12 +2383,22 @@ function extractClassMetadataCalls(code: string): ClassMetadataInfo[] {
 }
 
 /**
- * Normalize a metadata string for comparison.
- * Removes whitespace variations while preserving semantic content.
+ * Normalize a metadata argument for comparison.
+ *
+ * The argument is an expression fragment (`[...]`, `{...}`, `null`, ...), so
+ * parse it and compare normalized ASTs: quote style, indentation, trailing
+ * commas and key ordering noise don't matter semantically for these
+ * structures. Falls back to whitespace-collapsed text when the fragment
+ * can't be parsed.
  */
 function normalizeMetadataString(s: string | null): string {
   if (!s) return 'null'
-  return s.replace(/\s+/g, ' ').trim()
+  const parsed = parseSync('metadata.js', `(${s}\n)`, { sourceType: 'module' })
+  const stmt = parsed.program.body[0]
+  if (parsed.errors.length > 0 || !stmt || stmt.type !== 'ExpressionStatement') {
+    return s.replace(/\s+/g, ' ').trim()
+  }
+  return normalizeAst(stmt.expression)
 }
 
 /**

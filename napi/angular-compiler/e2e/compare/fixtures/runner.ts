@@ -156,7 +156,10 @@ async function testFixture(fixture: Fixture, verbose?: boolean): Promise<Fixture
           `import ${diff.moduleSource} expected { ${(diff.expected ?? []).join(', ')} } ` +
           `got { ${(diff.actual ?? []).join(', ')} }`,
       )
-    const allUndocumented = [...undocumented, ...undocumentedImports]
+    const undocumentedMetadata = (result.classMetadataDiffs ?? [])
+      .map((diff) => `${diff.className}.${diff.field}`)
+      .filter((field) => !(known.metadataDiffs ?? []).includes(field))
+    const allUndocumented = [...undocumented, ...undocumentedImports, ...undocumentedMetadata]
     if (allUndocumented.length > 0) {
       return {
         ...result,
